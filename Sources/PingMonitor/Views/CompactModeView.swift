@@ -10,7 +10,7 @@ struct CompactModeView: View {
             historySection
         }
         .padding(12)
-        .frame(minWidth: 280, minHeight: 220)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .onAppear {
             viewModel.setDisplayMode(.compact)
         }

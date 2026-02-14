@@ -34,18 +34,19 @@ final class DisplayModeCoordinatorTests: XCTestCase {
         XCTAssertFalse(window.isMovableByWindowBackground)
         XCTAssertTrue(window.collectionBehavior.contains(.transient))
         XCTAssertTrue(window.collectionBehavior.contains(.moveToActiveSpace))
+        XCTAssertTrue(window.collectionBehavior.contains(.fullScreenNone))
         XCTAssertFalse(window.collectionBehavior.contains(.canJoinAllSpaces))
     }
 
-    func testStandardWindowUsesMovableResizableConfiguration() {
+    func testStandardWindowUsesChromelessMovableFixedSizeConfiguration() {
         let coordinator = DisplayModeCoordinator(displayPreferencesStore: makePreferencesStore(suffix: "standard-window-flags"))
         let window = coordinator.makeStandardWindow(frame: NSRect(x: 20, y: 30, width: 450, height: 500))
 
-        XCTAssertTrue(window.styleMask.contains(.titled))
-        XCTAssertTrue(window.styleMask.contains(.closable))
-        XCTAssertTrue(window.styleMask.contains(.resizable))
+        XCTAssertEqual(window.styleMask, [.borderless])
         XCTAssertEqual(window.level, .normal)
+        XCTAssertTrue(window.isMovableByWindowBackground)
         XCTAssertTrue(window.collectionBehavior.contains(.moveToActiveSpace))
+        XCTAssertTrue(window.collectionBehavior.contains(.fullScreenNone))
         XCTAssertFalse(window.collectionBehavior.contains(.canJoinAllSpaces))
     }
 

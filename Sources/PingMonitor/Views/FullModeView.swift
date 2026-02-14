@@ -10,7 +10,7 @@ struct FullModeView: View {
             historySection
         }
         .padding(14)
-        .frame(minWidth: 450, minHeight: 500)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .onAppear {
             viewModel.setDisplayMode(.full)
         }
