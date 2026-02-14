@@ -10,18 +10,18 @@ See: `.planning/PROJECT.md` (updated 2026-02-13)
 ## Current Position
 
 Phase: 3 of 6 (Host Monitoring)
-Plan: 1 of 7 in current phase
+Plan: 2 of 7 in current phase
 Status: In progress
-Last activity: 2026-02-14 - Completed 03-01-PLAN.md
+Last activity: 2026-02-14 - Completed 03-02-PLAN.md
 
-Progress: [██████░░░░] 60%
+Progress: [███████░░░] 67%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 9
+- Total plans completed: 10
 - Average duration: 2 min
-- Total execution time: 0.35 hours
+- Total execution time: 0.38 hours
 
 **By Phase:**
 
@@ -29,10 +29,10 @@ Progress: [██████░░░░] 60%
 |-------|-------|-------|----------|
 | 1. Foundation | 4 | 4 | 2 min |
 | 2. Menu Bar & State | 4 | 4 | 3 min |
-| 3. Host Monitoring | 1 | 7 | 1 min |
+| 3. Host Monitoring | 2 | 7 | 2 min |
 
 **Recent Trend:**
-- Last 5 plans: 02-01 (2 min), 02-03 (3 min), 02-02 (4 min), 02-04 (2 min), 03-01 (1 min)
+- Last 5 plans: 02-03 (3 min), 02-02 (4 min), 02-04 (2 min), 03-01 (1 min), 03-02 (2 min)
 - Trend: Stable
 
 *Updated after each plan completion*
@@ -71,10 +71,12 @@ Recent decisions affecting current work:
 - (02-04): Settings action first tries showSettingsWindow and falls back to a dedicated NSWindow in accessory mode
 - (03-01): Use responsive global defaults of 2s interval/timeout and 50ms/150ms thresholds for host monitoring
 - (03-01): Preserve Host decode compatibility for legacy protocolType/timeout persisted payloads
+- (03-02): Detect default gateway from sysctl route table and avoid NWPath gateway fields for stability
+- (03-02): Debounce connected-path gateway updates at 200ms but emit unavailable immediately on disconnect
 
 ### Pending Todos
 
-- PingService still references removed Host.ProtocolType and must be updated in 03-03 to restore full package build.
+None.
 
 ### Blockers/Concerns
 
@@ -82,6 +84,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-02-14T16:50:40Z
-Stopped at: Completed 03-01-PLAN.md
+Last session: 2026-02-14T16:51:56Z
+Stopped at: Completed 03-02-PLAN.md
 Resume file: None
