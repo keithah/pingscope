@@ -45,10 +45,13 @@ Plans:
   2. Menu bar shows ping time in milliseconds that updates in real-time
   3. Left-click opens a popover/window with the app interface
   4. Right-click opens a context menu with host switching, mode toggles, Settings, and Quit
-**Plans**: TBD
+**Plans**: 4 plans
 
 Plans:
-- [ ] 02-01: TBD
+- [ ] 02-01-PLAN.md — Menu bar state evaluator, smoothing, and view-model tests
+- [ ] 02-02-PLAN.md — Status item controller, click routing, context menu, and mode persistence
+- [ ] 02-03-PLAN.md — Popover view model and SwiftUI popover interface
+- [ ] 02-04-PLAN.md — App lifecycle wiring, integration smoke tests, and human interaction verification
 
 ### Phase 3: Host Monitoring
 **Goal**: Users can monitor multiple hosts with configurable ping methods and settings.
