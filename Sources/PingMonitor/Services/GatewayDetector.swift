@@ -136,6 +136,16 @@ actor GatewayDetector {
     private let debounceInterval: Duration = .milliseconds(200)
 
     private(set) var currentGateway: GatewayInfo = .unavailable
+    private var previousNetworkName: String?
+    private var hasUnacknowledgedNetworkChange = false
+
+    var isNetworkAvailable: Bool {
+        currentGateway.isAvailable
+    }
+
+    var networkJustChanged: Bool {
+        hasUnacknowledgedNetworkChange
+    }
 
     func startMonitoring() -> AsyncStream<GatewayInfo> {
         AsyncStream { continuation in
@@ -145,7 +155,7 @@ actor GatewayDetector {
                 }
 
                 Task {
-                    await self.handlePathUpdate(path, continuation: continuation)
+                    await self.handlePathUpdate(path: path, continuation: continuation)
                 }
             }
 
@@ -153,7 +163,7 @@ actor GatewayDetector {
 
             Task {
                 let gateway = await self.resolveGateway()
-                await self.updateGateway(gateway, continuation: continuation)
+                self.updateGateway(gateway, continuation: continuation)
             }
 
             continuation.onTermination = { [weak self] _ in
@@ -175,19 +185,34 @@ actor GatewayDetector {
         pathMonitor = NWPathMonitor()
     }
 
+    func acknowledgeNetworkChange() {
+        hasUnacknowledgedNetworkChange = false
+    }
+
     private func handlePathUpdate(
-        _: NWPath,
+        path: NWPath,
         continuation: AsyncStream<GatewayInfo>.Continuation
     ) {
-        debounceTask?.cancel()
-        debounceTask = Task {
-            try? await Task.sleep(for: debounceInterval)
-            guard !Task.isCancelled else {
-                return
-            }
+        switch path.status {
+        case .satisfied:
+            debounceTask?.cancel()
+            debounceTask = Task {
+                try? await Task.sleep(for: debounceInterval)
+                guard !Task.isCancelled else {
+                    return
+                }
 
-            let gateway = await self.resolveGateway()
-            await self.updateGateway(gateway, continuation: continuation)
+                let gateway = await self.resolveGateway()
+                self.updateGateway(gateway, continuation: continuation)
+            }
+        case .unsatisfied, .requiresConnection:
+            debounceTask?.cancel()
+            debounceTask = nil
+            updateGateway(.unavailable, continuation: continuation)
+        @unknown default:
+            debounceTask?.cancel()
+            debounceTask = nil
+            updateGateway(.unavailable, continuation: continuation)
         }
     }
 
@@ -216,6 +241,11 @@ actor GatewayDetector {
         _ gateway: GatewayInfo,
         continuation: AsyncStream<GatewayInfo>.Continuation
     ) {
+        if let previousNetworkName, previousNetworkName != gateway.networkName {
+            hasUnacknowledgedNetworkChange = true
+        }
+
+        previousNetworkName = gateway.networkName
         currentGateway = gateway
         continuation.yield(gateway)
     }
