@@ -181,6 +181,12 @@ final class DisplayViewModel: ObservableObject {
     private func updateModeState(for mode: DisplayMode, _ update: (inout DisplayModeState) -> Void) {
         var state = modeState(for: mode)
         update(&state)
+
+        // `DisplayModeCoordinator` persists frame changes (move/resize) directly to the
+        // preferences store. Preserve the latest persisted frame data here so UI-only
+        // toggles (graph/history collapse) don't accidentally overwrite window geometry.
+        state.frameData = preferencesStore.modeState(for: mode).frameData
+
         modeStateByMode[mode] = state
         preferencesStore.setModeState(state, for: mode)
     }

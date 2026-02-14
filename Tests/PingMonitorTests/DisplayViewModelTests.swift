@@ -101,4 +101,25 @@ final class DisplayViewModelTests: XCTestCase {
 
         return userDefaults
     }
+
+    func testPanelVisibilityUpdatesDoNotOverwritePersistedFrameData() {
+        let defaults = UserDefaults(suiteName: "DisplayViewModelTests-frame-preservation-\(UUID().uuidString)")!
+        let store = DisplayPreferencesStore(userDefaults: defaults, keyPrefix: "DisplayViewModelTests.frame")
+
+        // Simulate a window geometry update persisted by DisplayModeCoordinator.
+        store.updateModeState(for: .compact) { state in
+            state.frameData = DisplayFrameData(x: 10, y: 20, width: 222, height: 111)
+        }
+
+        let viewModel = DisplayViewModel(preferencesStore: store)
+
+        // Now change a UI-only toggle via view model.
+        viewModel.setGraphVisible(false, for: .compact)
+
+        let persisted = store.modeState(for: .compact).frameData
+        XCTAssertEqual(persisted.width, 222, accuracy: 0.5)
+        XCTAssertEqual(persisted.height, 111, accuracy: 0.5)
+        XCTAssertEqual(persisted.x, 10, accuracy: 0.5)
+        XCTAssertEqual(persisted.y, 20, accuracy: 0.5)
+    }
 }
