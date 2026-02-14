@@ -10,18 +10,18 @@ See: `.planning/PROJECT.md` (updated 2026-02-13)
 ## Current Position
 
 Phase: 3 of 6 (Host Monitoring)
-Plan: 0 of TBD in current phase
-Status: Ready to execute
-Last activity: 2026-02-14 - Completed and verified Phase 2 (Menu Bar & State)
+Plan: 1 of 7 in current phase
+Status: In progress
+Last activity: 2026-02-14 - Completed 03-01-PLAN.md
 
-Progress: [███░░░░░░░] 33%
+Progress: [██████░░░░] 60%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 8
+- Total plans completed: 9
 - Average duration: 2 min
-- Total execution time: 0.32 hours
+- Total execution time: 0.35 hours
 
 **By Phase:**
 
@@ -29,9 +29,10 @@ Progress: [███░░░░░░░] 33%
 |-------|-------|-------|----------|
 | 1. Foundation | 4 | 4 | 2 min |
 | 2. Menu Bar & State | 4 | 4 | 3 min |
+| 3. Host Monitoring | 1 | 7 | 1 min |
 
 **Recent Trend:**
-- Last 5 plans: 01-04 (2 min), 02-01 (2 min), 02-03 (3 min), 02-02 (4 min), 02-04 (2 min)
+- Last 5 plans: 02-01 (2 min), 02-03 (3 min), 02-02 (4 min), 02-04 (2 min), 03-01 (1 min)
 - Trend: Stable
 
 *Updated after each plan completion*
@@ -68,10 +69,12 @@ Recent decisions affecting current work:
 - (02-04): Status item uses a non-template drawn dot plus centered stacked text for reliable menu-bar contrast
 - (02-04): Compact mode changes are observed alongside scheduler state so status rendering updates immediately
 - (02-04): Settings action first tries showSettingsWindow and falls back to a dedicated NSWindow in accessory mode
+- (03-01): Use responsive global defaults of 2s interval/timeout and 50ms/150ms thresholds for host monitoring
+- (03-01): Preserve Host decode compatibility for legacy protocolType/timeout persisted payloads
 
 ### Pending Todos
 
-None.
+- PingService still references removed Host.ProtocolType and must be updated in 03-03 to restore full package build.
 
 ### Blockers/Concerns
 
@@ -79,6 +82,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-02-14T10:27:54Z
-Stopped at: Completed 02-04-PLAN.md
+Last session: 2026-02-14T16:50:40Z
+Stopped at: Completed 03-01-PLAN.md
 Resume file: None
