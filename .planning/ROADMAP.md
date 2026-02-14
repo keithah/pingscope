@@ -12,7 +12,7 @@ PingMonitor is a macOS menu bar network monitoring app rewritten from a monolith
 
 - [x] **Phase 1: Foundation** - Async patterns and connection lifecycle management
 - [x] **Phase 2: Menu Bar & State** - Menu bar display, interaction, and state management
-- [ ] **Phase 3: Host Monitoring** - Multi-host support, ping methods, and configuration
+- [x] **Phase 3: Host Monitoring** - Multi-host support, ping methods, and configuration
 - [ ] **Phase 4: Display Modes** - Full view, compact view, and floating window
 - [ ] **Phase 5: Visualization** - Latency graph, history table, and statistics
 - [ ] **Phase 6: Notifications & Settings** - Alert system and persistent configuration
@@ -63,16 +63,18 @@ Plans:
   3. User can choose ping method per host (ICMP-simulated, UDP, TCP)
   4. User can configure interval, timeout, and latency thresholds per host
   5. User can add, edit, and delete custom hosts (default hosts protected)
-**Plans**: 7 plans
+**Plans**: 9 plans (including 2 gap-closure plans)
 
 Plans:
-- [ ] 03-01-PLAN.md — Extend Host model with per-host configuration and ping methods
-- [ ] 03-02-PLAN.md — GatewayDetector service with sysctl gateway lookup and network monitoring
-- [ ] 03-03-PLAN.md — Update PingService for TCP, UDP, and ICMP-simulated methods
-- [ ] 03-04-PLAN.md — HostStore actor for CRUD and UserDefaults persistence
-- [ ] 03-05-PLAN.md — Host list view with selection, indicators, and delete confirmation
-- [ ] 03-06-PLAN.md — Add/edit host sheet with form validation and test ping
-- [ ] 03-07-PLAN.md — App integration with multi-host monitoring and gateway detection
+- [x] 03-01-PLAN.md — Extend Host model with per-host configuration and ping methods
+- [x] 03-02-PLAN.md — GatewayDetector service with sysctl gateway lookup and network monitoring
+- [x] 03-03-PLAN.md — Update PingService for TCP, UDP, and ICMP-simulated methods
+- [x] 03-04-PLAN.md — HostStore actor for CRUD and UserDefaults persistence
+- [x] 03-05-PLAN.md — Host list view with selection, indicators, and delete confirmation
+- [x] 03-06-PLAN.md — Add/edit host sheet with form validation and test ping
+- [x] 03-07-PLAN.md — App integration with multi-host monitoring and gateway detection
+- [x] 03-08-PLAN.md — Gap closure: per-host scheduler cadence wiring and tests
+- [x] 03-09-PLAN.md — Gap closure: threshold-aware status evaluation wiring and tests
 
 ### Phase 4: Display Modes
 **Goal**: Users can choose between full and compact views, with optional stay-on-top floating window.
@@ -126,7 +128,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6
 |-------|----------------|--------|-----------|
 | 1. Foundation | 4/4 | Complete | 2026-02-14 |
 | 2. Menu Bar & State | 4/4 | Complete | 2026-02-14 |
-| 3. Host Monitoring | 0/7 | Planned | - |
+| 3. Host Monitoring | 9/9 | Complete | 2026-02-14 |
 | 4. Display Modes | 0/? | Not started | - |
 | 5. Visualization | 0/? | Not started | - |
 | 6. Notifications & Settings | 0/? | Not started | - |
