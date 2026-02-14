@@ -8,13 +8,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let displayPreferencesStore = DisplayPreferencesStore()
     private lazy var runtime = MenuBarRuntime(modePreferenceStore: modePreferenceStore)
     private let contextMenuFactory = ContextMenuFactory()
-    private let popover = NSPopover()
     private lazy var displayViewModel = DisplayViewModel(
         preferencesStore: displayPreferencesStore,
         initialMode: modePreferenceStore.displayMode
     )
     private lazy var displayCoordinator = DisplayModeCoordinator(
-        popover: popover,
         displayPreferencesStore: displayPreferencesStore
     )
     private let scheduler = PingScheduler(
@@ -32,8 +30,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
-
-        popover.behavior = .applicationDefined
 
         hostListViewModel = makeHostListViewModel()
         bindDisplaySelection()
@@ -332,7 +328,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private var isDisplayPresented: Bool {
-        popover.isShown || (displayCoordinator.floatingWindow?.isVisible ?? false)
+        displayCoordinator.isDisplayVisible
     }
 
     private func refreshPresentedDisplayIfNeeded() {
@@ -345,8 +341,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func presentDisplay(from button: NSStatusBarButton) {
         displayViewModel.setDisplayMode(runtime.displayMode)
-        let frameData = displayPreferencesStore.modeState(for: runtime.displayMode).frameData
-        popover.contentSize = NSSize(width: frameData.width, height: frameData.height)
         let rootView = DisplayRootView(
             viewModel: displayViewModel,
             mode: runtime.displayMode,

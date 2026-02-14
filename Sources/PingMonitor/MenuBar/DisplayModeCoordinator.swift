@@ -1,10 +1,11 @@
 import AppKit
 
 @MainActor
-final class DisplayModeCoordinator {
+final class DisplayModeCoordinator: NSObject, NSWindowDelegate {
     private let popover: NSPopover
     private let displayPreferencesStore: DisplayPreferencesStore
 
+    private(set) var standardWindow: NSWindow?
     private(set) var floatingWindow: NSWindow?
     private var lastPresentedMode: DisplayMode = .full
 
@@ -25,11 +26,19 @@ final class DisplayModeCoordinator {
         if isStayOnTopEnabled {
             showFloatingWindow(from: button, mode: mode, contentViewController: contentViewController)
         } else {
-            showPopover(from: button)
+            showStandardWindow(from: button, mode: mode, contentViewController: contentViewController)
         }
     }
 
-    func showPopover(from button: NSStatusBarButton) {
+    var isDisplayVisible: Bool {
+        (standardWindow?.isVisible ?? false) || (floatingWindow?.isVisible ?? false) || popover.isShown
+    }
+
+    func showStandardWindow(
+        from button: NSStatusBarButton,
+        mode: DisplayMode,
+        contentViewController: NSViewController
+    ) {
         if let window = floatingWindow {
             persistWindowFrame(window.frame, for: lastPresentedMode)
             window.orderOut(nil)
@@ -39,8 +48,30 @@ final class DisplayModeCoordinator {
             popover.performClose(nil)
         }
 
-        popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+        let modeChanged = lastPresentedMode != mode
+        if modeChanged, let window = standardWindow, window.isVisible {
+            persistWindowFrame(window.frame, for: lastPresentedMode)
+        }
+
+        let preferredFrame = frame(for: mode)
+        let anchorRect = statusItemAnchorRect(for: button)
+        let visibleFrame = visibleFrame(for: anchorRect, fallbackWindow: button.window)
+        let resolvedFrame = Self.anchoredAndClampedFrame(
+            anchorRect: anchorRect,
+            preferredFrame: preferredFrame,
+            visibleFrame: visibleFrame
+        )
+
+        let window = standardWindow ?? makeStandardWindow(frame: resolvedFrame)
+        lastPresentedMode = mode
+        if modeChanged || !window.isVisible {
+            window.setFrame(resolvedFrame, display: false)
+        }
+        window.contentViewController = contentViewController
+        window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+
+        standardWindow = window
     }
 
     func showFloatingWindow(
@@ -48,8 +79,18 @@ final class DisplayModeCoordinator {
         mode: DisplayMode,
         contentViewController: NSViewController
     ) {
+        if let window = standardWindow {
+            persistWindowFrame(window.frame, for: lastPresentedMode)
+            window.orderOut(nil)
+        }
+
         if popover.isShown {
             popover.performClose(nil)
+        }
+
+        let modeChanged = lastPresentedMode != mode
+        if modeChanged, let window = floatingWindow, window.isVisible {
+            persistWindowFrame(window.frame, for: lastPresentedMode)
         }
 
         let preferredFrame = frame(for: mode)
@@ -62,13 +103,22 @@ final class DisplayModeCoordinator {
         )
 
         let window = floatingWindow ?? makeFloatingWindow(frame: resolvedFrame)
+        lastPresentedMode = mode
         window.setFrame(resolvedFrame, display: false)
         window.contentViewController = contentViewController
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
 
         floatingWindow = window
-        lastPresentedMode = mode
+    }
+
+    func closeStandardWindow() {
+        guard let window = standardWindow else {
+            return
+        }
+
+        persistWindowFrame(window.frame, for: lastPresentedMode)
+        window.orderOut(nil)
     }
 
     func closeFloatingWindow() {
@@ -86,6 +136,7 @@ final class DisplayModeCoordinator {
 
     func closeAll() {
         closePopover()
+        closeStandardWindow()
         closeFloatingWindow()
     }
 
@@ -112,7 +163,36 @@ final class DisplayModeCoordinator {
         window.isReleasedWhenClosed = false
         window.hasShadow = true
         window.backgroundColor = .windowBackgroundColor
+        window.delegate = self
         return window
+    }
+
+    func makeStandardWindow(frame: NSRect) -> NSWindow {
+        let window = NSWindow(
+            contentRect: frame,
+            styleMask: [.titled, .closable, .resizable],
+            backing: .buffered,
+            defer: false
+        )
+
+        window.title = "PingMonitor"
+        window.level = .normal
+        window.collectionBehavior = [.moveToActiveSpace]
+        window.isReleasedWhenClosed = false
+        window.delegate = self
+        return window
+    }
+
+    func windowDidEndLiveResize(_ notification: Notification) {
+        persistFrameFromNotification(notification)
+    }
+
+    func windowDidMove(_ notification: Notification) {
+        persistFrameFromNotification(notification)
+    }
+
+    func windowWillClose(_ notification: Notification) {
+        persistFrameFromNotification(notification)
     }
 
     static func anchoredAndClampedFrame(
@@ -167,6 +247,18 @@ final class DisplayModeCoordinator {
                 height: frame.height
             )
         }
+    }
+
+    private func persistFrameFromNotification(_ notification: Notification) {
+        guard let window = notification.object as? NSWindow else {
+            return
+        }
+
+        guard window === standardWindow || window === floatingWindow else {
+            return
+        }
+
+        persistWindowFrame(window.frame, for: lastPresentedMode)
     }
 
     private func visibleFrame(for anchorRect: NSRect?, fallbackWindow: NSWindow?) -> NSRect {

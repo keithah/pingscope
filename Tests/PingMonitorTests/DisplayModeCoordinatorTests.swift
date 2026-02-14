@@ -37,6 +37,18 @@ final class DisplayModeCoordinatorTests: XCTestCase {
         XCTAssertFalse(window.collectionBehavior.contains(.canJoinAllSpaces))
     }
 
+    func testStandardWindowUsesMovableResizableConfiguration() {
+        let coordinator = DisplayModeCoordinator(displayPreferencesStore: makePreferencesStore(suffix: "standard-window-flags"))
+        let window = coordinator.makeStandardWindow(frame: NSRect(x: 20, y: 30, width: 450, height: 500))
+
+        XCTAssertTrue(window.styleMask.contains(.titled))
+        XCTAssertTrue(window.styleMask.contains(.closable))
+        XCTAssertTrue(window.styleMask.contains(.resizable))
+        XCTAssertEqual(window.level, .normal)
+        XCTAssertTrue(window.collectionBehavior.contains(.moveToActiveSpace))
+        XCTAssertFalse(window.collectionBehavior.contains(.canJoinAllSpaces))
+    }
+
     func testDragHandleMouseDownUsesDedicatedDragPath() {
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 220, height: 120),
