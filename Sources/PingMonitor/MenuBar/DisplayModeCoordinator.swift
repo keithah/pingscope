@@ -9,6 +9,8 @@ final class DisplayModeCoordinator: NSObject, NSWindowDelegate {
     private(set) var standardWindow: NSWindow?
     private(set) var floatingWindow: NSWindow?
     private var lastPresentedMode: DisplayMode = .full
+    private var standardWindowMode: DisplayMode?
+    private var floatingWindowMode: DisplayMode?
 
     init(
         displayPreferencesStore: DisplayPreferencesStore = DisplayPreferencesStore()
@@ -61,7 +63,7 @@ final class DisplayModeCoordinator: NSObject, NSWindowDelegate {
         contentViewController: NSViewController
     ) {
         if let window = floatingWindow {
-            persistWindowFrame(window.frame, for: lastPresentedMode)
+            persistWindowFrame(window.frame, for: floatingWindowMode ?? lastPresentedMode)
             window.orderOut(nil)
         }
 
@@ -93,6 +95,7 @@ final class DisplayModeCoordinator: NSObject, NSWindowDelegate {
 
         let window = standardWindow ?? makeStandardWindow(frame: resolvedFrame)
         lastPresentedMode = mode
+        standardWindowMode = mode
         configureStandardWindow(window, for: mode)
         if modeChanged || !window.isVisible {
             window.setFrame(resolvedFrame, display: false)
@@ -110,7 +113,7 @@ final class DisplayModeCoordinator: NSObject, NSWindowDelegate {
         contentViewController: NSViewController
     ) {
         if let window = standardWindow {
-            persistWindowFrame(window.frame, for: lastPresentedMode)
+            persistWindowFrame(window.frame, for: standardWindowMode ?? lastPresentedMode)
             window.orderOut(nil)
         }
 
@@ -137,6 +140,7 @@ final class DisplayModeCoordinator: NSObject, NSWindowDelegate {
 
         let window = floatingWindow ?? makeFloatingWindow(frame: resolvedFrame)
         lastPresentedMode = mode
+        floatingWindowMode = mode
         configureFloatingWindow(window, for: mode)
         window.setFrame(resolvedFrame, display: false)
         window.contentViewController = contentViewController
@@ -155,7 +159,7 @@ final class DisplayModeCoordinator: NSObject, NSWindowDelegate {
         // Otherwise, a hidden window with an old frame could overwrite the most recent
         // user-resized frame from the currently active shell.
         if window.isVisible {
-            persistWindowFrame(window.frame, for: lastPresentedMode)
+            persistWindowFrame(window.frame, for: standardWindowMode ?? lastPresentedMode)
         }
         window.orderOut(nil)
     }
@@ -166,7 +170,7 @@ final class DisplayModeCoordinator: NSObject, NSWindowDelegate {
         }
 
         if window.isVisible {
-            persistWindowFrame(window.frame, for: lastPresentedMode)
+            persistWindowFrame(window.frame, for: floatingWindowMode ?? lastPresentedMode)
         }
         window.orderOut(nil)
     }
@@ -323,11 +327,15 @@ final class DisplayModeCoordinator: NSObject, NSWindowDelegate {
             return
         }
 
-        guard window === standardWindow || window === floatingWindow else {
+        if window === standardWindow {
+            persistWindowFrame(window.frame, for: standardWindowMode ?? lastPresentedMode)
             return
         }
 
-        persistWindowFrame(window.frame, for: lastPresentedMode)
+        if window === floatingWindow {
+            persistWindowFrame(window.frame, for: floatingWindowMode ?? lastPresentedMode)
+            return
+        }
     }
 
     private func preferredFrame(for mode: DisplayMode, preservingSizeFrom outgoingWindow: NSWindow?) -> NSRect {
