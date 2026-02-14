@@ -31,6 +31,7 @@ struct StatusItemClickRouter {
 final class StatusItemController: NSObject {
     private let statusItem: NSStatusItem
     private let clickRouter: StatusItemClickRouter
+    private let titleFormatter: StatusItemTitleFormatter
     private let onTogglePopover: () -> Void
     private let onRequestContextMenu: (NSStatusBarButton) -> Void
     private var cancellables: Set<AnyCancellable> = []
@@ -42,22 +43,24 @@ final class StatusItemController: NSObject {
     init(
         viewModel: MenuBarViewModel,
         clickRouter: StatusItemClickRouter = StatusItemClickRouter(),
+        titleFormatter: StatusItemTitleFormatter = StatusItemTitleFormatter(),
         onTogglePopover: @escaping () -> Void,
         onRequestContextMenu: @escaping (NSStatusBarButton) -> Void
     ) {
         self.statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         self.clickRouter = clickRouter
+        self.titleFormatter = titleFormatter
         self.onTogglePopover = onTogglePopover
         self.onRequestContextMenu = onRequestContextMenu
         super.init()
 
         configureButton()
-        updateAppearance(with: viewModel.menuBarState)
+        updateAppearance(with: viewModel.menuBarState, isCompactModeEnabled: viewModel.isCompactModeEnabled)
 
-        viewModel.$menuBarState
+        viewModel.$menuBarState.combineLatest(viewModel.$isCompactModeEnabled)
             .receive(on: RunLoop.main)
-            .sink { [weak self] state in
-                self?.updateAppearance(with: state)
+            .sink { [weak self] state, isCompactModeEnabled in
+                self?.updateAppearance(with: state, isCompactModeEnabled: isCompactModeEnabled)
             }
             .store(in: &cancellables)
     }
@@ -88,30 +91,45 @@ final class StatusItemController: NSObject {
         button.target = self
         button.action = #selector(handleStatusItemButtonAction(_:))
         button.sendAction(on: [.leftMouseUp, .rightMouseUp])
-        button.imagePosition = .imageLeading
+        button.imagePosition = .imageAbove
+        button.alignment = .center
     }
 
-    private func updateAppearance(with state: MenuBarState) {
+    private func updateAppearance(with state: MenuBarState, isCompactModeEnabled: Bool) {
         guard let button = statusItem.button else {
             return
         }
 
-        button.title = state.displayText
+        button.attributedTitle = styledTitle(
+            text: titleFormatter.titleText(for: state.displayText, isCompactModeEnabled: isCompactModeEnabled)
+        )
         button.image = statusSymbolImage(for: state.status)
-        button.contentTintColor = statusColor(for: state.status)
+        button.contentTintColor = nil
     }
 
     private func statusSymbolImage(for status: MenuBarStatus) -> NSImage? {
-        guard let image = NSImage(
-            systemSymbolName: "circle.fill",
-            accessibilityDescription: "PingMonitor status"
-        ) else {
-            return nil
-        }
+        let diameter: CGFloat = 6
+        let image = NSImage(size: NSSize(width: diameter, height: diameter))
+        image.lockFocus()
+        statusColor(for: status).setFill()
+        NSBezierPath(ovalIn: NSRect(x: 0, y: 0, width: diameter, height: diameter)).fill()
+        image.unlockFocus()
+        image.isTemplate = false
+        return image
+    }
 
-        image.isTemplate = true
-        image.size = NSSize(width: 9, height: 9)
-        return image.withSymbolConfiguration(.init(pointSize: 9, weight: .regular))
+    private func styledTitle(text: String) -> NSAttributedString {
+        let paragraphStyle = NSMutableParagraphStyle()
+        paragraphStyle.alignment = .center
+
+        return NSAttributedString(
+            string: text,
+            attributes: [
+                .font: NSFont.monospacedDigitSystemFont(ofSize: 9, weight: .medium),
+                .foregroundColor: NSColor.labelColor,
+                .paragraphStyle: paragraphStyle
+            ]
+        )
     }
 
     private func statusColor(for status: MenuBarStatus) -> NSColor {
@@ -125,5 +143,15 @@ final class StatusItemController: NSObject {
         case .gray:
             return .systemGray
         }
+    }
+}
+
+struct StatusItemTitleFormatter {
+    func titleText(for displayText: String, isCompactModeEnabled: Bool) -> String {
+        guard isCompactModeEnabled else {
+            return displayText
+        }
+
+        return displayText.replacingOccurrences(of: " ms", with: "")
     }
 }

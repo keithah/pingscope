@@ -82,6 +82,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItemController: StatusItemController?
     private var statusPopoverViewModel: StatusPopoverViewModel?
     private let popover = NSPopover()
+    private var settingsWindowController: NSWindowController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -196,7 +197,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func openSettings() {
-        NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+        NSApp.activate(ignoringOtherApps: true)
+
+        if NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil) {
+            return
+        }
+
+        if settingsWindowController == nil {
+            let hostingController = NSHostingController(rootView: SettingsPlaceholderView())
+            let window = NSWindow(contentViewController: hostingController)
+            window.title = "Settings"
+            window.styleMask = [.titled, .closable, .miniaturizable]
+            window.setContentSize(NSSize(width: 420, height: 260))
+            settingsWindowController = NSWindowController(window: window)
+        }
+
+        settingsWindowController?.showWindow(nil)
+        settingsWindowController?.window?.makeKeyAndOrderFront(nil)
     }
 
     @objc
