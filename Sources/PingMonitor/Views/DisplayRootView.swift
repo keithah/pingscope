@@ -36,15 +36,17 @@ struct DisplayRootView: View {
     }
 
     private var floatingHeader: some View {
-        HStack(spacing: 8) {
+        ZStack {
+            // Make the entire header area draggable (handle-only movement) so moving is discoverable.
             WindowDragHandleView()
-                .frame(width: 68, height: 20)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-            Spacer()
-
-            Text(mode == .compact ? "Compact" : "Full")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
+            HStack {
+                Spacer()
+                Text(mode == .compact ? "Compact" : "Full")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
         }
         .padding(.horizontal, 12)
         .padding(.top, 8)

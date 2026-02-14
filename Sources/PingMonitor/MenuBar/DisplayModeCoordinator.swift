@@ -124,10 +124,12 @@ final class DisplayModeCoordinator: NSObject, NSWindowDelegate {
 
         let preferredFrame = preferredFrame(for: mode, preservingSizeFrom: standardWindow)
         let anchorRect = statusItemAnchorRect(for: button)
-        let visibleFrame = visibleFrame(for: anchorRect, fallbackWindow: button.window)
+        let wantsAnchoredOpen = preferredFrame.origin.x == 0 && preferredFrame.origin.y == 0
+        let referencePoint = wantsAnchoredOpen ? (anchorRect?.center ?? preferredFrame.center) : preferredFrame.center
+        let visibleFrame = visibleFrame(containing: referencePoint, fallbackWindow: button.window)
         let minimumSize = minimumContentSize(for: mode)
         let resolvedFrame = Self.anchoredAndClampedFrame(
-            anchorRect: anchorRect,
+            anchorRect: wantsAnchoredOpen ? anchorRect : nil,
             preferredFrame: preferredFrame,
             visibleFrame: visibleFrame,
             minimumSize: minimumSize
@@ -392,6 +394,7 @@ final class DisplayModeCoordinator: NSObject, NSWindowDelegate {
         window.styleMask.remove(.titled)
         window.collectionBehavior.insert(.fullScreenNone)
         window.contentMinSize = minimumContentSize(for: mode)
+        window.contentMaxSize = NSSize(width: 10_000, height: 10_000)
     }
 
     private func minimumContentSize(for mode: DisplayMode) -> NSSize {

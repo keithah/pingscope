@@ -28,8 +28,12 @@ struct FullModeView: View {
                 ForEach(viewModel.hosts) { host in
                     let isSelected = viewModel.selectedHostID == host.id
 
-                    Button(host.name) {
+                    Button {
                         viewModel.selectHost(id: host.id)
+                    } label: {
+                        Text(host.name)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
                     }
                     .font(.system(size: 12, weight: .semibold))
                     .buttonStyle(.plain)
@@ -38,6 +42,7 @@ struct FullModeView: View {
                     .background(isSelected ? Color.accentColor.opacity(0.18) : Color.secondary.opacity(0.08))
                     .foregroundColor(isSelected ? .accentColor : .primary)
                     .clipShape(Capsule())
+                    .frame(maxWidth: 150)
                 }
             }
         }
