@@ -72,14 +72,7 @@ final class DisplayModeCoordinator: NSObject, NSWindowDelegate {
             persistWindowFrame(window.frame, for: lastPresentedMode)
         }
 
-        var preferredFrame = preferredFrame(for: mode, preservingSizeFrom: floatingWindow)
-        if let existingWindow = standardWindow,
-           !existingWindow.isVisible,
-           lastPresentedMode == mode {
-            // Preserve the last in-memory size for quick open/close cycles even
-            // if persistence hasn't flushed yet.
-            preferredFrame.size = existingWindow.frame.size
-        }
+        let preferredFrame = preferredFrame(for: mode, preservingSizeFrom: floatingWindow)
         let anchorRect = statusItemAnchorRect(for: button)
         let anchorCenter = anchorRect?.center
         let wantsAnchoredOpen = preferredFrame.origin.x == 0 && preferredFrame.origin.y == 0
@@ -97,12 +90,19 @@ final class DisplayModeCoordinator: NSObject, NSWindowDelegate {
         lastPresentedMode = mode
         standardWindowMode = mode
         configureStandardWindow(window, for: mode)
-        if modeChanged || !window.isVisible {
-            window.setFrame(resolvedFrame, display: false)
-        }
         window.contentViewController = contentViewController
+        // Some content/controller swaps can influence sizing; enforce the desired frame
+        // after assigning content and again on the next runloop tick.
+        window.setFrame(resolvedFrame, display: false)
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+
+        DispatchQueue.main.async { [weak self, weak window] in
+            guard let self, let window, self.standardWindow === window else {
+                return
+            }
+            window.setFrame(resolvedFrame, display: false)
+        }
 
         standardWindow = window
     }
@@ -122,12 +122,7 @@ final class DisplayModeCoordinator: NSObject, NSWindowDelegate {
             persistWindowFrame(window.frame, for: lastPresentedMode)
         }
 
-        var preferredFrame = preferredFrame(for: mode, preservingSizeFrom: standardWindow)
-        if let existingWindow = floatingWindow,
-           !existingWindow.isVisible,
-           lastPresentedMode == mode {
-            preferredFrame.size = existingWindow.frame.size
-        }
+        let preferredFrame = preferredFrame(for: mode, preservingSizeFrom: standardWindow)
         let anchorRect = statusItemAnchorRect(for: button)
         let visibleFrame = visibleFrame(for: anchorRect, fallbackWindow: button.window)
         let minimumSize = minimumContentSize(for: mode)
@@ -142,10 +137,17 @@ final class DisplayModeCoordinator: NSObject, NSWindowDelegate {
         lastPresentedMode = mode
         floatingWindowMode = mode
         configureFloatingWindow(window, for: mode)
-        window.setFrame(resolvedFrame, display: false)
         window.contentViewController = contentViewController
+        window.setFrame(resolvedFrame, display: false)
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+
+        DispatchQueue.main.async { [weak self, weak window] in
+            guard let self, let window, self.floatingWindow === window else {
+                return
+            }
+            window.setFrame(resolvedFrame, display: false)
+        }
 
         floatingWindow = window
     }
