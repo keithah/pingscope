@@ -7,29 +7,48 @@ final class DisplayModeCoordinatorTests: XCTestCase {
     func testAnchoredAndClampedFrameStaysWithinVisibleScreenBounds() {
         let anchorRect = NSRect(x: 385, y: 290, width: 20, height: 18)
         let preferredFrame = NSRect(x: 0, y: 0, width: 280, height: 220)
-        let visibleFrame = NSRect(x: 100, y: 100, width: 300, height: 200)
+        let visibleFrame = NSRect(x: 100, y: 100, width: 300, height: 400)
 
         let frame = DisplayModeCoordinator.anchoredAndClampedFrame(
             anchorRect: anchorRect,
             preferredFrame: preferredFrame,
-            visibleFrame: visibleFrame
+            visibleFrame: visibleFrame,
+            minimumSize: NSSize(width: 280, height: 220)
         )
 
         XCTAssertEqual(frame.origin.x, 120)
         XCTAssertEqual(frame.origin.y, 100)
         XCTAssertEqual(frame.width, 280)
-        XCTAssertEqual(frame.height, 200)
+        XCTAssertEqual(frame.height, 220)
         XCTAssertGreaterThanOrEqual(frame.minX, visibleFrame.minX)
         XCTAssertGreaterThanOrEqual(frame.minY, visibleFrame.minY)
         XCTAssertLessThanOrEqual(frame.maxX, visibleFrame.maxX)
         XCTAssertLessThanOrEqual(frame.maxY, visibleFrame.maxY)
     }
 
+    func testAnchoredAndClampedFrameAppliesMinimumSizeFloor() {
+        let anchorRect = NSRect(x: 385, y: 290, width: 20, height: 18)
+        let preferredFrame = NSRect(x: 0, y: 0, width: 32, height: 44)
+        let visibleFrame = NSRect(x: 0, y: 0, width: 2_000, height: 1_200)
+
+        let frame = DisplayModeCoordinator.anchoredAndClampedFrame(
+            anchorRect: anchorRect,
+            preferredFrame: preferredFrame,
+            visibleFrame: visibleFrame,
+            minimumSize: NSSize(width: 280, height: 220)
+        )
+
+        XCTAssertEqual(frame.size.width, 280)
+        XCTAssertEqual(frame.size.height, 220)
+    }
+
     func testFloatingWindowUsesBorderlessFloatingCurrentSpaceConfiguration() {
         let coordinator = DisplayModeCoordinator(displayPreferencesStore: makePreferencesStore(suffix: "window-flags"))
         let window = coordinator.makeFloatingWindow(frame: NSRect(x: 20, y: 30, width: 280, height: 220))
 
-        XCTAssertEqual(window.styleMask, [.borderless])
+        XCTAssertTrue(window.styleMask.contains(.borderless))
+        XCTAssertTrue(window.styleMask.contains(.resizable))
+        XCTAssertFalse(window.styleMask.contains(.titled))
         XCTAssertEqual(window.level, .floating)
         XCTAssertFalse(window.isMovableByWindowBackground)
         XCTAssertTrue(window.collectionBehavior.contains(.transient))
@@ -111,6 +130,79 @@ final class DisplayModeCoordinatorTests: XCTestCase {
 
         XCTAssertEqual(reopened.frame.size.width, CGFloat(520), accuracy: CGFloat(0.5))
         XCTAssertEqual(reopened.frame.size.height, CGFloat(560), accuracy: CGFloat(0.5))
+    }
+
+    func testSwitchingShellsPreservesCurrentWindowSizeForSameMode() {
+        _ = NSApplication.shared
+
+        let store = makePreferencesStore(suffix: "shell-switch-preserves-size")
+        let coordinator = DisplayModeCoordinator(displayPreferencesStore: store)
+        let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+        addTeardownBlock {
+            NSStatusBar.system.removeStatusItem(statusItem)
+            coordinator.closeAll()
+        }
+
+        guard let button = statusItem.button else {
+            XCTFail("Status item button missing")
+            return
+        }
+
+        let contentViewController = NSViewController()
+        coordinator.showStandardWindow(from: button, mode: .full, contentViewController: contentViewController)
+
+        guard let window = coordinator.standardWindow else {
+            XCTFail("Expected standard window to be created")
+            return
+        }
+
+        let resized = NSRect(
+            x: window.frame.origin.x,
+            y: window.frame.origin.y,
+            width: 620,
+            height: 700
+        )
+        window.setFrame(resized, display: false)
+        coordinator.windowDidEndLiveResize(Notification(name: NSWindow.didEndLiveResizeNotification, object: window))
+
+        coordinator.showFloatingWindow(from: button, mode: .full, contentViewController: contentViewController)
+        guard let floating = coordinator.floatingWindow else {
+            XCTFail("Expected floating window to be created")
+            return
+        }
+
+        XCTAssertEqual(floating.frame.size.width, CGFloat(620), accuracy: CGFloat(0.5))
+        XCTAssertEqual(floating.frame.size.height, CGFloat(700), accuracy: CGFloat(0.5))
+    }
+
+    func testFloatingWindowEnforcesPerModeMinimumContentSize() {
+        _ = NSApplication.shared
+
+        let store = makePreferencesStore(suffix: "floating-min-size")
+        let coordinator = DisplayModeCoordinator(displayPreferencesStore: store)
+        let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+        addTeardownBlock {
+            NSStatusBar.system.removeStatusItem(statusItem)
+            coordinator.closeAll()
+        }
+
+        guard let button = statusItem.button else {
+            XCTFail("Status item button missing")
+            return
+        }
+
+        let contentViewController = NSViewController()
+        coordinator.showFloatingWindow(from: button, mode: .compact, contentViewController: contentViewController)
+
+        guard let floating = coordinator.floatingWindow else {
+            XCTFail("Expected floating window to be created")
+            return
+        }
+
+        XCTAssertEqual(floating.contentMinSize.width, 280, accuracy: 0.5)
+        XCTAssertEqual(floating.contentMinSize.height, 220, accuracy: 0.5)
+        XCTAssertGreaterThan(floating.contentMaxSize.width, floating.contentMinSize.width)
+        XCTAssertGreaterThan(floating.contentMaxSize.height, floating.contentMinSize.height)
     }
 
     func testDragHandleMouseDownUsesDedicatedDragPath() {

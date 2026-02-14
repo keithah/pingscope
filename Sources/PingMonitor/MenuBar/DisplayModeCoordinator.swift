@@ -64,16 +64,18 @@ final class DisplayModeCoordinator: NSObject, NSWindowDelegate {
             persistWindowFrame(window.frame, for: lastPresentedMode)
         }
 
-        let preferredFrame = frame(for: mode)
+        let preferredFrame = preferredFrame(for: mode, preservingSizeFrom: floatingWindow)
         let anchorRect = statusItemAnchorRect(for: button)
         let anchorCenter = anchorRect?.center
         let wantsAnchoredOpen = preferredFrame.origin.x == 0 && preferredFrame.origin.y == 0
         let referencePoint = wantsAnchoredOpen ? (anchorCenter ?? preferredFrame.center) : preferredFrame.center
         let visibleFrame = visibleFrame(containing: referencePoint, fallbackWindow: button.window)
+        let minimumSize = minimumContentSize(for: mode)
         let resolvedFrame = Self.anchoredAndClampedFrame(
             anchorRect: wantsAnchoredOpen ? anchorRect : nil,
             preferredFrame: preferredFrame,
-            visibleFrame: visibleFrame
+            visibleFrame: visibleFrame,
+            minimumSize: minimumSize
         )
 
         let window = standardWindow ?? makeStandardWindow(frame: resolvedFrame)
@@ -104,18 +106,20 @@ final class DisplayModeCoordinator: NSObject, NSWindowDelegate {
             persistWindowFrame(window.frame, for: lastPresentedMode)
         }
 
-        let preferredFrame = frame(for: mode)
+        let preferredFrame = preferredFrame(for: mode, preservingSizeFrom: standardWindow)
         let anchorRect = statusItemAnchorRect(for: button)
         let visibleFrame = visibleFrame(for: anchorRect, fallbackWindow: button.window)
+        let minimumSize = minimumContentSize(for: mode)
         let resolvedFrame = Self.anchoredAndClampedFrame(
             anchorRect: anchorRect,
             preferredFrame: preferredFrame,
-            visibleFrame: visibleFrame
+            visibleFrame: visibleFrame,
+            minimumSize: minimumSize
         )
 
         let window = floatingWindow ?? makeFloatingWindow(frame: resolvedFrame)
         lastPresentedMode = mode
-        lockWindow(window, to: resolvedFrame)
+        configureFloatingWindow(window, for: mode)
         window.setFrame(resolvedFrame, display: false)
         window.contentViewController = contentViewController
         window.makeKeyAndOrderFront(nil)
@@ -159,7 +163,7 @@ final class DisplayModeCoordinator: NSObject, NSWindowDelegate {
     func makeFloatingWindow(frame: NSRect) -> NSWindow {
         let window = DisplayShellWindow(
             contentRect: frame,
-            styleMask: [.borderless],
+            styleMask: [.borderless, .resizable],
             backing: .buffered,
             defer: false
         )
@@ -212,9 +216,13 @@ final class DisplayModeCoordinator: NSObject, NSWindowDelegate {
         anchorRect: NSRect?,
         preferredFrame: NSRect,
         visibleFrame: NSRect,
+        minimumSize: NSSize,
         verticalOffset: CGFloat = 8
     ) -> NSRect {
         var frame = preferredFrame
+
+        frame.size.width = max(frame.size.width, minimumSize.width)
+        frame.size.height = max(frame.size.height, minimumSize.height)
 
         if let anchorRect {
             frame.origin.x = anchorRect.midX - (frame.width / 2)
@@ -222,11 +230,11 @@ final class DisplayModeCoordinator: NSObject, NSWindowDelegate {
         }
 
         if frame.width > visibleFrame.width {
-            frame.size.width = visibleFrame.width
+            frame.size.width = max(minimumSize.width, visibleFrame.width)
         }
 
         if frame.height > visibleFrame.height {
-            frame.size.height = visibleFrame.height
+            frame.size.height = max(minimumSize.height, visibleFrame.height)
         }
 
         let minX = visibleFrame.minX
@@ -234,8 +242,17 @@ final class DisplayModeCoordinator: NSObject, NSWindowDelegate {
         let minY = visibleFrame.minY
         let maxY = visibleFrame.maxY - frame.height
 
-        frame.origin.x = min(max(frame.origin.x, minX), maxX)
-        frame.origin.y = min(max(frame.origin.y, minY), maxY)
+        if maxX < minX {
+            frame.origin.x = minX
+        } else {
+            frame.origin.x = min(max(frame.origin.x, minX), maxX)
+        }
+
+        if maxY < minY {
+            frame.origin.y = minY
+        } else {
+            frame.origin.y = min(max(frame.origin.y, minY), maxY)
+        }
 
         return frame
     }
@@ -278,6 +295,19 @@ final class DisplayModeCoordinator: NSObject, NSWindowDelegate {
         persistWindowFrame(window.frame, for: lastPresentedMode)
     }
 
+    private func preferredFrame(for mode: DisplayMode, preservingSizeFrom outgoingWindow: NSWindow?) -> NSRect {
+        var preferredFrame = frame(for: mode)
+
+        guard let outgoingWindow,
+              outgoingWindow.isVisible,
+              lastPresentedMode == mode else {
+            return preferredFrame
+        }
+
+        preferredFrame.size = outgoingWindow.frame.size
+        return preferredFrame
+    }
+
     private func visibleFrame(for anchorRect: NSRect?, fallbackWindow: NSWindow?) -> NSRect {
         if let anchorRect,
            let screen = NSScreen.screens.first(where: { $0.frame.contains(anchorRect.center) }) {
@@ -303,31 +333,29 @@ final class DisplayModeCoordinator: NSObject, NSWindowDelegate {
         return NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1_280, height: 800)
     }
 
-    private func lockWindow(_ window: NSWindow, to frame: NSRect) {
-        let size = frame.size
-        window.styleMask.remove(.resizable)
-        window.collectionBehavior.insert(.fullScreenNone)
-        window.contentMinSize = size
-        window.contentMaxSize = size
-    }
-
     private func configureStandardWindow(_ window: NSWindow, for mode: DisplayMode) {
         window.styleMask.insert(.resizable)
         window.styleMask.remove(.titled)
         window.collectionBehavior.insert(.fullScreenNone)
 
-        let minimumSize = minimumStandardWindowContentSize(for: mode)
-        window.contentMinSize = minimumSize
+        window.contentMinSize = minimumContentSize(for: mode)
         window.contentMaxSize = NSSize(width: 10_000, height: 10_000)
     }
 
-    private func minimumStandardWindowContentSize(for mode: DisplayMode) -> NSSize {
+    private func configureFloatingWindow(_ window: NSWindow, for mode: DisplayMode) {
+        window.styleMask.insert(.resizable)
+        window.styleMask.remove(.titled)
+        window.collectionBehavior.insert(.fullScreenNone)
+        window.contentMinSize = minimumContentSize(for: mode)
+    }
+
+    private func minimumContentSize(for mode: DisplayMode) -> NSSize {
         let defaultSize = NSSize(width: mode.defaultFrame.width, height: mode.defaultFrame.height)
         switch mode {
         case .full:
-            return NSSize(width: min(defaultSize.width, 380), height: min(defaultSize.height, 420))
+            return NSSize(width: max(defaultSize.width, 450), height: max(defaultSize.height, 500))
         case .compact:
-            return NSSize(width: min(defaultSize.width, 240), height: min(defaultSize.height, 200))
+            return NSSize(width: max(defaultSize.width, 280), height: max(defaultSize.height, 220))
         }
     }
 }
