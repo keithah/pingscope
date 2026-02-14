@@ -39,7 +39,7 @@ final class DisplayViewModel: ObservableObject {
     ) {
         self.preferencesStore = preferencesStore
         displayMode = initialMode
-        self.sampleBufferLimit = max(12, sampleBufferLimit)
+        self.sampleBufferLimit = max(1, sampleBufferLimit)
 
         let shared = preferencesStore.sharedState
         selectedHostID = shared.selectedHostID
