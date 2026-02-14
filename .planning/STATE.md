@@ -5,16 +5,16 @@
 See: `.planning/PROJECT.md` (updated 2026-02-13)
 
 **Core value:** Reliable, accurate ping monitoring that users can trust — no false timeouts, no stale connections, no crashes.
-**Current focus:** Phase 1 - Foundation
+**Current focus:** Phase 2 - Menu Bar & State
 
 ## Current Position
 
-Phase: 1 of 6 (Foundation)
-Plan: 4 of 4 in current phase
-Status: Phase complete
-Last activity: 2026-02-14 - Completed 01-04-PLAN.md (foundation service unit tests)
+Phase: 2 of 6 (Menu Bar & State)
+Plan: 0 of TBD in current phase
+Status: Ready to execute
+Last activity: 2026-02-14 - Verified Phase 1 (Foundation) complete (4/4 must-haves)
 
-Progress: [██████████] 100%
+Progress: [██░░░░░░░░] 17%
 
 ## Performance Metrics
 

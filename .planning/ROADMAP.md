@@ -10,7 +10,7 @@ PingMonitor is a macOS menu bar network monitoring app rewritten from a monolith
 - Integer phases (1, 2, 3): Planned milestone work
 - Decimal phases (2.1, 2.2): Urgent insertions (marked with INSERTED)
 
-- [ ] **Phase 1: Foundation** - Async patterns and connection lifecycle management
+- [x] **Phase 1: Foundation** - Async patterns and connection lifecycle management
 - [ ] **Phase 2: Menu Bar & State** - Menu bar display, interaction, and state management
 - [ ] **Phase 3: Host Monitoring** - Multi-host support, ping methods, and configuration
 - [ ] **Phase 4: Display Modes** - Full view, compact view, and floating window
@@ -31,10 +31,10 @@ PingMonitor is a macOS menu bar network monitoring app rewritten from a monolith
 **Plans**: 4 plans
 
 Plans:
-- [ ] 01-01-PLAN.md — Swift package setup and core data models (PingResult, Host, PingError)
-- [ ] 01-02-PLAN.md — NWConnection async wrapper and PingService actor with timeout racing
-- [ ] 01-03-PLAN.md — HostHealthTracker, ConnectionSweeper, and PingScheduler services
-- [ ] 01-04-PLAN.md — Unit tests for timeout behavior and concurrent handling
+- [x] 01-01-PLAN.md — Swift package setup and core data models (PingResult, Host, PingError)
+- [x] 01-02-PLAN.md — NWConnection async wrapper and PingService actor with timeout racing
+- [x] 01-03-PLAN.md — HostHealthTracker, ConnectionSweeper, and PingScheduler services
+- [x] 01-04-PLAN.md — Unit tests for timeout behavior and concurrent handling
 
 ### Phase 2: Menu Bar & State
 **Goal**: Users see real-time ping status in the menu bar and can interact via left/right click.
@@ -115,7 +115,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Foundation | 0/4 | Planning complete | - |
+| 1. Foundation | 4/4 | Complete | 2026-02-14 |
 | 2. Menu Bar & State | 0/? | Not started | - |
 | 3. Host Monitoring | 0/? | Not started | - |
 | 4. Display Modes | 0/? | Not started | - |
