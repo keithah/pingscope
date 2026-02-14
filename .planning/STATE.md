@@ -2,7 +2,7 @@
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-02-13)
+See: `.planning/PROJECT.md` (updated 2026-02-13)
 
 **Core value:** Reliable, accurate ping monitoring that users can trust — no false timeouts, no stale connections, no crashes.
 **Current focus:** Phase 1 - Foundation
@@ -10,28 +10,28 @@ See: .planning/PROJECT.md (updated 2026-02-13)
 ## Current Position
 
 Phase: 1 of 6 (Foundation)
-Plan: 1 of 4 in current phase
+Plan: 2 of 4 in current phase
 Status: In progress
-Last activity: 2026-02-14 — Completed 01-01-PLAN.md (Swift package + models)
+Last activity: 2026-02-14 - Completed 01-02-PLAN.md (NWConnection async wrapper + PingService actor)
 
-Progress: [█░░░░░░░░░] 25%
+Progress: [██░░░░░░░░] 22%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 0
-- Average duration: - min
-- Total execution time: 0 hours
+- Total plans completed: 2
+- Average duration: 2 min
+- Total execution time: 0.07 hours
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
-| - | - | - | - |
+| 1. Foundation | 2 | 4 | 2 min |
 
 **Recent Trend:**
-- Last 5 plans: none
-- Trend: N/A
+- Last 5 plans: 01-01 (2 min), 01-02 (2 min)
+- Trend: Stable
 
 *Updated after each plan completion*
 
@@ -47,17 +47,20 @@ Recent decisions affecting current work:
 - (init): Defer widget to v2 to focus on core app stability
 - (01-01): Used Duration instead of TimeInterval for type-safe timing
 - (01-01): All models conform to Sendable for actor isolation
+- (01-02): Use fresh NWConnection instances per measurement for reliability
+- (01-02): Timeout racing uses withThrowingTaskGroup with immediate loser cancellation
+- (01-02): pingAll default concurrency limit remains 10
 
 ### Pending Todos
 
-None yet.
+None.
 
 ### Blockers/Concerns
 
-None yet.
+None.
 
 ## Session Continuity
 
-Last session: 2026-02-14
-Stopped at: Completed 01-01-PLAN.md (Swift package + core models)
+Last session: 2026-02-14T08:37:49Z
+Stopped at: Completed 01-02-PLAN.md
 Resume file: None
