@@ -5,23 +5,23 @@
 See: `.planning/PROJECT.md` (updated 2026-02-13)
 
 **Core value:** Reliable, accurate ping monitoring that users can trust — no false timeouts, no stale connections, no crashes.
-**Current focus:** Phase 3 - Host Monitoring
+**Current focus:** Phase 4 - Display Modes
 
 ## Current Position
 
-Phase: 3 of 6 (Host Monitoring)
-Plan: 9 of 9 in current phase
-Status: Phase complete
-Last activity: 2026-02-14 - Completed 03-09-PLAN.md
+Phase: 4 of 6 (Display Modes)
+Plan: 1 of 5 in current phase
+Status: In progress
+Last activity: 2026-02-14 - Completed 04-01-PLAN.md
 
-Progress: [██████████] 100%
+Progress: [████████░░] 82%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 17
+- Total plans completed: 18
 - Average duration: 2 min
-- Total execution time: 0.58 hours
+- Total execution time: 0.61 hours
 
 **By Phase:**
 
@@ -30,9 +30,10 @@ Progress: [██████████] 100%
 | 1. Foundation | 4 | 4 | 2 min |
 | 2. Menu Bar & State | 4 | 4 | 3 min |
 | 3. Host Monitoring | 9 | 9 | 2 min |
+| 4. Display Modes | 1 | 5 | 2 min |
 
 **Recent Trend:**
-- Last 5 plans: 03-05 (2 min), 03-06 (3 min), 03-07 (1 min), 03-09 (2 min), 03-08 (3 min)
+- Last 5 plans: 03-06 (3 min), 03-07 (1 min), 03-09 (2 min), 03-08 (3 min), 04-01 (2 min)
 - Trend: Stable
 
 *Updated after each plan completion*
@@ -89,6 +90,9 @@ Recent decisions affecting current work:
 - (03-08): Add deterministic PingScheduler cadence tests using injected ping and health test doubles
 - (03-09): Pass effective green/yellow thresholds into menu status evaluation on each update instead of static bounds
 - (03-09): Recompute menu status immediately when selected host changes so threshold boundary updates are instant
+- (04-01): Persist display state as one Codable payload split into shared/full/compact partitions
+- (04-01): Keep deterministic mode defaults with full (450x500) and compact (280x220) frame data
+- (04-01): Expose focused DisplayPreferencesStore APIs for shared and per-mode updates
 
 ### Pending Todos
 
@@ -100,6 +104,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-02-14T17:48:00Z
-Stopped at: Completed 03-09-PLAN.md
+Last session: 2026-02-14T18:37:03Z
+Stopped at: Completed 04-01-PLAN.md
 Resume file: None
