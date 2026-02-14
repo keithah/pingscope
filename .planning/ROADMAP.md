@@ -11,7 +11,7 @@ PingMonitor is a macOS menu bar network monitoring app rewritten from a monolith
 - Decimal phases (2.1, 2.2): Urgent insertions (marked with INSERTED)
 
 - [x] **Phase 1: Foundation** - Async patterns and connection lifecycle management
-- [ ] **Phase 2: Menu Bar & State** - Menu bar display, interaction, and state management
+- [x] **Phase 2: Menu Bar & State** - Menu bar display, interaction, and state management
 - [ ] **Phase 3: Host Monitoring** - Multi-host support, ping methods, and configuration
 - [ ] **Phase 4: Display Modes** - Full view, compact view, and floating window
 - [ ] **Phase 5: Visualization** - Latency graph, history table, and statistics
@@ -48,10 +48,10 @@ Plans:
 **Plans**: 4 plans
 
 Plans:
-- [ ] 02-01-PLAN.md — Menu bar state evaluator, smoothing, and view-model tests
-- [ ] 02-02-PLAN.md — Status item controller, click routing, context menu, and mode persistence
-- [ ] 02-03-PLAN.md — Popover view model and SwiftUI popover interface
-- [ ] 02-04-PLAN.md — App lifecycle wiring, integration smoke tests, and human interaction verification
+- [x] 02-01-PLAN.md — Menu bar state evaluator, smoothing, and view-model tests
+- [x] 02-02-PLAN.md — Status item controller, click routing, context menu, and mode persistence
+- [x] 02-03-PLAN.md — Popover view model and SwiftUI popover interface
+- [x] 02-04-PLAN.md — App lifecycle wiring, integration smoke tests, and human interaction verification
 
 ### Phase 3: Host Monitoring
 **Goal**: Users can monitor multiple hosts with configurable ping methods and settings.
@@ -119,7 +119,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Foundation | 4/4 | Complete | 2026-02-14 |
-| 2. Menu Bar & State | 0/? | Not started | - |
+| 2. Menu Bar & State | 4/4 | Complete | 2026-02-14 |
 | 3. Host Monitoring | 0/? | Not started | - |
 | 4. Display Modes | 0/? | Not started | - |
 | 5. Visualization | 0/? | Not started | - |
