@@ -42,7 +42,7 @@ final class MenuBarRuntime {
 
         selectedHostID = selectedHost?.id
         if let selectedHost {
-            menuBarViewModel.setSelectedHost(selectedHost)
+            menuBarViewModel.setSelectedHost(selectedHost, globalDefaults: globalDefaults)
         }
 
         return selectedHost

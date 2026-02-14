@@ -15,6 +15,8 @@ final class MenuBarViewModel: ObservableObject {
     private var hasReceivedAnyResult = false
     private var isMonitoringActive = true
     private var smoothedLatencyMS: Double?
+    private var activeGreenThresholdMS: Double = GlobalDefaults.default.greenThresholdMS
+    private var activeYellowThresholdMS: Double = GlobalDefaults.default.yellowThresholdMS
 
     init(
         evaluator: MenuBarStatusEvaluator = MenuBarStatusEvaluator(),
@@ -41,8 +43,11 @@ final class MenuBarViewModel: ObservableObject {
         updateState(displayLatencyMS: smoothedLatencyMS, rawLatencyMS: menuBarState.lastRawLatencyMS)
     }
 
-    func setSelectedHost(_ host: Host) {
+    func setSelectedHost(_ host: Host, globalDefaults: GlobalDefaults) {
         selectedHostSummary = "\(host.name) (\(host.address))"
+        activeGreenThresholdMS = host.effectiveGreenThresholdMS(globalDefaults)
+        activeYellowThresholdMS = host.effectiveYellowThresholdMS(globalDefaults)
+        updateState(displayLatencyMS: smoothedLatencyMS, rawLatencyMS: menuBarState.lastRawLatencyMS)
     }
 
     func ingest(result: PingResult) {
@@ -63,6 +68,8 @@ final class MenuBarViewModel: ObservableObject {
     private func updateState(displayLatencyMS: Double?, rawLatencyMS: Double?) {
         let status = evaluator.evaluate(
             latencyMS: displayLatencyMS,
+            greenThresholdMS: activeGreenThresholdMS,
+            yellowThresholdMS: activeYellowThresholdMS,
             consecutiveFailures: consecutiveFailures,
             hasReceivedAnyResult: hasReceivedAnyResult,
             isMonitoringActive: isMonitoringActive
