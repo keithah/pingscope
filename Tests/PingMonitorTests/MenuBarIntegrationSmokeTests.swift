@@ -44,8 +44,10 @@ final class MenuBarIntegrationSmokeTests: XCTestCase {
         trigger(menuItem(in: menu, id: ContextMenuItemID.compactMode))
         trigger(menuItem(in: menu, id: ContextMenuItemID.stayOnTop))
 
+        XCTAssertEqual(runtime.displayMode, .compact)
         XCTAssertTrue(runtime.menuBarViewModel.isCompactModeEnabled)
         XCTAssertTrue(runtime.menuBarViewModel.isStayOnTopEnabled)
+        XCTAssertEqual(preferredShell(for: runtime), "floating")
         XCTAssertTrue(store.isCompactModeEnabled)
         XCTAssertTrue(store.isStayOnTopEnabled)
 
@@ -67,6 +69,47 @@ final class MenuBarIntegrationSmokeTests: XCTestCase {
         XCTAssertEqual(popoverViewModel.snapshot.hostSummary, "Cloudflare (1.1.1.1)")
     }
 
+    func testDisplayModeTogglePreservesDisplaySelectionContext() {
+        let suiteName = "MenuBarIntegrationSmokeTests-DisplaySelection-\(UUID().uuidString)"
+        guard let userDefaults = UserDefaults(suiteName: suiteName) else {
+            XCTFail("Unable to create isolated UserDefaults suite")
+            return
+        }
+
+        userDefaults.removePersistentDomain(forName: suiteName)
+        defer {
+            userDefaults.removePersistentDomain(forName: suiteName)
+        }
+
+        let runtime = MenuBarRuntime(
+            modePreferenceStore: ModePreferenceStore(
+                userDefaults: userDefaults,
+                keyPrefix: "integration.mode"
+            )
+        )
+        let displayViewModel = DisplayViewModel(
+            preferencesStore: DisplayPreferencesStore(
+                userDefaults: userDefaults,
+                keyPrefix: "integration.display"
+            )
+        )
+        let hosts = [Host.googleDNS, Host.cloudflareDNS]
+
+        _ = runtime.syncSelection(with: hosts, preferredHostID: hosts[1].id)
+        displayViewModel.setHosts(hosts)
+        displayViewModel.selectHost(id: hosts[1].id)
+        displayViewModel.setTimeRange(.oneHour)
+
+        runtime.toggleCompactMode()
+        displayViewModel.setDisplayMode(runtime.displayMode)
+        runtime.toggleCompactMode()
+        displayViewModel.setDisplayMode(runtime.displayMode)
+
+        XCTAssertEqual(displayViewModel.selectedHostID, hosts[1].id)
+        XCTAssertEqual(displayViewModel.selectedTimeRange, .oneHour)
+        XCTAssertEqual(runtime.selectedHostID, hosts[1].id)
+    }
+
     private func menuItem(in menu: NSMenu, id: NSUserInterfaceItemIdentifier) -> NSMenuItem? {
         menu.items.first { $0.identifier == id }
     }
@@ -83,5 +126,9 @@ final class MenuBarIntegrationSmokeTests: XCTestCase {
         }
 
         _ = target.perform(action, with: item)
+    }
+
+    private func preferredShell(for runtime: MenuBarRuntime) -> String {
+        runtime.menuBarViewModel.isStayOnTopEnabled ? "floating" : "popover"
     }
 }
