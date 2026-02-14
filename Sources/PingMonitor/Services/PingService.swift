@@ -6,12 +6,19 @@ actor PingService {
     private let defaultTimeout: Duration = .seconds(3)
 
     func ping(host: Host) async -> PingResult {
-        await ping(
-            address: host.address,
-            port: host.port,
-            pingMethod: host.pingMethod,
-            timeout: host.timeoutOverride
-        )
+        let effectiveTimeout = host.timeoutOverride ?? defaultTimeout
+
+        switch host.pingMethod {
+        case .tcp, .udp:
+            return await ping(
+                address: host.address,
+                port: host.port,
+                pingMethod: host.pingMethod,
+                timeout: effectiveTimeout
+            )
+        case .icmpSimulated:
+            return await pingICMPSimulated(host: host, timeout: effectiveTimeout)
+        }
     }
 
     func ping(
@@ -21,13 +28,60 @@ actor PingService {
         timeout: Duration? = nil
     ) async -> PingResult {
         let effectiveTimeout = timeout ?? defaultTimeout
-        let parameters: NWParameters
+
         switch pingMethod {
+        case .tcp:
+            return await ping(
+                address: address,
+                port: port,
+                parameters: .tcp,
+                timeout: effectiveTimeout
+            )
         case .udp:
-            parameters = .udp
-        case .tcp, .icmpSimulated:
-            parameters = .tcp
+            return await ping(
+                address: address,
+                port: port,
+                parameters: .udp,
+                timeout: effectiveTimeout
+            )
+        case .icmpSimulated:
+            return .failure(
+                host: address,
+                port: port,
+                error: .connectionFailed("Use ping(host:) for icmpSimulated probes")
+            )
         }
+    }
+
+    private func pingICMPSimulated(host: Host, timeout: Duration) async -> PingResult {
+        let probePorts: [UInt16] = [53, 80, 443, 22, 25]
+        var lastFailure: PingResult?
+
+        for probePort in probePorts {
+            let result = await ping(
+                address: host.address,
+                port: probePort,
+                parameters: .tcp,
+                timeout: timeout
+            )
+
+            if result.isSuccess {
+                return result
+            }
+
+            lastFailure = result
+        }
+
+        return lastFailure ?? .failure(host: host.address, port: host.port, error: .timeout)
+    }
+
+    private func ping(
+        address: String,
+        port: UInt16,
+        parameters: NWParameters,
+        timeout: Duration
+    ) async -> PingResult {
+        let effectiveTimeout = timeout
 
         do {
             let latency = try await withThrowingTaskGroup(of: Duration.self) { group in
