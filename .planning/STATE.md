@@ -10,16 +10,16 @@ See: `.planning/PROJECT.md` (updated 2026-02-13)
 ## Current Position
 
 Phase: 3 of 6 (Host Monitoring)
-Plan: 8 of 9 in current phase
-Status: In progress
-Last activity: 2026-02-14 - Completed 03-09-PLAN.md
+Plan: 9 of 9 in current phase
+Status: Phase complete
+Last activity: 2026-02-14 - Completed 03-08-PLAN.md
 
-Progress: [█████████░] 94%
+Progress: [██████████] 100%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 16
+- Total plans completed: 17
 - Average duration: 2 min
 - Total execution time: 0.58 hours
 
@@ -29,10 +29,10 @@ Progress: [█████████░] 94%
 |-------|-------|-------|----------|
 | 1. Foundation | 4 | 4 | 2 min |
 | 2. Menu Bar & State | 4 | 4 | 3 min |
-| 3. Host Monitoring | 8 | 9 | 2 min |
+| 3. Host Monitoring | 9 | 9 | 2 min |
 
 **Recent Trend:**
-- Last 5 plans: 03-04 (2 min), 03-05 (2 min), 03-06 (3 min), 03-07 (1 min), 03-09 (2 min)
+- Last 5 plans: 03-05 (2 min), 03-06 (3 min), 03-07 (1 min), 03-09 (2 min), 03-08 (3 min)
 - Trend: Stable
 
 *Updated after each plan completion*
@@ -84,6 +84,9 @@ Recent decisions affecting current work:
 - (03-07): Embed host list management directly in the popover for one-click host operations
 - (03-07): Drive scheduler host targets from HostStore so add/remove changes apply immediately
 - (03-07): Surface gateway churn via a brief runtime network change indicator
+- (03-08): Schedule pings per host using Host.effectiveInterval with a runtime global fallback instead of one shared loop interval
+- (03-08): Keep stagger behavior for concurrently due hosts while allowing shorter-interval hosts to run more frequently
+- (03-08): Add deterministic PingScheduler cadence tests using injected ping and health test doubles
 - (03-09): Pass effective green/yellow thresholds into menu status evaluation on each update instead of static bounds
 - (03-09): Recompute menu status immediately when selected host changes so threshold boundary updates are instant
 
@@ -97,6 +100,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-02-14T17:44:33Z
-Stopped at: Completed 03-09-PLAN.md
+Last session: 2026-02-14T17:45:18Z
+Stopped at: Completed 03-08-PLAN.md
 Resume file: None
