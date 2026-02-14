@@ -10,18 +10,18 @@ See: `.planning/PROJECT.md` (updated 2026-02-13)
 ## Current Position
 
 Phase: 4 of 6 (Display Modes)
-Plan: 1 of 5 in current phase
+Plan: 3 of 5 in current phase
 Status: In progress
-Last activity: 2026-02-14 - Completed 04-01-PLAN.md
+Last activity: 2026-02-14 - Completed 04-03-PLAN.md
 
-Progress: [████████░░] 82%
+Progress: [█████████░] 86%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 18
+- Total plans completed: 19
 - Average duration: 2 min
-- Total execution time: 0.61 hours
+- Total execution time: 0.69 hours
 
 **By Phase:**
 
@@ -30,10 +30,10 @@ Progress: [████████░░] 82%
 | 1. Foundation | 4 | 4 | 2 min |
 | 2. Menu Bar & State | 4 | 4 | 3 min |
 | 3. Host Monitoring | 9 | 9 | 2 min |
-| 4. Display Modes | 1 | 5 | 2 min |
+| 4. Display Modes | 2 | 5 | 3 min |
 
 **Recent Trend:**
-- Last 5 plans: 03-06 (3 min), 03-07 (1 min), 03-09 (2 min), 03-08 (3 min), 04-01 (2 min)
+- Last 5 plans: 03-07 (1 min), 03-09 (2 min), 03-08 (3 min), 04-01 (2 min), 04-03 (5 min)
 - Trend: Stable
 
 *Updated after each plan completion*
@@ -93,6 +93,9 @@ Recent decisions affecting current work:
 - (04-01): Persist display state as one Codable payload split into shared/full/compact partitions
 - (04-01): Keep deterministic mode defaults with full (450x500) and compact (280x220) frame data
 - (04-01): Expose focused DisplayPreferencesStore APIs for shared and per-mode updates
+- (04-03): Re-anchor floating shell from status-item screen rect on each open/mode handoff and clamp to active visibleFrame
+- (04-03): Enforce current-Space floating behavior with collectionBehavior [.transient, .moveToActiveSpace] and no all-spaces flags
+- (04-03): Keep floating movement handle-only by leaving isMovableByWindowBackground disabled
 
 ### Pending Todos
 
@@ -104,6 +107,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-02-14T18:37:03Z
-Stopped at: Completed 04-01-PLAN.md
+Last session: 2026-02-14T18:45:13Z
+Stopped at: Completed 04-03-PLAN.md
 Resume file: None
