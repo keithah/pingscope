@@ -38,6 +38,7 @@ final class StatusPopoverViewModel: ObservableObject {
     }
 
     @Published private(set) var snapshot: Snapshot
+    @Published private(set) var networkChangeIndicator: Bool = false
     let sections: [Section] = [.status, .quickActions]
 
     let quickActions: [QuickAction] = [
@@ -99,6 +100,10 @@ final class StatusPopoverViewModel: ObservableObject {
         case .settings:
             onOpenSettings()
         }
+    }
+
+    func setNetworkChangeIndicator(_ isVisible: Bool) {
+        networkChangeIndicator = isVisible
     }
 
     static func makeSnapshot(status: MenuBarStatus, latencyText: String?, hostSummary: String?) -> Snapshot {

@@ -2,75 +2,6 @@ import AppKit
 import SwiftUI
 
 @MainActor
-final class MenuBarRuntime {
-    let menuBarViewModel: MenuBarViewModel
-
-    private let modePreferenceStore: ModePreferenceStore
-    private(set) var availableHosts: [Host]
-    private(set) var selectedHostIndex: Int
-
-    init(
-        hosts: [Host] = [.googleDNS, .cloudflareDNS],
-        selectedHostIndex: Int = 0,
-        modePreferenceStore: ModePreferenceStore = ModePreferenceStore()
-    ) {
-        self.modePreferenceStore = modePreferenceStore
-        availableHosts = hosts
-        self.selectedHostIndex = max(0, min(selectedHostIndex, max(0, hosts.count - 1)))
-
-        menuBarViewModel = MenuBarViewModel(
-            isCompactModeEnabled: modePreferenceStore.isCompactModeEnabled,
-            isStayOnTopEnabled: modePreferenceStore.isStayOnTopEnabled
-        )
-
-        if let selectedHost {
-            menuBarViewModel.setSelectedHost(selectedHost)
-        }
-    }
-
-    var selectedHost: Host? {
-        guard availableHosts.indices.contains(selectedHostIndex) else {
-            return nil
-        }
-
-        return availableHosts[selectedHostIndex]
-    }
-
-    var contextMenuState: ContextMenuState {
-        ContextMenuState(
-            currentHostSummary: menuBarViewModel.selectedHostSummary,
-            isCompactModeEnabled: menuBarViewModel.isCompactModeEnabled,
-            isStayOnTopEnabled: menuBarViewModel.isStayOnTopEnabled
-        )
-    }
-
-    func ingestSchedulerResult(_ result: PingResult, isHostUp _: Bool) {
-        menuBarViewModel.ingest(result: result)
-    }
-
-    func switchHost() {
-        guard !availableHosts.isEmpty else {
-            return
-        }
-
-        selectedHostIndex = (selectedHostIndex + 1) % availableHosts.count
-        if let selectedHost {
-            menuBarViewModel.setSelectedHost(selectedHost)
-        }
-    }
-
-    func toggleCompactMode() {
-        menuBarViewModel.isCompactModeEnabled.toggle()
-        modePreferenceStore.isCompactModeEnabled = menuBarViewModel.isCompactModeEnabled
-    }
-
-    func toggleStayOnTop() {
-        menuBarViewModel.isStayOnTopEnabled.toggle()
-        modePreferenceStore.isStayOnTopEnabled = menuBarViewModel.isStayOnTopEnabled
-    }
-}
-
-@MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private let runtime = MenuBarRuntime()
     private let contextMenuFactory = ContextMenuFactory()
@@ -81,14 +12,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private var statusItemController: StatusItemController?
     private var statusPopoverViewModel: StatusPopoverViewModel?
+    private var hostListViewModel: HostListViewModel?
     private let popover = NSPopover()
     private var settingsWindowController: NSWindowController?
+    private var gatewayMonitorTask: Task<Void, Never>?
+    private var networkIndicatorTask: Task<Void, Never>?
+    private var monitoredHosts: [Host] = []
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
 
         popover.behavior = .applicationDefined
-        popover.contentSize = NSSize(width: 300, height: 220)
+        popover.contentSize = NSSize(width: 340, height: 440)
+
+        hostListViewModel = makeHostListViewModel()
         statusPopoverViewModel = StatusPopoverViewModel(
             menuBarViewModel: runtime.menuBarViewModel,
             onRefresh: { [weak self] in
@@ -107,7 +44,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         if let statusPopoverViewModel {
             popover.contentViewController = NSHostingController(
-                rootView: StatusPopoverView(viewModel: statusPopoverViewModel)
+                rootView: StatusPopoverView(
+                    viewModel: statusPopoverViewModel,
+                    hostListViewModel: hostListViewModel
+                )
             )
         }
 
@@ -122,11 +62,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
 
         startScheduler()
+        startGatewayMonitoring()
+
+        Task {
+            await self.refreshHostsAndScheduler()
+        }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        gatewayMonitorTask?.cancel()
+        networkIndicatorTask?.cancel()
+
         Task {
             await scheduler.stop()
+            await runtime.gatewayDetector.stopMonitoring()
         }
     }
 
@@ -136,12 +85,76 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
             await scheduler.setResultHandler { [weak self] result, isHostUp in
                 Task { @MainActor [weak self] in
-                    self?.runtime.ingestSchedulerResult(result, isHostUp: isHostUp)
+                    guard let self else {
+                        return
+                    }
+
+                    let matchedHostID = self.hostID(for: result)
+                    self.runtime.ingestSchedulerResult(result, isHostUp: isHostUp, matchedHostID: matchedHostID)
+
+                    guard let matchedHostID else {
+                        return
+                    }
+
+                    let latencyMS = result.latency.map(Self.durationToMilliseconds)
+                    self.hostListViewModel?.updateLatency(for: matchedHostID, latencyMS: latencyMS)
                 }
             }
 
-            if let selectedHost = runtime.selectedHost {
-                await scheduler.start(hosts: [selectedHost], interval: .seconds(30))
+            await scheduler.start(hosts: [], interval: runtime.globalDefaults.interval)
+        }
+    }
+
+    private func startGatewayMonitoring() {
+        gatewayMonitorTask?.cancel()
+        gatewayMonitorTask = Task { [weak self] in
+            guard let self else {
+                return
+            }
+
+            let stream = await runtime.gatewayDetector.startMonitoring()
+            for await gatewayInfo in stream {
+                await self.handleGatewayUpdate(gatewayInfo)
+            }
+        }
+    }
+
+    private func handleGatewayUpdate(_ gatewayInfo: GatewayInfo) async {
+        let previousGateway = await runtime.hostStore.gatewayHost
+
+        if gatewayInfo.isAvailable {
+            await runtime.hostStore.setGatewayHost(gatewayInfo)
+        } else {
+            await runtime.hostStore.clearGatewayHost()
+        }
+
+        let gatewayChanged = previousGateway?.address != (gatewayInfo.isAvailable ? gatewayInfo.ipAddress : nil)
+            || previousGateway?.name != (gatewayInfo.isAvailable ? gatewayInfo.displayName : nil)
+
+        if gatewayChanged {
+            showNetworkChangeIndicator()
+        }
+
+        await refreshHostsAndScheduler()
+    }
+
+    private func showNetworkChangeIndicator() {
+        networkIndicatorTask?.cancel()
+        runtime.setNetworkChangeIndicator(true)
+        statusPopoverViewModel?.setNetworkChangeIndicator(true)
+
+        networkIndicatorTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(2))
+            guard !Task.isCancelled else {
+                return
+            }
+
+            await MainActor.run {
+                guard let self else {
+                    return
+                }
+                self.runtime.setNetworkChangeIndicator(false)
+                self.statusPopoverViewModel?.setNetworkChangeIndicator(false)
             }
         }
     }
@@ -185,15 +198,94 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func switchHostAndRefreshScheduler() {
-        runtime.switchHost()
-
-        guard let selectedHost = runtime.selectedHost else {
-            return
-        }
-
         Task {
-            await scheduler.updateHosts([selectedHost])
+            let hosts = await runtime.hostStore.allHosts
+            _ = runtime.switchHost(in: hosts)
+            hostListViewModel?.activeHostID = runtime.selectedHostID
+            await scheduler.updateHosts(hosts)
         }
+    }
+
+    private func makeHostListViewModel() -> HostListViewModel {
+        HostListViewModel(
+            onSelectHost: { [weak self] host in
+                guard let self else {
+                    return
+                }
+
+                Task {
+                    await self.selectHostAndRefresh(host)
+                }
+            },
+            onAddHost: { [weak self] host in
+                guard let self else {
+                    return
+                }
+
+                Task {
+                    await self.runtime.hostStore.add(host)
+                    await self.refreshHostsAndScheduler(preferredHostID: host.id)
+                }
+            },
+            onUpdateHost: { [weak self] host in
+                guard let self else {
+                    return
+                }
+
+                Task {
+                    await self.runtime.hostStore.update(host)
+                    await self.refreshHostsAndScheduler(preferredHostID: host.id)
+                }
+            },
+            onDeleteHost: { [weak self] host in
+                guard let self else {
+                    return
+                }
+
+                Task {
+                    await self.runtime.hostStore.remove(host)
+                    await self.refreshHostsAndScheduler()
+                }
+            }
+        )
+    }
+
+    private func selectHostAndRefresh(_ host: Host) async {
+        let hosts = await runtime.hostStore.allHosts
+        _ = runtime.syncSelection(with: hosts, preferredHostID: host.id)
+        hostListViewModel?.activeHostID = runtime.selectedHostID
+        await scheduler.updateHosts(hosts)
+    }
+
+    private func refreshHostsAndScheduler(preferredHostID: UUID? = nil) async {
+        let hosts = await runtime.hostStore.allHosts
+        monitoredHosts = hosts
+
+        let selectedHost = runtime.syncSelection(with: hosts, preferredHostID: preferredHostID)
+        hostListViewModel?.hosts = hosts
+        hostListViewModel?.activeHostID = selectedHost?.id
+
+        let currentLatencyHostIDs = Set(hostListViewModel?.latencies.keys.map { $0 } ?? [])
+        let staleHostIDs = currentLatencyHostIDs.subtracting(Set(hosts.map(\.id)))
+        for staleHostID in staleHostIDs {
+            hostListViewModel?.latencies.removeValue(forKey: staleHostID)
+        }
+
+        await scheduler.updateHosts(hosts)
+    }
+
+    private func hostID(for result: PingResult) -> UUID? {
+        monitoredHosts.first {
+            $0.address.caseInsensitiveCompare(result.host) == .orderedSame &&
+                $0.port == result.port
+        }?.id
+    }
+
+    private static func durationToMilliseconds(_ duration: Duration) -> Double {
+        let components = duration.components
+        let secondsMS = Double(components.seconds) * 1_000
+        let attosecondsMS = Double(components.attoseconds) / 1_000_000_000_000_000
+        return secondsMS + attosecondsMS
     }
 
     private func openSettings() {
