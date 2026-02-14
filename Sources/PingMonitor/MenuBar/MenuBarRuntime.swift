@@ -36,6 +36,10 @@ final class MenuBarRuntime {
         )
     }
 
+    var displayMode: DisplayMode {
+        menuBarViewModel.isCompactModeEnabled ? .compact : .full
+    }
+
     func syncSelection(with hosts: [Host], preferredHostID: UUID? = nil) -> Host? {
         let targetHostID = preferredHostID ?? selectedHostID
         let selectedHost = hosts.first { $0.id == targetHostID } ?? hosts.first
@@ -76,12 +80,20 @@ final class MenuBarRuntime {
     }
 
     func toggleCompactMode() {
-        menuBarViewModel.isCompactModeEnabled.toggle()
-        modePreferenceStore.isCompactModeEnabled = menuBarViewModel.isCompactModeEnabled
+        setCompactModeEnabled(!menuBarViewModel.isCompactModeEnabled)
     }
 
     func toggleStayOnTop() {
-        menuBarViewModel.isStayOnTopEnabled.toggle()
-        modePreferenceStore.isStayOnTopEnabled = menuBarViewModel.isStayOnTopEnabled
+        setStayOnTopEnabled(!menuBarViewModel.isStayOnTopEnabled)
+    }
+
+    func setCompactModeEnabled(_ isEnabled: Bool) {
+        menuBarViewModel.isCompactModeEnabled = isEnabled
+        modePreferenceStore.isCompactModeEnabled = isEnabled
+    }
+
+    func setStayOnTopEnabled(_ isEnabled: Bool) {
+        menuBarViewModel.isStayOnTopEnabled = isEnabled
+        modePreferenceStore.isStayOnTopEnabled = isEnabled
     }
 }

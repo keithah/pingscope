@@ -1,55 +1,42 @@
 import AppKit
+import Combine
 import SwiftUI
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    private let runtime = MenuBarRuntime()
+    private let modePreferenceStore = ModePreferenceStore()
+    private let displayPreferencesStore = DisplayPreferencesStore()
+    private lazy var runtime = MenuBarRuntime(modePreferenceStore: modePreferenceStore)
     private let contextMenuFactory = ContextMenuFactory()
+    private let popover = NSPopover()
+    private lazy var displayViewModel = DisplayViewModel(
+        preferencesStore: displayPreferencesStore,
+        initialMode: modePreferenceStore.displayMode
+    )
+    private lazy var displayCoordinator = DisplayModeCoordinator(
+        popover: popover,
+        displayPreferencesStore: displayPreferencesStore
+    )
     private let scheduler = PingScheduler(
         pingService: PingService(),
         healthTracker: HostHealthTracker()
     )
 
     private var statusItemController: StatusItemController?
-    private var statusPopoverViewModel: StatusPopoverViewModel?
     private var hostListViewModel: HostListViewModel?
-    private let popover = NSPopover()
     private var settingsWindowController: NSWindowController?
     private var gatewayMonitorTask: Task<Void, Never>?
     private var networkIndicatorTask: Task<Void, Never>?
     private var monitoredHosts: [Host] = []
+    private var cancellables: Set<AnyCancellable> = []
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
 
         popover.behavior = .applicationDefined
-        popover.contentSize = NSSize(width: 340, height: 440)
 
         hostListViewModel = makeHostListViewModel()
-        statusPopoverViewModel = StatusPopoverViewModel(
-            menuBarViewModel: runtime.menuBarViewModel,
-            onRefresh: { [weak self] in
-                guard let self else { return }
-                Task {
-                    await self.scheduler.refresh(intervalFallback: self.runtime.globalDefaults.interval)
-                }
-            },
-            onSwitchHost: { [weak self] in
-                self?.switchHostAndRefreshScheduler()
-            },
-            onOpenSettings: { [weak self] in
-                self?.openSettings()
-            }
-        )
-
-        if let statusPopoverViewModel {
-            popover.contentViewController = NSHostingController(
-                rootView: StatusPopoverView(
-                    viewModel: statusPopoverViewModel,
-                    hostListViewModel: hostListViewModel
-                )
-            )
-        }
+        bindDisplaySelection()
 
         statusItemController = StatusItemController(
             viewModel: runtime.menuBarViewModel,
@@ -91,6 +78,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
                     let matchedHostID = self.hostID(for: result)
                     self.runtime.ingestSchedulerResult(result, isHostUp: isHostUp, matchedHostID: matchedHostID)
+                    if let matchedHostID {
+                        self.displayViewModel.ingest(result, for: matchedHostID)
+                    }
 
                     guard let matchedHostID else {
                         return
@@ -141,7 +131,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func showNetworkChangeIndicator() {
         networkIndicatorTask?.cancel()
         runtime.setNetworkChangeIndicator(true)
-        statusPopoverViewModel?.setNetworkChangeIndicator(true)
 
         networkIndicatorTask = Task { [weak self] in
             try? await Task.sleep(for: .seconds(2))
@@ -154,7 +143,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     return
                 }
                 self.runtime.setNetworkChangeIndicator(false)
-                self.statusPopoverViewModel?.setNetworkChangeIndicator(false)
             }
         }
     }
@@ -164,11 +152,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
-        if popover.isShown {
-            popover.performClose(nil)
+        if isDisplayPresented {
+            displayCoordinator.closeAll()
         } else {
-            popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
-            NSApp.activate(ignoringOtherApps: true)
+            presentDisplay(from: button)
         }
     }
 
@@ -180,10 +167,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     self?.switchHostAndRefreshScheduler()
                 },
                 onToggleCompactMode: { [weak self] in
-                    self?.runtime.toggleCompactMode()
+                    guard let self else {
+                        return
+                    }
+
+                    self.setCompactModeEnabled(!self.runtime.menuBarViewModel.isCompactModeEnabled)
                 },
                 onToggleStayOnTop: { [weak self] in
-                    self?.runtime.toggleStayOnTop()
+                    guard let self else {
+                        return
+                    }
+
+                    self.setStayOnTopEnabled(!self.runtime.menuBarViewModel.isStayOnTopEnabled)
                 },
                 onOpenSettings: { [weak self] in
                     self?.openSettings()
@@ -202,6 +197,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let hosts = await runtime.hostStore.allHosts
             _ = runtime.switchHost(in: hosts)
             hostListViewModel?.activeHostID = runtime.selectedHostID
+            displayViewModel.selectHost(id: runtime.selectedHostID)
             await scheduler.updateHosts(hosts, intervalFallback: runtime.globalDefaults.interval)
         }
     }
@@ -254,6 +250,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let hosts = await runtime.hostStore.allHosts
         _ = runtime.syncSelection(with: hosts, preferredHostID: host.id)
         hostListViewModel?.activeHostID = runtime.selectedHostID
+        displayViewModel.selectHost(id: runtime.selectedHostID)
         await scheduler.updateHosts(hosts, intervalFallback: runtime.globalDefaults.interval)
     }
 
@@ -264,6 +261,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let selectedHost = runtime.syncSelection(with: hosts, preferredHostID: preferredHostID)
         hostListViewModel?.hosts = hosts
         hostListViewModel?.activeHostID = selectedHost?.id
+        displayViewModel.setHosts(hosts)
+        displayViewModel.selectHost(id: selectedHost?.id)
 
         let currentLatencyHostIDs = Set(hostListViewModel?.latencies.keys.map { $0 } ?? [])
         let staleHostIDs = currentLatencyHostIDs.subtracting(Set(hosts.map(\.id)))
@@ -311,5 +310,81 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc
     private func quitApp() {
         NSApp.terminate(nil)
+    }
+
+    func setCompactModeEnabled(_ isEnabled: Bool) {
+        guard runtime.menuBarViewModel.isCompactModeEnabled != isEnabled else {
+            return
+        }
+
+        runtime.setCompactModeEnabled(isEnabled)
+        displayViewModel.setDisplayMode(runtime.displayMode)
+        refreshPresentedDisplayIfNeeded()
+    }
+
+    func setStayOnTopEnabled(_ isEnabled: Bool) {
+        guard runtime.menuBarViewModel.isStayOnTopEnabled != isEnabled else {
+            return
+        }
+
+        runtime.setStayOnTopEnabled(isEnabled)
+        refreshPresentedDisplayIfNeeded()
+    }
+
+    private var isDisplayPresented: Bool {
+        popover.isShown || (displayCoordinator.floatingWindow?.isVisible ?? false)
+    }
+
+    private func refreshPresentedDisplayIfNeeded() {
+        guard let button = statusItemController?.button, isDisplayPresented else {
+            return
+        }
+
+        presentDisplay(from: button)
+    }
+
+    private func presentDisplay(from button: NSStatusBarButton) {
+        displayViewModel.setDisplayMode(runtime.displayMode)
+        let frameData = displayPreferencesStore.modeState(for: runtime.displayMode).frameData
+        popover.contentSize = NSSize(width: frameData.width, height: frameData.height)
+        let rootView = DisplayRootView(
+            viewModel: displayViewModel,
+            mode: runtime.displayMode,
+            showsFloatingChrome: runtime.menuBarViewModel.isStayOnTopEnabled
+        )
+
+        let contentViewController = NSHostingController(rootView: rootView)
+        displayCoordinator.open(
+            from: button,
+            mode: runtime.displayMode,
+            isStayOnTopEnabled: runtime.menuBarViewModel.isStayOnTopEnabled,
+            contentViewController: contentViewController
+        )
+    }
+
+    private func bindDisplaySelection() {
+        displayViewModel.$selectedHostID
+            .dropFirst()
+            .sink { [weak self] selectedHostID in
+                guard let self else {
+                    return
+                }
+
+                Task {
+                    await self.syncRuntimeSelection(with: selectedHostID)
+                }
+            }
+            .store(in: &cancellables)
+    }
+
+    private func syncRuntimeSelection(with selectedHostID: UUID?) async {
+        guard runtime.selectedHostID != selectedHostID else {
+            return
+        }
+
+        let hosts = await runtime.hostStore.allHosts
+        _ = runtime.syncSelection(with: hosts, preferredHostID: selectedHostID)
+        hostListViewModel?.activeHostID = runtime.selectedHostID
+        await scheduler.updateHosts(hosts, intervalFallback: runtime.globalDefaults.interval)
     }
 }
