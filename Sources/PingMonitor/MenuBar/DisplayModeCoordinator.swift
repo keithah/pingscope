@@ -145,7 +145,12 @@ final class DisplayModeCoordinator: NSObject, NSWindowDelegate {
             return
         }
 
-        persistWindowFrame(window.frame, for: lastPresentedMode)
+        // Only persist when this window is actually being dismissed from a visible state.
+        // Otherwise, a hidden window with an old frame could overwrite the most recent
+        // user-resized frame from the currently active shell.
+        if window.isVisible {
+            persistWindowFrame(window.frame, for: lastPresentedMode)
+        }
         window.orderOut(nil)
     }
 
@@ -154,7 +159,9 @@ final class DisplayModeCoordinator: NSObject, NSWindowDelegate {
             return
         }
 
-        persistWindowFrame(window.frame, for: lastPresentedMode)
+        if window.isVisible {
+            persistWindowFrame(window.frame, for: lastPresentedMode)
+        }
         window.orderOut(nil)
     }
 
