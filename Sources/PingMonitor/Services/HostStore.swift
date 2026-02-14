@@ -9,15 +9,10 @@ actor HostStore {
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
-
-        let persistedHosts = Self.loadHosts(from: defaults, key: key)
-        if persistedHosts.isEmpty {
-            self.hosts = Host.defaults
-        } else {
-            self.hosts = Self.mergeDefaults(into: persistedHosts)
-        }
-
+        self.hosts = Self.loadHosts(from: defaults, key: key)
         self.gatewayHost = nil
+
+        ensureDefaultsPresent()
     }
 
     private func loadHosts() -> [Host] {
@@ -45,6 +40,26 @@ actor HostStore {
         }
     }
 
+    func ensureDefaultsPresent() {
+        if hosts.isEmpty {
+            hosts = Host.defaults
+            return
+        }
+
+        var merged = hosts
+        let missingDefaults = Host.defaults.filter { defaultHost in
+            !merged.contains { $0.isDefault && $0.name == defaultHost.name }
+        }
+
+        if !missingDefaults.isEmpty {
+            merged.insert(contentsOf: missingDefaults, at: 0)
+        }
+
+        let defaultHosts = merged.filter(\.isDefault)
+        let customHosts = merged.filter { !$0.isDefault }
+        hosts = defaultHosts + customHosts
+    }
+
     private static func mergeDefaults(into loadedHosts: [Host]) -> [Host] {
         var merged = Host.defaults
 
@@ -59,16 +74,26 @@ actor HostStore {
     }
 
     func add(_ host: Host) {
+        guard isValidHost(host) else {
+            return
+        }
+
         hosts.append(host)
+        ensureDefaultsPresent()
         persistHosts()
     }
 
     func update(_ host: Host) {
+        guard isValidHost(host) else {
+            return
+        }
+
         guard let index = hosts.firstIndex(where: { $0.id == host.id }) else {
             return
         }
 
         hosts[index] = host
+        ensureDefaultsPresent()
         persistHosts()
     }
 
@@ -78,6 +103,7 @@ actor HostStore {
         }
 
         hosts.removeAll { $0.id == host.id }
+        ensureDefaultsPresent()
         persistHosts()
     }
 
@@ -91,7 +117,21 @@ actor HostStore {
             hosts.remove(at: index)
         }
 
+        ensureDefaultsPresent()
         persistHosts()
+    }
+
+    func isValidHost(_ host: Host) -> Bool {
+        !host.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+            !host.address.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+            host.port > 0
+    }
+
+    func hostExists(address: String, port: UInt16) -> Bool {
+        hosts.contains {
+            $0.address.caseInsensitiveCompare(address) == .orderedSame &&
+                $0.port == port
+        }
     }
 
     func setGatewayHost(_ info: GatewayInfo) {
@@ -112,7 +152,7 @@ actor HostStore {
         gatewayHost = nil
     }
 
-    var allHosts: [Host] {
+    func sortedHosts() -> [Host] {
         let defaultHosts = hosts.filter(\.isDefault)
         let customHosts = hosts.filter { !$0.isDefault }
 
@@ -123,5 +163,9 @@ actor HostStore {
 
         ordered.append(contentsOf: customHosts)
         return ordered
+    }
+
+    var allHosts: [Host] {
+        sortedHosts()
     }
 }
