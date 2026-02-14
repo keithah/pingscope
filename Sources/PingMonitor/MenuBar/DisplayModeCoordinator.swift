@@ -2,7 +2,6 @@ import AppKit
 
 @MainActor
 final class DisplayModeCoordinator: NSObject, NSWindowDelegate {
-    private let popover: NSPopover
     private let displayPreferencesStore: DisplayPreferencesStore
 
     private(set) var standardWindow: NSWindow?
@@ -10,10 +9,8 @@ final class DisplayModeCoordinator: NSObject, NSWindowDelegate {
     private var lastPresentedMode: DisplayMode = .full
 
     init(
-        popover: NSPopover? = nil,
         displayPreferencesStore: DisplayPreferencesStore = DisplayPreferencesStore()
     ) {
-        self.popover = popover ?? NSPopover()
         self.displayPreferencesStore = displayPreferencesStore
     }
 
@@ -31,7 +28,7 @@ final class DisplayModeCoordinator: NSObject, NSWindowDelegate {
     }
 
     var isDisplayVisible: Bool {
-        (standardWindow?.isVisible ?? false) || (floatingWindow?.isVisible ?? false) || popover.isShown
+        (standardWindow?.isVisible ?? false) || (floatingWindow?.isVisible ?? false)
     }
 
     func showStandardWindow(
@@ -42,10 +39,6 @@ final class DisplayModeCoordinator: NSObject, NSWindowDelegate {
         if let window = floatingWindow {
             persistWindowFrame(window.frame, for: lastPresentedMode)
             window.orderOut(nil)
-        }
-
-        if popover.isShown {
-            popover.performClose(nil)
         }
 
         let modeChanged = lastPresentedMode != mode
@@ -82,10 +75,6 @@ final class DisplayModeCoordinator: NSObject, NSWindowDelegate {
         if let window = standardWindow {
             persistWindowFrame(window.frame, for: lastPresentedMode)
             window.orderOut(nil)
-        }
-
-        if popover.isShown {
-            popover.performClose(nil)
         }
 
         let modeChanged = lastPresentedMode != mode
@@ -130,12 +119,7 @@ final class DisplayModeCoordinator: NSObject, NSWindowDelegate {
         window.orderOut(nil)
     }
 
-    func closePopover() {
-        popover.performClose(nil)
-    }
-
     func closeAll() {
-        closePopover()
         closeStandardWindow()
         closeFloatingWindow()
     }

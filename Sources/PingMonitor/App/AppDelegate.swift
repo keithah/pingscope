@@ -12,6 +12,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         preferencesStore: displayPreferencesStore,
         initialMode: modePreferenceStore.displayMode
     )
+    private lazy var displayContentFactory = DisplayContentFactory(viewModel: displayViewModel)
     private lazy var displayCoordinator = DisplayModeCoordinator(
         displayPreferencesStore: displayPreferencesStore
     )
@@ -341,13 +342,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func presentDisplay(from button: NSStatusBarButton) {
         displayViewModel.setDisplayMode(runtime.displayMode)
-        let rootView = DisplayRootView(
-            viewModel: displayViewModel,
+        let contentViewController = displayContentFactory.make(
             mode: runtime.displayMode,
             showsFloatingChrome: runtime.menuBarViewModel.isStayOnTopEnabled
         )
-
-        let contentViewController = NSHostingController(rootView: rootView)
         displayCoordinator.open(
             from: button,
             mode: runtime.displayMode,
