@@ -8,16 +8,16 @@ enum MenuBarStatus: String, Sendable, Equatable {
 }
 
 struct MenuBarStatusEvaluator: Sendable {
-    let healthyUpperBoundMS: Double
     let sustainedFailureThreshold: Int
 
-    init(healthyUpperBoundMS: Double = 80, sustainedFailureThreshold: Int = 3) {
-        self.healthyUpperBoundMS = healthyUpperBoundMS
+    init(sustainedFailureThreshold: Int = 3) {
         self.sustainedFailureThreshold = sustainedFailureThreshold
     }
 
     func evaluate(
         latencyMS: Double?,
+        greenThresholdMS: Double = 80,
+        yellowThresholdMS: Double = 150,
         consecutiveFailures: Int,
         hasReceivedAnyResult: Bool,
         isMonitoringActive: Bool
@@ -38,10 +38,29 @@ struct MenuBarStatusEvaluator: Sendable {
             return .gray
         }
 
-        if latencyMS <= healthyUpperBoundMS {
+        let (normalizedGreenThresholdMS, normalizedYellowThresholdMS) = normalizedThresholds(
+            greenThresholdMS: greenThresholdMS,
+            yellowThresholdMS: yellowThresholdMS
+        )
+
+        if latencyMS <= normalizedGreenThresholdMS {
             return .green
         }
 
-        return .yellow
+        if latencyMS <= normalizedYellowThresholdMS {
+            return .yellow
+        }
+
+        return .red
+    }
+
+    private func normalizedThresholds(greenThresholdMS: Double, yellowThresholdMS: Double) -> (Double, Double) {
+        let sanitizedGreenThresholdMS = max(0, greenThresholdMS.isFinite ? greenThresholdMS : 0)
+        let sanitizedYellowThresholdMS = max(0, yellowThresholdMS.isFinite ? yellowThresholdMS : sanitizedGreenThresholdMS)
+
+        return (
+            min(sanitizedGreenThresholdMS, sanitizedYellowThresholdMS),
+            max(sanitizedGreenThresholdMS, sanitizedYellowThresholdMS)
+        )
     }
 }
