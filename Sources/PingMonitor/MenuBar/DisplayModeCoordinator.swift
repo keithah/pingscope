@@ -213,6 +213,11 @@ final class DisplayModeCoordinator: NSObject, NSWindowDelegate {
     }
 
     func windowDidEndLiveResize(_ notification: Notification) {
+#if DEBUG
+        if let window = notification.object as? NSWindow {
+            print("[DisplayModeCoordinator] didEndLiveResize frame=\(NSStringFromRect(window.frame))")
+        }
+#endif
         persistFrameFromNotification(notification)
     }
 
@@ -364,11 +369,11 @@ final class DisplayModeCoordinator: NSObject, NSWindowDelegate {
     private func minimumContentSize(for mode: DisplayMode) -> NSSize {
         switch mode {
         case .full:
-            // Allow shrinking below the original 450x500 default while staying usable.
-            return NSSize(width: 300, height: 340)
+            // User wants to freely resize smaller to find the right size.
+            return NSSize(width: 220, height: 260)
         case .compact:
             // User explicitly wants compact to be much smaller by default.
-            return NSSize(width: 120, height: 90)
+            return NSSize(width: 100, height: 80)
         }
     }
 }
