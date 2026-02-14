@@ -93,6 +93,8 @@ Recent decisions affecting current work:
 - (04-01): Persist display state as one Codable payload split into shared/full/compact partitions
 - (04-01): Keep deterministic mode defaults with full (450x500) and compact (280x220) frame data
 - (04-01): Expose focused DisplayPreferencesStore APIs for shared and per-mode updates
+- (04-02): Use one DisplayViewModel to preserve selected host/time range across mode switches while panel visibility persists per mode
+- (04-02): Keep bounded per-host sample buffers and project recent results newest-first for full/compact history surfaces
 - (04-03): Re-anchor floating shell from status-item screen rect on each open/mode handoff and clamp to active visibleFrame
 - (04-03): Enforce current-Space floating behavior with collectionBehavior [.transient, .moveToActiveSpace] and no all-spaces flags
 - (04-03): Keep floating movement handle-only by leaving isMovableByWindowBackground disabled
@@ -107,6 +109,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-02-14T18:45:13Z
-Stopped at: Completed 04-03-PLAN.md
+Last session: 2026-02-14T18:45:41Z
+Stopped at: Completed 04-02-PLAN.md
 Resume file: None
