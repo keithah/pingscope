@@ -99,12 +99,20 @@ final class DisplayModeCoordinator {
     }
 
     func makeFloatingWindow(frame: NSRect) -> NSWindow {
-        NSWindow(
+        let window = NSWindow(
             contentRect: frame,
-            styleMask: [.titled],
+            styleMask: [.borderless],
             backing: .buffered,
             defer: false
         )
+
+        window.level = .floating
+        window.isMovableByWindowBackground = false
+        window.collectionBehavior = [.transient, .moveToActiveSpace]
+        window.isReleasedWhenClosed = false
+        window.hasShadow = true
+        window.backgroundColor = .windowBackgroundColor
+        return window
     }
 
     static func anchoredAndClampedFrame(
