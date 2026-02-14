@@ -129,6 +129,6 @@ final class MenuBarIntegrationSmokeTests: XCTestCase {
     }
 
     private func preferredShell(for runtime: MenuBarRuntime) -> String {
-        runtime.menuBarViewModel.isStayOnTopEnabled ? "floating" : "popover"
+        runtime.menuBarViewModel.isStayOnTopEnabled ? "floating" : "standardWindow"
     }
 }
