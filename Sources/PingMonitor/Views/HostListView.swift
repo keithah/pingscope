@@ -23,12 +23,28 @@ struct HostListView: View {
         }
         .padding(12)
         .sheet(isPresented: $viewModel.showingAddSheet) {
-            Text("Add Host Sheet")
-                .frame(minWidth: 320, minHeight: 220)
+            AddHostSheet(
+                viewModel: AddHostViewModel(
+                    mode: .add,
+                    onSave: { host in
+                        viewModel.addHost(host)
+                    },
+                    onCancel: {}
+                )
+            )
+            .frame(minWidth: 360, minHeight: 320)
         }
-        .sheet(item: $viewModel.hostToEdit) { _ in
-            Text("Edit Host Sheet")
-                .frame(minWidth: 320, minHeight: 220)
+        .sheet(item: $viewModel.hostToEdit) { host in
+            AddHostSheet(
+                viewModel: AddHostViewModel(
+                    mode: .edit(host),
+                    onSave: { updatedHost in
+                        viewModel.updateHost(updatedHost)
+                    },
+                    onCancel: {}
+                )
+            )
+            .frame(minWidth: 360, minHeight: 320)
         }
         .confirmationDialog(
             deleteDialogTitle,

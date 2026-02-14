@@ -2,15 +2,27 @@ import SwiftUI
 
 struct StatusPopoverView: View {
     @ObservedObject var viewModel: StatusPopoverViewModel
+    @ObservedObject var hostListViewModel: HostListViewModel
+
+    init(viewModel: StatusPopoverViewModel, hostListViewModel: HostListViewModel? = nil) {
+        self.viewModel = viewModel
+        self.hostListViewModel = hostListViewModel ?? HostListViewModel(onSelectHost: { _ in })
+    }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 12) {
+            if viewModel.networkChangeIndicator {
+                networkChangeBanner
+            }
+
             statusSection
+            Divider()
+            hostsSection
             Divider()
             quickActionsSection
         }
         .padding(14)
-        .frame(minWidth: 280, idealWidth: 300)
+        .frame(minWidth: 320, idealWidth: 340)
     }
 
     private var statusSection: some View {
@@ -48,6 +60,17 @@ struct StatusPopoverView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
+    }
+
+    private var hostsSection: some View {
+        HostListView(viewModel: hostListViewModel)
+            .frame(height: 220)
+    }
+
+    private var networkChangeBanner: some View {
+        Label("Network changed", systemImage: "network")
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(.blue)
     }
 
     private var statusColor: Color {
