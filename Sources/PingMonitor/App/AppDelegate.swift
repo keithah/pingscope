@@ -31,7 +31,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             onRefresh: { [weak self] in
                 guard let self else { return }
                 Task {
-                    await self.scheduler.refresh()
+                    await self.scheduler.refresh(intervalFallback: self.runtime.globalDefaults.interval)
                 }
             },
             onSwitchHost: { [weak self] in
@@ -101,7 +101,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
             }
 
-            await scheduler.start(hosts: [], interval: runtime.globalDefaults.interval)
+            await scheduler.start(hosts: [], intervalFallback: runtime.globalDefaults.interval)
         }
     }
 
@@ -202,7 +202,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let hosts = await runtime.hostStore.allHosts
             _ = runtime.switchHost(in: hosts)
             hostListViewModel?.activeHostID = runtime.selectedHostID
-            await scheduler.updateHosts(hosts)
+            await scheduler.updateHosts(hosts, intervalFallback: runtime.globalDefaults.interval)
         }
     }
 
@@ -254,7 +254,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let hosts = await runtime.hostStore.allHosts
         _ = runtime.syncSelection(with: hosts, preferredHostID: host.id)
         hostListViewModel?.activeHostID = runtime.selectedHostID
-        await scheduler.updateHosts(hosts)
+        await scheduler.updateHosts(hosts, intervalFallback: runtime.globalDefaults.interval)
     }
 
     private func refreshHostsAndScheduler(preferredHostID: UUID? = nil) async {
@@ -271,7 +271,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             hostListViewModel?.latencies.removeValue(forKey: staleHostID)
         }
 
-        await scheduler.updateHosts(hosts)
+        await scheduler.updateHosts(hosts, intervalFallback: runtime.globalDefaults.interval)
     }
 
     private func hostID(for result: PingResult) -> UUID? {
