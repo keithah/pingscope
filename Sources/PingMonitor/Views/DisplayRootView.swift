@@ -15,7 +15,7 @@ struct DisplayRootView: View {
 
             modeView
         }
-        .frame(width: mode.defaultFrame.width, height: mode.defaultFrame.height, alignment: .top)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(panelShape.fill(Color(nsColor: .windowBackgroundColor)))
         .clipShape(panelShape)
         .overlay(panelShape.strokeBorder(Color.black.opacity(0.18), lineWidth: 1))

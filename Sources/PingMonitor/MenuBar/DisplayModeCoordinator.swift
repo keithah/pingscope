@@ -3,6 +3,7 @@ import AppKit
 @MainActor
 final class DisplayModeCoordinator: NSObject, NSWindowDelegate {
     private let displayPreferencesStore: DisplayPreferencesStore
+    private var applicationResignObserver: Any?
 
     private(set) var standardWindow: NSWindow?
     private(set) var floatingWindow: NSWindow?
@@ -12,6 +13,23 @@ final class DisplayModeCoordinator: NSObject, NSWindowDelegate {
         displayPreferencesStore: DisplayPreferencesStore = DisplayPreferencesStore()
     ) {
         self.displayPreferencesStore = displayPreferencesStore
+        super.init()
+
+        applicationResignObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.didResignActiveNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.closeStandardWindow()
+            }
+        }
+    }
+
+    deinit {
+        if let applicationResignObserver {
+            NotificationCenter.default.removeObserver(applicationResignObserver)
+        }
     }
 
     func open(
@@ -60,7 +78,7 @@ final class DisplayModeCoordinator: NSObject, NSWindowDelegate {
 
         let window = standardWindow ?? makeStandardWindow(frame: resolvedFrame)
         lastPresentedMode = mode
-        lockWindow(window, to: resolvedFrame)
+        configureStandardWindow(window, for: mode)
         if modeChanged || !window.isVisible {
             window.setFrame(resolvedFrame, display: false)
         }
@@ -161,7 +179,7 @@ final class DisplayModeCoordinator: NSObject, NSWindowDelegate {
     func makeStandardWindow(frame: NSRect) -> NSWindow {
         let window = DisplayShellWindow(
             contentRect: frame,
-            styleMask: [.borderless],
+            styleMask: [.borderless, .resizable],
             backing: .buffered,
             defer: false
         )
@@ -227,22 +245,23 @@ final class DisplayModeCoordinator: NSObject, NSWindowDelegate {
         let frameData = modeState.frameData
 
         let defaultFrame = mode.defaultFrame
+        let resolvedWidth = frameData.width > 0 ? frameData.width : defaultFrame.width
+        let resolvedHeight = frameData.height > 0 ? frameData.height : defaultFrame.height
         return NSRect(
             x: frameData.x,
             y: frameData.y,
-            width: defaultFrame.width,
-            height: defaultFrame.height
+            width: resolvedWidth,
+            height: resolvedHeight
         )
     }
 
     private func persistWindowFrame(_ frame: NSRect, for mode: DisplayMode) {
-        let defaultFrame = mode.defaultFrame
         displayPreferencesStore.updateModeState(for: mode) { state in
             state.frameData = DisplayFrameData(
                 x: frame.origin.x,
                 y: frame.origin.y,
-                width: defaultFrame.width,
-                height: defaultFrame.height
+                width: frame.size.width,
+                height: frame.size.height
             )
         }
     }
@@ -290,6 +309,26 @@ final class DisplayModeCoordinator: NSObject, NSWindowDelegate {
         window.collectionBehavior.insert(.fullScreenNone)
         window.contentMinSize = size
         window.contentMaxSize = size
+    }
+
+    private func configureStandardWindow(_ window: NSWindow, for mode: DisplayMode) {
+        window.styleMask.insert(.resizable)
+        window.styleMask.remove(.titled)
+        window.collectionBehavior.insert(.fullScreenNone)
+
+        let minimumSize = minimumStandardWindowContentSize(for: mode)
+        window.contentMinSize = minimumSize
+        window.contentMaxSize = NSSize(width: 10_000, height: 10_000)
+    }
+
+    private func minimumStandardWindowContentSize(for mode: DisplayMode) -> NSSize {
+        let defaultSize = NSSize(width: mode.defaultFrame.width, height: mode.defaultFrame.height)
+        switch mode {
+        case .full:
+            return NSSize(width: min(defaultSize.width, 380), height: min(defaultSize.height, 420))
+        case .compact:
+            return NSSize(width: min(defaultSize.width, 240), height: min(defaultSize.height, 200))
+        }
     }
 }
 
