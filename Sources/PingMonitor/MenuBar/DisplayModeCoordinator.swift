@@ -4,6 +4,7 @@ import AppKit
 final class DisplayModeCoordinator: NSObject, NSWindowDelegate {
     private let displayPreferencesStore: DisplayPreferencesStore
     private var applicationResignObserver: Any?
+    private var isInLiveResize: Bool = false
 
     private(set) var standardWindow: NSWindow?
     private(set) var floatingWindow: NSWindow?
@@ -21,7 +22,12 @@ final class DisplayModeCoordinator: NSObject, NSWindowDelegate {
             queue: .main
         ) { [weak self] _ in
             Task { @MainActor [weak self] in
-                self?.closeStandardWindow()
+                guard let self else { return }
+                // Dismiss like a popover, but never while resizing (grabbing the edge can
+                // momentarily reshuffle focus/activation for borderless windows).
+                if !self.isInLiveResize {
+                    self.closeStandardWindow()
+                }
             }
         }
     }
@@ -219,24 +225,18 @@ final class DisplayModeCoordinator: NSObject, NSWindowDelegate {
         return window
     }
 
+    func windowWillStartLiveResize(_ notification: Notification) {
+        isInLiveResize = true
+    }
+
     func windowDidEndLiveResize(_ notification: Notification) {
+        isInLiveResize = false
         persistFrameFromNotification(notification)
     }
 
     func windowDidResize(_ notification: Notification) {
         // Persist continuously so quick hide/reopen cycles keep the latest size.
         persistFrameFromNotification(notification)
-    }
-
-    func windowDidResignKey(_ notification: Notification) {
-        guard let window = notification.object as? NSWindow else {
-            return
-        }
-
-        // Popover-like behavior: when not stay-on-top, clicking off should dismiss.
-        if window === standardWindow {
-            closeStandardWindow()
-        }
     }
 
     func windowDidMove(_ notification: Notification) {
