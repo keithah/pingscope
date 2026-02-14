@@ -9,19 +9,25 @@ actor PingService {
         await ping(
             address: host.address,
             port: host.port,
-            protocolType: host.protocolType,
-            timeout: host.timeout
+            pingMethod: host.pingMethod,
+            timeout: host.timeoutOverride
         )
     }
 
     func ping(
         address: String,
         port: UInt16,
-        protocolType: Host.ProtocolType = .tcp,
+        pingMethod: PingMethod = .tcp,
         timeout: Duration? = nil
     ) async -> PingResult {
         let effectiveTimeout = timeout ?? defaultTimeout
-        let parameters: NWParameters = protocolType == .tcp ? .tcp : .udp
+        let parameters: NWParameters
+        switch pingMethod {
+        case .udp:
+            parameters = .udp
+        case .tcp, .icmpSimulated:
+            parameters = .tcp
+        }
 
         do {
             let latency = try await withThrowingTaskGroup(of: Duration.self) { group in
