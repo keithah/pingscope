@@ -10,27 +10,27 @@ See: `.planning/PROJECT.md` (updated 2026-02-13)
 ## Current Position
 
 Phase: 1 of 6 (Foundation)
-Plan: 2 of 4 in current phase
+Plan: 3 of 4 in current phase
 Status: In progress
-Last activity: 2026-02-14 - Completed 01-02-PLAN.md (NWConnection async wrapper + PingService actor)
+Last activity: 2026-02-14 - Completed 01-03-PLAN.md (health tracker + sweeper + scheduler actors)
 
-Progress: [██░░░░░░░░] 22%
+Progress: [███░░░░░░░] 33%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 2
+- Total plans completed: 3
 - Average duration: 2 min
-- Total execution time: 0.07 hours
+- Total execution time: 0.10 hours
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
-| 1. Foundation | 2 | 4 | 2 min |
+| 1. Foundation | 3 | 4 | 2 min |
 
 **Recent Trend:**
-- Last 5 plans: 01-01 (2 min), 01-02 (2 min)
+- Last 5 plans: 01-01 (2 min), 01-02 (2 min), 01-03 (2 min)
 - Trend: Stable
 
 *Updated after each plan completion*
@@ -50,6 +50,9 @@ Recent decisions affecting current work:
 - (01-02): Use fresh NWConnection instances per measurement for reliability
 - (01-02): Timeout racing uses withThrowingTaskGroup with immediate loser cancellation
 - (01-02): pingAll default concurrency limit remains 10
+- (01-03): Host down state requires 3 consecutive failures tracked per host
+- (01-03): Connection sweeper defaults to 10-second cadence with 30-second max age
+- (01-03): Ping scheduling spreads execution across 80% of interval with cancel-before-restart updates
 
 ### Pending Todos
 
@@ -61,6 +64,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-02-14T08:37:49Z
-Stopped at: Completed 01-02-PLAN.md
+Last session: 2026-02-14T08:56:22Z
+Stopped at: Completed 01-03-PLAN.md
 Resume file: None
