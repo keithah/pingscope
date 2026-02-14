@@ -8,10 +8,10 @@ enum DisplayMode: String, CaseIterable, Codable, Sendable {
         switch self {
         case .full:
             // Default should match the visual footprint in `images/mainscreen*`.
-            return .init(x: 0, y: 0, width: 400, height: 460)
+            return .init(x: 0, y: 0, width: 380, height: 440)
         case .compact:
-            // Smaller starting point; user can resize and we'll persist per-mode.
-            return .init(x: 0, y: 0, width: 200, height: 160)
+            // User wants compact much smaller by default.
+            return .init(x: 0, y: 0, width: 140, height: 110)
         }
     }
 }

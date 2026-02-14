@@ -7,7 +7,7 @@ struct CompactModeView: View {
         GeometryReader { proxy in
             let totalHeight = proxy.size.height
             // In compact, the graph should visibly shrink when the window is resized smaller.
-            let graphHeight = max(72, min(150, totalHeight * 0.34))
+            let graphHeight = max(44, min(120, totalHeight * 0.28))
 
             VStack(alignment: .leading, spacing: 10) {
                 hostPicker

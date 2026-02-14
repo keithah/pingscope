@@ -199,8 +199,8 @@ final class DisplayModeCoordinatorTests: XCTestCase {
             return
         }
 
-        XCTAssertEqual(floating.contentMinSize.width, 160, accuracy: 0.5)
-        XCTAssertEqual(floating.contentMinSize.height, 140, accuracy: 0.5)
+        XCTAssertEqual(floating.contentMinSize.width, 120, accuracy: 0.5)
+        XCTAssertEqual(floating.contentMinSize.height, 90, accuracy: 0.5)
         // We allow resizing larger, but never below the per-mode minimum.
         XCTAssertTrue(floating.styleMask.contains(.resizable))
     }

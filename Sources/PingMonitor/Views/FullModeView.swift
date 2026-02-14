@@ -7,7 +7,7 @@ struct FullModeView: View {
         GeometryReader { proxy in
             let totalHeight = proxy.size.height
             // Scale graph with window size while keeping it usable.
-            let graphHeight = max(110, min(240, totalHeight * 0.40))
+            let graphHeight = max(80, min(220, totalHeight * 0.34))
 
             VStack(alignment: .leading, spacing: 12) {
                 hostPills
@@ -31,10 +31,10 @@ struct FullModeView: View {
                     Button(host.name) {
                         viewModel.selectHost(id: host.id)
                     }
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(.system(size: 12, weight: .semibold))
                     .buttonStyle(.plain)
                     .padding(.horizontal, 8)
-                    .padding(.vertical, 5)
+                    .padding(.vertical, 4)
                     .background(isSelected ? Color.accentColor.opacity(0.18) : Color.secondary.opacity(0.08))
                     .foregroundColor(isSelected ? .accentColor : .primary)
                     .clipShape(Capsule())

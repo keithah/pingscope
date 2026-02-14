@@ -64,7 +64,14 @@ final class DisplayModeCoordinator: NSObject, NSWindowDelegate {
             persistWindowFrame(window.frame, for: lastPresentedMode)
         }
 
-        let preferredFrame = preferredFrame(for: mode, preservingSizeFrom: floatingWindow)
+        var preferredFrame = preferredFrame(for: mode, preservingSizeFrom: floatingWindow)
+        if let existingWindow = standardWindow,
+           !existingWindow.isVisible,
+           lastPresentedMode == mode {
+            // Preserve the last in-memory size for quick open/close cycles even
+            // if persistence hasn't flushed yet.
+            preferredFrame.size = existingWindow.frame.size
+        }
         let anchorRect = statusItemAnchorRect(for: button)
         let anchorCenter = anchorRect?.center
         let wantsAnchoredOpen = preferredFrame.origin.x == 0 && preferredFrame.origin.y == 0
@@ -106,7 +113,12 @@ final class DisplayModeCoordinator: NSObject, NSWindowDelegate {
             persistWindowFrame(window.frame, for: lastPresentedMode)
         }
 
-        let preferredFrame = preferredFrame(for: mode, preservingSizeFrom: standardWindow)
+        var preferredFrame = preferredFrame(for: mode, preservingSizeFrom: standardWindow)
+        if let existingWindow = floatingWindow,
+           !existingWindow.isVisible,
+           lastPresentedMode == mode {
+            preferredFrame.size = existingWindow.frame.size
+        }
         let anchorRect = statusItemAnchorRect(for: button)
         let visibleFrame = visibleFrame(for: anchorRect, fallbackWindow: button.window)
         let minimumSize = minimumContentSize(for: mode)
@@ -353,10 +365,10 @@ final class DisplayModeCoordinator: NSObject, NSWindowDelegate {
         switch mode {
         case .full:
             // Allow shrinking below the original 450x500 default while staying usable.
-            return NSSize(width: 320, height: 380)
+            return NSSize(width: 300, height: 340)
         case .compact:
             // User explicitly wants compact to be much smaller by default.
-            return NSSize(width: 160, height: 140)
+            return NSSize(width: 120, height: 90)
         }
     }
 }
