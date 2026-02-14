@@ -7,10 +7,13 @@ import XCTest
 final class MenuBarIntegrationSmokeTests: XCTestCase {
     func testSchedulerResultUpdatesMenuBarViewModelState() {
         let runtime = MenuBarRuntime()
+        let hosts = [Host.googleDNS]
+        let selectedHost = runtime.syncSelection(with: hosts)
 
         runtime.ingestSchedulerResult(
             PingResult.success(host: "8.8.8.8", port: 443, latency: .milliseconds(48)),
-            isHostUp: true
+            isHostUp: true,
+            matchedHostID: selectedHost?.id
         )
 
         XCTAssertEqual(runtime.menuBarViewModel.status, .green)
@@ -26,10 +29,11 @@ final class MenuBarIntegrationSmokeTests: XCTestCase {
 
         let store = ModePreferenceStore(userDefaults: userDefaults, keyPrefix: "integration.mode")
         let runtime = MenuBarRuntime(modePreferenceStore: store)
+        let hosts = [Host.googleDNS, Host.cloudflareDNS]
         let menu = ContextMenuFactory().makeMenu(
             state: runtime.contextMenuState,
             actions: .init(
-                onSwitchHost: { runtime.switchHost() },
+                onSwitchHost: { runtime.switchHost(in: hosts) },
                 onToggleCompactMode: { runtime.toggleCompactMode() },
                 onToggleStayOnTop: { runtime.toggleStayOnTop() },
                 onOpenSettings: {},
@@ -49,13 +53,15 @@ final class MenuBarIntegrationSmokeTests: XCTestCase {
     }
 
     func testSwitchHostActionUpdatesMenuAndPopoverReadableState() {
-        let runtime = MenuBarRuntime(hosts: [.googleDNS, .cloudflareDNS], selectedHostIndex: 0)
+        let runtime = MenuBarRuntime()
+        let hosts = [Host.googleDNS, Host.cloudflareDNS]
+        _ = runtime.syncSelection(with: hosts, preferredHostID: hosts[0].id)
         let popoverViewModel = StatusPopoverViewModel(menuBarViewModel: runtime.menuBarViewModel)
 
         XCTAssertEqual(runtime.contextMenuState.currentHostSummary, "Google DNS (8.8.8.8)")
         XCTAssertEqual(popoverViewModel.snapshot.hostSummary, "Google DNS (8.8.8.8)")
 
-        runtime.switchHost()
+        _ = runtime.switchHost(in: hosts)
 
         XCTAssertEqual(runtime.contextMenuState.currentHostSummary, "Cloudflare (1.1.1.1)")
         XCTAssertEqual(popoverViewModel.snapshot.hostSummary, "Cloudflare (1.1.1.1)")

@@ -13,7 +13,7 @@ final class MenuBarViewModelTests: XCTestCase {
 
     func testHealthyAndWarningTransitions() {
         let viewModel = MenuBarViewModel(
-            evaluator: MenuBarStatusEvaluator(healthyUpperBoundMS: 80, sustainedFailureThreshold: 3),
+            evaluator: MenuBarStatusEvaluator(sustainedFailureThreshold: 3),
             smoother: LatencySmoother(alpha: 1.0, maxStepMS: 1_000)
         )
 
@@ -28,7 +28,7 @@ final class MenuBarViewModelTests: XCTestCase {
 
     func testSustainedFailureTurnsRedAfterThreshold() {
         let viewModel = MenuBarViewModel(
-            evaluator: MenuBarStatusEvaluator(healthyUpperBoundMS: 80, sustainedFailureThreshold: 3),
+            evaluator: MenuBarStatusEvaluator(sustainedFailureThreshold: 3),
             smoother: LatencySmoother(alpha: 1.0, maxStepMS: 1_000)
         )
 
@@ -49,7 +49,7 @@ final class MenuBarViewModelTests: XCTestCase {
 
     func testSmoothingReducesAbruptTextJumps() {
         let viewModel = MenuBarViewModel(
-            evaluator: MenuBarStatusEvaluator(healthyUpperBoundMS: 80, sustainedFailureThreshold: 3),
+            evaluator: MenuBarStatusEvaluator(sustainedFailureThreshold: 3),
             smoother: LatencySmoother(alpha: 0.5, maxStepMS: 20)
         )
 
@@ -60,6 +60,67 @@ final class MenuBarViewModelTests: XCTestCase {
         viewModel.ingest(result: successResult(latencyMS: 200))
         XCTAssertEqual(viewModel.compactLatencyText, "70 ms")
         XCTAssertEqual(viewModel.menuBarState.lastRawLatencyMS ?? 0, 200, accuracy: 0.001)
+    }
+
+    func testSelectedHostThresholdOverridesCanTurnSameLatencyRed() {
+        let viewModel = MenuBarViewModel(
+            evaluator: MenuBarStatusEvaluator(sustainedFailureThreshold: 3),
+            smoother: LatencySmoother(alpha: 1.0, maxStepMS: 1_000)
+        )
+        let globalDefaults = GlobalDefaults(greenThresholdMS: 50, yellowThresholdMS: 150)
+        let strictHost = Host(
+            name: "Strict",
+            address: "10.0.0.10",
+            greenThresholdMSOverride: 40,
+            yellowThresholdMSOverride: 80
+        )
+
+        viewModel.setSelectedHost(strictHost, globalDefaults: globalDefaults)
+        viewModel.ingest(result: successResult(latencyMS: 90))
+
+        XCTAssertEqual(viewModel.status, .red)
+        XCTAssertEqual(viewModel.compactLatencyText, "90 ms")
+    }
+
+    func testSelectedHostThresholdsFallbackToGlobalDefaultsWhenOverridesMissing() {
+        let viewModel = MenuBarViewModel(
+            evaluator: MenuBarStatusEvaluator(sustainedFailureThreshold: 3),
+            smoother: LatencySmoother(alpha: 1.0, maxStepMS: 1_000)
+        )
+        let globalDefaults = GlobalDefaults(greenThresholdMS: 60, yellowThresholdMS: 120)
+        let hostWithoutOverrides = Host(
+            name: "GlobalFallback",
+            address: "10.0.0.20",
+            greenThresholdMSOverride: nil,
+            yellowThresholdMSOverride: nil
+        )
+
+        viewModel.setSelectedHost(hostWithoutOverrides, globalDefaults: globalDefaults)
+        viewModel.ingest(result: successResult(latencyMS: 90))
+
+        XCTAssertEqual(viewModel.status, .yellow)
+    }
+
+    func testSwitchingSelectedHostReclassifiesStatusWithNewThresholds() {
+        let viewModel = MenuBarViewModel(
+            evaluator: MenuBarStatusEvaluator(sustainedFailureThreshold: 3),
+            smoother: LatencySmoother(alpha: 1.0, maxStepMS: 1_000)
+        )
+        let globalDefaults = GlobalDefaults(greenThresholdMS: 50, yellowThresholdMS: 150)
+        let relaxedHost = Host(name: "Relaxed", address: "10.0.0.30")
+        let strictHost = Host(
+            name: "Strict",
+            address: "10.0.0.31",
+            greenThresholdMSOverride: 40,
+            yellowThresholdMSOverride: 80
+        )
+
+        viewModel.setSelectedHost(relaxedHost, globalDefaults: globalDefaults)
+        viewModel.ingest(result: successResult(latencyMS: 90))
+        XCTAssertEqual(viewModel.status, .yellow)
+
+        viewModel.setSelectedHost(strictHost, globalDefaults: globalDefaults)
+        XCTAssertEqual(viewModel.status, .red)
     }
 
     private func successResult(latencyMS: Double) -> PingResult {
