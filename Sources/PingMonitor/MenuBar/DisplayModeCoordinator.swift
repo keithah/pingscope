@@ -350,12 +350,13 @@ final class DisplayModeCoordinator: NSObject, NSWindowDelegate {
     }
 
     private func minimumContentSize(for mode: DisplayMode) -> NSSize {
-        let defaultSize = NSSize(width: mode.defaultFrame.width, height: mode.defaultFrame.height)
         switch mode {
         case .full:
-            return NSSize(width: max(defaultSize.width, 450), height: max(defaultSize.height, 500))
+            // Allow shrinking below the original 450x500 default while staying usable.
+            return NSSize(width: 320, height: 380)
         case .compact:
-            return NSSize(width: max(defaultSize.width, 280), height: max(defaultSize.height, 220))
+            // User explicitly wants compact to be much smaller by default.
+            return NSSize(width: 160, height: 140)
         }
     }
 }

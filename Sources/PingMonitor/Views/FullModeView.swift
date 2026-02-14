@@ -4,15 +4,21 @@ struct FullModeView: View {
     @ObservedObject var viewModel: DisplayViewModel
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            hostPills
-            graphSection
-            historySection
-        }
-        .padding(14)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .onAppear {
-            viewModel.setDisplayMode(.full)
+        GeometryReader { proxy in
+            let totalHeight = proxy.size.height
+            // Scale graph with window size while keeping it usable.
+            let graphHeight = max(110, min(240, totalHeight * 0.40))
+
+            VStack(alignment: .leading, spacing: 12) {
+                hostPills
+                graphSection(graphHeight: graphHeight)
+                historySection
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .onAppear {
+                viewModel.setDisplayMode(.full)
+            }
         }
     }
 
@@ -25,9 +31,10 @@ struct FullModeView: View {
                     Button(host.name) {
                         viewModel.selectHost(id: host.id)
                     }
+                    .font(.system(size: 13, weight: .semibold))
                     .buttonStyle(.plain)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 5)
                     .background(isSelected ? Color.accentColor.opacity(0.18) : Color.secondary.opacity(0.08))
                     .foregroundColor(isSelected ? .accentColor : .primary)
                     .clipShape(Capsule())
@@ -36,7 +43,7 @@ struct FullModeView: View {
         }
     }
 
-    private var graphSection: some View {
+    private func graphSection(graphHeight: CGFloat) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             sectionHeader(
                 title: "Graph",
@@ -46,7 +53,7 @@ struct FullModeView: View {
 
             if viewModel.modeState(for: .full).graphVisible {
                 DisplayGraphView(points: viewModel.selectedHostGraphPoints)
-                    .frame(height: 180)
+                    .frame(height: graphHeight)
             }
         }
     }

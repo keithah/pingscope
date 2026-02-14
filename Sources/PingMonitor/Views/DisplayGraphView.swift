@@ -11,7 +11,8 @@ struct DisplayGraphView: View {
                 chart(in: proxy.size)
             }
         }
-        .frame(minHeight: 96)
+        // Allow the graph to shrink when the window is resized smaller.
+        .frame(minHeight: 44)
     }
 
     private var emptyState: some View {

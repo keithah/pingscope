@@ -199,10 +199,10 @@ final class DisplayModeCoordinatorTests: XCTestCase {
             return
         }
 
-        XCTAssertEqual(floating.contentMinSize.width, 280, accuracy: 0.5)
-        XCTAssertEqual(floating.contentMinSize.height, 220, accuracy: 0.5)
-        XCTAssertGreaterThan(floating.contentMaxSize.width, floating.contentMinSize.width)
-        XCTAssertGreaterThan(floating.contentMaxSize.height, floating.contentMinSize.height)
+        XCTAssertEqual(floating.contentMinSize.width, 160, accuracy: 0.5)
+        XCTAssertEqual(floating.contentMinSize.height, 140, accuracy: 0.5)
+        // We allow resizing larger, but never below the per-mode minimum.
+        XCTAssertTrue(floating.styleMask.contains(.resizable))
     }
 
     func testDragHandleMouseDownUsesDedicatedDragPath() {

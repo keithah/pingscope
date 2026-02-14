@@ -7,9 +7,11 @@ enum DisplayMode: String, CaseIterable, Codable, Sendable {
     var defaultFrame: DisplayFrameData {
         switch self {
         case .full:
-            return .init(x: 0, y: 0, width: 450, height: 500)
+            // Default should match the visual footprint in `images/mainscreen*`.
+            return .init(x: 0, y: 0, width: 400, height: 460)
         case .compact:
-            return .init(x: 0, y: 0, width: 280, height: 220)
+            // Smaller starting point; user can resize and we'll persist per-mode.
+            return .init(x: 0, y: 0, width: 200, height: 160)
         }
     }
 }

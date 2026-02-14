@@ -4,15 +4,21 @@ struct CompactModeView: View {
     @ObservedObject var viewModel: DisplayViewModel
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            hostPicker
-            graphSection
-            historySection
-        }
-        .padding(12)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .onAppear {
-            viewModel.setDisplayMode(.compact)
+        GeometryReader { proxy in
+            let totalHeight = proxy.size.height
+            // In compact, the graph should visibly shrink when the window is resized smaller.
+            let graphHeight = max(72, min(150, totalHeight * 0.34))
+
+            VStack(alignment: .leading, spacing: 10) {
+                hostPicker
+                graphSection(graphHeight: graphHeight)
+                historySection
+            }
+            .padding(12)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .onAppear {
+                viewModel.setDisplayMode(.compact)
+            }
         }
     }
 
@@ -26,7 +32,7 @@ struct CompactModeView: View {
         .pickerStyle(.menu)
     }
 
-    private var graphSection: some View {
+    private func graphSection(graphHeight: CGFloat) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             sectionHeader(
                 title: "Graph",
@@ -36,7 +42,7 @@ struct CompactModeView: View {
 
             if viewModel.modeState(for: .compact).graphVisible {
                 DisplayGraphView(points: viewModel.selectedHostGraphPoints)
-                    .frame(height: 96)
+                    .frame(height: graphHeight)
             }
         }
     }
