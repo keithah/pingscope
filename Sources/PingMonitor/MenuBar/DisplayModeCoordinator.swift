@@ -213,12 +213,23 @@ final class DisplayModeCoordinator: NSObject, NSWindowDelegate {
     }
 
     func windowDidEndLiveResize(_ notification: Notification) {
-#if DEBUG
-        if let window = notification.object as? NSWindow {
-            print("[DisplayModeCoordinator] didEndLiveResize frame=\(NSStringFromRect(window.frame))")
-        }
-#endif
         persistFrameFromNotification(notification)
+    }
+
+    func windowDidResize(_ notification: Notification) {
+        // Persist continuously so quick hide/reopen cycles keep the latest size.
+        persistFrameFromNotification(notification)
+    }
+
+    func windowDidResignKey(_ notification: Notification) {
+        guard let window = notification.object as? NSWindow else {
+            return
+        }
+
+        // Popover-like behavior: when not stay-on-top, clicking off should dismiss.
+        if window === standardWindow {
+            closeStandardWindow()
+        }
     }
 
     func windowDidMove(_ notification: Notification) {

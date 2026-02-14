@@ -150,16 +150,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         if isDisplayPresented {
-#if DEBUG
-            let standard = displayCoordinator.standardWindow.map { NSStringFromRect($0.frame) } ?? "nil"
-            let floating = displayCoordinator.floatingWindow.map { NSStringFromRect($0.frame) } ?? "nil"
-            print("[AppDelegate] togglePopover: closing (standard=\(standard), floating=\(floating))")
-#endif
             displayCoordinator.closeAll()
         } else {
-#if DEBUG
-            print("[AppDelegate] togglePopover: opening mode=\(runtime.displayMode.rawValue) stayOnTop=\(runtime.menuBarViewModel.isStayOnTopEnabled)")
-#endif
             presentDisplay(from: button)
         }
     }
