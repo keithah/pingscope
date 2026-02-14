@@ -42,12 +42,75 @@ final class DisplayModeCoordinatorTests: XCTestCase {
         let coordinator = DisplayModeCoordinator(displayPreferencesStore: makePreferencesStore(suffix: "standard-window-flags"))
         let window = coordinator.makeStandardWindow(frame: NSRect(x: 20, y: 30, width: 450, height: 500))
 
-        XCTAssertEqual(window.styleMask, [.borderless])
+        XCTAssertTrue(window.styleMask.contains(.borderless))
+        XCTAssertTrue(window.styleMask.contains(.resizable))
+        XCTAssertFalse(window.styleMask.contains(.titled))
         XCTAssertEqual(window.level, .normal)
         XCTAssertTrue(window.isMovableByWindowBackground)
         XCTAssertTrue(window.collectionBehavior.contains(.moveToActiveSpace))
         XCTAssertTrue(window.collectionBehavior.contains(.fullScreenNone))
         XCTAssertFalse(window.collectionBehavior.contains(.canJoinAllSpaces))
+    }
+
+    func testStandardWindowPersistsUserResizedFramePerMode() {
+        _ = NSApplication.shared
+
+        let store = makePreferencesStore(suffix: "standard-window-resize-persistence")
+        let coordinator = DisplayModeCoordinator(displayPreferencesStore: store)
+        let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+        addTeardownBlock {
+            NSStatusBar.system.removeStatusItem(statusItem)
+            coordinator.closeAll()
+        }
+
+        guard let button = statusItem.button else {
+            XCTFail("Status item button missing")
+            return
+        }
+
+        let contentViewController = NSViewController()
+        coordinator.showStandardWindow(from: button, mode: .full, contentViewController: contentViewController)
+
+        guard let window = coordinator.standardWindow else {
+            XCTFail("Expected standard window to be created")
+            return
+        }
+
+        let fullResized = NSRect(
+            x: window.frame.origin.x,
+            y: window.frame.origin.y,
+            width: 520,
+            height: 560
+        )
+        window.setFrame(fullResized, display: false)
+        coordinator.windowDidEndLiveResize(Notification(name: NSWindow.didEndLiveResizeNotification, object: window))
+
+        XCTAssertEqual(store.modeState(for: .full).frameData.width, 520, accuracy: 0.5)
+        XCTAssertEqual(store.modeState(for: .full).frameData.height, 560, accuracy: 0.5)
+
+        coordinator.showStandardWindow(from: button, mode: .compact, contentViewController: contentViewController)
+        let compactResized = NSRect(
+            x: window.frame.origin.x,
+            y: window.frame.origin.y,
+            width: 340,
+            height: 260
+        )
+        window.setFrame(compactResized, display: false)
+        coordinator.windowDidEndLiveResize(Notification(name: NSWindow.didEndLiveResizeNotification, object: window))
+
+        XCTAssertEqual(store.modeState(for: .compact).frameData.width, 340, accuracy: 0.5)
+        XCTAssertEqual(store.modeState(for: .compact).frameData.height, 260, accuracy: 0.5)
+
+        coordinator.closeStandardWindow()
+        coordinator.showStandardWindow(from: button, mode: .full, contentViewController: contentViewController)
+
+        guard let reopened = coordinator.standardWindow else {
+            XCTFail("Expected standard window to still exist")
+            return
+        }
+
+        XCTAssertEqual(reopened.frame.size.width, CGFloat(520), accuracy: CGFloat(0.5))
+        XCTAssertEqual(reopened.frame.size.height, CGFloat(560), accuracy: CGFloat(0.5))
     }
 
     func testDragHandleMouseDownUsesDedicatedDragPath() {
