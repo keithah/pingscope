@@ -10,18 +10,18 @@ See: `.planning/PROJECT.md` (updated 2026-02-13)
 ## Current Position
 
 Phase: 3 of 6 (Host Monitoring)
-Plan: 3 of 7 in current phase
+Plan: 4 of 7 in current phase
 Status: In progress
-Last activity: 2026-02-14 - Completed 03-03-PLAN.md
+Last activity: 2026-02-14 - Completed 03-04-PLAN.md
 
-Progress: [███████░░░] 73%
+Progress: [████████░░] 80%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 11
+- Total plans completed: 12
 - Average duration: 2 min
-- Total execution time: 0.41 hours
+- Total execution time: 0.44 hours
 
 **By Phase:**
 
@@ -29,10 +29,10 @@ Progress: [███████░░░] 73%
 |-------|-------|-------|----------|
 | 1. Foundation | 4 | 4 | 2 min |
 | 2. Menu Bar & State | 4 | 4 | 3 min |
-| 3. Host Monitoring | 3 | 7 | 2 min |
+| 3. Host Monitoring | 4 | 7 | 2 min |
 
 **Recent Trend:**
-- Last 5 plans: 02-02 (4 min), 02-04 (2 min), 03-01 (1 min), 03-02 (2 min), 03-03 (2 min)
+- Last 5 plans: 02-04 (2 min), 03-01 (1 min), 03-02 (2 min), 03-03 (2 min), 03-04 (2 min)
 - Trend: Stable
 
 *Updated after each plan completion*
@@ -75,6 +75,8 @@ Recent decisions affecting current work:
 - (03-02): Debounce connected-path gateway updates at 200ms but emit unavailable immediately on disconnect
 - (03-03): Route icmpSimulated through dedicated host-level probe sequencing across ports 53/80/443/22/25
 - (03-03): Keep single-port ping overload limited to tcp/udp paths with explicit icmpSimulated misuse failure
+- (03-04): Persist host lists with JSONEncoder/JSONDecoder while excluding the ephemeral gateway host
+- (03-04): Enforce default-host restoration and default->gateway->custom host ordering from HostStore
 
 ### Pending Todos
 
@@ -86,6 +88,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-02-14T17:02:31Z
-Stopped at: Completed 03-03-PLAN.md
+Last session: 2026-02-14T17:02:28Z
+Stopped at: Completed 03-04-PLAN.md
 Resume file: None
