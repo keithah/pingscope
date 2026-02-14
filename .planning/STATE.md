@@ -10,18 +10,18 @@ See: `.planning/PROJECT.md` (updated 2026-02-13)
 ## Current Position
 
 Phase: 3 of 6 (Host Monitoring)
-Plan: 6 of 7 in current phase
-Status: In progress
-Last activity: 2026-02-14 - Completed 03-06-PLAN.md
+Plan: 7 of 7 in current phase
+Status: Phase complete
+Last activity: 2026-02-14 - Completed 03-07-PLAN.md
 
-Progress: [█████████░] 93%
+Progress: [██████████] 100%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 14
+- Total plans completed: 15
 - Average duration: 2 min
-- Total execution time: 0.52 hours
+- Total execution time: 0.55 hours
 
 **By Phase:**
 
@@ -29,10 +29,10 @@ Progress: [█████████░] 93%
 |-------|-------|-------|----------|
 | 1. Foundation | 4 | 4 | 2 min |
 | 2. Menu Bar & State | 4 | 4 | 3 min |
-| 3. Host Monitoring | 6 | 7 | 2 min |
+| 3. Host Monitoring | 7 | 7 | 2 min |
 
 **Recent Trend:**
-- Last 5 plans: 03-02 (2 min), 03-03 (2 min), 03-04 (2 min), 03-05 (2 min), 03-06 (3 min)
+- Last 5 plans: 03-03 (2 min), 03-04 (2 min), 03-05 (2 min), 03-06 (3 min), 03-07 (1 min)
 - Trend: Stable
 
 *Updated after each plan completion*
@@ -81,6 +81,9 @@ Recent decisions affecting current work:
 - (03-05): Keep host-row indicator slots fixed-width so checkmark/lock toggles do not shift row content
 - (03-06): Keep add/edit sheet save gating tied to required fields; test ping failures warn but do not block save
 - (03-06): Persist per-host interval/timeout/threshold overrides only when their custom toggles are enabled
+- (03-07): Embed host list management directly in the popover for one-click host operations
+- (03-07): Drive scheduler host targets from HostStore so add/remove changes apply immediately
+- (03-07): Surface gateway churn via a brief runtime network change indicator
 
 ### Pending Todos
 
@@ -92,6 +95,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-02-14T17:08:20Z
-Stopped at: Completed 03-06-PLAN.md
+Last session: 2026-02-14T17:24:00Z
+Stopped at: Completed 03-07-PLAN.md
 Resume file: None
