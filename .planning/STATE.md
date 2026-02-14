@@ -10,28 +10,28 @@ See: `.planning/PROJECT.md` (updated 2026-02-13)
 ## Current Position
 
 Phase: 2 of 6 (Menu Bar & State)
-Plan: 1 of 4 in current phase
+Plan: 3 of 4 in current phase
 Status: In progress
-Last activity: 2026-02-14 - Completed 02-01-PLAN.md
+Last activity: 2026-02-14 - Completed 02-03-PLAN.md
 
-Progress: [████░░░░░░] 42%
+Progress: [█████░░░░░] 50%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 5
+- Total plans completed: 6
 - Average duration: 2 min
-- Total execution time: 0.17 hours
+- Total execution time: 0.22 hours
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
 | 1. Foundation | 4 | 4 | 2 min |
-| 2. Menu Bar & State | 1 | 1 | 2 min |
+| 2. Menu Bar & State | 2 | 4 | 2 min |
 
 **Recent Trend:**
-- Last 5 plans: 01-02 (2 min), 01-03 (2 min), 01-04 (2 min), 02-01 (2 min)
+- Last 5 plans: 01-02 (2 min), 01-03 (2 min), 01-04 (2 min), 02-01 (2 min), 02-03 (3 min)
 - Trend: Stable
 
 *Updated after each plan completion*
@@ -60,6 +60,8 @@ Recent decisions affecting current work:
 - (02-01): Menu status thresholds use <=80ms for green and reserve red for sustained failures
 - (02-01): Sustained failure threshold for red status is 3 consecutive failures
 - (02-01): Display text smoothing uses bounded EMA (alpha 0.35, max step 40ms)
+- (02-03): Popover section order is fixed as status first, quick actions second
+- (02-03): Popover snapshot sanitizes blank or missing host/latency to N/A
 
 ### Pending Todos
 
@@ -71,6 +73,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-02-14T09:51:54Z
-Stopped at: Completed 02-01-PLAN.md
+Last session: 2026-02-14T10:09:09Z
+Stopped at: Completed 02-03-PLAN.md
 Resume file: None
