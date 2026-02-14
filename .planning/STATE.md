@@ -5,33 +5,33 @@
 See: `.planning/PROJECT.md` (updated 2026-02-13)
 
 **Core value:** Reliable, accurate ping monitoring that users can trust — no false timeouts, no stale connections, no crashes.
-**Current focus:** Phase 2 - Menu Bar & State
+**Current focus:** Phase 3 preparation
 
 ## Current Position
 
 Phase: 2 of 6 (Menu Bar & State)
-Plan: 3 of 4 in current phase
-Status: In progress
-Last activity: 2026-02-14 - Completed 02-02-PLAN.md
+Plan: 4 of 4 in current phase
+Status: Phase complete
+Last activity: 2026-02-14 - Completed 02-04-PLAN.md
 
-Progress: [██████░░░░] 58%
+Progress: [███████░░░] 67%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 7
+- Total plans completed: 8
 - Average duration: 2 min
-- Total execution time: 0.29 hours
+- Total execution time: 0.32 hours
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
 | 1. Foundation | 4 | 4 | 2 min |
-| 2. Menu Bar & State | 3 | 4 | 3 min |
+| 2. Menu Bar & State | 4 | 4 | 3 min |
 
 **Recent Trend:**
-- Last 5 plans: 01-03 (2 min), 01-04 (2 min), 02-01 (2 min), 02-03 (3 min), 02-02 (4 min)
+- Last 5 plans: 01-04 (2 min), 02-01 (2 min), 02-03 (3 min), 02-02 (4 min), 02-04 (2 min)
 - Trend: Stable
 
 *Updated after each plan completion*
@@ -65,6 +65,9 @@ Recent decisions affecting current work:
 - (02-02): Render status dot with SF Symbol tint and keep title compact to preserve menu-bar width
 - (02-02): Route ctrl-click and cmd-click through the same context-menu path as right-click
 - (02-02): Build menu sections from runtime state and persist mode toggles with a dedicated preference store
+- (02-04): Status item uses a non-template drawn dot plus centered stacked text for reliable menu-bar contrast
+- (02-04): Compact mode changes are observed alongside scheduler state so status rendering updates immediately
+- (02-04): Settings action first tries showSettingsWindow and falls back to a dedicated NSWindow in accessory mode
 
 ### Pending Todos
 
@@ -76,6 +79,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-02-14T10:10:51Z
-Stopped at: Completed 02-02-PLAN.md
+Last session: 2026-02-14T10:27:54Z
+Stopped at: Completed 02-04-PLAN.md
 Resume file: None
