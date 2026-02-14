@@ -16,14 +16,18 @@ final class PingServiceTests: XCTestCase {
         let result = await pingService.ping(
             address: "8.8.8.8",
             port: 443,
-            protocolType: .tcp,
+            pingMethod: .tcp,
             timeout: .seconds(5)
         )
 
         XCTAssertTrue(result.isSuccess)
         XCTAssertNotNil(result.latency)
         XCTAssertNil(result.error)
-        XCTAssertGreaterThan(result.latency ?? .zero, .zero)
+        guard let latency = result.latency else {
+            XCTFail("Expected latency for successful ping")
+            return
+        }
+        XCTAssertGreaterThan(latency, .zero)
     }
 
     func testTimeoutOnUnreachableHost() async {
@@ -33,7 +37,7 @@ final class PingServiceTests: XCTestCase {
         let result = await pingService.ping(
             address: "192.0.2.1",
             port: 12345,
-            protocolType: .tcp,
+            pingMethod: .tcp,
             timeout: timeout
         )
 
@@ -52,7 +56,7 @@ final class PingServiceTests: XCTestCase {
         _ = await pingService.ping(
             address: "192.0.2.1",
             port: 12345,
-            protocolType: .tcp,
+            pingMethod: .tcp,
             timeout: timeout
         )
 
@@ -64,7 +68,7 @@ final class PingServiceTests: XCTestCase {
         let result = await pingService.ping(
             address: "",
             port: 443,
-            protocolType: .tcp,
+            pingMethod: .tcp,
             timeout: .seconds(1)
         )
 
@@ -78,7 +82,7 @@ final class PingServiceTests: XCTestCase {
                 name: "Host \(index)",
                 address: "8.8.8.8",
                 port: 443,
-                protocolType: .tcp,
+                pingMethod: .tcp,
                 timeout: .seconds(3),
                 isDefault: false
             )
@@ -87,13 +91,13 @@ final class PingServiceTests: XCTestCase {
         let results = await pingService.pingAll(hosts: hosts, maxConcurrent: 10)
 
         XCTAssertEqual(results.count, hosts.count)
-        XCTAssertTrue(results.allSatisfy(\.isSuccess))
+        XCTAssertTrue(results.allSatisfy { $0.isSuccess })
     }
 
     func testPingAllReturnsResultsInInputOrder() async {
         let hosts = [
-            Host(name: "Google", address: "8.8.8.8", port: 443, protocolType: .tcp, timeout: .seconds(3), isDefault: true),
-            Host(name: "Cloudflare", address: "1.1.1.1", port: 443, protocolType: .tcp, timeout: .seconds(3), isDefault: true)
+            Host(name: "Google", address: "8.8.8.8", port: 443, pingMethod: .tcp, timeout: .seconds(3), isDefault: true),
+            Host(name: "Cloudflare", address: "1.1.1.1", port: 443, pingMethod: .tcp, timeout: .seconds(3), isDefault: true)
         ]
 
         let results = await pingService.pingAll(hosts: hosts, maxConcurrent: 2)
@@ -107,7 +111,7 @@ final class PingServiceTests: XCTestCase {
         let result = await pingService.ping(
             address: "8.8.8.8",
             port: 53,
-            protocolType: .udp,
+            pingMethod: .udp,
             timeout: .seconds(3)
         )
 
