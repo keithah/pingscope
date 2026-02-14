@@ -28,10 +28,13 @@ PingMonitor is a macOS menu bar network monitoring app rewritten from a monolith
   2. Connection timeouts report accurately without false positives from race conditions
   3. Connections are properly cleaned up after use (no stale connections accumulating)
   4. Unit tests verify timeout behavior and concurrent ping handling
-**Plans**: TBD
+**Plans**: 4 plans
 
 Plans:
-- [ ] 01-01: TBD
+- [ ] 01-01-PLAN.md — Swift package setup and core data models (PingResult, Host, PingError)
+- [ ] 01-02-PLAN.md — NWConnection async wrapper and PingService actor with timeout racing
+- [ ] 01-03-PLAN.md — HostHealthTracker, ConnectionSweeper, and PingScheduler services
+- [ ] 01-04-PLAN.md — Unit tests for timeout behavior and concurrent handling
 
 ### Phase 2: Menu Bar & State
 **Goal**: Users see real-time ping status in the menu bar and can interact via left/right click.
@@ -112,7 +115,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Foundation | 0/? | Not started | - |
+| 1. Foundation | 0/4 | Planning complete | - |
 | 2. Menu Bar & State | 0/? | Not started | - |
 | 3. Host Monitoring | 0/? | Not started | - |
 | 4. Display Modes | 0/? | Not started | - |
@@ -121,3 +124,4 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6
 
 ---
 *Roadmap created: 2026-02-13*
+*Phase 1 planned: 2026-02-14*
