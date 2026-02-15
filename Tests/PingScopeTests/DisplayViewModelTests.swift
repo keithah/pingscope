@@ -86,6 +86,31 @@ final class DisplayViewModelTests: XCTestCase {
         XCTAssertEqual(compactWindow.last?.latencyMS, 6)
     }
 
+    func testDefaultBufferRetains3600SamplesWithinOneHourWindow() {
+        let suiteName = "DisplayViewModelTests-default-buffer-\(UUID().uuidString)"
+        let userDefaults = makeIsolatedUserDefaults(suiteName: suiteName)
+        defer { userDefaults.removePersistentDomain(forName: suiteName) }
+
+        let store = DisplayPreferencesStore(userDefaults: userDefaults, keyPrefix: "test.display.vm")
+        let viewModel = DisplayViewModel(preferencesStore: store)
+        let host = PingScope.Host(name: "Google", address: "8.8.8.8")
+
+        viewModel.setHosts([host])
+        viewModel.selectHost(id: host.id)
+        viewModel.setTimeRange(.oneHour)
+
+        let start = Date().addingTimeInterval(-3_500)
+        for sampleIndex in 0 ..< 4_000 {
+            let timestamp = start.addingTimeInterval(Double(sampleIndex) * 0.5)
+            viewModel.ingestSample(hostID: host.id, timestamp: timestamp, latencyMS: Double(sampleIndex))
+        }
+
+        let rows = viewModel.recentResults(for: host.id, limit: nil)
+        XCTAssertEqual(rows.count, 3_600)
+        XCTAssertEqual(rows.first?.latencyMS, 3_999)
+        XCTAssertEqual(rows.last?.latencyMS, 400)
+    }
+
     private func makeHosts() -> [PingScope.Host] {
         [
             PingScope.Host(name: "Google", address: "8.8.8.8"),
