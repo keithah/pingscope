@@ -7,8 +7,36 @@ struct PingScopeApp: App {
 
     var body: some Scene {
         Settings {
-            DisplaySettingsView()
+            SettingsTabView()
         }
+    }
+}
+
+struct SettingsTabView: View {
+    @State private var selectedTab = 0
+
+    var body: some View {
+        TabView(selection: $selectedTab) {
+            HostSettingsView()
+                .tabItem {
+                    Label("Hosts", systemImage: "server.rack")
+                }
+                .tag(0)
+
+            NotificationSettingsView()
+                .tabItem {
+                    Label("Notifications", systemImage: "bell")
+                }
+                .tag(1)
+
+            DisplaySettingsView()
+                .tabItem {
+                    Label("Display", systemImage: "display")
+                }
+                .tag(2)
+        }
+        .frame(width: 480, height: 420)
+        .padding()
     }
 }
 
@@ -51,11 +79,10 @@ struct DisplaySettingsView: View {
 
 struct SettingsPlaceholderView: View {
     var body: some View {
-        DisplaySettingsView()
+        SettingsTabView()
     }
 }
 
 #Preview {
-    DisplaySettingsView()
-        .frame(width: 360)
+    SettingsTabView()
 }
