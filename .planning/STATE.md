@@ -5,23 +5,23 @@
 See: `.planning/PROJECT.md` (updated 2026-02-13)
 
 **Core value:** Reliable, accurate ping monitoring that users can trust — no false timeouts, no stale connections, no crashes.
-**Current focus:** Phase 4 - Display Modes
+**Current focus:** Phase 5 - Visualization
 
 ## Current Position
 
-Phase: 4 of 6 (Display Modes)
-Plan: 4 of 5 in current phase
-Status: In progress
-Last activity: 2026-02-14 - Completed 04-04-PLAN.md
+Phase: 4 of 6 (Display Modes) - COMPLETE
+Plan: 5 of 5 in phase 4
+Status: Phase 4 complete, ready for Phase 5 planning
+Last activity: 2026-02-15 - Completed 04-05-PLAN.md (human verification)
 
-Progress: [█████████░] 91%
+Progress: [████████░░] 67% (4 of 6 phases complete)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 20
+- Total plans completed: 22
 - Average duration: 2 min
-- Total execution time: 0.79 hours
+- Total execution time: 0.85 hours
 
 **By Phase:**
 
@@ -30,10 +30,10 @@ Progress: [█████████░] 91%
 | 1. Foundation | 4 | 4 | 2 min |
 | 2. Menu Bar & State | 4 | 4 | 3 min |
 | 3. Host Monitoring | 9 | 9 | 2 min |
-| 4. Display Modes | 3 | 5 | 3 min |
+| 4. Display Modes | 5 | 5 | 3 min |
 
 **Recent Trend:**
-- Last 5 plans: 03-09 (2 min), 03-08 (3 min), 04-01 (2 min), 04-03 (5 min), 04-04 (6 min)
+- Last 5 plans: 04-01 (2 min), 04-03 (5 min), 04-04 (6 min), 04-05 (3 min)
 - Trend: Stable
 
 *Updated after each plan completion*
@@ -101,6 +101,7 @@ Recent decisions affecting current work:
 - (04-04): Delegate status-item open/close through DisplayModeCoordinator so mode and shell toggles re-anchor active presentation consistently
 - (04-04): Bind settings display toggles to menuBar.mode persisted keys and route writes through AppDelegate runtime setters
 - (04-04): Preserve display selected host/time range across compact/full switches by reusing a single app-lifecycle DisplayViewModel
+- (04-05): Host pill status indicators derive from most recent ping result per host instead of hardcoded green
 
 ### Pending Todos
 
@@ -112,6 +113,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-02-14T18:55:43Z
-Stopped at: Completed 04-04-PLAN.md
+Last session: 2026-02-15T09:15:00Z
+Stopped at: Completed Phase 4 (Display Modes)
 Resume file: None

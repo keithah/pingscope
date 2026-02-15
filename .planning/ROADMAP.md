@@ -13,7 +13,7 @@ PingMonitor is a macOS menu bar network monitoring app rewritten from a monolith
 - [x] **Phase 1: Foundation** - Async patterns and connection lifecycle management
 - [x] **Phase 2: Menu Bar & State** - Menu bar display, interaction, and state management
 - [x] **Phase 3: Host Monitoring** - Multi-host support, ping methods, and configuration
-- [ ] **Phase 4: Display Modes** - Full view, compact view, and floating window
+- [x] **Phase 4: Display Modes** - Full view, compact view, and floating window
 - [ ] **Phase 5: Visualization** - Latency graph, history table, and statistics
 - [ ] **Phase 6: Notifications & Settings** - Alert system and persistent configuration
 
@@ -88,11 +88,11 @@ Plans:
 **Plans**: 5 plans
 
 Plans:
-- [ ] 04-01-PLAN.md — Define display-mode persistence contracts and preference store
-- [ ] 04-02-PLAN.md — Build full/compact display views and shared display view model
-- [ ] 04-03-PLAN.md — Implement popover/floating coordinator with anchor and drag-handle behavior
-- [ ] 04-04-PLAN.md — Integrate display mode runtime wiring, settings toggles, and smoke tests
-- [ ] 04-05-PLAN.md — Human verification checkpoint for DISP-01 through DISP-06
+- [x] 04-01-PLAN.md — Define display-mode persistence contracts and preference store
+- [x] 04-02-PLAN.md — Build full/compact display views and shared display view model
+- [x] 04-03-PLAN.md — Implement popover/floating coordinator with anchor and drag-handle behavior
+- [x] 04-04-PLAN.md — Integrate display mode runtime wiring, settings toggles, and smoke tests
+- [x] 04-05-PLAN.md — Human verification checkpoint for DISP-01 through DISP-06
 
 ### Phase 5: Visualization
 **Goal**: Users can see latency trends via graph and review ping history with statistics.
@@ -133,7 +133,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6
 | 1. Foundation | 4/4 | Complete | 2026-02-14 |
 | 2. Menu Bar & State | 4/4 | Complete | 2026-02-14 |
 | 3. Host Monitoring | 9/9 | Complete | 2026-02-14 |
-| 4. Display Modes | 0/5 | Not started | - |
+| 4. Display Modes | 5/5 | Complete | 2026-02-15 |
 | 5. Visualization | 0/? | Not started | - |
 | 6. Notifications & Settings | 0/? | Not started | - |
 

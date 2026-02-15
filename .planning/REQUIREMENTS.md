@@ -42,12 +42,12 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### Display Modes
 
-- [ ] **DISP-01**: Full view mode (450x500) with host tabs, graph, history
-- [ ] **DISP-02**: Compact view mode (280x220) with condensed display
-- [ ] **DISP-03**: Toggle between full and compact modes
-- [ ] **DISP-04**: Stay-on-top floating window option
-- [ ] **DISP-05**: Floating window is borderless and movable
-- [ ] **DISP-06**: Window positions near menu bar icon when opened
+- [x] **DISP-01**: Full view mode (450x500) with host tabs, graph, history
+- [x] **DISP-02**: Compact view mode (280x220) with condensed display
+- [x] **DISP-03**: Toggle between full and compact modes
+- [x] **DISP-04**: Stay-on-top floating window option
+- [x] **DISP-05**: Floating window is borderless and movable
+- [x] **DISP-06**: Window positions near menu bar icon when opened
 
 ### Notifications
 
@@ -147,12 +147,12 @@ Which phases cover which requirements. Updated during roadmap creation.
 | HOST-08 | Phase 3 | Complete |
 | HOST-09 | Phase 3 | Complete |
 | HOST-10 | Phase 3 | Complete |
-| DISP-01 | Phase 4 | Pending |
-| DISP-02 | Phase 4 | Pending |
-| DISP-03 | Phase 4 | Pending |
-| DISP-04 | Phase 4 | Pending |
-| DISP-05 | Phase 4 | Pending |
-| DISP-06 | Phase 4 | Pending |
+| DISP-01 | Phase 4 | Complete |
+| DISP-02 | Phase 4 | Complete |
+| DISP-03 | Phase 4 | Complete |
+| DISP-04 | Phase 4 | Complete |
+| DISP-05 | Phase 4 | Complete |
+| DISP-06 | Phase 4 | Complete |
 | VIS-01 | Phase 5 | Pending |
 | VIS-02 | Phase 5 | Pending |
 | VIS-03 | Phase 5 | Pending |
