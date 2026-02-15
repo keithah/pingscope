@@ -36,7 +36,7 @@ final class DisplayViewModel: ObservableObject {
     init(
         preferencesStore: DisplayPreferencesStore = DisplayPreferencesStore(),
         initialMode: DisplayMode = .full,
-        sampleBufferLimit: Int = 360
+        sampleBufferLimit: Int = 3_600
     ) {
         self.preferencesStore = preferencesStore
         displayMode = initialMode
