@@ -17,7 +17,8 @@ let package = Package(
         .executableTarget(
             name: "PingScope",
             dependencies: [],
-            path: "Sources/PingScope"
+            path: "Sources/PingScope",
+            resources: [.process("Resources")]
         ),
         .testTarget(
             name: "PingScopeTests",
