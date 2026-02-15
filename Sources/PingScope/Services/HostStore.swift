@@ -121,6 +121,12 @@ actor HostStore {
         persistHosts()
     }
 
+    func resetToDefaults() {
+        hosts = Host.defaults
+        gatewayHost = nil
+        persistHosts()
+    }
+
     func isValidHost(_ host: Host) -> Bool {
         !host.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
             !host.address.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&

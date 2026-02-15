@@ -33,4 +33,9 @@ final class ModePreferenceStore {
     func setStayOnTopEnabled(_ isEnabled: Bool) {
         isStayOnTopEnabled = isEnabled
     }
+
+    func reset() {
+        isCompactModeEnabled = false
+        isStayOnTopEnabled = false
+    }
 }

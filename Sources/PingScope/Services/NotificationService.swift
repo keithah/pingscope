@@ -2,9 +2,13 @@ import Foundation
 import UserNotifications
 
 actor NotificationService {
-    private let center = UNUserNotificationCenter.current()
     private let preferencesStore: NotificationPreferencesStore
     private var authorizationStatus: UNAuthorizationStatus = .notDetermined
+
+    // UNUserNotificationCenter asserts/crashes when invoked from a non-bundled SwiftPM executable
+    // (Bundle.main.bundleIdentifier is nil). Keep this lazy and guarded so `swift run` doesn't
+    // crash; notifications will be disabled until running as a proper `.app` bundle.
+    private var center: UNUserNotificationCenter? = nil
 
     private var alertStates: [UUID: HostAlertState] = [:]
     private var previousGatewayIP: String? = nil
@@ -15,7 +19,30 @@ actor NotificationService {
         self.preferencesStore = preferencesStore
     }
 
+    private func notificationCenterIfAvailable() -> UNUserNotificationCenter? {
+        if let center {
+            return center
+        }
+
+        // When launched via `swift run` / `.build/debug/PingScope`, Bundle.main has no identifier.
+        // Calling `UNUserNotificationCenter.current()` in that environment can crash.
+        guard let bundleIdentifier = Bundle.main.bundleIdentifier, !bundleIdentifier.isEmpty else {
+#if DEBUG
+            print("[Notifications] Disabled: no Bundle.main.bundleIdentifier (run via an .app bundle to enable)")
+#endif
+            return nil
+        }
+
+        let created = UNUserNotificationCenter.current()
+        center = created
+        return created
+    }
+
     func requestAuthorization() async -> Bool {
+        guard let center = notificationCenterIfAvailable() else {
+            return false
+        }
+
         do {
             let granted = try await center.requestAuthorization(options: [.alert, .sound])
             _ = await checkAuthorizationStatus()
@@ -27,6 +54,11 @@ actor NotificationService {
     }
 
     func checkAuthorizationStatus() async -> UNAuthorizationStatus {
+        guard let center = notificationCenterIfAvailable() else {
+            authorizationStatus = .notDetermined
+            return authorizationStatus
+        }
+
         let settings = await center.notificationSettings()
         authorizationStatus = settings.authorizationStatus
         return authorizationStatus
@@ -166,6 +198,10 @@ actor NotificationService {
         identifier: String,
         for alertType: AlertType
     ) async throws {
+        guard let center = notificationCenterIfAvailable() else {
+            return
+        }
+
         let preferences = preferencesStore.loadPreferences()
         guard preferences.globalEnabled else {
             return
@@ -191,6 +227,10 @@ actor NotificationService {
     }
 
     func removeDeliveredNotification(identifier: String) async {
+        guard let center = notificationCenterIfAvailable() else {
+            return
+        }
+
         center.removeDeliveredNotifications(withIdentifiers: [identifier])
     }
 

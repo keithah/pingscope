@@ -36,6 +36,10 @@ final class DisplayPreferencesStore {
         userDefaults.set(data, forKey: preferencesKey)
     }
 
+    func reset() {
+        userDefaults.removeObject(forKey: preferencesKey)
+    }
+
     var sharedState: DisplaySharedState {
         get { loadPreferences().shared }
         set {

@@ -43,8 +43,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         healthTracker: HostHealthTracker()
     )
 
-    private let notificationService = NotificationService(
-        preferencesStore: NotificationPreferencesStore()
+    private let notificationPreferencesStore = NotificationPreferencesStore()
+    private lazy var notificationService = NotificationService(
+        preferencesStore: notificationPreferencesStore
     )
     private var previousGatewayIP: String? = nil
     private var latestHostUpStates: [UUID: Bool] = [:]
@@ -58,6 +59,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var cancellables: Set<AnyCancellable> = []
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        guard enforceSingleInstance() else {
+            // Bring existing instance forward and exit this one.
+            DispatchQueue.main.async {
+                NSApp.terminate(nil)
+            }
+            return
+        }
+
         NSApp.setActivationPolicy(.accessory)
 
         hostListViewModel = makeHostListViewModel()
@@ -77,6 +86,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         startGatewayMonitoring()
 
         Task {
+            let status = await notificationService.checkAuthorizationStatus()
+            guard status == .notDetermined else {
+                return
+            }
+
+            // Give the run loop a moment to settle before prompting.
+            try? await Task.sleep(for: .milliseconds(400))
+
+            // The permission prompt is system-modal; make sure we're frontmost when it appears.
+            await MainActor.run {
+                NSApp.activate(ignoringOtherApps: true)
+            }
             _ = await notificationService.requestAuthorization()
         }
 
@@ -350,19 +371,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return secondsMS + attosecondsMS
     }
 
-    private func openSettings() {
+    @objc
+    func openSettings() {
         NSApp.activate(ignoringOtherApps: true)
 
-        if NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil) {
-            return
-        }
-
+        // SwiftUI's built-in Settings scene can be unreliable for accessory/menu-bar apps
+        // launched outside of Xcode. Always use a dedicated settings window.
         if settingsWindowController == nil {
-            let hostingController = NSHostingController(rootView: SettingsPlaceholderView())
+            guard let hostListViewModel else {
+                return
+            }
+
+            let rootView = PingMonitorSettingsView(
+                hostListViewModel: hostListViewModel,
+                displayViewModel: displayViewModel,
+                notificationStore: notificationPreferencesStore,
+                onSetCompactModeEnabled: { [weak self] isEnabled in
+                    self?.setCompactModeEnabled(isEnabled)
+                },
+                onSetStayOnTopEnabled: { [weak self] isEnabled in
+                    self?.setStayOnTopEnabled(isEnabled)
+                },
+                onResetAll: { [weak self] in
+                    self?.resetToDefaults()
+                },
+                onClose: { [weak self] in
+                    self?.settingsWindowController?.close()
+                }
+            )
+
+            let hostingController = NSHostingController(rootView: rootView)
             let window = NSWindow(contentViewController: hostingController)
-            window.title = "Settings"
-            window.styleMask = [.titled, .closable, .miniaturizable]
-            window.setContentSize(NSSize(width: 420, height: 260))
+            window.title = "PingMonitor Settings"
+            window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
+            window.setContentSize(NSSize(width: 560, height: 660))
+            window.isReleasedWhenClosed = false
+            window.center()
             settingsWindowController = NSWindowController(window: window)
         }
 
@@ -370,9 +414,54 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         settingsWindowController?.window?.makeKeyAndOrderFront(nil)
     }
 
+    private func resetToDefaults() {
+        // App/display preferences
+        modePreferenceStore.reset()
+        displayPreferencesStore.reset()
+        notificationPreferencesStore.reset()
+        _ = StartOnLaunchService.setEnabled(false)
+
+        // Apply mode toggles immediately in the running UI
+        setCompactModeEnabled(false)
+        setStayOnTopEnabled(false)
+
+        // Restore display section defaults
+        displayViewModel.setShowsMonitoredHosts(true)
+        displayViewModel.setShowsHistorySummary(false)
+        displayViewModel.setGraphVisible(true, for: .full)
+        displayViewModel.setHistoryVisible(true, for: .full)
+        displayViewModel.setTimeRange(.fiveMinutes)
+
+        // Reset hosts
+        Task { [weak self] in
+            guard let self else { return }
+            await self.runtime.hostStore.resetToDefaults()
+            await self.refreshHostsAndScheduler()
+        }
+    }
+
     @objc
     private func quitApp() {
         NSApp.terminate(nil)
+    }
+
+    private func enforceSingleInstance() -> Bool {
+        guard let bundleIdentifier = Bundle.main.bundleIdentifier, !bundleIdentifier.isEmpty else {
+            // When launched via a non-bundled SwiftPM executable, there is no bundle identifier.
+            // Don't attempt to enforce single-instance in that case.
+            return true
+        }
+
+        let currentPID = ProcessInfo.processInfo.processIdentifier
+        let others = NSRunningApplication.runningApplications(withBundleIdentifier: bundleIdentifier)
+            .filter { $0.processIdentifier != currentPID }
+
+        guard let existing = others.first else {
+            return true
+        }
+
+        existing.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
+        return false
     }
 
     func setCompactModeEnabled(_ isEnabled: Bool) {

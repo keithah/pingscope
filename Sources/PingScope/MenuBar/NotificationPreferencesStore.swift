@@ -36,6 +36,10 @@ final class NotificationPreferencesStore {
         userDefaults.set(data, forKey: preferencesKey)
     }
 
+    func reset() {
+        userDefaults.removeObject(forKey: preferencesKey)
+    }
+
     var globalEnabled: Bool {
         get { loadPreferences().globalEnabled }
         set {

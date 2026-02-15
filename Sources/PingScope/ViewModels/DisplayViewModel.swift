@@ -27,6 +27,8 @@ final class DisplayViewModel: ObservableObject {
     @Published private(set) var displayMode: DisplayMode
     @Published private(set) var selectedHostID: UUID?
     @Published private(set) var selectedTimeRange: DisplayTimeRange
+    @Published private(set) var showsMonitoredHosts: Bool
+    @Published private(set) var showsHistorySummary: Bool
 
     private let preferencesStore: DisplayPreferencesStore
     private let sampleBufferLimit: Int
@@ -45,6 +47,8 @@ final class DisplayViewModel: ObservableObject {
         let shared = preferencesStore.sharedState
         selectedHostID = shared.selectedHostID
         selectedTimeRange = shared.selectedTimeRange
+        showsMonitoredHosts = shared.showsMonitoredHosts
+        showsHistorySummary = shared.showsHistorySummary
 
         modeStateByMode = [
             .full: preferencesStore.modeState(for: .full),
@@ -105,6 +109,24 @@ final class DisplayViewModel: ObservableObject {
         }
 
         selectedTimeRange = range
+        persistSharedState()
+    }
+
+    func setShowsMonitoredHosts(_ isVisible: Bool) {
+        guard showsMonitoredHosts != isVisible else {
+            return
+        }
+
+        showsMonitoredHosts = isVisible
+        persistSharedState()
+    }
+
+    func setShowsHistorySummary(_ isVisible: Bool) {
+        guard showsHistorySummary != isVisible else {
+            return
+        }
+
+        showsHistorySummary = isVisible
         persistSharedState()
     }
 
@@ -245,7 +267,9 @@ final class DisplayViewModel: ObservableObject {
     private func persistSharedState() {
         preferencesStore.sharedState = DisplaySharedState(
             selectedHostID: selectedHostID,
-            selectedTimeRange: selectedTimeRange
+            selectedTimeRange: selectedTimeRange,
+            showsMonitoredHosts: showsMonitoredHosts,
+            showsHistorySummary: showsHistorySummary
         )
     }
 

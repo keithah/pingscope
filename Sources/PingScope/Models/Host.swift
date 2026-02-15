@@ -128,6 +128,22 @@ struct Host: Sendable, Identifiable, Equatable, Codable {
         yellowThresholdMSOverride ?? globals.yellowThresholdMS
     }
 
+    func withNotificationsEnabled(_ isEnabled: Bool) -> Host {
+        Host(
+            id: id,
+            name: name,
+            address: address,
+            port: port,
+            pingMethod: pingMethod,
+            intervalOverride: intervalOverride,
+            timeout: timeoutOverride,
+            greenThresholdMSOverride: greenThresholdMSOverride,
+            yellowThresholdMSOverride: yellowThresholdMSOverride,
+            notificationsEnabled: isEnabled,
+            isDefault: isDefault
+        )
+    }
+
     private static func durationToTimeInterval(_ duration: Duration) -> TimeInterval {
         let components = duration.components
         return TimeInterval(components.seconds) + (TimeInterval(components.attoseconds) / 1_000_000_000_000_000_000)
