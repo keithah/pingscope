@@ -14,6 +14,7 @@ struct AddHostSheet: View {
                 hostDetailsSection
                 testConnectionSection
                 advancedSection
+                notificationsSection
             }
             .navigationTitle(title)
             .toolbar {
@@ -113,6 +114,12 @@ struct AddHostSheet: View {
                         .applyDecimalPadKeyboard()
                 }
             }
+        }
+    }
+
+    private var notificationsSection: some View {
+        Section("Notifications") {
+            Toggle("Enable Notifications", isOn: $viewModel.notificationsEnabled)
         }
     }
 
