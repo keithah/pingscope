@@ -20,6 +20,8 @@ final class AddHostViewModel: ObservableObject {
     @Published var port: String = ""
     @Published var pingMethod: PingMethod = .tcp
 
+    @Published var notificationsEnabled: Bool = true
+
     @Published var useCustomInterval: Bool = false
     @Published var intervalSeconds: String = ""
     @Published var useCustomTimeout: Bool = false
@@ -55,6 +57,7 @@ final class AddHostViewModel: ObservableObject {
             hostname = host.address
             displayName = host.name
             pingMethod = host.pingMethod
+            notificationsEnabled = host.notificationsEnabled
             if host.port != host.pingMethod.defaultPort {
                 port = String(host.port)
             }
@@ -126,6 +129,26 @@ final class AddHostViewModel: ObservableObject {
         onCancel()
     }
 
+    func reset() {
+        hostname = ""
+        displayName = ""
+        port = ""
+        pingMethod = .tcp
+        notificationsEnabled = true
+
+        useCustomInterval = false
+        intervalSeconds = ""
+        useCustomTimeout = false
+        timeoutSeconds = ""
+        useCustomThresholds = false
+        greenThresholdMS = ""
+        yellowThresholdMS = ""
+
+        isTesting = false
+        testResult = nil
+        showTestWarning = false
+    }
+
     private var trimmedHostname: String {
         hostname.trimmingCharacters(in: .whitespacesAndNewlines)
     }
@@ -155,6 +178,7 @@ final class AddHostViewModel: ObservableObject {
                 timeout: timeoutOverride,
                 greenThresholdMSOverride: greenOverride,
                 yellowThresholdMSOverride: yellowOverride,
+                notificationsEnabled: notificationsEnabled,
                 isDefault: false
             )
         case let .edit(existing):
@@ -168,6 +192,7 @@ final class AddHostViewModel: ObservableObject {
                 timeout: timeoutOverride,
                 greenThresholdMSOverride: greenOverride,
                 yellowThresholdMSOverride: yellowOverride,
+                notificationsEnabled: notificationsEnabled,
                 isDefault: existing.isDefault
             )
         }
