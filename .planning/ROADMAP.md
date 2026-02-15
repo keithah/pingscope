@@ -16,6 +16,7 @@ PingMonitor is a macOS menu bar network monitoring app rewritten from a monolith
 - [x] **Phase 4: Display Modes** - Full view, compact view, and floating window
 - [x] **Phase 5: Visualization** - Latency graph, history table, and statistics
 - [ ] **Phase 6: Notifications & Settings** - Alert system and persistent configuration
+- [ ] **Phase 7: Settings Focus** - Settings reliability, live-updating configuration, and end-to-end persistence
 
 ## Phase Details
 
@@ -130,6 +131,24 @@ Plans:
 - [ ] 06-05-PLAN.md — Privacy manifest and app lifecycle notification wiring
 - [ ] 06-06-PLAN.md — Human verification checkpoint for all Phase 6 requirements
 
+### Phase 7: Settings Focus
+**Goal**: Settings are reliable, native-feeling, and changes apply immediately across the running app (no restart required).
+**Depends on**: Phase 6 (Settings UI + persistence foundation)
+**Requirements**: SETT-01, SETT-02, SETT-03, SETT-04, SETT-05, SETT-06
+**Success Criteria** (what must be TRUE):
+  1. Settings opens reliably from all entry points (menu-bar context menu, in-app gear, Cmd+,)
+  2. Only one Settings window exists; repeated opens focus the existing window
+  3. Host add/edit/delete in Settings updates the running monitor immediately
+  4. Display settings toggles in Settings affect the running UI immediately
+  5. Settings persist across quit/relaunch and restore correctly
+**Plans**: 4 plans
+
+Plans:
+- [ ] 07-01-PLAN.md — Dedicated settings window + single-window behavior + command wiring
+- [ ] 07-02-PLAN.md — Use a shared HostStore (no duplicate stores) so Settings updates apply live
+- [ ] 07-03-PLAN.md — Settings persistence + reload consistency (hosts, display, notifications UI)
+- [ ] 07-04-PLAN.md — Human verification checkpoint for Settings end-to-end
+
 ## Progress
 
 **Execution Order:**
@@ -143,6 +162,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6
 | 4. Display Modes | 5/5 | Complete | 2026-02-15 |
 | 5. Visualization | 3/3 | Complete | 2026-02-15 |
 | 6. Notifications & Settings | 0/6 | Not started | - |
+| 7. Settings Focus | 0/4 | Not started | - |
 
 ---
 *Roadmap created: 2026-02-13*

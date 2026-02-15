@@ -5,23 +5,23 @@
 See: `.planning/PROJECT.md` (updated 2026-02-13)
 
 **Core value:** Reliable, accurate ping monitoring that users can trust — no false timeouts, no stale connections, no crashes.
-**Current focus:** Phase 6 - Notifications & Settings
+**Current focus:** Phase 7 - Settings Focus
 
 ## Current Position
 
-Phase: 6 of 6 (Notifications & Settings) - IN PROGRESS
-Plan: 5 of 6 in phase 6
-Status: Phase 6 in progress
-Last activity: 2026-02-15 - Completed 06-05-PLAN.md
+Phase: 7 of 7 (Settings Focus) - IN PROGRESS
+Plan: 1 of 4 in phase 7
+Status: Phase 7 in progress; Phase 6 human verification deferred
+Last activity: 2026-02-15 - Completed 07-01 (Settings window reliability + entry-point routing)
 
-Progress: [█████████░] 97% (30 of 31 plans complete)
+Progress: [█████████░] 89% (31 of 35 plans complete)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 30
+- Total plans completed: 31
 - Average duration: 2 min
-- Total execution time: 1.19 hours
+- Total execution time: 1.24 hours
 
 **By Phase:**
 
@@ -33,9 +33,10 @@ Progress: [█████████░] 97% (30 of 31 plans complete)
 | 4. Display Modes | 5 | 5 | 3 min |
 | 5. Visualization | 3 | 3 | 2 min |
 | 6. Notifications & Settings | 5 | 6 | 3 min |
+| 7. Settings Focus | 1 | 4 | 3 min |
 
 **Recent Trend:**
-- Last 5 plans: 06-01 (4 min), 06-02 (2 min), 06-03 (3 min), 06-04 (3 min), 06-05 (3 min)
+- Last 5 plans: 06-02 (2 min), 06-03 (3 min), 06-04 (3 min), 06-05 (3 min), 07-01 (3 min)
 - Trend: Stable
 
 *Updated after each plan completion*
@@ -111,6 +112,8 @@ Recent decisions affecting current work:
 - (06-04): Settings window uses a Settings-scene TabView with Hosts/Notifications/Display tabs for native Cmd+, behavior
 - (06-05): AppDelegate requests notification permission at launch and forwards scheduler/gateway events into NotificationService
 - (06-05): Added PrivacyInfo.xcprivacy and SwiftPM resource processing for App Store UserDefaults declaration
+- (07-01): Always open Settings via a dedicated NSWindowController for LSUIElement reliability
+- (07-01): Lazily initialize UNUserNotificationCenter only when running as a bundled .app
 
 ### Pending Todos
 
@@ -122,6 +125,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-02-15T20:23:40Z
-Stopped at: Completed 06-05-PLAN.md
+Last session: 2026-02-15T22:28:50Z
+Stopped at: Completed 07-01-PLAN.md
 Resume file: None
