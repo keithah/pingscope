@@ -120,6 +120,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
                     if let host = self.monitoredHosts.first(where: { $0.id == matchedHostID }) {
                         self.latestHostUpStates[matchedHostID] = isHostUp
+#if DEBUG
+                        let latencyText = result.latency.map { "\(Int(Self.durationToMilliseconds($0).rounded()))ms" } ?? "failed"
+                        print("[Notifications] Evaluating result for \(host.name): \(latencyText)")
+#endif
                         Task {
                             await self.notificationService.evaluateResult(result, for: host, isHostUp: isHostUp)
                         }
