@@ -202,7 +202,7 @@ final class DisplayModeCoordinator: NSObject, NSWindowDelegate {
         )
 
         window.level = .floating
-        window.isMovableByWindowBackground = true
+        window.isMovableByWindowBackground = false
         window.collectionBehavior = [.transient, .moveToActiveSpace, .fullScreenNone]
         window.isReleasedWhenClosed = false
         window.hasShadow = true
