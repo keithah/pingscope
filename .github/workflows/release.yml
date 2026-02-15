@@ -1,0 +1,89 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    name: Build and Release
+    runs-on: self-hosted
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build Release
+        run: |
+          swift build -c release
+
+      - name: Create App Bundle
+        run: |
+          APP_NAME="PingMonitor"
+          VERSION="${GITHUB_REF_NAME#v}"
+          BUILD_DIR=".build/release"
+          BUNDLE_DIR="$BUILD_DIR/$APP_NAME.app"
+
+          # Create app bundle structure
+          mkdir -p "$BUNDLE_DIR/Contents/MacOS"
+          mkdir -p "$BUNDLE_DIR/Contents/Resources"
+
+          # Copy executable
+          cp "$BUILD_DIR/PingMonitor" "$BUNDLE_DIR/Contents/MacOS/"
+
+          # Create Info.plist
+          cat > "$BUNDLE_DIR/Contents/Info.plist" << PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>CFBundleExecutable</key>
+              <string>PingMonitor</string>
+              <key>CFBundleIdentifier</key>
+              <string>com.hadm.pingmonitor</string>
+              <key>CFBundleName</key>
+              <string>PingMonitor</string>
+              <key>CFBundleDisplayName</key>
+              <string>PingMonitor</string>
+              <key>CFBundleVersion</key>
+              <string>$VERSION</string>
+              <key>CFBundleShortVersionString</key>
+              <string>$VERSION</string>
+              <key>CFBundlePackageType</key>
+              <string>APPL</string>
+              <key>LSMinimumSystemVersion</key>
+              <string>13.0</string>
+              <key>LSUIElement</key>
+              <true/>
+              <key>NSHighResolutionCapable</key>
+              <true/>
+          </dict>
+          </plist>
+          PLIST
+
+          # Create zip for release
+          cd "$BUILD_DIR"
+          zip -r "PingMonitor-$VERSION.zip" "$APP_NAME.app"
+          echo "ASSET_PATH=$BUILD_DIR/PingMonitor-$VERSION.zip" >> $GITHUB_ENV
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          name: PingMonitor v${{ env.VERSION }}
+          body: |
+            ## PingMonitor v${{ env.VERSION }}
+
+            ### Installation
+            1. Download `PingMonitor-${{ env.VERSION }}.zip`
+            2. Unzip and drag `PingMonitor.app` to Applications
+            3. Launch from Applications
+
+            ### Requirements
+            - macOS 13.0 (Ventura) or later
+          files: ${{ env.ASSET_PATH }}
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
