@@ -422,7 +422,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Restore display section defaults
         displayViewModel.setShowsMonitoredHosts(true)
-        displayViewModel.setShowsHistorySummary(false)
+        displayViewModel.setShowsHistorySummary(true)
         displayViewModel.setGraphVisible(true, for: .full)
         displayViewModel.setHistoryVisible(true, for: .full)
         displayViewModel.setTimeRange(.fiveMinutes)

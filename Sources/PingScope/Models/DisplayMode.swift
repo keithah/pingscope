@@ -24,22 +24,12 @@ enum DisplayTimeRange: String, CaseIterable, Codable, Sendable {
 }
 
 struct DisplaySharedState: Codable, Sendable, Equatable {
-    var selectedHostID: UUID?
-    var selectedTimeRange: DisplayTimeRange
-    var showsMonitoredHosts: Bool
-    var showsHistorySummary: Bool
-
-    init(
-        selectedHostID: UUID? = nil,
-        selectedTimeRange: DisplayTimeRange = .fiveMinutes,
-        showsMonitoredHosts: Bool = true,
-        showsHistorySummary: Bool = false
-    ) {
-        self.selectedHostID = selectedHostID
-        self.selectedTimeRange = selectedTimeRange
-        self.showsMonitoredHosts = showsMonitoredHosts
-        self.showsHistorySummary = showsHistorySummary
-    }
+    // Defaults are declared on properties so decoding older payloads (missing keys)
+    // does not fail and can fall back predictably.
+    var selectedHostID: UUID? = nil
+    var selectedTimeRange: DisplayTimeRange = .fiveMinutes
+    var showsMonitoredHosts: Bool = true
+    var showsHistorySummary: Bool = true
 }
 
 struct DisplayFrameData: Codable, Sendable, Equatable {
