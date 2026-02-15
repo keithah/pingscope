@@ -255,33 +255,64 @@ struct DisplayGraphView: View {
 
     private func latencyBounds(_ points: [DisplayViewModel.GraphPoint]) -> ClosedRange<Double> {
         let values = points.map(\.latencyMS)
-        guard let maxVal = values.max() else {
+        guard let minVal = values.min(), let maxVal = values.max() else {
             return 0 ... 100
         }
 
-        // Always start from 0 and round up to nice number
-        let niceMax = ceilToNice(maxVal * 1.1)
-        return 0 ... niceMax
-    }
+        // Use a "nice" tick step (1/2/2.5/5 * 10^n) based on the visible data.
+        // This avoids jumping from ~1000ms to a 2000ms axis ceiling just to keep
+        // the top label "round".
+        let range = max(0.001, maxVal - minVal)
+        let rawStep = range / Double(max(1, gridLineCount))
+        let step = max(1, niceNumber(rawStep, round: true))
 
-    private func ceilToNice(_ value: Double) -> Double {
-        if value <= 0 { return 100 }
+        var lower = floor(minVal / step) * step
+        var upper = ceil(maxVal / step) * step
 
-        let magnitude = pow(10, floor(log10(value)))
-        let normalized = value / magnitude
-
-        let niceNormalized: Double
-        if normalized <= 1 {
-            niceNormalized = 1
-        } else if normalized <= 2 {
-            niceNormalized = 2
-        } else if normalized <= 5 {
-            niceNormalized = 5
-        } else {
-            niceNormalized = 10
+        if lower == upper {
+            upper = lower + step
         }
 
-        return niceNormalized * magnitude
+        lower = max(0, lower)
+        upper = max(lower + step, upper)
+
+        return lower ... upper
+    }
+
+    private func niceNumber(_ x: Double, round: Bool) -> Double {
+        guard x > 0 else { return 1 }
+
+        let exp = floor(log10(x))
+        let f = x / pow(10, exp)
+
+        let nf: Double
+        if round {
+            if f < 1.5 {
+                nf = 1
+            } else if f < 2.25 {
+                nf = 2
+            } else if f < 3.5 {
+                nf = 2.5
+            } else if f < 7.5 {
+                nf = 5
+            } else {
+                nf = 10
+            }
+        } else {
+            if f <= 1 {
+                nf = 1
+            } else if f <= 2 {
+                nf = 2
+            } else if f <= 2.5 {
+                nf = 2.5
+            } else if f <= 5 {
+                nf = 5
+            } else {
+                nf = 10
+            }
+        }
+
+        return nf * pow(10, exp)
     }
 }
 
