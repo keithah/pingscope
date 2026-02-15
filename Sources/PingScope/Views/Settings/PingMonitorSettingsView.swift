@@ -84,7 +84,6 @@ struct PingMonitorSettingsView: View {
             presenting: hostListViewModel.hostToDelete,
             actions: { host in
                 Button("Remove", role: .destructive) {
-                    hostListViewModel.triggerDelete(host)
                     hostListViewModel.confirmDelete()
                 }
                 Button("Cancel", role: .cancel) {}
