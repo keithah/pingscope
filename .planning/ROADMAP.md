@@ -14,7 +14,7 @@ PingMonitor is a macOS menu bar network monitoring app rewritten from a monolith
 - [x] **Phase 2: Menu Bar & State** - Menu bar display, interaction, and state management
 - [x] **Phase 3: Host Monitoring** - Multi-host support, ping methods, and configuration
 - [x] **Phase 4: Display Modes** - Full view, compact view, and floating window
-- [ ] **Phase 5: Visualization** - Latency graph, history table, and statistics
+- [x] **Phase 5: Visualization** - Latency graph, history table, and statistics
 - [ ] **Phase 6: Notifications & Settings** - Alert system and persistent configuration
 
 ## Phase Details
@@ -106,9 +106,9 @@ Plans:
 **Plans**: 3 plans
 
 Plans:
-- [ ] 05-01-PLAN.md — Increase in-session history retention to 3600 samples per host
-- [ ] 05-02-PLAN.md — Polish graph styling (Activity Monitor-like gradient fill + per-sample markers)
-- [ ] 05-03-PLAN.md — Human verification checkpoint for visualization polish
+- [x] 05-01-PLAN.md — Increase in-session history retention to 3600 samples per host
+- [x] 05-02-PLAN.md — Polish graph styling (Activity Monitor-like gradient fill + per-sample markers)
+- [x] 05-03-PLAN.md — Human verification checkpoint for visualization polish
 
 ### Phase 6: Notifications & Settings
 **Goal**: Users receive intelligent alerts and all settings persist across app restarts.
@@ -120,10 +120,15 @@ Plans:
   3. User can configure notification settings per-host and globally
   4. Settings panel allows host, notification, and display configuration
   5. All settings persist via UserDefaults and survive app restart
-**Plans**: TBD
+**Plans**: 6 plans
 
 Plans:
-- [ ] 06-01: TBD
+- [ ] 06-01-PLAN.md — NotificationService actor, AlertType enum, and NotificationPreferencesStore
+- [ ] 06-02-PLAN.md — Alert detection logic for all 7 alert types with cooldown
+- [ ] 06-03-PLAN.md — Per-host notification settings in Host model and add/edit sheet
+- [ ] 06-04-PLAN.md — Settings TabView with Host, Notification, and Display tabs
+- [ ] 06-05-PLAN.md — Privacy manifest and app lifecycle notification wiring
+- [ ] 06-06-PLAN.md — Human verification checkpoint for all Phase 6 requirements
 
 ## Progress
 
@@ -136,8 +141,8 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6
 | 2. Menu Bar & State | 4/4 | Complete | 2026-02-14 |
 | 3. Host Monitoring | 9/9 | Complete | 2026-02-14 |
 | 4. Display Modes | 5/5 | Complete | 2026-02-15 |
-| 5. Visualization | 0/3 | Not started | - |
-| 6. Notifications & Settings | 0/? | Not started | - |
+| 5. Visualization | 3/3 | Complete | 2026-02-15 |
+| 6. Notifications & Settings | 0/6 | Not started | - |
 
 ---
 *Roadmap created: 2026-02-13*
