@@ -6,7 +6,6 @@ struct DisplayGraphView: View {
     private let gridLineCount = 4
     private let yAxisWidth: CGFloat = 36
     private let plotPadding: CGFloat = 8
-    private let dotRadius: CGFloat = 2
 
     var body: some View {
         GeometryReader { proxy in
@@ -173,22 +172,37 @@ struct DisplayGraphView: View {
 
     private func dataPointDots(in size: CGSize, xBounds: ClosedRange<TimeInterval>, yBounds: ClosedRange<Double>) -> some View {
         Canvas { context, _ in
-            // Only show dots if there aren't too many points
-            let showDots = points.count <= 60
+            let count = points.count
+            let (radius, opacity): (CGFloat, Double)
 
-            guard showDots else { return }
+            switch count {
+            case 0 ..< 80:
+                radius = 2.0
+                opacity = 0.9
+            case 80 ..< 300:
+                radius = 1.6
+                opacity = 0.65
+            case 300 ..< 1_000:
+                radius = 1.2
+                opacity = 0.45
+            default:
+                radius = 0.9
+                opacity = 0.3
+            }
+
+            let dotColor = Color.accentColor.opacity(opacity)
 
             for point in points {
                 let position = positionForPoint(point, in: size, xBounds: xBounds, yBounds: yBounds)
 
                 // Simple dot
                 let dotRect = CGRect(
-                    x: position.x - dotRadius,
-                    y: position.y - dotRadius,
-                    width: dotRadius * 2,
-                    height: dotRadius * 2
+                    x: position.x - radius,
+                    y: position.y - radius,
+                    width: radius * 2,
+                    height: radius * 2
                 )
-                context.fill(Circle().path(in: dotRect), with: .color(Color.accentColor))
+                context.fill(Circle().path(in: dotRect), with: .color(dotColor))
             }
         }
     }
