@@ -108,11 +108,15 @@ final class StatusItemController: NSObject {
     }
 
     private func statusSymbolImage(for status: MenuBarStatus) -> NSImage? {
-        let diameter: CGFloat = 6
-        let image = NSImage(size: NSSize(width: diameter, height: diameter))
+        let diameter: CGFloat = 8
+        // Offset dot to right to center over "m" and part of 2nd numeral
+        let imageWidth: CGFloat = 26
+        let xOffset: CGFloat = 13
+        let imageHeight: CGFloat = diameter + 4 // Extra padding at top to lower the dot
+        let image = NSImage(size: NSSize(width: imageWidth, height: imageHeight))
         image.lockFocus()
         statusColor(for: status).setFill()
-        NSBezierPath(ovalIn: NSRect(x: 0, y: 0, width: diameter, height: diameter)).fill()
+        NSBezierPath(ovalIn: NSRect(x: xOffset, y: 0, width: diameter, height: diameter)).fill()
         image.unlockFocus()
         image.isTemplate = false
         return image
@@ -127,7 +131,8 @@ final class StatusItemController: NSObject {
             attributes: [
                 .font: NSFont.monospacedDigitSystemFont(ofSize: 9, weight: .medium),
                 .foregroundColor: NSColor.labelColor,
-                .paragraphStyle: paragraphStyle
+                .paragraphStyle: paragraphStyle,
+                .baselineOffset: -5
             ]
         )
     }
@@ -148,10 +153,7 @@ final class StatusItemController: NSObject {
 
 struct StatusItemTitleFormatter {
     func titleText(for displayText: String, isCompactModeEnabled: Bool) -> String {
-        guard isCompactModeEnabled else {
-            return displayText
-        }
-
-        return displayText.replacingOccurrences(of: " ms", with: "")
+        // Always format as "26ms" (no space)
+        return displayText.replacingOccurrences(of: " ms", with: "ms")
     }
 }

@@ -12,7 +12,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         preferencesStore: displayPreferencesStore,
         initialMode: modePreferenceStore.displayMode
     )
-    private lazy var displayContentFactory = DisplayContentFactory(viewModel: displayViewModel)
+    private var displayContentFactory: DisplayContentFactory {
+        DisplayContentFactory(
+            viewModel: displayViewModel,
+            menuActions: DisplayMenuActions(
+                onToggleCompact: { [weak self] in
+                    guard let self else { return }
+                    self.setCompactModeEnabled(!self.runtime.menuBarViewModel.isCompactModeEnabled)
+                },
+                onToggleStayOnTop: { [weak self] in
+                    guard let self else { return }
+                    self.setStayOnTopEnabled(!self.runtime.menuBarViewModel.isStayOnTopEnabled)
+                },
+                onOpenSettings: { [weak self] in
+                    self?.openSettings()
+                },
+                onQuit: { [weak self] in
+                    self?.quitApp()
+                },
+                isCompactEnabled: runtime.menuBarViewModel.isCompactModeEnabled,
+                isStayOnTopEnabled: runtime.menuBarViewModel.isStayOnTopEnabled
+            )
+        )
+    }
     private lazy var displayCoordinator = DisplayModeCoordinator(
         displayPreferencesStore: displayPreferencesStore
     )

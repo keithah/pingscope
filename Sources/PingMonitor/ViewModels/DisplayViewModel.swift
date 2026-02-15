@@ -16,6 +16,7 @@ final class DisplayViewModel: ObservableObject {
     struct RecentResultRow: Equatable {
         let timestamp: Date
         let latencyMS: Double?
+        let hostName: String?
 
         var isSuccess: Bool {
             latencyMS != nil
@@ -119,6 +120,16 @@ final class DisplayViewModel: ObservableObject {
         }
     }
 
+    func toggleGraphVisible(for mode: DisplayMode? = nil) {
+        let targetMode = mode ?? displayMode
+        setGraphVisible(!modeState(for: targetMode).graphVisible, for: targetMode)
+    }
+
+    func toggleHistoryVisible(for mode: DisplayMode? = nil) {
+        let targetMode = mode ?? displayMode
+        setHistoryVisible(!modeState(for: targetMode).historyVisible, for: targetMode)
+    }
+
     func modeState(for mode: DisplayMode) -> DisplayModeState {
         modeStateByMode[mode] ?? .default(for: mode)
     }
@@ -140,6 +151,9 @@ final class DisplayViewModel: ObservableObject {
         }
 
         samplesByHostID[hostID] = samples
+
+        // Notify observers so graph and results views update with new data.
+        objectWillChange.send()
     }
 
     func graphPoints(for hostID: UUID?) -> [GraphPoint] {
@@ -154,10 +168,12 @@ final class DisplayViewModel: ObservableObject {
     }
 
     func recentResults(for hostID: UUID?, limit: Int? = nil) -> [RecentResultRow] {
+        let hostName = hostID.flatMap { id in hosts.first { $0.id == id }?.name }
+
         let rows = filteredSamples(for: hostID)
             .reversed()
             .map {
-                RecentResultRow(timestamp: $0.timestamp, latencyMS: $0.latencyMS)
+                RecentResultRow(timestamp: $0.timestamp, latencyMS: $0.latencyMS, hostName: hostName)
             }
 
         guard let limit else {
@@ -189,6 +205,9 @@ final class DisplayViewModel: ObservableObject {
 
         modeStateByMode[mode] = state
         preferencesStore.setModeState(state, for: mode)
+
+        // Notify observers so SwiftUI re-renders collapsed/expanded sections.
+        objectWillChange.send()
     }
 
     private func persistSharedState() {

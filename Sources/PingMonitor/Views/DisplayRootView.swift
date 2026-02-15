@@ -4,6 +4,7 @@ struct DisplayRootView: View {
     @ObservedObject var viewModel: DisplayViewModel
     let mode: DisplayMode
     let showsFloatingChrome: Bool
+    var menuActions: DisplayMenuActions = DisplayMenuActions()
 
     private let cornerRadius: CGFloat = 14
 
@@ -15,7 +16,8 @@ struct DisplayRootView: View {
 
             modeView
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .frame(minWidth: mode == .full ? 350 : 240)
+        .fixedSize(horizontal: false, vertical: true)
         .background(panelShape.fill(Color(nsColor: .windowBackgroundColor)))
         .clipShape(panelShape)
         .overlay(panelShape.strokeBorder(Color.black.opacity(0.18), lineWidth: 1))
@@ -25,9 +27,25 @@ struct DisplayRootView: View {
     private var modeView: some View {
         switch mode {
         case .full:
-            FullModeView(viewModel: viewModel)
+            FullModeView(
+                viewModel: viewModel,
+                onToggleCompact: menuActions.onToggleCompact,
+                onToggleStayOnTop: menuActions.onToggleStayOnTop,
+                onOpenSettings: menuActions.onOpenSettings,
+                onQuit: menuActions.onQuit,
+                isCompactEnabled: menuActions.isCompactEnabled,
+                isStayOnTopEnabled: menuActions.isStayOnTopEnabled
+            )
         case .compact:
-            CompactModeView(viewModel: viewModel)
+            CompactModeView(
+                viewModel: viewModel,
+                onToggleCompact: menuActions.onToggleCompact,
+                onToggleStayOnTop: menuActions.onToggleStayOnTop,
+                onOpenSettings: menuActions.onOpenSettings,
+                onQuit: menuActions.onQuit,
+                isCompactEnabled: menuActions.isCompactEnabled,
+                isStayOnTopEnabled: menuActions.isStayOnTopEnabled
+            )
         }
     }
 
@@ -36,21 +54,9 @@ struct DisplayRootView: View {
     }
 
     private var floatingHeader: some View {
-        ZStack {
-            // Make the entire header area draggable (handle-only movement) so moving is discoverable.
-            WindowDragHandleView()
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-
-            HStack {
-                Spacer()
-                Text(mode == .compact ? "Compact" : "Full")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .padding(.horizontal, 12)
-        .padding(.top, 8)
-        .padding(.bottom, 6)
-        .background(Color(nsColor: .windowBackgroundColor).opacity(0.92))
+        Color.clear
+            .frame(height: 12)
+            .frame(maxWidth: .infinity)
+            .background(WindowDragHandleView())
     }
 }
