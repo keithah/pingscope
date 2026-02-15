@@ -57,7 +57,7 @@ struct FullModeView: View {
                         } label: {
                             HStack(spacing: 6) {
                                 Circle()
-                                    .fill(Color.green)
+                                    .fill(statusColor(for: viewModel.hostStatus(for: host.id)))
                                     .frame(width: 8, height: 8)
                                 Text(host.name)
                                     .lineLimit(1)
@@ -73,6 +73,19 @@ struct FullModeView: View {
                     }
                 }
             }
+        }
+    }
+
+    private func statusColor(for status: DisplayViewModel.HostStatus) -> Color {
+        switch status {
+        case .good:
+            return .green
+        case .warning:
+            return .yellow
+        case .poor, .failure:
+            return .red
+        case .unknown:
+            return .gray
         }
     }
 

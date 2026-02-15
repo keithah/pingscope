@@ -183,6 +183,38 @@ final class DisplayViewModel: ObservableObject {
         return Array(rows.prefix(max(0, limit)))
     }
 
+    /// Returns a status indicator for the host based on most recent ping result.
+    /// - Green: <= 80ms latency
+    /// - Yellow: <= 150ms latency
+    /// - Red: > 150ms or failure (nil latency)
+    /// - Gray: No samples yet
+    func hostStatus(for hostID: UUID) -> HostStatus {
+        guard let samples = samplesByHostID[hostID], !samples.isEmpty else {
+            return .unknown
+        }
+
+        // Use the most recent sample to determine status
+        guard let latestLatency = samples.last?.latencyMS else {
+            return .failure
+        }
+
+        if latestLatency <= 80 {
+            return .good
+        } else if latestLatency <= 150 {
+            return .warning
+        } else {
+            return .poor
+        }
+    }
+
+    enum HostStatus {
+        case good      // green: <= 80ms
+        case warning   // yellow: <= 150ms
+        case poor      // red: > 150ms
+        case failure   // red: nil latency (failed)
+        case unknown   // gray: no samples
+    }
+
     private func filteredSamples(for hostID: UUID?) -> [HostSample] {
         guard let hostID,
               let hostSamples = samplesByHostID[hostID]
