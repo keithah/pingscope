@@ -1,0 +1,279 @@
+name: Production Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version number (e.g., 2.0.0)'
+        required: true
+        default: '2.0.0'
+
+env:
+  PRODUCT_NAME: "PingScope"
+  PRODUCT_DISPLAY_NAME: "PingScope"
+  BUNDLE_ID: "com.hadm.pingscope"
+
+jobs:
+  build-and-release:
+    runs-on: self-hosted
+    timeout-minutes: 30
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Get version
+      id: version
+      run: |
+        if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+          echo "VERSION=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+        else
+          echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Import signing certificates
+      run: |
+        # Create keychain with proper settings
+        security create-keychain -p "build-keychain-pass" build.keychain || true
+        security default-keychain -s build.keychain
+        security unlock-keychain -p "build-keychain-pass" build.keychain
+        security set-keychain-settings -t 3600 -u build.keychain
+
+        # Import Developer ID Application certificate
+        echo "${{ secrets.APPLE_CERTIFICATE_P12 }}" | base64 -d > app_certificate.p12
+        echo "Importing Application certificate..."
+        security import app_certificate.p12 -k build.keychain -P "${{ secrets.CERTIFICATE_PASSWORD }}" -A
+
+        # Import Developer ID Installer certificate
+        echo "${{ secrets.APPLE_INSTALLER_P12 }}" | base64 -d > installer_certificate.p12
+        echo "Importing Installer certificate..."
+        security import installer_certificate.p12 -k build.keychain -P "${{ secrets.CERTIFICATE_PASSWORD }}" -A
+
+        # Set key partition list to allow codesign access
+        security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "build-keychain-pass" build.keychain
+
+        # Find Developer ID identities dynamically
+        echo "=== Finding Developer ID identities ==="
+        APP_SIGNING_IDENTITY=$(security find-identity -v -p codesigning build.keychain | grep "Developer ID Application" | head -1 | grep -o '"[^"]*"' | tr -d '"')
+        INSTALLER_SIGNING_IDENTITY=$(security find-identity -v -p codesigning build.keychain | grep "Developer ID Installer" | head -1 | grep -o '"[^"]*"' | tr -d '"')
+
+        if [ -z "$APP_SIGNING_IDENTITY" ]; then
+          echo "❌ Could not find Developer ID Application certificate"
+          security find-identity -v -p codesigning build.keychain
+          exit 1
+        fi
+
+        if [ -z "$INSTALLER_SIGNING_IDENTITY" ]; then
+          echo "❌ Could not find Developer ID Installer certificate"
+          security find-identity -v -p codesigning build.keychain
+          exit 1
+        fi
+
+        echo "APP_SIGNING_IDENTITY=$APP_SIGNING_IDENTITY" >> $GITHUB_ENV
+        echo "INSTALLER_SIGNING_IDENTITY=$INSTALLER_SIGNING_IDENTITY" >> $GITHUB_ENV
+        echo "✅ Using Application signing: $APP_SIGNING_IDENTITY"
+        echo "✅ Using Installer signing: $INSTALLER_SIGNING_IDENTITY"
+
+    - name: Build Release Binary
+      run: |
+        # Build release binary using Swift Package Manager
+        swift build -c release
+
+        # Verify binary exists
+        ls -la .build/release/PingScope
+
+    - name: Create App Bundle
+      run: |
+        VERSION="${{ steps.version.outputs.VERSION }}"
+
+        mkdir -p "$PRODUCT_NAME.app/Contents/MacOS"
+        mkdir -p "$PRODUCT_NAME.app/Contents/Resources"
+        cp .build/release/PingScope "$PRODUCT_NAME.app/Contents/MacOS/$PRODUCT_NAME"
+
+        # Create Info.plist
+        cat > "$PRODUCT_NAME.app/Contents/Info.plist" << EOF
+        <?xml version="1.0" encoding="UTF-8"?>
+        <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+        <plist version="1.0">
+        <dict>
+            <key>CFBundleDevelopmentRegion</key>
+            <string>en</string>
+            <key>CFBundleExecutable</key>
+            <string>$PRODUCT_NAME</string>
+            <key>CFBundleIconFile</key>
+            <string>AppIcon</string>
+            <key>CFBundleIdentifier</key>
+            <string>$BUNDLE_ID</string>
+            <key>CFBundleInfoDictionaryVersion</key>
+            <string>6.0</string>
+            <key>CFBundleName</key>
+            <string>$PRODUCT_DISPLAY_NAME</string>
+            <key>CFBundlePackageType</key>
+            <string>APPL</string>
+            <key>CFBundleShortVersionString</key>
+            <string>$VERSION</string>
+            <key>CFBundleVersion</key>
+            <string>$VERSION</string>
+            <key>LSMinimumSystemVersion</key>
+            <string>13.0</string>
+            <key>LSUIElement</key>
+            <true/>
+            <key>NSHighResolutionCapable</key>
+            <true/>
+            <key>NSSupportsAutomaticGraphicsSwitching</key>
+            <true/>
+            <key>NSRequiresAquaSystemAppearance</key>
+            <false/>
+            <key>NSNetworkVolumesUsageDescription</key>
+            <string>PingScope needs network access to perform ping operations and monitor network connectivity.</string>
+            <key>LSApplicationCategoryType</key>
+            <string>public.app-category.utilities</string>
+            <key>NSHumanReadableCopyright</key>
+            <string>Copyright © 2024-2026 Keith Herrington. All rights reserved.</string>
+        </dict>
+        </plist>
+        EOF
+
+        # Convert icon set to icns if needed
+        if [ -d "Assets.xcassets/AppIcon.appiconset" ]; then
+          iconutil -c icns Assets.xcassets/AppIcon.appiconset -o "$PRODUCT_NAME.app/Contents/Resources/AppIcon.icns" 2>/dev/null || \
+          cp Assets.xcassets/AppIcon.appiconset/icon_512x512@2x.png "$PRODUCT_NAME.app/Contents/Resources/AppIcon.icns" 2>/dev/null || true
+        fi
+
+        chmod +x "$PRODUCT_NAME.app/Contents/MacOS/$PRODUCT_NAME"
+
+    - name: Create entitlements
+      run: |
+        cat > entitlements.plist << EOF
+        <?xml version="1.0" encoding="UTF-8"?>
+        <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+        <plist version="1.0">
+        <dict>
+            <key>com.apple.security.app-sandbox</key>
+            <false/>
+            <key>com.apple.security.network.client</key>
+            <true/>
+            <key>com.apple.security.network.server</key>
+            <false/>
+            <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+            <true/>
+            <key>com.apple.security.cs.disable-library-validation</key>
+            <true/>
+        </dict>
+        </plist>
+        EOF
+
+    - name: Sign application
+      run: |
+        echo "🔐 Signing app with: $APP_SIGNING_IDENTITY"
+        codesign --force --deep --sign "$APP_SIGNING_IDENTITY" --options runtime --entitlements entitlements.plist "$PRODUCT_NAME.app"
+
+    - name: Verify code signature
+      run: |
+        echo "🔍 Verifying signature..."
+        codesign -dv --verbose=4 "$PRODUCT_NAME.app"
+        echo "🔍 Testing with spctl..."
+        spctl -a -t exec -vv "$PRODUCT_NAME.app" || echo "⚠️ App will need notarization"
+
+    - name: Create DMG
+      run: |
+        VERSION="${{ steps.version.outputs.VERSION }}"
+        echo "💿 Creating DMG..."
+        hdiutil create -volname "$PRODUCT_NAME v$VERSION" \
+          -srcfolder "$PRODUCT_NAME.app" \
+          -ov -format UDZO \
+          "$PRODUCT_NAME-$VERSION.dmg"
+
+    - name: Create PKG installer
+      run: |
+        VERSION="${{ steps.version.outputs.VERSION }}"
+        echo "📦 Creating PKG..."
+        pkgbuild --root "$PRODUCT_NAME.app" \
+          --identifier "$BUNDLE_ID" \
+          --version "$VERSION" \
+          --install-location "/Applications/$PRODUCT_NAME.app" \
+          "unsigned.pkg"
+
+    - name: Sign PKG
+      run: |
+        VERSION="${{ steps.version.outputs.VERSION }}"
+        echo "🔐 Signing PKG with: $INSTALLER_SIGNING_IDENTITY"
+        productsign --sign "$INSTALLER_SIGNING_IDENTITY" \
+          "unsigned.pkg" \
+          "$PRODUCT_NAME-$VERSION.pkg"
+
+    - name: Notarize DMG and PKG
+      run: |
+        VERSION="${{ steps.version.outputs.VERSION }}"
+        echo "📡 Setting up notarization credentials..."
+        xcrun notarytool store-credentials "NotarytoolProfile" \
+          --apple-id "${{ secrets.APPLE_ID }}" \
+          --password "${{ secrets.APPLE_APP_PASSWORD }}" \
+          --team-id "${{ secrets.APPLE_TEAM_ID }}"
+
+        echo "📡 Submitting DMG for notarization..."
+        xcrun notarytool submit "$PRODUCT_NAME-$VERSION.dmg" \
+          --keychain-profile "NotarytoolProfile" \
+          --wait
+
+        echo "📡 Submitting PKG for notarization..."
+        xcrun notarytool submit "$PRODUCT_NAME-$VERSION.pkg" \
+          --keychain-profile "NotarytoolProfile" \
+          --wait
+
+        echo "📎 Stapling notarization tickets..."
+        xcrun stapler staple "$PRODUCT_NAME-$VERSION.dmg"
+        xcrun stapler staple "$PRODUCT_NAME-$VERSION.pkg"
+
+        echo "🔍 Verifying notarization..."
+        spctl -a -t exec -vv "$PRODUCT_NAME.app"
+
+    - name: Generate checksums
+      run: |
+        VERSION="${{ steps.version.outputs.VERSION }}"
+        echo "🔐 Generating checksums..."
+        shasum -a 256 "$PRODUCT_NAME-$VERSION.dmg" > checksums.txt
+        shasum -a 256 "$PRODUCT_NAME-$VERSION.pkg" >> checksums.txt
+        cat checksums.txt
+
+    - name: Create GitHub Release
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: v${{ steps.version.outputs.VERSION }}
+        name: PingScope v${{ steps.version.outputs.VERSION }}
+        body: |
+          ## PingScope v${{ steps.version.outputs.VERSION }}
+
+          ### Installation
+
+          **DMG Installation (Recommended)**
+          1. Download `PingScope-${{ steps.version.outputs.VERSION }}.dmg`
+          2. Open the DMG file
+          3. Drag PingScope to your Applications folder
+
+          **PKG Installation**
+          1. Download `PingScope-${{ steps.version.outputs.VERSION }}.pkg`
+          2. Double-click to run the installer
+
+          ### Security
+          - ✅ Signed with Developer ID
+          - ✅ Notarized by Apple
+          - ✅ Hardened runtime enabled
+
+          ### Requirements
+          - macOS 13.0 (Ventura) or later
+        files: |
+          ${{ env.PRODUCT_NAME }}-${{ steps.version.outputs.VERSION }}.dmg
+          ${{ env.PRODUCT_NAME }}-${{ steps.version.outputs.VERSION }}.pkg
+          checksums.txt
+        draft: false
+        prerelease: false
+
+    - name: Clean up keychain
+      if: always()
+      run: |
+        security delete-keychain build.keychain || true
+        rm -f app_certificate.p12 installer_certificate.p12

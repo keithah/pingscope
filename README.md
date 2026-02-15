@@ -1,85 +1,132 @@
-# PingMonitor Documentation
+# PingScope
 
-This documentation describes the PingMonitor macOS menu bar application, a network latency monitoring tool that runs in the system tray.
+A professional macOS menu bar application for real-time network monitoring with beautiful graphs and detailed ping history.
 
-## Overview
+## Screenshot
 
-PingMonitor is a macOS menu bar application that monitors network connectivity by pinging configurable hosts. It displays real-time latency data, historical graphs, and provides configurable notifications for network issues.
+![PingScope Interface](screenshot_v11.png)
 
-**Key Features:**
-- Menu bar status display with color-coded latency indicator
-- Multiple host monitoring (Google DNS, Cloudflare DNS, Default Gateway)
-- Three ping methods: ICMP (simulated via TCP), UDP, TCP
-- Auto-detection of default gateway
-- Real-time latency graph visualization
-- 7 notification alert types
-- Compact and full display modes
-- Stay-on-top floating window option
-- macOS Widget extension (small, medium, large)
-- Data export (CSV, JSON, Text)
+*PingScope's main interface showing real-time ping monitoring with beautiful graphs, host tabs, detailed history, and the Settings/Export dropdown menu. The app displays current network status with color-coded indicators and provides comprehensive monitoring tools in a native macOS design.*
 
-## Application Structure
+## Features
 
+### 🎯 Core Functionality
+- **Real-time ping monitoring** of multiple hosts simultaneously
+- **Beautiful menu bar status** with colored dot and ping time
+- **Professional dropdown interface** with tabs, graphs, and history
+- **Smart default gateway detection** - automatically finds your router IP
+
+### 📊 Visual Monitoring
+- **Interactive host tabs** - Switch between monitored servers
+- **Real-time line graphs** with smooth animations and data points
+- **Detailed history table** with time, host, ping times, and status
+- **Color-coded status indicators** (Green/Yellow/Red/Gray)
+
+### ⚙️ Settings & Management
+- **Complete host management** - Add, edit, and remove custom hosts
+- **Professional Settings interface** with real-time status indicators
+- **Data export functionality** - CSV, JSON, and Text formats with filtering
+- **Enhanced click support** - Ctrl+Click and Cmd+Click for context menu
+- **Clean, native macOS design** following Apple's design guidelines
+
+### 🌐 Host Management
+- **Flexible host configuration** - Add any IP address or hostname
+- **Default hosts included** - Google DNS, Cloudflare, and Default Gateway
+- **Full editability** - All hosts can be customized or removed
+- **Duplicate prevention** - Smart validation prevents conflicts
+
+## Installation
+
+1. Download the latest release
+2. Move PingScope.app to your Applications folder
+3. Launch the app - it will appear in your menu bar
+4. Grant network permissions when prompted
+
+## Usage
+
+### Basic Monitoring
+- The menu bar shows a colored status dot and current ping time
+- **Green**: Good connection (<50ms)
+- **Yellow**: Slow connection (50-150ms)
+- **Red**: Poor connection (>150ms)
+- **Gray**: Connection timeout/error
+
+### Interface Navigation
+- **Left-click** the menu bar icon to open the full interface
+- **Right-click/Ctrl+Click/Cmd+Click** for quick host switching and settings
+- **Click host tabs** to switch between monitored servers
+- **Use the gear menu** for settings and export options
+
+### Settings & Export
+- **Settings Interface**: Add, edit, and remove hosts with real-time status
+- **Export Data**: Generate reports in CSV, JSON, or Text formats
+- **Time Range Filtering**: Export last hour, 24 hours, week, or all data
+- **Host-specific Export**: Export data for all hosts or specific ones
+
+## Technical Details
+
+### Requirements
+- macOS 13.0 or later
+- Network permissions for ping operations
+
+### Architecture
+- **SwiftUI** for modern, native interface
+- **Real-time ping monitoring** using system ping command
+- **Multi-host concurrent monitoring** with separate timers
+- **Data persistence** with automatic history management
+- **Native menu bar integration** with proper click handling
+
+### Performance
+- **Lightweight**: Minimal CPU and memory usage
+- **Efficient**: Smart ping scheduling and data management
+- **Responsive**: Non-blocking UI with background ping operations
+
+## Development
+
+### Building from Source
+```bash
+git clone https://github.com/keithah/pingscope.git
+cd pingscope
+swiftc PingScope.swift -o PingScope
+./PingScope
 ```
-PingMonitor/
-├── App/
-│   └── PingMonitorApp.swift          # @main entry point
-├── Models/
-│   ├── Host.swift                    # Host data model
-│   ├── PingResult.swift              # Ping result model
-│   ├── PingSettings.swift            # Per-host ping configuration
-│   ├── NotificationSettings.swift    # Alert configuration
-│   └── Enums.swift                   # PingStatus, PingType, GatewayMode, etc.
-├── Services/
-│   ├── PingService.swift             # Core ping engine
-│   ├── NetworkMonitor.swift          # Gateway detection
-│   ├── NotificationService.swift     # Alert management
-│   └── PersistenceService.swift      # Settings storage
-├── ViewModels/
-│   ├── PingViewModel.swift           # Main view model
-│   └── SettingsViewModel.swift       # Settings logic
-├── Views/
-│   ├── MenuBar/
-│   │   └── MenuBarController.swift   # NSStatusItem management
-│   ├── Main/
-│   │   ├── ContentView.swift         # Full view
-│   │   ├── CompactView.swift         # Compact view
-│   │   ├── GraphView.swift           # Ping graph
-│   │   └── HistoryView.swift         # Results list
-│   ├── Settings/
-│   │   └── SettingsView.swift        # Main settings
-│   └── Export/
-│       └── ExportView.swift          # Data export
-└── Utilities/
-    ├── Extensions.swift              # Helper extensions
-    └── Constants.swift               # App constants
+
+### Project Structure
+```
+PingScope/
+├── PingScope.swift           # Main application code
+├── .github/workflows/          # GitHub Actions CI/CD
+├── README.md                   # Documentation
+├── LICENSE                     # MIT License
+└── screenshot.png             # App screenshot
 ```
 
-## Documentation Index
+## Issues & Roadmap
 
-- [ARCHITECTURE.md](./ARCHITECTURE.md) - System architecture and component interactions
-- [MODELS.md](./MODELS.md) - Data model specifications
-- [SERVICES.md](./SERVICES.md) - Service layer documentation
-- [VIEWS.md](./VIEWS.md) - View layer and UI components
-- [WIDGET.md](./WIDGET.md) - macOS Widget extension
-- [CONFIGURATION.md](./CONFIGURATION.md) - Constants and configuration options
+Have ideas for new features or found a bug? Check out our [GitHub Issues](https://github.com/keithah/pingscope/issues) to:
+- Report bugs and issues
+- Request new features
+- View planned enhancements
+- Contribute to development
 
-## Technical Requirements
+## Contributing
 
-- **Platform:** macOS 13.0+ (Ventura)
-- **Frameworks:** SwiftUI, AppKit, Network.framework, SystemConfiguration
-- **Bundle ID:** com.hadm.pingmonitor
-- **App Group:** group.com.hadm.pingmonitor.shared
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
 
-## Entitlements
+## License
 
-```xml
-com.apple.security.app-sandbox: true
-com.apple.security.network.client: true
-com.apple.security.files.user-selected.read-write: true
-com.apple.security.application-groups: [group.com.hadm.pingmonitor.shared]
-```
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
-## App Store Sandbox Compatibility
+## Acknowledgments
 
-The application is designed for App Store distribution. Since raw ICMP sockets require special entitlements not available in the App Store sandbox, the "ICMP" ping method actually performs TCP connections to common ports (53, 80, 443, 22, 25) as a fallback mechanism to measure connectivity latency.
+- Built with SwiftUI and AppKit
+- Inspired by professional network monitoring tools
+- Designed for macOS menu bar integration
+
+---
+
+**PingScope** - Professional network monitoring for macOS

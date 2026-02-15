@@ -1,5 +1,32 @@
+# Xcode
 .DS_Store
+build/
+*.pbxuser
+*.mode1v3
+*.mode2v3
+*.perspectivev3
+*.xcuserstate
+*.xcworkspace/xcuserdata/
+
+# Swift Package Manager
 .build/
-*.xcodeproj
-*.xcworkspace
-DerivedData/
+Packages/
+Package.pins
+Package.resolved
+
+# Binary files (but not source .swift files)
+pingmonitor_*
+*_output.log
+
+# macOS
+.Trash/
+.fseventsd/
+.Spotlight-V100/
+
+# IDE
+.vscode/
+.idea/
+
+# Build artifacts
+*.o
+*.dSYM
