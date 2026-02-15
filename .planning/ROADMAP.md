@@ -85,10 +85,14 @@ Plans:
   2. Compact view mode (280x220) shows condensed display
   3. User can toggle between full and compact modes
   4. Stay-on-top floating window works with borderless, movable frame
-**Plans**: TBD
+**Plans**: 5 plans
 
 Plans:
-- [ ] 04-01: TBD
+- [ ] 04-01-PLAN.md — Define display-mode persistence contracts and preference store
+- [ ] 04-02-PLAN.md — Build full/compact display views and shared display view model
+- [ ] 04-03-PLAN.md — Implement popover/floating coordinator with anchor and drag-handle behavior
+- [ ] 04-04-PLAN.md — Integrate display mode runtime wiring, settings toggles, and smoke tests
+- [ ] 04-05-PLAN.md — Human verification checkpoint for DISP-01 through DISP-06
 
 ### Phase 5: Visualization
 **Goal**: Users can see latency trends via graph and review ping history with statistics.
@@ -129,7 +133,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6
 | 1. Foundation | 4/4 | Complete | 2026-02-14 |
 | 2. Menu Bar & State | 4/4 | Complete | 2026-02-14 |
 | 3. Host Monitoring | 9/9 | Complete | 2026-02-14 |
-| 4. Display Modes | 0/? | Not started | - |
+| 4. Display Modes | 0/5 | Not started | - |
 | 5. Visualization | 0/? | Not started | - |
 | 6. Notifications & Settings | 0/? | Not started | - |
 
@@ -137,3 +141,4 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6
 *Roadmap created: 2026-02-13*
 *Phase 1 planned: 2026-02-14*
 *Phase 3 planned: 2026-02-14*
+*Phase 4 planned: 2026-02-14*

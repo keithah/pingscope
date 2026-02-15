@@ -2,27 +2,27 @@
 import PackageDescription
 
 let package = Package(
-    name: "PingMonitor",
+    name: "PingScope",
     platforms: [
         .macOS(.v13)
     ],
     products: [
         .executable(
-            name: "PingMonitor",
-            targets: ["PingMonitor"]
+            name: "PingScope",
+            targets: ["PingScope"]
         )
     ],
     dependencies: [],
     targets: [
         .executableTarget(
-            name: "PingMonitor",
+            name: "PingScope",
             dependencies: [],
-            path: "Sources/PingMonitor"
+            path: "Sources/PingScope"
         ),
         .testTarget(
-            name: "PingMonitorTests",
-            dependencies: ["PingMonitor"],
-            path: "Tests/PingMonitorTests"
+            name: "PingScopeTests",
+            dependencies: ["PingScope"],
+            path: "Tests/PingScopeTests"
         )
     ]
 )

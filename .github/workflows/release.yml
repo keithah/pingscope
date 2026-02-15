@@ -20,7 +20,7 @@ jobs:
 
       - name: Create App Bundle
         run: |
-          APP_NAME="PingMonitor"
+          APP_NAME="PingScope"
           VERSION="${GITHUB_REF_NAME#v}"
           BUILD_DIR=".build/release"
           BUNDLE_DIR="$BUILD_DIR/$APP_NAME.app"
@@ -30,7 +30,7 @@ jobs:
           mkdir -p "$BUNDLE_DIR/Contents/Resources"
 
           # Copy executable
-          cp "$BUILD_DIR/PingMonitor" "$BUNDLE_DIR/Contents/MacOS/"
+          cp "$BUILD_DIR/PingScope" "$BUNDLE_DIR/Contents/MacOS/"
 
           # Create Info.plist
           cat > "$BUNDLE_DIR/Contents/Info.plist" << PLIST
@@ -39,13 +39,13 @@ jobs:
           <plist version="1.0">
           <dict>
               <key>CFBundleExecutable</key>
-              <string>PingMonitor</string>
+              <string>PingScope</string>
               <key>CFBundleIdentifier</key>
-              <string>com.hadm.pingmonitor</string>
+              <string>com.hadm.pingscope</string>
               <key>CFBundleName</key>
-              <string>PingMonitor</string>
+              <string>PingScope</string>
               <key>CFBundleDisplayName</key>
-              <string>PingMonitor</string>
+              <string>PingScope</string>
               <key>CFBundleVersion</key>
               <string>$VERSION</string>
               <key>CFBundleShortVersionString</key>
@@ -64,20 +64,20 @@ jobs:
 
           # Create zip for release
           cd "$BUILD_DIR"
-          zip -r "PingMonitor-$VERSION.zip" "$APP_NAME.app"
-          echo "ASSET_PATH=$BUILD_DIR/PingMonitor-$VERSION.zip" >> $GITHUB_ENV
+          zip -r "PingScope-$VERSION.zip" "$APP_NAME.app"
+          echo "ASSET_PATH=$BUILD_DIR/PingScope-$VERSION.zip" >> $GITHUB_ENV
           echo "VERSION=$VERSION" >> $GITHUB_ENV
 
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
-          name: PingMonitor v${{ env.VERSION }}
+          name: PingScope v${{ env.VERSION }}
           body: |
-            ## PingMonitor v${{ env.VERSION }}
+            ## PingScope v${{ env.VERSION }}
 
             ### Installation
-            1. Download `PingMonitor-${{ env.VERSION }}.zip`
-            2. Unzip and drag `PingMonitor.app` to Applications
+            1. Download `PingScope-${{ env.VERSION }}.zip`
+            2. Unzip and drag `PingScope.app` to Applications
             3. Launch from Applications
 
             ### Requirements
