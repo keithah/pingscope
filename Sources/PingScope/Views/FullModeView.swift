@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import SwiftUI
 
 struct FullModeView: View {
@@ -14,7 +15,9 @@ struct FullModeView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            hostPills
+            if viewModel.showsMonitoredHosts {
+                hostPills
+            }
             graphSection
             historySection
         }
@@ -22,6 +25,10 @@ struct FullModeView: View {
         .frame(maxWidth: .infinity, alignment: .topLeading)
         .onAppear {
             viewModel.setDisplayMode(.full)
+            showingStats = viewModel.showsHistorySummary
+        }
+        .onReceive(viewModel.$showsHistorySummary) { newValue in
+            showingStats = newValue
         }
     }
 

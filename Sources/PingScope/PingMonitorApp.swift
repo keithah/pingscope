@@ -9,6 +9,14 @@ struct PingScopeApp: App {
         Settings {
             SettingsTabView()
         }
+        .commands {
+            CommandGroup(replacing: .appSettings) {
+                Button("Settings...") {
+                    (NSApp.delegate as? AppDelegate)?.openSettings()
+                }
+                .keyboardShortcut(",", modifiers: [.command])
+            }
+        }
     }
 }
 
