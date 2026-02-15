@@ -10,18 +10,18 @@ See: `.planning/PROJECT.md` (updated 2026-02-13)
 ## Current Position
 
 Phase: 6 of 6 (Notifications & Settings) - IN PROGRESS
-Plan: 1 of 6 in phase 6
+Plan: 2 of 6 in phase 6
 Status: Phase 6 in progress
-Last activity: 2026-02-15 - Completed 06-01-PLAN.md
+Last activity: 2026-02-15 - Completed 06-02-PLAN.md
 
-Progress: [████████░░] 84% (26 of 31 plans complete)
+Progress: [█████████░] 87% (27 of 31 plans complete)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 26
+- Total plans completed: 27
 - Average duration: 2 min
-- Total execution time: 1.01 hours
+- Total execution time: 1.04 hours
 
 **By Phase:**
 
@@ -32,10 +32,10 @@ Progress: [████████░░] 84% (26 of 31 plans complete)
 | 3. Host Monitoring | 9 | 9 | 2 min |
 | 4. Display Modes | 5 | 5 | 3 min |
 | 5. Visualization | 3 | 3 | 2 min |
-| 6. Notifications & Settings | 1 | 6 | 4 min |
+| 6. Notifications & Settings | 2 | 6 | 3 min |
 
 **Recent Trend:**
-- Last 5 plans: 04-05 (3 min), 05-01 (3 min), 05-02 (1 min), 05-03 (human verify), 06-01 (4 min)
+- Last 5 plans: 05-01 (3 min), 05-02 (1 min), 05-03 (human verify), 06-01 (4 min), 06-02 (2 min)
 - Trend: Stable
 
 *Updated after each plan completion*
@@ -105,6 +105,8 @@ Recent decisions affecting current work:
 - (04-04): Preserve display selected host/time range across compact/full switches by reusing a single app-lifecycle DisplayViewModel
 - (04-05): Host pill status indicators derive from most recent ping result per host instead of hardcoded green
 - (06-01): Persist per-host notification overrides in NotificationPreferences as a [UUID: HostNotificationOverride] dictionary for efficient lookup
+- (06-02): Intermittent failures count uses a time window (seconds) because failures are stored as timestamps
+- (06-02): Per-host enabled alert types are intersected with global enabled alert types (overrides can restrict but not expand)
 
 ### Pending Todos
 
@@ -116,6 +118,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-02-15T20:05:16Z
-Stopped at: Completed 06-01-PLAN.md
+Last session: 2026-02-15T20:10:37Z
+Stopped at: Completed 06-02-PLAN.md
 Resume file: None
