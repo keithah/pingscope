@@ -20,7 +20,11 @@ struct DisplayGraphView: View {
 
     private var emptyState: some View {
         RoundedRectangle(cornerRadius: 8)
-            .fill(Color.black.opacity(0.3))
+            .fill(Color(nsColor: .controlBackgroundColor).opacity(0.75))
+            .overlay {
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(Color(nsColor: .separatorColor).opacity(0.35), lineWidth: 1)
+            }
             .overlay {
                 Text("No samples yet")
                     .font(.caption)
@@ -71,9 +75,13 @@ struct DisplayGraphView: View {
         let xBounds = dateBounds(points)
 
         ZStack {
-            // Dark background
+            // Activity Monitor-like background
             RoundedRectangle(cornerRadius: 8)
-                .fill(Color.black.opacity(0.35))
+                .fill(Color(nsColor: .controlBackgroundColor).opacity(0.85))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(Color(nsColor: .separatorColor).opacity(0.35), lineWidth: 1)
+                }
 
             // Grid lines
             gridLines(in: size, yBounds: yBounds)
@@ -95,7 +103,7 @@ struct DisplayGraphView: View {
         let yValues = yAxisValues(for: yBounds)
 
         return Canvas { context, canvasSize in
-            let lineColor = Color.white.opacity(0.1)
+            let lineColor = Color(nsColor: .separatorColor).opacity(0.35)
 
             // Horizontal grid lines
             for value in yValues {
@@ -106,7 +114,7 @@ struct DisplayGraphView: View {
                 path.move(to: CGPoint(x: 0, y: y))
                 path.addLine(to: CGPoint(x: canvasSize.width, y: y))
 
-                context.stroke(path, with: .color(lineColor), lineWidth: 0.5)
+                context.stroke(path, with: .color(lineColor), lineWidth: 0.6)
             }
 
             // Vertical grid lines (4 segments)
@@ -118,7 +126,7 @@ struct DisplayGraphView: View {
                 path.move(to: CGPoint(x: x, y: 0))
                 path.addLine(to: CGPoint(x: x, y: canvasSize.height))
 
-                context.stroke(path, with: .color(lineColor), lineWidth: 0.5)
+                context.stroke(path, with: .color(lineColor), lineWidth: 0.6)
             }
         }
     }
