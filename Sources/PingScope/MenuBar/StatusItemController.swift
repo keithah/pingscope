@@ -153,7 +153,10 @@ final class StatusItemController: NSObject {
 
 struct StatusItemTitleFormatter {
     func titleText(for displayText: String, isCompactModeEnabled: Bool) -> String {
-        // Always format as "26ms" (no space)
-        return displayText.replacingOccurrences(of: " ms", with: "ms")
+        guard isCompactModeEnabled else {
+            return displayText
+        }
+
+        return displayText.replacingOccurrences(of: " ms", with: "")
     }
 }
