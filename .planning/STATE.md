@@ -10,18 +10,18 @@ See: `.planning/PROJECT.md` (updated 2026-02-13)
 ## Current Position
 
 Phase: 6 of 6 (Notifications & Settings) - IN PROGRESS
-Plan: 3 of 6 in phase 6
+Plan: 4 of 6 in phase 6
 Status: Phase 6 in progress
-Last activity: 2026-02-15 - Completed 06-03-PLAN.md
+Last activity: 2026-02-15 - Completed 06-04-PLAN.md
 
-Progress: [█████████░] 90% (28 of 31 plans complete)
+Progress: [█████████░] 94% (29 of 31 plans complete)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 28
+- Total plans completed: 29
 - Average duration: 2 min
-- Total execution time: 1.09 hours
+- Total execution time: 1.14 hours
 
 **By Phase:**
 
@@ -32,10 +32,10 @@ Progress: [█████████░] 90% (28 of 31 plans complete)
 | 3. Host Monitoring | 9 | 9 | 2 min |
 | 4. Display Modes | 5 | 5 | 3 min |
 | 5. Visualization | 3 | 3 | 2 min |
-| 6. Notifications & Settings | 3 | 6 | 3 min |
+| 6. Notifications & Settings | 4 | 6 | 3 min |
 
 **Recent Trend:**
-- Last 5 plans: 05-02 (1 min), 05-03 (human verify), 06-01 (4 min), 06-02 (2 min), 06-03 (3 min)
+- Last 5 plans: 05-03 (human verify), 06-01 (4 min), 06-02 (2 min), 06-03 (3 min), 06-04 (3 min)
 - Trend: Stable
 
 *Updated after each plan completion*
@@ -108,6 +108,7 @@ Recent decisions affecting current work:
 - (06-02): Intermittent failures count uses a time window (seconds) because failures are stored as timestamps
 - (06-02): Per-host enabled alert types are intersected with global enabled alert types (overrides can restrict but not expand)
 - (06-03): Host.notificationsEnabled defaults to true and decodes missing values as true for backwards compatibility
+- (06-04): Settings window uses a Settings-scene TabView with Hosts/Notifications/Display tabs for native Cmd+, behavior
 
 ### Pending Todos
 
@@ -119,6 +120,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-02-15T20:14:24Z
-Stopped at: Completed 06-03-PLAN.md
+Last session: 2026-02-15T20:18:50Z
+Stopped at: Completed 06-04-PLAN.md
 Resume file: None
