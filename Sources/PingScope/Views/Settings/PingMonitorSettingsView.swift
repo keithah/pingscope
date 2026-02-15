@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import SwiftUI
 
 @MainActor
@@ -51,8 +52,15 @@ struct PingMonitorSettingsView: View {
         }
         .padding(16)
         .frame(width: 540, height: 620)
-        .task {
-            startOnLaunchEnabled = StartOnLaunchService.isEnabled()
+        .onAppear {
+            reloadFromStores()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in
+            guard NSApp.keyWindow?.title == "PingMonitor Settings" else {
+                return
+            }
+
+            reloadFromStores()
         }
         .sheet(isPresented: $hostListViewModel.showingAddSheet) {
             AddHostSheet(
@@ -283,6 +291,7 @@ struct PingMonitorSettingsView: View {
         HStack {
             Button("Reset to Defaults") {
                 onResetAll()
+                reloadFromStores()
             }
 
             Spacer()
@@ -339,6 +348,11 @@ struct PingMonitorSettingsView: View {
                 notificationStore.savePreferences(preferences)
             }
         )
+    }
+
+    private func reloadFromStores() {
+        startOnLaunchEnabled = StartOnLaunchService.isEnabled()
+        preferences = notificationStore.loadPreferences()
     }
 
     private var allHostsNotificationsEnabled: Bool {
