@@ -37,6 +37,10 @@ actor NotificationService {
     }
 
     func evaluateResult(_ result: PingResult, for host: Host, isHostUp: Bool) async {
+        guard host.notificationsEnabled else {
+            return
+        }
+
         let preferences = preferencesStore.loadPreferences()
         guard preferences.globalEnabled else {
             return

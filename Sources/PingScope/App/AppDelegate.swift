@@ -43,6 +43,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         healthTracker: HostHealthTracker()
     )
 
+    private let notificationService = NotificationService(
+        preferencesStore: NotificationPreferencesStore()
+    )
+    private var previousGatewayIP: String? = nil
+    private var latestHostUpStates: [UUID: Bool] = [:]
+
     private var statusItemController: StatusItemController?
     private var hostListViewModel: HostListViewModel?
     private var settingsWindowController: NSWindowController?
@@ -69,6 +75,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         startScheduler()
         startGatewayMonitoring()
+
+        Task {
+            _ = await notificationService.requestAuthorization()
+        }
 
         Task {
             await self.refreshHostsAndScheduler()
@@ -107,6 +117,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
                     let latencyMS = result.latency.map(Self.durationToMilliseconds)
                     self.hostListViewModel?.updateLatency(for: matchedHostID, latencyMS: latencyMS)
+
+                    if let host = self.monitoredHosts.first(where: { $0.id == matchedHostID }) {
+                        self.latestHostUpStates[matchedHostID] = isHostUp
+                        Task {
+                            await self.notificationService.evaluateResult(result, for: host, isHostUp: isHostUp)
+                        }
+                    }
+
+                    Task {
+                        let hostResults = await self.collectHostResults()
+                        await self.notificationService.evaluateInternetLoss(hostResults: hostResults)
+                    }
                 }
             }
 
@@ -131,17 +153,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func handleGatewayUpdate(_ gatewayInfo: GatewayInfo) async {
         let previousGateway = await runtime.hostStore.gatewayHost
 
+        let currentGatewayIP = gatewayInfo.isAvailable ? gatewayInfo.ipAddress : nil
+
         if gatewayInfo.isAvailable {
             await runtime.hostStore.setGatewayHost(gatewayInfo)
         } else {
             await runtime.hostStore.clearGatewayHost()
         }
 
-        let gatewayChanged = previousGateway?.address != (gatewayInfo.isAvailable ? gatewayInfo.ipAddress : nil)
+        let gatewayChanged = previousGatewayIP != currentGatewayIP
             || previousGateway?.name != (gatewayInfo.isAvailable ? gatewayInfo.displayName : nil)
 
         if gatewayChanged {
             showNetworkChangeIndicator()
+
+            let previousIP = previousGatewayIP
+            previousGatewayIP = currentGatewayIP
+            Task {
+                await notificationService.evaluateGatewayChange(from: previousIP, to: currentGatewayIP)
+            }
         }
 
         await refreshHostsAndScheduler()
@@ -277,6 +307,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let hosts = await runtime.hostStore.allHosts
         monitoredHosts = hosts
 
+        let currentHostIDs = Set(hosts.map(\.id))
+        latestHostUpStates = latestHostUpStates.filter { currentHostIDs.contains($0.key) }
+
         let selectedHost = runtime.syncSelection(with: hosts, preferredHostID: preferredHostID)
         hostListViewModel?.hosts = hosts
         hostListViewModel?.activeHostID = selectedHost?.id
@@ -290,6 +323,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         await scheduler.updateHosts(hosts, intervalFallback: runtime.globalDefaults.interval)
+    }
+
+    private func collectHostResults() async -> [(Host, Bool)] {
+        monitoredHosts.map { host in
+            let isUp = latestHostUpStates[host.id] ?? true
+            return (host, isUp)
+        }
     }
 
     private func hostID(for result: PingResult) -> UUID? {
