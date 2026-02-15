@@ -103,10 +103,12 @@ Plans:
   2. Graph time filter works (1min, 5min, 10min, 1hour)
   3. History table shows timestamp, host, ping time, and status (scrollable, recent first)
   4. Statistics display shows transmitted, received, packet loss, min/avg/max/stddev
-**Plans**: TBD
+**Plans**: 3 plans
 
 Plans:
-- [ ] 05-01: TBD
+- [ ] 05-01-PLAN.md — Increase in-session history retention to 3600 samples per host
+- [ ] 05-02-PLAN.md — Polish graph styling (Activity Monitor-like gradient fill + per-sample markers)
+- [ ] 05-03-PLAN.md — Human verification checkpoint for visualization polish
 
 ### Phase 6: Notifications & Settings
 **Goal**: Users receive intelligent alerts and all settings persist across app restarts.
@@ -134,7 +136,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6
 | 2. Menu Bar & State | 4/4 | Complete | 2026-02-14 |
 | 3. Host Monitoring | 9/9 | Complete | 2026-02-14 |
 | 4. Display Modes | 5/5 | Complete | 2026-02-15 |
-| 5. Visualization | 0/? | Not started | - |
+| 5. Visualization | 0/3 | Not started | - |
 | 6. Notifications & Settings | 0/? | Not started | - |
 
 ---
