@@ -8,7 +8,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let displayPreferencesStore = DisplayPreferencesStore()
     private lazy var runtime = MenuBarRuntime(modePreferenceStore: modePreferenceStore)
     private let contextMenuFactory = ContextMenuFactory()
-    private lazy var displayViewModel = DisplayViewModel(
+    lazy var displayViewModel = DisplayViewModel(
         preferencesStore: displayPreferencesStore,
         initialMode: modePreferenceStore.displayMode
     )
@@ -43,7 +43,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         healthTracker: HostHealthTracker()
     )
 
-    private let notificationPreferencesStore = NotificationPreferencesStore()
+    let notificationPreferencesStore = NotificationPreferencesStore()
     private lazy var notificationService = NotificationService(
         preferencesStore: notificationPreferencesStore
     )
@@ -51,7 +51,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var latestHostUpStates: [UUID: Bool] = [:]
 
     private var statusItemController: StatusItemController?
-    private var hostListViewModel: HostListViewModel?
+    lazy var hostListViewModel: HostListViewModel = makeHostListViewModel()
     private var settingsWindowController: NSWindowController?
     private var gatewayMonitorTask: Task<Void, Never>?
     private var networkIndicatorTask: Task<Void, Never>?
@@ -69,7 +69,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         NSApp.setActivationPolicy(.accessory)
 
-        hostListViewModel = makeHostListViewModel()
         bindDisplaySelection()
 
         statusItemController = StatusItemController(
@@ -137,7 +136,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     }
 
                     let latencyMS = result.latency.map(Self.durationToMilliseconds)
-                    self.hostListViewModel?.updateLatency(for: matchedHostID, latencyMS: latencyMS)
+                    self.hostListViewModel.updateLatency(for: matchedHostID, latencyMS: latencyMS)
 
                     if let host = self.monitoredHosts.first(where: { $0.id == matchedHostID }) {
                         self.latestHostUpStates[matchedHostID] = isHostUp
@@ -270,7 +269,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         Task {
             let hosts = await runtime.hostStore.allHosts
             _ = runtime.switchHost(in: hosts)
-            hostListViewModel?.activeHostID = runtime.selectedHostID
+            hostListViewModel.activeHostID = runtime.selectedHostID
             displayViewModel.selectHost(id: runtime.selectedHostID)
             await scheduler.updateHosts(hosts, intervalFallback: runtime.globalDefaults.interval)
         }
@@ -323,7 +322,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func selectHostAndRefresh(_ host: Host) async {
         let hosts = await runtime.hostStore.allHosts
         _ = runtime.syncSelection(with: hosts, preferredHostID: host.id)
-        hostListViewModel?.activeHostID = runtime.selectedHostID
+        hostListViewModel.activeHostID = runtime.selectedHostID
         displayViewModel.selectHost(id: runtime.selectedHostID)
         await scheduler.updateHosts(hosts, intervalFallback: runtime.globalDefaults.interval)
     }
@@ -336,15 +335,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         latestHostUpStates = latestHostUpStates.filter { currentHostIDs.contains($0.key) }
 
         let selectedHost = runtime.syncSelection(with: hosts, preferredHostID: preferredHostID)
-        hostListViewModel?.hosts = hosts
-        hostListViewModel?.activeHostID = selectedHost?.id
+        hostListViewModel.hosts = hosts
+        hostListViewModel.activeHostID = selectedHost?.id
         displayViewModel.setHosts(hosts)
         displayViewModel.selectHost(id: selectedHost?.id)
 
-        let currentLatencyHostIDs = Set(hostListViewModel?.latencies.keys.map { $0 } ?? [])
+        let currentLatencyHostIDs = Set(hostListViewModel.latencies.keys.map { $0 })
         let staleHostIDs = currentLatencyHostIDs.subtracting(Set(hosts.map(\.id)))
         for staleHostID in staleHostIDs {
-            hostListViewModel?.latencies.removeValue(forKey: staleHostID)
+            hostListViewModel.latencies.removeValue(forKey: staleHostID)
         }
 
         await scheduler.updateHosts(hosts, intervalFallback: runtime.globalDefaults.interval)
@@ -378,10 +377,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // SwiftUI's built-in Settings scene can be unreliable for accessory/menu-bar apps
         // launched outside of Xcode. Always use a dedicated settings window.
         if settingsWindowController == nil {
-            guard let hostListViewModel else {
-                return
-            }
-
             let rootView = PingMonitorSettingsView(
                 hostListViewModel: hostListViewModel,
                 displayViewModel: displayViewModel,
@@ -414,7 +409,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         settingsWindowController?.window?.makeKeyAndOrderFront(nil)
     }
 
-    private func resetToDefaults() {
+    func resetToDefaults() {
         // App/display preferences
         modePreferenceStore.reset()
         displayPreferencesStore.reset()
@@ -531,7 +526,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let hosts = await runtime.hostStore.allHosts
         _ = runtime.syncSelection(with: hosts, preferredHostID: selectedHostID)
-        hostListViewModel?.activeHostID = runtime.selectedHostID
+        hostListViewModel.activeHostID = runtime.selectedHostID
         await scheduler.updateHosts(hosts, intervalFallback: runtime.globalDefaults.interval)
     }
 }
