@@ -5,23 +5,23 @@
 See: `.planning/PROJECT.md` (updated 2026-02-13)
 
 **Core value:** Reliable, accurate ping monitoring that users can trust — no false timeouts, no stale connections, no crashes.
-**Current focus:** Phase 5 - Visualization
+**Current focus:** Phase 6 - Notifications & Settings
 
 ## Current Position
 
-Phase: 5 of 6 (Visualization) - COMPLETE
-Plan: 3 of 3 in phase 5
-Status: Phase 5 complete, ready for Phase 6 planning
-Last activity: 2026-02-15 - Completed 05-03-PLAN.md (human verification)
+Phase: 6 of 6 (Notifications & Settings) - IN PROGRESS
+Plan: 1 of 6 in phase 6
+Status: Phase 6 in progress
+Last activity: 2026-02-15 - Completed 06-01-PLAN.md
 
-Progress: [██████████] 100% (25 of 25 plans complete)
+Progress: [████████░░] 84% (26 of 31 plans complete)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 25
+- Total plans completed: 26
 - Average duration: 2 min
-- Total execution time: 0.94 hours
+- Total execution time: 1.01 hours
 
 **By Phase:**
 
@@ -32,9 +32,10 @@ Progress: [██████████] 100% (25 of 25 plans complete)
 | 3. Host Monitoring | 9 | 9 | 2 min |
 | 4. Display Modes | 5 | 5 | 3 min |
 | 5. Visualization | 3 | 3 | 2 min |
+| 6. Notifications & Settings | 1 | 6 | 4 min |
 
 **Recent Trend:**
-- Last 5 plans: 04-04 (6 min), 04-05 (3 min), 05-01 (3 min), 05-02 (1 min), 05-03 (human verify)
+- Last 5 plans: 04-05 (3 min), 05-01 (3 min), 05-02 (1 min), 05-03 (human verify), 06-01 (4 min)
 - Trend: Stable
 
 *Updated after each plan completion*
@@ -103,6 +104,7 @@ Recent decisions affecting current work:
 - (04-04): Bind settings display toggles to menuBar.mode persisted keys and route writes through AppDelegate runtime setters
 - (04-04): Preserve display selected host/time range across compact/full switches by reusing a single app-lifecycle DisplayViewModel
 - (04-05): Host pill status indicators derive from most recent ping result per host instead of hardcoded green
+- (06-01): Persist per-host notification overrides in NotificationPreferences as a [UUID: HostNotificationOverride] dictionary for efficient lookup
 
 ### Pending Todos
 
@@ -114,6 +116,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-02-15T19:30:09Z
-Stopped at: Completed 05-03-PLAN.md
+Last session: 2026-02-15T20:05:16Z
+Stopped at: Completed 06-01-PLAN.md
 Resume file: None
