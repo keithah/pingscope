@@ -11,6 +11,7 @@ struct Host: Sendable, Identifiable, Equatable, Codable {
     let timeoutOverride: Duration?
     let greenThresholdMSOverride: Double?
     let yellowThresholdMSOverride: Double?
+    let notificationsEnabled: Bool
     let isDefault: Bool
 
     enum CodingKeys: String, CodingKey {
@@ -23,6 +24,7 @@ struct Host: Sendable, Identifiable, Equatable, Codable {
         case timeoutOverrideSeconds
         case greenThresholdMSOverride
         case yellowThresholdMSOverride
+        case notificationsEnabled
         case isDefault
         case protocolType
         case timeoutSeconds
@@ -44,6 +46,7 @@ struct Host: Sendable, Identifiable, Equatable, Codable {
         timeout: Duration? = nil,
         greenThresholdMSOverride: Double? = nil,
         yellowThresholdMSOverride: Double? = nil,
+        notificationsEnabled: Bool = true,
         isDefault: Bool = false
     ) {
         self.id = id
@@ -55,6 +58,7 @@ struct Host: Sendable, Identifiable, Equatable, Codable {
         self.timeoutOverride = timeout
         self.greenThresholdMSOverride = greenThresholdMSOverride
         self.yellowThresholdMSOverride = yellowThresholdMSOverride
+        self.notificationsEnabled = notificationsEnabled
         self.isDefault = isDefault
     }
 
@@ -89,6 +93,7 @@ struct Host: Sendable, Identifiable, Equatable, Codable {
 
         greenThresholdMSOverride = try container.decodeIfPresent(Double.self, forKey: .greenThresholdMSOverride)
         yellowThresholdMSOverride = try container.decodeIfPresent(Double.self, forKey: .yellowThresholdMSOverride)
+        notificationsEnabled = try container.decodeIfPresent(Bool.self, forKey: .notificationsEnabled) ?? true
         isDefault = try container.decode(Bool.self, forKey: .isDefault)
     }
 
@@ -103,6 +108,7 @@ struct Host: Sendable, Identifiable, Equatable, Codable {
         try container.encodeIfPresent(timeoutOverride.map(Self.durationToTimeInterval), forKey: .timeoutOverrideSeconds)
         try container.encodeIfPresent(greenThresholdMSOverride, forKey: .greenThresholdMSOverride)
         try container.encodeIfPresent(yellowThresholdMSOverride, forKey: .yellowThresholdMSOverride)
+        try container.encode(notificationsEnabled, forKey: .notificationsEnabled)
         try container.encode(isDefault, forKey: .isDefault)
     }
 
@@ -134,6 +140,7 @@ struct Host: Sendable, Identifiable, Equatable, Codable {
         port: 443,
         pingMethod: .tcp,
         timeout: .seconds(3),
+        notificationsEnabled: true,
         isDefault: true
     )
 
@@ -144,6 +151,7 @@ struct Host: Sendable, Identifiable, Equatable, Codable {
         port: 443,
         pingMethod: .tcp,
         timeout: .seconds(3),
+        notificationsEnabled: true,
         isDefault: true
     )
 
