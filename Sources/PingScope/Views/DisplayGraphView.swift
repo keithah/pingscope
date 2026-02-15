@@ -5,6 +5,7 @@ struct DisplayGraphView: View {
 
     private let gridLineCount = 4
     private let yAxisWidth: CGFloat = 36
+    private let plotPadding: CGFloat = 8
     private let dotRadius: CGFloat = 2
 
     var body: some View {
@@ -78,6 +79,9 @@ struct DisplayGraphView: View {
             // Grid lines
             gridLines(in: size, yBounds: yBounds)
 
+            // Gradient fill under the line
+            areaFill(in: size, xBounds: xBounds, yBounds: yBounds)
+
             // Line path
             linePath(in: size, xBounds: xBounds, yBounds: yBounds)
                 .stroke(Color.accentColor, style: StrokeStyle(lineWidth: 1.5, lineCap: .round, lineJoin: .round))
@@ -133,6 +137,40 @@ struct DisplayGraphView: View {
         }
     }
 
+    private func areaFill(in size: CGSize, xBounds: ClosedRange<TimeInterval>, yBounds: ClosedRange<Double>) -> some View {
+        Canvas { context, canvasSize in
+            guard points.count >= 2,
+                  let firstPoint = points.first,
+                  let lastPoint = points.last
+            else {
+                return
+            }
+
+            let first = positionForPoint(firstPoint, in: canvasSize, xBounds: xBounds, yBounds: yBounds)
+            let last = positionForPoint(lastPoint, in: canvasSize, xBounds: xBounds, yBounds: yBounds)
+            let baselineY = canvasSize.height - plotPadding
+
+            var area = linePath(in: canvasSize, xBounds: xBounds, yBounds: yBounds)
+            area.addLine(to: CGPoint(x: last.x, y: baselineY))
+            area.addLine(to: CGPoint(x: first.x, y: baselineY))
+            area.closeSubpath()
+
+            let gradient = Gradient(stops: [
+                .init(color: Color.accentColor.opacity(0.28), location: 0),
+                .init(color: Color.accentColor.opacity(0.0), location: 1)
+            ])
+
+            context.fill(
+                area,
+                with: .linearGradient(
+                    gradient,
+                    startPoint: CGPoint(x: 0, y: plotPadding),
+                    endPoint: CGPoint(x: 0, y: baselineY)
+                )
+            )
+        }
+    }
+
     private func dataPointDots(in size: CGSize, xBounds: ClosedRange<TimeInterval>, yBounds: ClosedRange<Double>) -> some View {
         Canvas { context, _ in
             // Only show dots if there aren't too many points
@@ -171,13 +209,12 @@ struct DisplayGraphView: View {
         let clampedX = min(max(normalizedX, 0), 1)
         let clampedY = min(max(normalizedY, 0), 1)
 
-        let padding: CGFloat = 8
-        let drawWidth = size.width - padding * 2
-        let drawHeight = size.height - padding * 2
+        let drawWidth = size.width - plotPadding * 2
+        let drawHeight = size.height - plotPadding * 2
 
         return CGPoint(
-            x: padding + clampedX * drawWidth,
-            y: padding + (1 - clampedY) * drawHeight
+            x: plotPadding + clampedX * drawWidth,
+            y: plotPadding + (1 - clampedY) * drawHeight
         )
     }
 
