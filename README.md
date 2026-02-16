@@ -16,29 +16,6 @@ A professional macOS menu bar application for real-time network monitoring with 
 
 ![PingScope Settings](images/settings.png)
 
-<details>
-<summary>More screenshots</summary>
-
-![Full Mode (Proper)](images/mainscreen_proper.png)
-
-![Full Mode (Final)](images/mainscreen_final.png)
-
-![Full Mode (App Store)](images/mainscreen_appstore.png)
-
-![Compact Mode (Proper)](images/compact_proper.png)
-
-![Compact Mode (Final)](images/compact_final.png)
-
-![Compact Mode (App Store)](images/compact_appstore.png)
-
-![Settings (Proper)](images/settings_proper.png)
-
-![Settings (Final)](images/settings_final.png)
-
-![Settings (App Store)](images/settings_appstore.png)
-
-</details>
-
 ## Features
 
 ### 🎯 Core Functionality
