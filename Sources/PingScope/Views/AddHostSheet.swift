@@ -48,9 +48,21 @@ struct AddHostSheet: View {
                 }
             }
 
-            TextField("Port", text: $viewModel.port, prompt: Text("\(viewModel.pingMethod.defaultPort)"))
-                .applyNumberPadKeyboard()
+            if viewModel.pingMethod == .icmp {
+                LabeledContent("Port") {
+                    Text("N/A")
+                        .foregroundStyle(.secondary)
+                }
+            } else {
+                TextField("Port", text: $viewModel.port, prompt: Text("\(viewModel.pingMethod.defaultPort)"))
+                    .applyNumberPadKeyboard()
+            }
         }
+        .onChange(of: viewModel.pingMethod, perform: { newMethod in
+            if newMethod == .icmp {
+                viewModel.port = ""
+            }
+        })
     }
 
     private var testConnectionSection: some View {

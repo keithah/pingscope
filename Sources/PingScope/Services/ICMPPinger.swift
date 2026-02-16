@@ -13,6 +13,16 @@ actor ICMPPinger {
     }
 
     func ping(host: String, timeout: Duration) async throws -> Duration {
+        do {
+            return try await pingViaSystemUtility(host: host, timeout: timeout)
+        } catch {
+            // Fallback to socket implementation if the system utility path fails.
+        }
+
+        return try await pingViaSocket(host: host, timeout: timeout)
+    }
+
+    private func pingViaSocket(host: String, timeout: Duration) async throws -> Duration {
         try await withThrowingTaskGroup(of: Duration.self) { group in
             group.addTask {
                 try await self.sendAndReceive(host: host)
@@ -29,6 +39,64 @@ actor ICMPPinger {
                 throw PingError.cancelled
             }
             return result
+        }
+    }
+
+    private func pingViaSystemUtility(host: String, timeout: Duration) async throws -> Duration {
+        let timeoutMS = max(250, Self.timeoutMilliseconds(for: timeout))
+        let timeoutSeconds = max(1, Int(ceil(Double(timeoutMS) / 1_000.0)))
+
+        let state = ContinuationState()
+        let processBox = ProcessBox()
+
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Duration, Error>) in
+                let process = Process()
+                process.executableURL = URL(fileURLWithPath: "/sbin/ping")
+                process.arguments = ["-n", "-c", "1", "-W", String(timeoutMS), "-t", String(timeoutSeconds), host]
+
+                let outputPipe = Pipe()
+                process.standardOutput = outputPipe
+                process.standardError = outputPipe
+                processBox.process = process
+
+                process.terminationHandler = { process in
+                    let data = outputPipe.fileHandleForReading.readDataToEndOfFile()
+                    let output = String(decoding: data, as: UTF8.self)
+                    let trimmedOutput = output
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                        .replacingOccurrences(of: "\n", with: " | ")
+
+                    if process.terminationStatus == 0,
+                       let latencyMS = Self.extractLatencyMilliseconds(from: output) {
+                        if state.markResumed() {
+                            continuation.resume(returning: .nanoseconds(Int64((latencyMS * 1_000_000).rounded())))
+                        }
+                    } else if process.terminationStatus == 0 {
+                        if state.markResumed() {
+                            let message = trimmedOutput.isEmpty
+                                ? "ICMP failed: latency could not be parsed"
+                                : "ICMP failed: \(trimmedOutput)"
+                            continuation.resume(throwing: PingError.connectionFailed(message))
+                        }
+                    } else if state.markResumed() {
+                        let message = trimmedOutput.isEmpty
+                            ? "ICMP failed (exit \(process.terminationStatus))"
+                            : "ICMP failed (exit \(process.terminationStatus)): \(trimmedOutput)"
+                        continuation.resume(throwing: PingError.connectionFailed(message))
+                    }
+                }
+
+                do {
+                    try process.run()
+                } catch {
+                    if state.markResumed() {
+                        continuation.resume(throwing: error)
+                    }
+                }
+            }
+        } onCancel: {
+            processBox.process?.terminate()
         }
     }
 
@@ -111,7 +179,7 @@ actor ICMPPinger {
                 let readSource = DispatchSource.makeReadSource(fileDescriptor: fd, queue: queue)
                 sourceBox.source = readSource
 
-                readSource.setEventHandler { [identifier] in
+                readSource.setEventHandler {
                     var buffer = [UInt8](repeating: 0, count: 1024)
                     var senderAddr = sockaddr_in()
                     var addrLen = socklen_t(MemoryLayout<sockaddr_in>.size)
@@ -131,12 +199,11 @@ actor ICMPPinger {
                     }
 
                     let data = Data(buffer.prefix(Int(received)))
-                    guard let responseHeader = ICMPHeader.from(data: data) else {
+                    guard let responseHeader = self.echoReplyHeader(from: data, expectedSequence: expectedSequence) else {
                         return
                     }
 
                     guard responseHeader.type == ICMPHeader.echoReply,
-                          responseHeader.identifier == identifier,
                           responseHeader.sequenceNumber == expectedSequence else {
                         return
                     }
@@ -159,10 +226,70 @@ actor ICMPPinger {
             sourceBox.source?.cancel()
         }
     }
+
+    private func echoReplyHeader(from data: Data, expectedSequence: UInt16) -> ICMPHeader? {
+        // On macOS ICMP datagram sockets can deliver either:
+        // - bare ICMP packet (starts at ICMP header), or
+        // - IPv4 packet (starts at IP header, ICMP header at IHL offset).
+        // Accept either format and match on sequence number.
+        var candidateOffsets: [Int] = [0]
+
+        if data.count >= 20 {
+            let version = data[0] >> 4
+            let ihlWords = Int(data[0] & 0x0F)
+            let ipHeaderLength = ihlWords * 4
+            if version == 4, ipHeaderLength >= 20, ipHeaderLength + ICMPHeader.size <= data.count {
+                candidateOffsets.append(ipHeaderLength)
+            }
+        }
+
+        for offset in candidateOffsets {
+            guard data.count >= offset + ICMPHeader.size else {
+                continue
+            }
+
+            let slice = data.subdata(in: offset..<(offset + ICMPHeader.size))
+            guard let header = ICMPHeader.from(data: slice) else {
+                continue
+            }
+
+            if header.type == ICMPHeader.echoReply, header.sequenceNumber == expectedSequence {
+                return header
+            }
+        }
+
+        return nil
+    }
+
+    private static func timeoutMilliseconds(for timeout: Duration) -> Int {
+        let components = timeout.components
+        let millisecondsFromSeconds = components.seconds * 1_000
+        let millisecondsFromAttoseconds = components.attoseconds / 1_000_000_000_000_000
+        let total = millisecondsFromSeconds + millisecondsFromAttoseconds
+        return Int(min(max(total, 1), 60_000))
+    }
+
+    private static func extractLatencyMilliseconds(from output: String) -> Double? {
+        guard let timeRange = output.range(of: "time=") else {
+            return nil
+        }
+
+        let remainder = output[timeRange.upperBound...]
+        guard let msRange = remainder.range(of: " ms") else {
+            return nil
+        }
+
+        let value = remainder[..<msRange.lowerBound].trimmingCharacters(in: .whitespacesAndNewlines)
+        return Double(value)
+    }
 }
 
 private final class ReadSourceBox: @unchecked Sendable {
     var source: DispatchSourceRead?
+}
+
+private final class ProcessBox: @unchecked Sendable {
+    var process: Process?
 }
 
 private final class ContinuationState: @unchecked Sendable {

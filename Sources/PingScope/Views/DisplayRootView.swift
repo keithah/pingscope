@@ -19,8 +19,11 @@ struct DisplayRootView: View {
                         .frame(maxWidth: .infinity)
                 }
             }
-        .frame(minWidth: mode == .full ? 350 : 240)
-        .fixedSize(horizontal: false, vertical: true)
+        .frame(
+            minWidth: mode == .full ? 350 : 150,
+            minHeight: mode == .full ? 260 : 120,
+            alignment: .topLeading
+        )
         .background(panelShape.fill(Color(nsColor: .windowBackgroundColor)))
         .clipShape(panelShape)
         .overlay(panelShape.strokeBorder(Color.black.opacity(0.18), lineWidth: 1))

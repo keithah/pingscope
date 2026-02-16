@@ -6,6 +6,7 @@ struct FullModeView: View {
     @ObservedObject var viewModel: DisplayViewModel
     @State private var showingStats: Bool = false
     @State private var showCopiedFeedback: Bool = false
+    @State private var showCopiedStatsFeedback: Bool = false
     var onToggleCompact: (() -> Void)?
     var onToggleStayOnTop: (() -> Void)?
     var onOpenSettings: (() -> Void)?
@@ -292,20 +293,43 @@ struct FullModeView: View {
         let avgLatency = latencies.isEmpty ? 0 : latencies.reduce(0, +) / Double(latencies.count)
         let stddev = latencies.isEmpty ? 0 : sqrt(latencies.map { pow($0 - avgLatency, 2) }.reduce(0, +) / Double(latencies.count))
 
-        return VStack(alignment: .leading, spacing: 4) {
-            Text("--- \(hostAddress) ping statistics ---")
+        let statisticsText = pingStatisticsText(
+            hostAddress: hostAddress,
+            transmitted: transmitted,
+            received: received,
+            lossPercent: lossPercent,
+            minLatency: minLatency,
+            avgLatency: avgLatency,
+            maxLatency: maxLatency,
+            stddev: stddev
+        )
+
+        return VStack(alignment: .leading, spacing: 0) {
+            Text(statisticsText)
                 .font(.system(size: 11, design: .monospaced))
                 .foregroundStyle(.secondary)
-
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 110), spacing: 8)], spacing: 6) {
-                statsMetric(title: "Transmitted", value: "\(transmitted)")
-                statsMetric(title: "Received", value: "\(received)")
-                statsMetric(title: "Packet Loss", value: "\(String(format: "%.1f", lossPercent))%")
-                statsMetric(title: "Min", value: "\(String(format: "%.3f", minLatency)) ms")
-                statsMetric(title: "Avg", value: "\(String(format: "%.3f", avgLatency)) ms")
-                statsMetric(title: "Max", value: "\(String(format: "%.3f", maxLatency)) ms")
-                statsMetric(title: "Stddev", value: "\(String(format: "%.3f", stddev)) ms")
-            }
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .overlay(alignment: .topTrailing) {
+                    Button {
+                        copyTextToClipboard(statisticsText)
+                        withAnimation {
+                            showCopiedStatsFeedback = true
+                        }
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+                            withAnimation {
+                                showCopiedStatsFeedback = false
+                            }
+                        }
+                    } label: {
+                        Image(systemName: showCopiedStatsFeedback ? "checkmark" : "doc.on.doc")
+                            .font(.caption)
+                            .foregroundColor(showCopiedStatsFeedback ? .green : .secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Copy statistics")
+                    .padding(.top, 2)
+                }
         }
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -313,20 +337,31 @@ struct FullModeView: View {
         .clipShape(RoundedRectangle(cornerRadius: 6))
     }
 
-    private func statsMetric(title: String, value: String) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(title)
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
+    private func pingStatisticsText(
+        hostAddress: String,
+        transmitted: Int,
+        received: Int,
+        lossPercent: Double,
+        minLatency: Double,
+        avgLatency: Double,
+        maxLatency: Double,
+        stddev: Double
+    ) -> String {
+        let lossText = String(format: "%.1f", lossPercent)
+        let minText = String(format: "%.3f", minLatency)
+        let avgText = String(format: "%.3f", avgLatency)
+        let maxText = String(format: "%.3f", maxLatency)
+        let stddevText = String(format: "%.3f", stddev)
 
-            Text(value)
-                .font(.system(size: 11, design: .monospaced))
-                .foregroundStyle(.primary)
-                .lineLimit(1)
-                .minimumScaleFactor(0.8)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        let packetLine = "\(transmitted) packets transmitted, \(received) packets received, \(lossText)% packet loss"
+        let roundTripLine = "round-trip min/avg/max/stddev = \(minText)/\(avgText)/\(maxText)/\(stddevText) ms"
+        return "--- \(hostAddress) ping statistics ---\n\(packetLine)\n\(roundTripLine)"
+    }
+
+    private func copyTextToClipboard(_ text: String) {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(text, forType: .string)
     }
 
     private func copyScreenshotToClipboard() {

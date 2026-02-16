@@ -1,5 +1,6 @@
 import AppKit
 import Combine
+import Darwin
 import SwiftUI
 
 @MainActor
@@ -58,6 +59,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var networkIndicatorTask: Task<Void, Never>?
     private var monitoredHosts: [Host] = []
     private var cancellables: Set<AnyCancellable> = []
+    private var instanceLockFD: Int32 = -1
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         guard enforceSingleInstance() else {
@@ -114,6 +116,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             await scheduler.stop()
             await runtime.gatewayDetector.stopMonitoring()
         }
+
+        releaseInstanceLock()
     }
 
     private func startScheduler() {
@@ -376,6 +380,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc
     func openSettings() {
+        // Ensure the display popover/window does not obscure Settings.
+        displayCoordinator.closeAll()
+
         NSApp.activate(ignoringOtherApps: true)
 
         // SwiftUI's built-in Settings scene can be unreliable for accessory/menu-bar apps
@@ -413,7 +420,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         settingsWindowController?.showWindow(nil)
-        settingsWindowController?.window?.makeKeyAndOrderFront(nil)
+        if let window = settingsWindowController?.window {
+            // Accessory/menu-bar apps can leave normal windows hidden behind floating UI.
+            // Use floating level and force-front ordering so Settings always appears.
+            window.level = .floating
+            window.makeKeyAndOrderFront(nil)
+            window.orderFrontRegardless()
+        }
     }
 
     @objc
@@ -467,9 +480,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func enforceSingleInstance() -> Bool {
+        guard acquireInstanceLock() else {
+            return false
+        }
+
         guard let bundleIdentifier = Bundle.main.bundleIdentifier, !bundleIdentifier.isEmpty else {
-            // When launched via a non-bundled SwiftPM executable, there is no bundle identifier.
-            // Don't attempt to enforce single-instance in that case.
+            // SwiftPM debug launches have no bundle identifier; lock file still enforces single-instance.
             return true
         }
 
@@ -483,6 +499,45 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         existing.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
         return false
+    }
+
+    private func acquireInstanceLock() -> Bool {
+        if instanceLockFD != -1 {
+            return true
+        }
+
+        let lockName: String
+        if let bundleIdentifier = Bundle.main.bundleIdentifier, !bundleIdentifier.isEmpty {
+            lockName = bundleIdentifier
+        } else {
+            lockName = "dev.pingscope.single-instance"
+        }
+
+        let sanitizedLockName = lockName.replacingOccurrences(of: "/", with: "_")
+        let lockPath = "/tmp/\(sanitizedLockName).lock"
+
+        let fd = open(lockPath, O_CREAT | O_RDWR, S_IRUSR | S_IWUSR)
+        guard fd != -1 else {
+            return true
+        }
+
+        if flock(fd, LOCK_EX | LOCK_NB) != 0 {
+            close(fd)
+            return false
+        }
+
+        instanceLockFD = fd
+        return true
+    }
+
+    private func releaseInstanceLock() {
+        guard instanceLockFD != -1 else {
+            return
+        }
+
+        flock(instanceLockFD, LOCK_UN)
+        close(instanceLockFD)
+        instanceLockFD = -1
     }
 
     func setCompactModeEnabled(_ isEnabled: Bool) {

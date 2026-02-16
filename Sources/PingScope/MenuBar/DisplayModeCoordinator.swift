@@ -403,8 +403,8 @@ final class DisplayModeCoordinator: NSObject, NSWindowDelegate {
             // User wants to freely resize smaller to find the right size.
             return NSSize(width: 220, height: 260)
         case .compact:
-            // User explicitly wants compact to be much smaller by default.
-            return NSSize(width: 100, height: 80)
+            // Keep compact resizable, but still readable at very narrow width.
+            return NSSize(width: 150, height: 80)
         }
     }
 }

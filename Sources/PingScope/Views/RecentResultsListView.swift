@@ -6,7 +6,6 @@ struct RecentResultsListView: View {
     var compact: Bool = false
     var showHostName: Bool = true
 
-    private let rowHeight: CGFloat = 22
     private let timeColumnWidth: CGFloat = 65
     private let pingColumnWidth: CGFloat = 56
     private let statusColumnWidth: CGFloat = 64
@@ -34,37 +33,40 @@ struct RecentResultsListView: View {
 
     @ViewBuilder
     private func rowView(_ row: DisplayViewModel.RecentResultRow) -> some View {
-        HStack(spacing: compact ? 6 : 10) {
-            Text(Self.timeFormatter.string(from: row.timestamp))
-                .font(.system(size: compact ? 11 : 12).monospacedDigit())
+        HStack(spacing: compact ? 4 : 10) {
+            Text(timeText(for: row))
+                .font(.system(size: compact ? 10 : 12).monospacedDigit())
                 .foregroundStyle(.secondary)
-                .frame(width: compact ? 58 : timeColumnWidth, alignment: .leading)
+                .frame(width: compact ? 50 : timeColumnWidth, alignment: .leading)
+                .lineLimit(1)
 
             if showHostName, let hostName = row.hostName {
                 Text(hostName)
-                    .font(.system(size: compact ? 11 : 12))
+                    .font(.system(size: compact ? 10 : 12))
                     .foregroundStyle(.primary)
                     .lineLimit(1)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
 
             Text(pingTimeText(for: row))
-                .font(.system(size: compact ? 11 : 12, weight: .medium).monospacedDigit())
-                .foregroundStyle(.primary)
-                .frame(width: compact ? 48 : pingColumnWidth, alignment: .trailing)
+                .font(.system(size: compact ? 10 : 12, weight: .medium).monospacedDigit())
+                .foregroundStyle(compact ? statusColor(for: row) : .primary)
+                .frame(width: compact ? 42 : pingColumnWidth, alignment: .trailing)
 
-            HStack(spacing: 6) {
-                Circle()
-                    .fill(statusColor(for: row))
-                    .frame(width: 6, height: 6)
+            if !compact {
+                HStack(spacing: 6) {
+                    Circle()
+                        .fill(statusColor(for: row))
+                        .frame(width: 6, height: 6)
 
-                Text(statusText(for: row))
-                    .font(.system(size: compact ? 11 : 12, weight: .medium).monospacedDigit())
-                    .foregroundColor(statusColor(for: row))
+                    Text(statusText(for: row))
+                        .font(.system(size: compact ? 11 : 12, weight: .medium).monospacedDigit())
+                        .foregroundColor(statusColor(for: row))
+                }
+                .frame(width: statusColumnWidth, alignment: .trailing)
             }
-            .frame(width: compact ? 56 : statusColumnWidth, alignment: .trailing)
         }
-        .frame(height: rowHeight)
+        .frame(height: compact ? 20 : 22)
     }
 
     private var maxHeight: CGFloat? {
@@ -72,7 +74,8 @@ struct RecentResultsListView: View {
             return nil
         }
 
-        return CGFloat(maxVisibleRows) * (rowHeight + (compact ? 2 : 4))
+        let perRowHeight: CGFloat = compact ? 20 : 22
+        return CGFloat(maxVisibleRows) * (perRowHeight + (compact ? 2 : 4))
     }
 
     private func statusColor(for row: DisplayViewModel.RecentResultRow) -> Color {
@@ -102,9 +105,19 @@ struct RecentResultsListView: View {
         row.latencyMS == nil ? "FAIL" : "OK"
     }
 
+    private func timeText(for row: DisplayViewModel.RecentResultRow) -> String {
+        (compact ? Self.compactTimeFormatter : Self.timeFormatter).string(from: row.timestamp)
+    }
+
     private static let timeFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.dateFormat = "h:mm:ss a"
+        return formatter
+    }()
+
+    private static let compactTimeFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "H:mm:ss"
         return formatter
     }()
 }

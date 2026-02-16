@@ -97,7 +97,10 @@ final class AddHostViewModel: ObservableObject {
     }
 
     var effectivePort: UInt16 {
-        portNumber ?? pingMethod.defaultPort
+        if pingMethod == .icmp {
+            return 0
+        }
+        return portNumber ?? pingMethod.defaultPort
     }
 
     func testPing() async {

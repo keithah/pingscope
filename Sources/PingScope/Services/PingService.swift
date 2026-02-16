@@ -17,8 +17,6 @@ actor PingService {
                 pingMethod: host.pingMethod,
                 timeout: effectiveTimeout
             )
-        case .icmpSimulated:
-            return await pingICMPSimulated(host: host, timeout: effectiveTimeout)
         case .icmp:
             return await pingICMP(host: host, timeout: effectiveTimeout)
         }
@@ -47,12 +45,6 @@ actor PingService {
                 parameters: .udp,
                 timeout: effectiveTimeout
             )
-        case .icmpSimulated:
-            return .failure(
-                host: address,
-                port: port,
-                error: .connectionFailed("Use ping(host:) for icmpSimulated probes")
-            )
         case .icmp:
             return .failure(
                 host: address,
@@ -73,28 +65,6 @@ actor PingService {
         } catch {
             return .failure(host: host.address, port: 0, error: .connectionFailed(error.localizedDescription))
         }
-    }
-
-    private func pingICMPSimulated(host: Host, timeout: Duration) async -> PingResult {
-        let probePorts: [UInt16] = [53, 80, 443, 22, 25]
-        var lastFailure: PingResult?
-
-        for probePort in probePorts {
-            let result = await ping(
-                address: host.address,
-                port: probePort,
-                parameters: .tcp,
-                timeout: timeout
-            )
-
-            if result.isSuccess {
-                return result
-            }
-
-            lastFailure = result
-        }
-
-        return lastFailure ?? .failure(host: host.address, port: host.port, error: .timeout)
     }
 
     private func ping(

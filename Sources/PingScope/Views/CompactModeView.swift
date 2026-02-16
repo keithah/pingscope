@@ -10,9 +10,9 @@ struct CompactModeView: View {
     var isStayOnTopEnabled: Bool = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 8) {
             // Host picker + gear
-            HStack {
+            HStack(spacing: 6) {
                 Picker("", selection: hostSelectionBinding) {
                     ForEach(viewModel.hosts) { host in
                         Text(host.name)
@@ -21,15 +21,15 @@ struct CompactModeView: View {
                 }
                 .pickerStyle(.menu)
                 .labelsHidden()
-
-                Spacer()
+                .controlSize(.small)
+                .frame(minWidth: 88, maxWidth: .infinity, alignment: .leading)
 
                 // Switch to full
                 Button {
                     onToggleCompact?()
                 } label: {
                     Image(systemName: "arrow.up.left.and.arrow.down.right")
-                        .font(.body)
+                        .font(.system(size: 14, weight: .regular))
                         .foregroundColor(.secondary)
                 }
                 .buttonStyle(.plain)
@@ -45,12 +45,13 @@ struct CompactModeView: View {
                     viewModel.toggleGraphVisible(for: .compact)
                 },
                 expandedHelp: "Hide graph",
-                collapsedHelp: "Show graph"
+                collapsedHelp: "Show graph",
+                compact: true
             )
 
             if viewModel.modeState(for: .compact).graphVisible {
                 CompactGraphView(points: viewModel.selectedHostGraphPoints)
-                    .frame(height: 50)
+                    .frame(height: 40)
             }
 
             sectionHeader(
@@ -60,20 +61,21 @@ struct CompactModeView: View {
                     viewModel.toggleHistoryVisible(for: .compact)
                 },
                 expandedHelp: "Hide results",
-                collapsedHelp: "Show results"
+                collapsedHelp: "Show results",
+                compact: true
             )
 
             if viewModel.modeState(for: .compact).historyVisible {
                 RecentResultsListView(
                     rows: viewModel.selectedHostRecentResults,
-                    maxVisibleRows: 5,
+                    maxVisibleRows: 4,
                     compact: true,
-                    showHostName: true
+                    showHostName: false
                 )
             }
         }
         // Match FullMode look-and-feel (control heights differ, so tune top slightly).
-        .padding(.horizontal, 14)
+        .padding(.horizontal, 8)
         .padding(.bottom, 14)
         .padding(.top, 12)
         .frame(maxWidth: .infinity, alignment: .topLeading)
@@ -124,7 +126,7 @@ struct CompactModeView: View {
             }
         } label: {
             Image(systemName: "gearshape.fill")
-                .font(.body)
+                .font(.system(size: 16, weight: .regular))
                 .foregroundColor(.accentColor)
         }
         .buttonStyle(.plain)
@@ -135,18 +137,21 @@ struct CompactModeView: View {
         isExpanded: Bool,
         onToggle: @escaping () -> Void,
         expandedHelp: String,
-        collapsedHelp: String
+        collapsedHelp: String,
+        compact: Bool
     ) -> some View {
         Button {
             onToggle()
         } label: {
             HStack(spacing: 6) {
                 Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
-                    .font(.caption)
+                    .font((compact ? Font.callout : .subheadline).weight(.semibold))
                     .foregroundColor(.secondary)
+                    .frame(width: 12, alignment: .leading)
 
                 Text(title)
-                    .font(.subheadline.weight(.semibold))
+                    .font((compact ? Font.callout : .subheadline).weight(.semibold))
+                    .lineLimit(1)
 
                 Spacer()
             }

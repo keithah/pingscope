@@ -81,7 +81,7 @@ Core network latency measurement engine:
 
 **Ping Methods:**
 
-1. **ICMP (Simulated):** Since App Store sandbox prohibits raw ICMP sockets, this method tries TCP connections to ports 53, 80, 443, 22, 25 in sequence until one succeeds.
+1. **ICMP:** Uses native ICMP echo for true ping behavior. This option is only available when running outside sandbox constraints.
 
 2. **UDP:** Uses `NWConnection` with `.udp` protocol. Default port 53 (DNS).
 

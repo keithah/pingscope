@@ -28,6 +28,8 @@ A professional macOS menu bar application for real-time network monitoring with 
 - **Interactive host tabs** - Switch between monitored servers
 - **Real-time line graphs** with smooth animations and data points
 - **Detailed history table** with time, host, ping times, and status
+- **Terminal-style ping statistics** panel with min/avg/max/stddev summary
+- **Copyable statistics text** for easy sharing/debugging
 - **Color-coded status indicators** (Green/Yellow/Red/Gray)
 
 ### ⚙️ Settings & Management
@@ -42,6 +44,7 @@ A professional macOS menu bar application for real-time network monitoring with 
 - **Default hosts included** - Google DNS, Cloudflare, and Default Gateway
 - **Full editability** - All hosts can be customized or removed
 - **Duplicate prevention** - Smart validation prevents conflicts
+- **Ping method selection** - TCP/UDP everywhere, ICMP when runtime supports it
 
 ## Installation
 

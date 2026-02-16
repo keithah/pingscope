@@ -70,8 +70,15 @@ struct Host: Sendable, Identifiable, Equatable, Codable {
         address = try container.decode(String.self, forKey: .address)
         port = try container.decode(UInt16.self, forKey: .port)
 
-        if let pingMethod = try container.decodeIfPresent(PingMethod.self, forKey: .pingMethod) {
-            self.pingMethod = pingMethod
+        if let pingMethodRaw = try container.decodeIfPresent(String.self, forKey: .pingMethod) {
+            if let pingMethod = PingMethod(rawValue: pingMethodRaw) {
+                self.pingMethod = pingMethod
+            } else if pingMethodRaw == "icmpSimulated" {
+                // Legacy migration: icmpSimulated no longer exists.
+                self.pingMethod = .tcp
+            } else {
+                self.pingMethod = .tcp
+            }
         } else {
             let legacyProtocolType = try container.decodeIfPresent(LegacyProtocolType.self, forKey: .protocolType) ?? .tcp
             self.pingMethod = legacyProtocolType == .udp ? .udp : .tcp
