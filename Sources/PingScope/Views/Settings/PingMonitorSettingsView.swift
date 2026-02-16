@@ -18,6 +18,7 @@ struct PingMonitorSettingsView: View {
     @AppStorage("menuBar.mode.stayOnTop") private var stayOnTopEnabled: Bool = false
 
     @State private var startOnLaunchEnabled: Bool = false
+    @State private var hostForNotificationOverride: Host?
 
     init(
         hostListViewModel: HostListViewModel,
@@ -98,6 +99,13 @@ struct PingMonitorSettingsView: View {
                 )
             )
             .frame(minWidth: 360, minHeight: 320)
+        }
+        .sheet(item: $hostForNotificationOverride) { host in
+            HostNotificationOverrideEditorView(
+                host: host,
+                store: notificationStore
+            )
+            .frame(minWidth: 440, minHeight: 520)
         }
         .confirmationDialog(
             deleteDialogTitle,
@@ -286,6 +294,7 @@ struct PingMonitorSettingsView: View {
                         host: host,
                         isActive: hostListViewModel.isActive(host),
                         status: status(for: host),
+                        onConfigureNotifications: { hostForNotificationOverride = host },
                         onEdit: { hostListViewModel.triggerEdit(host) },
                         onRemove: { hostListViewModel.triggerDelete(host) }
                     )
@@ -417,6 +426,7 @@ private struct HostSettingsRow: View {
     let host: Host
     let isActive: Bool
     let status: HostStatus
+    let onConfigureNotifications: () -> Void
     let onEdit: () -> Void
     let onRemove: () -> Void
 
@@ -454,6 +464,11 @@ private struct HostSettingsRow: View {
 
             Button("Edit") {
                 onEdit()
+            }
+            .buttonStyle(.bordered)
+
+            Button("Notifications") {
+                onConfigureNotifications()
             }
             .buttonStyle(.bordered)
 
