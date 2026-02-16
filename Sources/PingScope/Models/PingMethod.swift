@@ -4,9 +4,19 @@ enum PingMethod: String, Sendable, Codable, CaseIterable, Equatable {
     case tcp
     case udp
     case icmpSimulated
+    case icmp
 
     // ICMP-simulated mode attempts TCP probes in this order.
     static let icmpSimulatedProbePorts: [UInt16] = [53, 80, 443, 22, 25]
+
+    /// Returns the ping methods available in the current runtime environment.
+    /// When running in App Store sandbox, true ICMP is not available.
+    static var availableCases: [PingMethod] {
+        if SandboxDetector.isRunningInSandbox {
+            return [.tcp, .udp, .icmpSimulated]
+        }
+        return allCases
+    }
 
     var displayName: String {
         switch self {
@@ -16,6 +26,8 @@ enum PingMethod: String, Sendable, Codable, CaseIterable, Equatable {
             return "UDP"
         case .icmpSimulated:
             return "ICMP (Simulated)"
+        case .icmp:
+            return "ICMP"
         }
     }
 
@@ -27,6 +39,8 @@ enum PingMethod: String, Sendable, Codable, CaseIterable, Equatable {
             return 53
         case .icmpSimulated:
             return 53
+        case .icmp:
+            return 0
         }
     }
 }
