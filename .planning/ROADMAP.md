@@ -17,6 +17,8 @@ PingMonitor is a macOS menu bar network monitoring app rewritten from a monolith
 - [x] **Phase 5: Visualization** - Latency graph, history table, and statistics
 - [x] **Phase 6: Notifications & Settings** - Alert system and persistent configuration
 - [x] **Phase 7: Settings Focus** - Settings reliability, live-updating configuration, and end-to-end persistence
+- [ ] **Phase 8: Visualization Requirement Reconciliation & Verification** - Close VIS-01 through VIS-07 and produce missing Phase 5 verification artifact
+- [ ] **Phase 9: Regression Test Wiring Recovery** - Restore compile-green automated regression integration coverage
 
 ## Phase Details
 
@@ -151,10 +153,38 @@ Plans:
 - [x] 07-03-PLAN.md — Settings persistence + reload consistency (hosts, display, notifications UI)
 - [x] 07-04-PLAN.md — Human verification checkpoint for Settings end-to-end
 
+### Phase 8: Visualization Requirement Reconciliation & Verification
+**Goal**: Close milestone visualization gaps by reconciling VIS-01 through VIS-07 with implementation and producing complete verification evidence.
+**Depends on**: Phase 7
+**Requirements**: VIS-01, VIS-02, VIS-03, VIS-04, VIS-05, VIS-06, VIS-07
+**Gap Closure**: Closes audit requirement gaps and missing Phase 5 verification artifact
+**Success Criteria** (what must be TRUE):
+  1. VIS-01 through VIS-07 are all implemented and verified against current runtime behavior
+  2. `.planning/phases/05-visualization/*-VERIFICATION.md` exists and documents pass/fail evidence for each VIS requirement
+  3. `.planning/REQUIREMENTS.md` traceability marks VIS-01 through VIS-07 as Complete
+**Plans**: 1 plan (to be created)
+
+Plans:
+- [ ] 08-01-PLAN.md — Reconcile visualization requirements, fill implementation gaps, and produce Phase 5 verification artifact
+
+### Phase 9: Regression Test Wiring Recovery
+**Goal**: Restore cross-phase test wiring so automated regression checks compile and run cleanly.
+**Depends on**: Phase 8
+**Requirements**: Milestone integration closure (test compile baseline)
+**Gap Closure**: Closes audit integration gap blocking automated regression verification
+**Success Criteria** (what must be TRUE):
+  1. Test targets compile without stale symbol/signature errors
+  2. `StatusItemTitleFormatter` and `ContextMenuActions` test wiring aligns with current production interfaces
+  3. Regression suite can run to completion in CI/local verification flow
+**Plans**: 1 plan (to be created)
+
+Plans:
+- [ ] 09-01-PLAN.md — Repair stale test references and re-establish compile-green regression baseline
+
 ## Progress
 
 **Execution Order:**
-Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7
+Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 8 -> 9
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
@@ -165,6 +195,8 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7
 | 5. Visualization | 3/3 | Complete | 2026-02-15 |
 | 6. Notifications & Settings | 8/8 | Complete | 2026-02-16 |
 | 7. Settings Focus | 4/4 | Complete | 2026-02-16 |
+| 8. Visualization Requirement Reconciliation & Verification | 0/1 | Planned | — |
+| 9. Regression Test Wiring Recovery | 0/1 | Planned | — |
 
 ---
 *Roadmap created: 2026-02-13*
