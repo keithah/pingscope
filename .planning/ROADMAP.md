@@ -192,10 +192,13 @@ Plans:
   3. PingMethod.icmp case available and functional when not sandboxed
   4. ICMP option hidden from host configuration UI when sandboxed
   5. Existing TCP/UDP/ICMP-simulated methods unchanged
-**Plans**: TBD
+**Plans**: 4 plans
 
 Plans:
-- [ ] 10-01-PLAN.md — TBD
+- [ ] 10-01-PLAN.md — SandboxDetector utility and ICMPPacket structures
+- [ ] 10-02-PLAN.md — ICMPPinger service with non-privileged socket ping
+- [ ] 10-03-PLAN.md — PingMethod.icmp case, PingService routing, and AddHostSheet filtering
+- [ ] 10-04-PLAN.md — Human verification checkpoint for ICMP support end-to-end
 
 ## Progress
 
@@ -213,7 +216,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 8 -> 9 -> 10
 | 7. Settings Focus | 4/4 | Complete | 2026-02-16 |
 | 8. Visualization Requirement Reconciliation & Verification | 1/1 | Complete | 2026-02-16 |
 | 9. Regression Test Wiring Recovery | 1/1 | Complete | 2026-02-16 |
-| 10. True ICMP Support | 0/? | Planned | — |
+| 10. True ICMP Support | 0/4 | Planned | — |
 
 ---
 *Roadmap created: 2026-02-13*
@@ -221,3 +224,4 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 8 -> 9 -> 10
 *Phase 3 planned: 2026-02-14*
 *Phase 4 planned: 2026-02-14*
 *Phase 9 planned: 2026-02-16*
+*Phase 10 planned: 2026-02-16*
