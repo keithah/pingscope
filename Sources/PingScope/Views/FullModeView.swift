@@ -140,13 +140,6 @@ struct FullModeView: View {
     private var graphSection: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
-                Text("Ping History")
-                    .font(.headline)
-
-                timeRangePicker
-
-                Spacer()
-
                 Button {
                     withAnimation(.easeInOut(duration: 0.2)) {
                         viewModel.toggleGraphVisible()
@@ -158,6 +151,13 @@ struct FullModeView: View {
                 }
                 .buttonStyle(.plain)
                 .help(viewModel.modeState(for: .full).graphVisible ? "Hide graph" : "Show graph")
+
+                Text("Ping History")
+                    .font(.headline)
+
+                timeRangePicker
+
+                Spacer()
             }
 
             if viewModel.modeState(for: .full).graphVisible {
@@ -195,6 +195,18 @@ struct FullModeView: View {
     private var historySection: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        viewModel.toggleHistoryVisible()
+                    }
+                } label: {
+                    Image(systemName: viewModel.modeState(for: .full).historyVisible ? "chevron.down" : "chevron.right")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help(viewModel.modeState(for: .full).historyVisible ? "Hide results" : "Show results")
+
                 Text("Recent Results")
                     .font(.headline)
 
@@ -222,17 +234,6 @@ struct FullModeView: View {
                 .buttonStyle(.plain)
                 .help("Show statistics")
 
-                Button {
-                    withAnimation(.easeInOut(duration: 0.2)) {
-                        viewModel.toggleHistoryVisible()
-                    }
-                } label: {
-                    Image(systemName: viewModel.modeState(for: .full).historyVisible ? "chevron.down" : "chevron.right")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
-                .buttonStyle(.plain)
-                .help(viewModel.modeState(for: .full).historyVisible ? "Hide results" : "Show results")
             }
 
             if viewModel.modeState(for: .full).historyVisible {

@@ -9,13 +9,16 @@ struct DisplayRootView: View {
     private let cornerRadius: CGFloat = 14
 
     var body: some View {
-        VStack(spacing: 0) {
-            if showsFloatingChrome {
-                floatingHeader
+        modeView
+            // Provide a small drag region at the top without shifting content down.
+            // Both Full and Compact views use top padding >= 12, so this won't overlap controls.
+            .overlay(alignment: .top) {
+                if showsFloatingChrome {
+                    WindowDragHandleView()
+                        .frame(height: 12)
+                        .frame(maxWidth: .infinity)
+                }
             }
-
-            modeView
-        }
         .frame(minWidth: mode == .full ? 350 : 240)
         .fixedSize(horizontal: false, vertical: true)
         .background(panelShape.fill(Color(nsColor: .windowBackgroundColor)))
@@ -53,10 +56,5 @@ struct DisplayRootView: View {
         RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
     }
 
-    private var floatingHeader: some View {
-        Color.clear
-            .frame(height: 12)
-            .frame(maxWidth: .infinity)
-            .background(WindowDragHandleView())
-    }
+    // NOTE: floating chrome is implemented as an overlay; no header spacer needed.
 }

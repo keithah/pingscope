@@ -10,7 +10,7 @@ struct CompactModeView: View {
     var isStayOnTopEnabled: Bool = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 10) {
             // Host picker + gear
             HStack {
                 Picker("", selection: hostSelectionBinding) {
@@ -38,23 +38,44 @@ struct CompactModeView: View {
                 settingsMenu
             }
 
-            Text("Ping History")
-                .font(.subheadline.weight(.semibold))
-
-            CompactGraphView(points: viewModel.selectedHostGraphPoints)
-                .frame(height: 50)
-
-            Text("Recent Results")
-                .font(.subheadline.weight(.semibold))
-
-            RecentResultsListView(
-                rows: viewModel.selectedHostRecentResults,
-                maxVisibleRows: 5,
-                compact: true,
-                showHostName: true
+            sectionHeader(
+                title: "Ping History",
+                isExpanded: viewModel.modeState(for: .compact).graphVisible,
+                onToggle: {
+                    viewModel.toggleGraphVisible(for: .compact)
+                },
+                expandedHelp: "Hide graph",
+                collapsedHelp: "Show graph"
             )
+
+            if viewModel.modeState(for: .compact).graphVisible {
+                CompactGraphView(points: viewModel.selectedHostGraphPoints)
+                    .frame(height: 50)
+            }
+
+            sectionHeader(
+                title: "Recent Results",
+                isExpanded: viewModel.modeState(for: .compact).historyVisible,
+                onToggle: {
+                    viewModel.toggleHistoryVisible(for: .compact)
+                },
+                expandedHelp: "Hide results",
+                collapsedHelp: "Show results"
+            )
+
+            if viewModel.modeState(for: .compact).historyVisible {
+                RecentResultsListView(
+                    rows: viewModel.selectedHostRecentResults,
+                    maxVisibleRows: 5,
+                    compact: true,
+                    showHostName: true
+                )
+            }
         }
-        .padding(12)
+        // Match FullMode look-and-feel (control heights differ, so tune top slightly).
+        .padding(.horizontal, 14)
+        .padding(.bottom, 14)
+        .padding(.top, 12)
         .frame(maxWidth: .infinity, alignment: .topLeading)
         .onAppear {
             viewModel.setDisplayMode(.compact)
@@ -107,6 +128,31 @@ struct CompactModeView: View {
                 .foregroundColor(.accentColor)
         }
         .buttonStyle(.plain)
+    }
+
+    private func sectionHeader(
+        title: String,
+        isExpanded: Bool,
+        onToggle: @escaping () -> Void,
+        expandedHelp: String,
+        collapsedHelp: String
+    ) -> some View {
+        Button {
+            onToggle()
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+
+                Spacer()
+            }
+        }
+        .buttonStyle(.plain)
+        .help(isExpanded ? expandedHelp : collapsedHelp)
     }
 }
 

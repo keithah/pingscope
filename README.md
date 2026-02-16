@@ -2,11 +2,42 @@
 
 A professional macOS menu bar application for real-time network monitoring with beautiful graphs and detailed ping history.
 
-## Screenshot
+## Screenshots
 
-![PingScope Interface](screenshot_v11.png)
+### Full Mode
 
-*PingScope's main interface showing real-time ping monitoring with beautiful graphs, host tabs, detailed history, and the Settings/Export dropdown menu. The app displays current network status with color-coded indicators and provides comprehensive monitoring tools in a native macOS design.*
+![PingScope Full Mode](images/mainscreen.png)
+
+### Compact Mode
+
+![PingScope Compact Mode](images/compact.png)
+
+### Settings
+
+![PingScope Settings](images/settings.png)
+
+<details>
+<summary>More screenshots</summary>
+
+![Full Mode (Proper)](images/mainscreen_proper.png)
+
+![Full Mode (Final)](images/mainscreen_final.png)
+
+![Full Mode (App Store)](images/mainscreen_appstore.png)
+
+![Compact Mode (Proper)](images/compact_proper.png)
+
+![Compact Mode (Final)](images/compact_final.png)
+
+![Compact Mode (App Store)](images/compact_appstore.png)
+
+![Settings (Proper)](images/settings_proper.png)
+
+![Settings (Final)](images/settings_final.png)
+
+![Settings (App Store)](images/settings_appstore.png)
+
+</details>
 
 ## Features
 
@@ -94,11 +125,11 @@ swiftc PingScope.swift -o PingScope
 ### Project Structure
 ```
 PingScope/
-├── PingScope.swift           # Main application code
+├── Sources/                   # App source code
 ├── .github/workflows/          # GitHub Actions CI/CD
 ├── README.md                   # Documentation
 ├── LICENSE                     # MIT License
-└── screenshot.png             # App screenshot
+└── images/                     # Screenshots
 ```
 
 ## Issues & Roadmap
