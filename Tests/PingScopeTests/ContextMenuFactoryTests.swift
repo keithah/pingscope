@@ -8,7 +8,7 @@ final class ContextMenuFactoryTests: XCTestCase {
     func testMenuStructureIncludesRequiredSectionsAndItems() {
         let menu = makeMenu(state: .init(currentHostSummary: "Google DNS (8.8.8.8)", isCompactModeEnabled: false, isStayOnTopEnabled: false))
 
-        XCTAssertEqual(menu.items.count, 8)
+        XCTAssertEqual(menu.items.count, 9)
         XCTAssertEqual(menu.items[0].title, "Current Host: Google DNS (8.8.8.8)")
         XCTAssertFalse(menu.items[0].isEnabled)
         XCTAssertEqual(menu.items[1].title, "Switch Host...")
@@ -17,7 +17,8 @@ final class ContextMenuFactoryTests: XCTestCase {
         XCTAssertEqual(menu.items[4].title, "Stay on Top")
         XCTAssertTrue(menu.items[5].isSeparatorItem)
         XCTAssertEqual(menu.items[6].title, "Settings...")
-        XCTAssertEqual(menu.items[7].title, "Quit")
+        XCTAssertEqual(menu.items[7].title, "About PingScope")
+        XCTAssertEqual(menu.items[8].title, "Quit")
     }
 
     func testToggleCheckedStateReflectsState() {
@@ -32,6 +33,7 @@ final class ContextMenuFactoryTests: XCTestCase {
         var toggleCompactCalled = false
         var toggleStayOnTopCalled = false
         var openSettingsCalled = false
+        var openAboutCalled = false
         var quitCalled = false
 
         let factory = ContextMenuFactory()
@@ -42,6 +44,7 @@ final class ContextMenuFactoryTests: XCTestCase {
                 onToggleCompactMode: { toggleCompactCalled = true },
                 onToggleStayOnTop: { toggleStayOnTopCalled = true },
                 onOpenSettings: { openSettingsCalled = true },
+                onOpenAbout: { openAboutCalled = true },
                 onQuit: { quitCalled = true }
             )
         )
@@ -50,12 +53,14 @@ final class ContextMenuFactoryTests: XCTestCase {
         trigger(menuItem(in: menu, id: ContextMenuItemID.compactMode))
         trigger(menuItem(in: menu, id: ContextMenuItemID.stayOnTop))
         trigger(menuItem(in: menu, id: ContextMenuItemID.settings))
+        trigger(menuItem(in: menu, id: ContextMenuItemID.about))
         trigger(menuItem(in: menu, id: ContextMenuItemID.quit))
 
         XCTAssertTrue(switchHostCalled)
         XCTAssertTrue(toggleCompactCalled)
         XCTAssertTrue(toggleStayOnTopCalled)
         XCTAssertTrue(openSettingsCalled)
+        XCTAssertTrue(openAboutCalled)
         XCTAssertTrue(quitCalled)
     }
 
@@ -85,6 +90,7 @@ final class ContextMenuFactoryTests: XCTestCase {
                 onToggleCompactMode: {},
                 onToggleStayOnTop: {},
                 onOpenSettings: {},
+                onOpenAbout: {},
                 onQuit: {}
             )
         )

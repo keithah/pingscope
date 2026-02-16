@@ -37,6 +37,7 @@ final class MenuBarIntegrationSmokeTests: XCTestCase {
                 onToggleCompactMode: { runtime.toggleCompactMode() },
                 onToggleStayOnTop: { runtime.toggleStayOnTop() },
                 onOpenSettings: {},
+                onOpenAbout: {},
                 onQuit: {}
             )
         )

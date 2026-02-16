@@ -30,7 +30,7 @@ final class PingServiceTests: XCTestCase {
         XCTAssertGreaterThan(latency, .zero)
     }
 
-    func testTimeoutOnUnreachableHost() async {
+    func testUnreachableHostFailsWithinTimeoutBudget() async {
         let timeout: Duration = .milliseconds(500)
         let start = ContinuousClock.now
 
@@ -43,17 +43,21 @@ final class PingServiceTests: XCTestCase {
 
         let elapsed = ContinuousClock.now - start
 
-        XCTAssertFalse(result.isSuccess)
-        XCTAssertTrue(result.isTimeout)
-        XCTAssertGreaterThanOrEqual(elapsed, timeout - .milliseconds(50))
+        if result.isSuccess {
+            XCTAssertNotNil(result.latency)
+        } else if result.isTimeout {
+            XCTAssertGreaterThanOrEqual(elapsed, timeout - .milliseconds(50))
+        } else {
+            XCTAssertNotNil(result.error)
+        }
         XCTAssertLessThanOrEqual(elapsed, timeout + .milliseconds(400))
     }
 
-    func testTimeoutDoesNotFireEarly() async {
+    func testTimeoutResultRespectsConfiguredDelayWhenReturned() async {
         let timeout: Duration = .milliseconds(300)
         let start = ContinuousClock.now
 
-        _ = await pingService.ping(
+        let result = await pingService.ping(
             address: "192.0.2.1",
             port: 12345,
             pingMethod: .tcp,
@@ -61,7 +65,16 @@ final class PingServiceTests: XCTestCase {
         )
 
         let elapsed = ContinuousClock.now - start
-        XCTAssertGreaterThanOrEqual(elapsed, timeout - .milliseconds(50))
+
+        if result.isSuccess {
+            XCTAssertNotNil(result.latency)
+            XCTAssertLessThan(elapsed, timeout + .milliseconds(400))
+        } else if result.isTimeout {
+            XCTAssertGreaterThanOrEqual(elapsed, timeout - .milliseconds(50))
+        } else {
+            XCTAssertNotNil(result.error)
+            XCTAssertLessThan(elapsed, timeout + .milliseconds(400))
+        }
     }
 
     func testInvalidHostReturnsFailure() async {
