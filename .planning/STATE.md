@@ -10,17 +10,17 @@ See: `.planning/PROJECT.md` (updated 2026-02-13)
 ## Current Position
 
 Phase: 11 of 11 (Tech Debt Closure)
-Plan: 3 of 4 in phase 11
+Plan: 2 of 4 in phase 11
 Status: In progress
-Last activity: 2026-02-16 - Completed 11-03-PLAN.md
-Next Phase: 11-04 acceptance verification checkpoint
+Last activity: 2026-02-16 - Completed 11-02-PLAN.md
+Next Phase: Remaining Phase 11 plans (11-01 and 11-04)
 
-Progress: [█████████░] 94% (44 of 47 plans complete)
+Progress: [██████████] 96% (45 of 47 plans complete)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 44
+- Total plans completed: 45
 - Average duration: 2 min
 - Total execution time: 2.00 hours
 
@@ -138,6 +138,8 @@ Recent decisions affecting current work:
 - (10-03): PingMethod.availableCases is the single runtime gate for showing true ICMP only when not sandboxed
 - (10-03): PingService treats true ICMP as host-based only and rejects port-overload .icmp calls with explicit guidance
 - (10-04): Human verification approval is sufficient to close checkpoint-only ICMP acceptance plan when all criteria pass
+- (11-02): Host override settings state uses explicit inheritance mode so reset-to-global clears NotificationPreferences.hostOverrides entries
+- (11-02): Active host rows open HostNotificationOverrideEditorView via sheet using shared NotificationPreferencesStore wiring
 - (11-03): Remove orphaned HostSettingsView after confirming no compile references remain in Sources
 - (11-03): Normalize legacy summary source paths from Sources/PingMonitor/ to Sources/PingScope/ via scripted textual replacement
 
@@ -155,6 +157,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-02-16T23:48:39Z
-Stopped at: Completed 11-03-PLAN.md
+Last session: 2026-02-16T23:49:38Z
+Stopped at: Completed 11-02-PLAN.md
 Resume file: None
