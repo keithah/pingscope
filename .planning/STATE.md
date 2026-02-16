@@ -5,23 +5,23 @@
 See: `.planning/PROJECT.md` (updated 2026-02-13)
 
 **Core value:** Reliable, accurate ping monitoring that users can trust — no false timeouts, no stale connections, no crashes.
-**Current focus:** Phase 9 regression test wiring recovery readiness
+**Current focus:** Roadmap complete; regression baseline restored
 
 ## Current Position
 
-Phase: 9 of 9 (Regression Test Wiring Recovery) - READY
-Plan: 0 of 1 in phase 9
-Status: Phase 8 complete and verified; ready to execute phase 9
-Last activity: 2026-02-16 - Verified and closed Phase 8 (08-01)
+Phase: 9 of 9 (Regression Test Wiring Recovery)
+Plan: 1 of 1 in phase 9
+Status: Phase complete
+Last activity: 2026-02-16 - Completed 09-01-PLAN.md
 
-Progress: [█████████░] 97% (38 of 39 plans complete)
+Progress: [██████████] 100% (39 of 39 plans complete)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 38
+- Total plans completed: 39
 - Average duration: 2 min
-- Total execution time: 1.78 hours
+- Total execution time: 1.81 hours
 
 **By Phase:**
 
@@ -35,9 +35,10 @@ Progress: [█████████░] 97% (38 of 39 plans complete)
 | 6. Notifications & Settings | 8 | 8 | 3 min |
 | 7. Settings Focus | 4 | 4 | 3 min |
 | 8. Visualization Reconciliation | 1 | 1 | 15 min |
+| 9. Regression Test Wiring Recovery | 1 | 1 | 2 min |
 
 **Recent Trend:**
-- Last 5 plans: 08-01 (15 min), 07-03 (5 min), 07-04 (1 min), 06-07 (6 min), 06-08 (0 min)
+- Last 5 plans: 09-01 (2 min), 08-01 (15 min), 07-03 (5 min), 07-04 (1 min), 06-07 (6 min)
 - Trend: Stable
 
 *Updated after each plan completion*
@@ -126,6 +127,8 @@ Recent decisions affecting current work:
 - (06-08): Human re-verification approval is sufficient to close the Phase 6 gap-checkpoint plan when all checks pass
 - (08-01): VIS-04 is satisfied only with explicitly separated timestamp/host/ping/status fields in history rows
 - (08-01): Runtime clipping during full-mode resize is treated as blocking visualization correctness and must be fixed before acceptance
+- (09-01): Remove obsolete StatusItemTitleFormatterTests when equivalent compactLatencyText coverage exists in MenuBarViewModelTests
+- (09-01): PingService timeout tests accept timeout or immediate network outcomes, but enforce timeout timing bounds when timeout is returned
 
 ### Pending Todos
 
@@ -137,6 +140,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-02-16T19:59:22Z
-Stopped at: Completed 08-01-PLAN.md
+Last session: 2026-02-16T20:25:22Z
+Stopped at: Completed 09-01-PLAN.md
 Resume file: None
