@@ -16,7 +16,7 @@ struct NotificationSettingsView: View {
             thresholdsSection
         }
         .formStyle(.grouped)
-        .frame(width: 400, height: 400)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
         .onChange(of: preferences) { newValue in
             store.savePreferences(newValue)
         }
@@ -73,6 +73,13 @@ struct NotificationSettingsView: View {
                 "Intermittent: \(preferences.intermittentFailureCount) failures in \(preferences.intermittentWindowSize) seconds",
                 value: binding(for: \NotificationPreferences.intermittentFailureCount),
                 in: 2 ... 10
+            )
+
+            Stepper(
+                "Intermittent Window: \(preferences.intermittentWindowSize) seconds",
+                value: binding(for: \NotificationPreferences.intermittentWindowSize),
+                in: 30 ... 600,
+                step: 10
             )
         }
         .disabled(!preferences.globalEnabled)
