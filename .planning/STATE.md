@@ -5,21 +5,22 @@
 See: `.planning/PROJECT.md` (updated 2026-02-13)
 
 **Core value:** Reliable, accurate ping monitoring that users can trust — no false timeouts, no stale connections, no crashes.
-**Current focus:** Roadmap complete — all planned phases executed
+**Current focus:** Phase 11 tech-debt closure execution
 
 ## Current Position
 
-Phase: 10 of 10 (True ICMP Support)
-Plan: 4 of 4 in phase 10
-Status: Phase complete
-Last activity: 2026-02-16 - Completed 10-04-PLAN.md
+Phase: 11 of 11 (Tech Debt Closure)
+Plan: 3 of 4 in phase 11
+Status: In progress
+Last activity: 2026-02-16 - Completed 11-03-PLAN.md
+Next Phase: 11-04 acceptance verification checkpoint
 
-Progress: [██████████] 100% (43 of 43 plans complete)
+Progress: [█████████░] 94% (44 of 47 plans complete)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 43
+- Total plans completed: 44
 - Average duration: 2 min
 - Total execution time: 2.00 hours
 
@@ -137,6 +138,8 @@ Recent decisions affecting current work:
 - (10-03): PingMethod.availableCases is the single runtime gate for showing true ICMP only when not sandboxed
 - (10-03): PingService treats true ICMP as host-based only and rejects port-overload .icmp calls with explicit guidance
 - (10-04): Human verification approval is sufficient to close checkpoint-only ICMP acceptance plan when all criteria pass
+- (11-03): Remove orphaned HostSettingsView after confirming no compile references remain in Sources
+- (11-03): Normalize legacy summary source paths from Sources/PingMonitor/ to Sources/PingScope/ via scripted textual replacement
 
 ### Pending Todos
 
@@ -146,8 +149,12 @@ None.
 
 None.
 
+### Roadmap Evolution
+
+- Phase 11 added: 11
+
 ## Session Continuity
 
-Last session: 2026-02-16T23:10:43Z
-Stopped at: Completed 10-04-PLAN.md
+Last session: 2026-02-16T23:48:39Z
+Stopped at: Completed 11-03-PLAN.md
 Resume file: None
