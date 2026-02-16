@@ -10,18 +10,18 @@ See: `.planning/PROJECT.md` (updated 2026-02-13)
 ## Current Position
 
 Phase: 10 of 10 (True ICMP Support)
-Plan: 0 of ? in phase 10
-Status: Phase added, awaiting planning
-Last activity: 2026-02-16 - Added Phase 10 for true ICMP support
+Plan: 1 of 4 in phase 10
+Status: In progress
+Last activity: 2026-02-16 - Completed 10-01-PLAN.md
 
-Progress: [█████████░] 97% (39 of 40+ plans complete)
+Progress: [█████████░] 93% (40 of 43 plans complete)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 39
+- Total plans completed: 40
 - Average duration: 2 min
-- Total execution time: 1.81 hours
+- Total execution time: 1.83 hours
 
 **By Phase:**
 
@@ -38,7 +38,7 @@ Progress: [█████████░] 97% (39 of 40+ plans complete)
 | 9. Regression Test Wiring Recovery | 1 | 1 | 2 min |
 
 **Recent Trend:**
-- Last 5 plans: 09-01 (2 min), 08-01 (15 min), 07-03 (5 min), 07-04 (1 min), 06-07 (6 min)
+- Last 5 plans: 10-01 (1 min), 09-01 (2 min), 08-01 (15 min), 07-03 (5 min), 07-04 (1 min)
 - Trend: Stable
 
 *Updated after each plan completion*
@@ -129,6 +129,8 @@ Recent decisions affecting current work:
 - (08-01): Runtime clipping during full-mode resize is treated as blocking visualization correctness and must be fixed before acceptance
 - (09-01): Remove obsolete StatusItemTitleFormatterTests when equivalent compactLatencyText coverage exists in MenuBarViewModelTests
 - (09-01): PingService timeout tests accept timeout or immediate network outcomes, but enforce timeout timing bounds when timeout is returned
+- (10-01): Sandbox detection uses NSHomeDirectory() container-path matching to gate true ICMP availability at runtime
+- (10-01): ICMP packet primitives use explicit big-endian serialization/parsing and RFC 1071 ones-complement checksum in pure Swift
 
 ### Pending Todos
 
@@ -140,6 +142,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-02-16T20:25:22Z
-Stopped at: Completed 09-01-PLAN.md
+Last session: 2026-02-16T21:24:01Z
+Stopped at: Completed 10-01-PLAN.md
 Resume file: None
