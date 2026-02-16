@@ -21,10 +21,10 @@ tech-stack:
 key-files:
   created:
     - Package.swift - Swift package manifest
-    - Sources/PingMonitor/PingMonitorApp.swift - App entry point
-    - Sources/PingMonitor/Models/PingError.swift - Error enumeration
-    - Sources/PingMonitor/Models/PingResult.swift - Result type
-    - Sources/PingMonitor/Models/Host.swift - Host configuration
+    - Sources/PingScope/PingMonitorApp.swift - App entry point
+    - Sources/PingScope/Models/PingError.swift - Error enumeration
+    - Sources/PingScope/Models/PingResult.swift - Result type
+    - Sources/PingScope/Models/Host.swift - Host configuration
 
 key-decisions:
   - Used Duration instead of TimeInterval for type-safe timing
@@ -68,10 +68,10 @@ completed: 2026-02-14
 
 ## Files Created/Modified
 - `Package.swift` - Swift package manifest
-- `Sources/PingMonitor/PingMonitorApp.swift` - App entry point
-- `Sources/PingMonitor/Models/PingError.swift` - Error types
-- `Sources/PingMonitor/Models/PingResult.swift` - Result type
-- `Sources/PingMonitor/Models/Host.swift` - Host configuration
+- `Sources/PingScope/PingMonitorApp.swift` - App entry point
+- `Sources/PingScope/Models/PingError.swift` - Error types
+- `Sources/PingScope/Models/PingResult.swift` - Result type
+- `Sources/PingScope/Models/Host.swift` - Host configuration
 
 ## Decisions Made
 - Used Duration (Swift 5.9+) over TimeInterval for type-safe timing

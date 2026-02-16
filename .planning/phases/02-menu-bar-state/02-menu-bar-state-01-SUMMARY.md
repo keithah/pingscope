@@ -22,10 +22,10 @@ tech-stack:
 
 key-files:
   created:
-    - Sources/PingMonitor/MenuBar/MenuBarState.swift
-    - Sources/PingMonitor/MenuBar/MenuBarStatusEvaluator.swift
-    - Sources/PingMonitor/MenuBar/LatencySmoother.swift
-    - Sources/PingMonitor/ViewModels/MenuBarViewModel.swift
+    - Sources/PingScope/MenuBar/MenuBarState.swift
+    - Sources/PingScope/MenuBar/MenuBarStatusEvaluator.swift
+    - Sources/PingScope/MenuBar/LatencySmoother.swift
+    - Sources/PingScope/ViewModels/MenuBarViewModel.swift
     - Tests/PingMonitorTests/MenuBarViewModelTests.swift
   modified: []
 
@@ -69,10 +69,10 @@ Each task was committed atomically:
 2. **Task 2: Build @MainActor menu bar view model with behavior tests** - `a18c6ee` (feat)
 
 ## Files Created/Modified
-- `Sources/PingMonitor/MenuBar/MenuBarState.swift` - UI-facing menu bar state with display text, status, and last raw latency.
-- `Sources/PingMonitor/MenuBar/MenuBarStatusEvaluator.swift` - Deterministic green/yellow/red/gray transition logic.
-- `Sources/PingMonitor/MenuBar/LatencySmoother.swift` - Reusable side-effect-free smoothing utility for display latency.
-- `Sources/PingMonitor/ViewModels/MenuBarViewModel.swift` - MainActor observable state pipeline for menu bar UI.
+- `Sources/PingScope/MenuBar/MenuBarState.swift` - UI-facing menu bar state with display text, status, and last raw latency.
+- `Sources/PingScope/MenuBar/MenuBarStatusEvaluator.swift` - Deterministic green/yellow/red/gray transition logic.
+- `Sources/PingScope/MenuBar/LatencySmoother.swift` - Reusable side-effect-free smoothing utility for display latency.
+- `Sources/PingScope/ViewModels/MenuBarViewModel.swift` - MainActor observable state pipeline for menu bar UI.
 - `Tests/PingMonitorTests/MenuBarViewModelTests.swift` - Behavior coverage for status, text formatting, and smoothing.
 
 ## Decisions Made

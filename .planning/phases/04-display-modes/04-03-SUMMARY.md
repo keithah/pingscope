@@ -23,11 +23,11 @@ tech-stack:
 
 key-files:
   created:
-    - Sources/PingMonitor/MenuBar/DisplayModeCoordinator.swift
-    - Sources/PingMonitor/Views/WindowDragHandleView.swift
+    - Sources/PingScope/MenuBar/DisplayModeCoordinator.swift
+    - Sources/PingScope/Views/WindowDragHandleView.swift
     - Tests/PingMonitorTests/DisplayModeCoordinatorTests.swift
   modified:
-    - Sources/PingMonitor/MenuBar/DisplayModeCoordinator.swift
+    - Sources/PingScope/MenuBar/DisplayModeCoordinator.swift
 
 key-decisions:
   - "Reopen and mode-switch floating windows are always re-anchored from the status-item button and clamped to visibleFrame"
@@ -70,8 +70,8 @@ Each task was committed atomically:
 3. **Task 3: Add coordinator tests for placement and window flags** - `b7369c4` (test)
 
 ## Files Created/Modified
-- `Sources/PingMonitor/MenuBar/DisplayModeCoordinator.swift` - Central presentation coordinator with anchor/clamp placement and shell routing.
-- `Sources/PingMonitor/Views/WindowDragHandleView.swift` - Dedicated AppKit drag-handle bridge that forwards mouse down to window drag behavior.
+- `Sources/PingScope/MenuBar/DisplayModeCoordinator.swift` - Central presentation coordinator with anchor/clamp placement and shell routing.
+- `Sources/PingScope/Views/WindowDragHandleView.swift` - Dedicated AppKit drag-handle bridge that forwards mouse down to window drag behavior.
 - `Tests/PingMonitorTests/DisplayModeCoordinatorTests.swift` - Regression suite for frame clamping, window flags, and drag-handle behavior.
 
 ## Decisions Made

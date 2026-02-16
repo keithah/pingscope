@@ -21,8 +21,8 @@ tech-stack:
 
 key-files:
   created:
-    - Sources/PingMonitor/ViewModels/StatusPopoverViewModel.swift
-    - Sources/PingMonitor/Views/StatusPopoverView.swift
+    - Sources/PingScope/ViewModels/StatusPopoverViewModel.swift
+    - Sources/PingScope/Views/StatusPopoverView.swift
     - Tests/PingMonitorTests/StatusPopoverViewModelTests.swift
   modified: []
 
@@ -67,8 +67,8 @@ Each task was committed atomically:
 **Plan metadata:** pending
 
 ## Files Created/Modified
-- `Sources/PingMonitor/ViewModels/StatusPopoverViewModel.swift` - Popover state transformation, section/action metadata, and callback dispatch.
-- `Sources/PingMonitor/Views/StatusPopoverView.swift` - SwiftUI popover surface rendering status details and quick-action controls.
+- `Sources/PingScope/ViewModels/StatusPopoverViewModel.swift` - Popover state transformation, section/action metadata, and callback dispatch.
+- `Sources/PingScope/Views/StatusPopoverView.swift` - SwiftUI popover surface rendering status details and quick-action controls.
 - `Tests/PingMonitorTests/StatusPopoverViewModelTests.swift` - Unit coverage for section order, fallback display values, and action hooks.
 
 ## Decisions Made

@@ -24,9 +24,9 @@ tech-stack:
 
 key-files:
   created:
-    - Sources/PingMonitor/Services/HostStore.swift
+    - Sources/PingScope/Services/HostStore.swift
   modified:
-    - Sources/PingMonitor/Services/HostStore.swift
+    - Sources/PingScope/Services/HostStore.swift
 
 key-decisions:
   - "Persist only hosts owned by HostStore and keep gateway host non-persistent"
@@ -67,7 +67,7 @@ Each task was committed atomically:
 2. **Task 2: Add host validation and merging** - `67820c1` (feat)
 
 ## Files Created/Modified
-- `Sources/PingMonitor/Services/HostStore.swift` - New actor service for host persistence, CRUD operations, default restoration, validation, duplicate checks, and ordered host projection.
+- `Sources/PingScope/Services/HostStore.swift` - New actor service for host persistence, CRUD operations, default restoration, validation, duplicate checks, and ordered host projection.
 
 ## Decisions Made
 - Kept gateway host state separate from persisted host storage so network-driven gateway changes never overwrite saved host lists.

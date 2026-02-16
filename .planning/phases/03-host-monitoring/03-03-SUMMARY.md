@@ -21,7 +21,7 @@ tech-stack:
 
 key-files:
   created: [.planning/phases/03-host-monitoring/03-03-SUMMARY.md]
-  modified: [Sources/PingMonitor/Services/PingService.swift, Tests/PingMonitorTests/PingServiceTests.swift]
+  modified: [Sources/PingScope/Services/PingService.swift, Tests/PingMonitorTests/PingServiceTests.swift]
 
 key-decisions:
   - "Handle icmpSimulated through ping(host:) with a dedicated probe sequence instead of single-port overload"
@@ -62,7 +62,7 @@ Each task was committed atomically:
 
 ## Files Created/Modified
 - `.planning/phases/03-host-monitoring/03-03-SUMMARY.md` - Execution summary and metadata for plan 03-03.
-- `Sources/PingMonitor/Services/PingService.swift` - PingMethod routing and icmp-simulated probe implementation.
+- `Sources/PingScope/Services/PingService.swift` - PingMethod routing and icmp-simulated probe implementation.
 - `Tests/PingMonitorTests/PingServiceTests.swift` - Test updates from legacy `protocolType` usage to `pingMethod`.
 
 ## Decisions Made

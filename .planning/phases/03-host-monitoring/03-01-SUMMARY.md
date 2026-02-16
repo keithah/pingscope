@@ -24,10 +24,10 @@ tech-stack:
 
 key-files:
   created:
-    - Sources/PingMonitor/Models/PingMethod.swift
-    - Sources/PingMonitor/Models/GlobalDefaults.swift
+    - Sources/PingScope/Models/PingMethod.swift
+    - Sources/PingScope/Models/GlobalDefaults.swift
   modified:
-    - Sources/PingMonitor/Models/Host.swift
+    - Sources/PingScope/Models/Host.swift
 
 key-decisions:
   - "Use responsive global defaults of 2s interval/timeout with 50ms/150ms thresholds for faster feedback"
@@ -67,9 +67,9 @@ Each task was committed atomically:
 2. **Task 2: Extend Host model with per-host configuration** - `6948511` (feat)
 
 ## Files Created/Modified
-- `Sources/PingMonitor/Models/PingMethod.swift` - Ping method enum and method metadata
-- `Sources/PingMonitor/Models/GlobalDefaults.swift` - Global monitoring default configuration with Codable handling
-- `Sources/PingMonitor/Models/Host.swift` - Host override schema, fallback helpers, and custom Codable implementation
+- `Sources/PingScope/Models/PingMethod.swift` - Ping method enum and method metadata
+- `Sources/PingScope/Models/GlobalDefaults.swift` - Global monitoring default configuration with Codable handling
+- `Sources/PingScope/Models/Host.swift` - Host override schema, fallback helpers, and custom Codable implementation
 
 ## Decisions Made
 - Adopted responsive global defaults (2s interval/timeout, 50ms/150ms thresholds) as the baseline for host monitoring.

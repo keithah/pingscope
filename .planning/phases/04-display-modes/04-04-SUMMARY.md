@@ -25,11 +25,11 @@ tech-stack:
 
 key-files:
   created:
-    - Sources/PingMonitor/Views/DisplayRootView.swift
+    - Sources/PingScope/Views/DisplayRootView.swift
   modified:
-    - Sources/PingMonitor/App/AppDelegate.swift
-    - Sources/PingMonitor/MenuBar/MenuBarRuntime.swift
-    - Sources/PingMonitor/PingMonitorApp.swift
+    - Sources/PingScope/App/AppDelegate.swift
+    - Sources/PingScope/MenuBar/MenuBarRuntime.swift
+    - Sources/PingScope/PingMonitorApp.swift
     - Tests/PingMonitorTests/MenuBarIntegrationSmokeTests.swift
 
 key-decisions:
@@ -73,10 +73,10 @@ Each task was committed atomically:
 3. **Task 3: Extend integration smoke tests for display mode and shell switching** - `963cb4a` (test)
 
 ## Files Created/Modified
-- `Sources/PingMonitor/App/AppDelegate.swift` - Wires runtime display presentation, host-selection bridging, and scheduler fanout into `DisplayViewModel`.
-- `Sources/PingMonitor/MenuBar/MenuBarRuntime.swift` - Adds explicit compact/stay-on-top setter APIs and active `displayMode` projection.
-- `Sources/PingMonitor/Views/DisplayRootView.swift` - Mode-aware root view that switches between full and compact surfaces and exposes floating drag chrome.
-- `Sources/PingMonitor/PingMonitorApp.swift` - Adds display settings toggles for compact mode and stay-on-top with shared preference-key bindings.
+- `Sources/PingScope/App/AppDelegate.swift` - Wires runtime display presentation, host-selection bridging, and scheduler fanout into `DisplayViewModel`.
+- `Sources/PingScope/MenuBar/MenuBarRuntime.swift` - Adds explicit compact/stay-on-top setter APIs and active `displayMode` projection.
+- `Sources/PingScope/Views/DisplayRootView.swift` - Mode-aware root view that switches between full and compact surfaces and exposes floating drag chrome.
+- `Sources/PingScope/PingMonitorApp.swift` - Adds display settings toggles for compact mode and stay-on-top with shared preference-key bindings.
 - `Tests/PingMonitorTests/MenuBarIntegrationSmokeTests.swift` - Adds wiring-level assertions for persisted mode/shell toggles and preserved selection context.
 
 ## Decisions Made

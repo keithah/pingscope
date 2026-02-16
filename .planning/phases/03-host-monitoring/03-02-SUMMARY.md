@@ -24,10 +24,10 @@ tech-stack:
 
 key-files:
   created:
-    - Sources/PingMonitor/Services/GatewayDetector.swift
+    - Sources/PingScope/Services/GatewayDetector.swift
   modified:
-    - Sources/PingMonitor/Services/GatewayDetector.swift
-    - Sources/PingMonitor/Services/PingService.swift
+    - Sources/PingScope/Services/GatewayDetector.swift
+    - Sources/PingScope/Services/PingService.swift
 
 key-decisions:
   - "Use sysctl route-table parsing instead of NWPath gateway fields for default gateway detection"
@@ -68,8 +68,8 @@ Each task was committed atomically:
 2. **Task 2: Add network path status handling** - `59394ec` (feat)
 
 ## Files Created/Modified
-- `Sources/PingMonitor/Services/GatewayDetector.swift` - Gateway model, sysctl parsing, SSID lookup, monitor stream, debounce, and network-change helpers.
-- `Sources/PingMonitor/Services/PingService.swift` - Blocking API alignment fix so package builds with the current `Host` schema.
+- `Sources/PingScope/Services/GatewayDetector.swift` - Gateway model, sysctl parsing, SSID lookup, monitor stream, debounce, and network-change helpers.
+- `Sources/PingScope/Services/PingService.swift` - Blocking API alignment fix so package builds with the current `Host` schema.
 
 ## Decisions Made
 - Preferred kernel routing-table queries via `sysctl` over `NWPath` gateway fields to avoid known stability pitfalls during path transitions.
@@ -83,7 +83,7 @@ Each task was committed atomically:
 - **Found during:** Task 1 (Implement GatewayInfo and gateway detection)
 - **Issue:** `PingService` still referenced removed `Host.ProtocolType` and `Host.timeout`, causing `swift build` to fail before gateway changes could be verified.
 - **Fix:** Switched `PingService` to `Host.pingMethod` and `Host.timeoutOverride`, with temporary `icmpSimulated` routing through TCP parameters.
-- **Files modified:** `Sources/PingMonitor/Services/PingService.swift`
+- **Files modified:** `Sources/PingScope/Services/PingService.swift`
 - **Verification:** `swift build` succeeds after the fix.
 - **Committed in:** `b211f31`
 

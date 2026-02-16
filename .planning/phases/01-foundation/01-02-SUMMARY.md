@@ -21,8 +21,8 @@ tech-stack:
 
 key-files:
   created:
-    - Sources/PingMonitor/Services/ConnectionWrapper.swift
-    - Sources/PingMonitor/Services/PingService.swift
+    - Sources/PingScope/Services/ConnectionWrapper.swift
+    - Sources/PingScope/Services/PingService.swift
   modified: []
 
 key-decisions:
@@ -65,8 +65,8 @@ Each task was committed atomically:
 2. **Task 2: Create PingService Actor** - `7add630` (feat)
 
 ## Files Created/Modified
-- `Sources/PingMonitor/Services/ConnectionWrapper.swift` - Async bridge over `NWConnection` state updates.
-- `Sources/PingMonitor/Services/PingService.swift` - Actor service with timeout race and throttled multi-host pinging.
+- `Sources/PingScope/Services/ConnectionWrapper.swift` - Async bridge over `NWConnection` state updates.
+- `Sources/PingScope/Services/PingService.swift` - Actor service with timeout race and throttled multi-host pinging.
 
 ## Decisions Made
 - Treated `.waiting` as failure to avoid indefinite hangs.
@@ -81,7 +81,7 @@ Each task was committed atomically:
 - **Found during:** Task 1 (Create NWConnection Async Wrapper)
 - **Issue:** Captured mutable local `didResume` in concurrent callback produced sendable-capture warnings that become errors in Swift 6 mode.
 - **Fix:** Replaced mutable captured var with lock-protected `ResumeState` reference type marked `@unchecked Sendable`.
-- **Files modified:** `Sources/PingMonitor/Services/ConnectionWrapper.swift`
+- **Files modified:** `Sources/PingScope/Services/ConnectionWrapper.swift`
 - **Verification:** `swift build` completed without sendable warnings.
 - **Committed in:** `ff5bd80` (Task 1 commit)
 

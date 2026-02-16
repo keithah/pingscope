@@ -19,12 +19,12 @@ tech-stack:
     - Lightweight mode persistence via dedicated preference store
 key-files:
   created:
-    - Sources/PingMonitor/MenuBar/StatusItemController.swift
-    - Sources/PingMonitor/MenuBar/ContextMenuFactory.swift
-    - Sources/PingMonitor/MenuBar/ModePreferenceStore.swift
+    - Sources/PingScope/MenuBar/StatusItemController.swift
+    - Sources/PingScope/MenuBar/ContextMenuFactory.swift
+    - Sources/PingScope/MenuBar/ModePreferenceStore.swift
     - Tests/PingMonitorTests/ContextMenuFactoryTests.swift
   modified:
-    - Sources/PingMonitor/PingMonitorApp.swift
+    - Sources/PingScope/PingMonitorApp.swift
 key-decisions:
   - "Render menu bar dot using SF Symbol image tint plus compact text to keep width small"
   - "Route ctrl-click and cmd-click through the same context-menu path as right-click"
@@ -62,11 +62,11 @@ Each task was committed atomically:
 2. **Task 2: Implement context menu factory and mode preference persistence** - `cfbf627` (feat)
 
 ## Files Created/Modified
-- `Sources/PingMonitor/MenuBar/StatusItemController.swift` - NSStatusItem lifecycle, rendering, and route adapters.
-- `Sources/PingMonitor/MenuBar/ContextMenuFactory.swift` - State-driven NSMenu composition and callback relay.
-- `Sources/PingMonitor/MenuBar/ModePreferenceStore.swift` - UserDefaults-backed compact/stay-on-top mode persistence.
+- `Sources/PingScope/MenuBar/StatusItemController.swift` - NSStatusItem lifecycle, rendering, and route adapters.
+- `Sources/PingScope/MenuBar/ContextMenuFactory.swift` - State-driven NSMenu composition and callback relay.
+- `Sources/PingScope/MenuBar/ModePreferenceStore.swift` - UserDefaults-backed compact/stay-on-top mode persistence.
 - `Tests/PingMonitorTests/ContextMenuFactoryTests.swift` - Menu structure/action/persistence coverage.
-- `Sources/PingMonitor/PingMonitorApp.swift` - App delegate wiring for status item, popover toggle, host switch flow, and mode persistence.
+- `Sources/PingScope/PingMonitorApp.swift` - App delegate wiring for status item, popover toggle, host switch flow, and mode persistence.
 
 ## Decisions Made
 - Used `StatusItemClickRouter` as a separate adapter so click routing remains deterministic and testable without full app launch.
@@ -81,7 +81,7 @@ Each task was committed atomically:
 - **Found during:** Task 1 (status item controller implementation)
 - **Issue:** The app had no status-item lifecycle wiring, so `swift run PingMonitor` could not satisfy the required visible menu-bar interaction path.
 - **Fix:** Updated app delegate startup to instantiate `StatusItemController`, popover toggle behavior, and context-menu presentation hooks.
-- **Files modified:** `Sources/PingMonitor/PingMonitorApp.swift`
+- **Files modified:** `Sources/PingScope/PingMonitorApp.swift`
 - **Verification:** `swift build`; `swift run PingMonitor` startup smoke run
 - **Committed in:** `07da38a` (part of task commit)
 

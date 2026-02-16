@@ -21,9 +21,9 @@ tech-stack:
 
 key-files:
   created:
-    - Sources/PingMonitor/Services/HostHealthTracker.swift
-    - Sources/PingMonitor/Services/ConnectionSweeper.swift
-    - Sources/PingMonitor/Services/PingScheduler.swift
+    - Sources/PingScope/Services/HostHealthTracker.swift
+    - Sources/PingScope/Services/ConnectionSweeper.swift
+    - Sources/PingScope/Services/PingScheduler.swift
   modified: []
 
 key-decisions:
@@ -66,9 +66,9 @@ Each task was committed atomically:
 3. **Task 3: Create PingScheduler Actor** - `04c3698` (feat)
 
 ## Files Created/Modified
-- `Sources/PingMonitor/Services/HostHealthTracker.swift` - Consecutive failure tracking and host-down evaluation.
-- `Sources/PingMonitor/Services/ConnectionSweeper.swift` - Active connection registration, timed sweeps, and bulk cancellation.
-- `Sources/PingMonitor/Services/PingScheduler.swift` - Staggered ping orchestration with update and refresh restart controls.
+- `Sources/PingScope/Services/HostHealthTracker.swift` - Consecutive failure tracking and host-down evaluation.
+- `Sources/PingScope/Services/ConnectionSweeper.swift` - Active connection registration, timed sweeps, and bulk cancellation.
+- `Sources/PingScope/Services/PingScheduler.swift` - Staggered ping orchestration with update and refresh restart controls.
 
 ## Decisions Made
 - Kept host health bookkeeping keyed by host address strings to align with `PingResult.host` values.

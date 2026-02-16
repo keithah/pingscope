@@ -23,11 +23,11 @@ tech-stack:
 
 key-files:
   created:
-    - Sources/PingMonitor/Models/DisplayMode.swift
-    - Sources/PingMonitor/MenuBar/DisplayPreferencesStore.swift
+    - Sources/PingScope/Models/DisplayMode.swift
+    - Sources/PingScope/MenuBar/DisplayPreferencesStore.swift
     - Tests/PingMonitorTests/DisplayPreferencesStoreTests.swift
   modified:
-    - Sources/PingMonitor/MenuBar/ModePreferenceStore.swift
+    - Sources/PingScope/MenuBar/ModePreferenceStore.swift
 
 key-decisions:
   - "Use one Codable DisplayPreferences payload with explicit shared/full/compact partitions"
@@ -70,9 +70,9 @@ Each task was committed atomically:
 3. **Task 3: Add regression tests for display preference persistence** - `be3e530` (test)
 
 ## Files Created/Modified
-- `Sources/PingMonitor/Models/DisplayMode.swift` - Core display-mode persistence models and defaults.
-- `Sources/PingMonitor/MenuBar/DisplayPreferencesStore.swift` - UserDefaults-backed store for shared and per-mode display state.
-- `Sources/PingMonitor/MenuBar/ModePreferenceStore.swift` - Added helper APIs for mode/stay-on-top persistence reuse.
+- `Sources/PingScope/Models/DisplayMode.swift` - Core display-mode persistence models and defaults.
+- `Sources/PingScope/MenuBar/DisplayPreferencesStore.swift` - UserDefaults-backed store for shared and per-mode display state.
+- `Sources/PingScope/MenuBar/ModePreferenceStore.swift` - Added helper APIs for mode/stay-on-top persistence reuse.
 - `Tests/PingMonitorTests/DisplayPreferencesStoreTests.swift` - Regression suite for defaults and state-isolation persistence behavior.
 
 ## Decisions Made

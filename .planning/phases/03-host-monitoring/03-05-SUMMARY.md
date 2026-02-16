@@ -23,9 +23,9 @@ tech-stack:
 
 key-files:
   created:
-    - Sources/PingMonitor/ViewModels/HostListViewModel.swift
-    - Sources/PingMonitor/Views/HostRowView.swift
-    - Sources/PingMonitor/Views/HostListView.swift
+    - Sources/PingScope/ViewModels/HostListViewModel.swift
+    - Sources/PingScope/Views/HostRowView.swift
+    - Sources/PingScope/Views/HostListView.swift
   modified: []
 
 key-decisions:
@@ -66,9 +66,9 @@ Each task was committed atomically:
 2. **Task 2: Create HostRowView and HostListView** - `1851d9d` (feat)
 
 ## Files Created/Modified
-- `Sources/PingMonitor/ViewModels/HostListViewModel.swift` - Host list state, selection callbacks, and latency text formatting
-- `Sources/PingMonitor/Views/HostRowView.swift` - Flat row UI with checkmark/lock indicators and context menu actions
-- `Sources/PingMonitor/Views/HostListView.swift` - Host list container with header, list rendering, sheets, and delete confirmation
+- `Sources/PingScope/ViewModels/HostListViewModel.swift` - Host list state, selection callbacks, and latency text formatting
+- `Sources/PingScope/Views/HostRowView.swift` - Flat row UI with checkmark/lock indicators and context menu actions
+- `Sources/PingScope/Views/HostListView.swift` - Host list container with header, list rendering, sheets, and delete confirmation
 
 ## Decisions Made
 - Kept row latency rendering in the ViewModel using tri-state dictionary semantics so the view only consumes display text
@@ -82,7 +82,7 @@ Each task was committed atomically:
 - **Found during:** Task 2 (Create HostRowView and HostListView)
 - **Issue:** Conditional `.foregroundStyle(showsSymbol ? .secondary : .clear)` failed type-checking because branches resolved to incompatible styles
 - **Fix:** Switched to consistent `.foregroundStyle(.secondary)` plus `.opacity(showsSymbol ? 1 : 0)` to preserve layout and compile cleanly
-- **Files modified:** `Sources/PingMonitor/Views/HostRowView.swift`
+- **Files modified:** `Sources/PingScope/Views/HostRowView.swift`
 - **Verification:** `swift build` passes
 - **Committed in:** `1851d9d` (part of Task 2 commit)
 

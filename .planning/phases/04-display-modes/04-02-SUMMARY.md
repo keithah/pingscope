@@ -23,11 +23,11 @@ tech-stack:
 
 key-files:
   created:
-    - Sources/PingMonitor/ViewModels/DisplayViewModel.swift
-    - Sources/PingMonitor/Views/DisplayGraphView.swift
-    - Sources/PingMonitor/Views/RecentResultsListView.swift
-    - Sources/PingMonitor/Views/FullModeView.swift
-    - Sources/PingMonitor/Views/CompactModeView.swift
+    - Sources/PingScope/ViewModels/DisplayViewModel.swift
+    - Sources/PingScope/Views/DisplayGraphView.swift
+    - Sources/PingScope/Views/RecentResultsListView.swift
+    - Sources/PingScope/Views/FullModeView.swift
+    - Sources/PingScope/Views/CompactModeView.swift
     - Tests/PingMonitorTests/DisplayViewModelTests.swift
   modified: []
 
@@ -71,11 +71,11 @@ Each task was committed atomically:
 3. **Task 3: Add display view-model regression tests** - `52fe8bf` (test)
 
 ## Files Created/Modified
-- `Sources/PingMonitor/ViewModels/DisplayViewModel.swift` - Shared display state, per-mode visibility persistence, and graph/history data projection.
-- `Sources/PingMonitor/Views/DisplayGraphView.swift` - Lightweight trend graph renderer for projected latency points.
-- `Sources/PingMonitor/Views/RecentResultsListView.swift` - Reusable recent-results list with optional six-row compact viewport.
-- `Sources/PingMonitor/Views/FullModeView.swift` - Full mode composition with host pills and independently collapsible graph/history sections.
-- `Sources/PingMonitor/Views/CompactModeView.swift` - Compact mode composition with dropdown host selector and condensed stack.
+- `Sources/PingScope/ViewModels/DisplayViewModel.swift` - Shared display state, per-mode visibility persistence, and graph/history data projection.
+- `Sources/PingScope/Views/DisplayGraphView.swift` - Lightweight trend graph renderer for projected latency points.
+- `Sources/PingScope/Views/RecentResultsListView.swift` - Reusable recent-results list with optional six-row compact viewport.
+- `Sources/PingScope/Views/FullModeView.swift` - Full mode composition with host pills and independently collapsible graph/history sections.
+- `Sources/PingScope/Views/CompactModeView.swift` - Compact mode composition with dropdown host selector and condensed stack.
 - `Tests/PingMonitorTests/DisplayViewModelTests.swift` - Regression suite for mode-switch continuity and bounded recent-result ordering.
 
 ## Decisions Made
@@ -91,7 +91,7 @@ Each task was committed atomically:
 - **Found during:** Task 3 (Add display view-model regression tests)
 - **Issue:** `sampleBufferLimit` was clamped to a minimum of 12, which broke expected bounded-memory behavior for smaller explicit limits.
 - **Fix:** Changed clamp to minimum 1 so configured limits are honored.
-- **Files modified:** `Sources/PingMonitor/ViewModels/DisplayViewModel.swift`, `Tests/PingMonitorTests/DisplayViewModelTests.swift`
+- **Files modified:** `Sources/PingScope/ViewModels/DisplayViewModel.swift`, `Tests/PingMonitorTests/DisplayViewModelTests.swift`
 - **Verification:** `swift test --filter DisplayViewModelTests`
 - **Committed in:** `52fe8bf` (part of task commit)
 

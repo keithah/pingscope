@@ -28,11 +28,11 @@ tech-stack:
 key-files:
   created: []
   modified:
-    - Sources/PingMonitor/MenuBar/MenuBarRuntime.swift
-    - Sources/PingMonitor/App/AppDelegate.swift
-    - Sources/PingMonitor/ViewModels/StatusPopoverViewModel.swift
-    - Sources/PingMonitor/Views/StatusPopoverView.swift
-    - Sources/PingMonitor/Views/HostListView.swift
+    - Sources/PingScope/MenuBar/MenuBarRuntime.swift
+    - Sources/PingScope/App/AppDelegate.swift
+    - Sources/PingScope/ViewModels/StatusPopoverViewModel.swift
+    - Sources/PingScope/Views/StatusPopoverView.swift
+    - Sources/PingScope/Views/HostListView.swift
 
 key-decisions:
   - "Embed host management directly in the status popover for immediate access instead of a separate window."
@@ -76,11 +76,11 @@ Each task was committed atomically:
 
 ## Files Created/Modified
 
-- `Sources/PingMonitor/MenuBar/MenuBarRuntime.swift` - Runtime model now tracks HostStore-driven hosts and network change indicator state.
-- `Sources/PingMonitor/App/AppDelegate.swift` - Wires HostStore and GatewayDetector into launch lifecycle and scheduler updates.
-- `Sources/PingMonitor/ViewModels/StatusPopoverViewModel.swift` - Exposes host-management-aware popover state.
-- `Sources/PingMonitor/Views/StatusPopoverView.swift` - Adds inline Hosts section and host list integration.
-- `Sources/PingMonitor/Views/HostListView.swift` - Refines embedded list behavior for popover use.
+- `Sources/PingScope/MenuBar/MenuBarRuntime.swift` - Runtime model now tracks HostStore-driven hosts and network change indicator state.
+- `Sources/PingScope/App/AppDelegate.swift` - Wires HostStore and GatewayDetector into launch lifecycle and scheduler updates.
+- `Sources/PingScope/ViewModels/StatusPopoverViewModel.swift` - Exposes host-management-aware popover state.
+- `Sources/PingScope/Views/StatusPopoverView.swift` - Adds inline Hosts section and host list integration.
+- `Sources/PingScope/Views/HostListView.swift` - Refines embedded list behavior for popover use.
 
 ## Decisions Made
 

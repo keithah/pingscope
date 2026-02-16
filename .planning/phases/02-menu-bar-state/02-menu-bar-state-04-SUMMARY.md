@@ -27,8 +27,8 @@ key-files:
   created:
     - Tests/PingMonitorTests/StatusItemTitleFormatterTests.swift
   modified:
-    - Sources/PingMonitor/App/AppDelegate.swift
-    - Sources/PingMonitor/MenuBar/StatusItemController.swift
+    - Sources/PingScope/App/AppDelegate.swift
+    - Sources/PingScope/MenuBar/StatusItemController.swift
     - Tests/PingMonitorTests/MenuBarIntegrationSmokeTests.swift
 
 key-decisions:
@@ -73,8 +73,8 @@ Each task was committed atomically:
 _Plan metadata commit will be added after summary/state updates._
 
 ## Files Created/Modified
-- `Sources/PingMonitor/App/AppDelegate.swift` - Added reliable settings launch with fallback window in accessory mode.
-- `Sources/PingMonitor/MenuBar/StatusItemController.swift` - Updated status rendering (colored dot + stacked text), compact mode observer wiring, and title formatting behavior.
+- `Sources/PingScope/App/AppDelegate.swift` - Added reliable settings launch with fallback window in accessory mode.
+- `Sources/PingScope/MenuBar/StatusItemController.swift` - Updated status rendering (colored dot + stacked text), compact mode observer wiring, and title formatting behavior.
 - `Tests/PingMonitorTests/MenuBarIntegrationSmokeTests.swift` - Existing integration coverage retained as end-to-end behavior guardrails.
 - `Tests/PingMonitorTests/StatusItemTitleFormatterTests.swift` - Added formatter regression coverage for compact/non-compact status text rendering.
 
@@ -90,7 +90,7 @@ _Plan metadata commit will be added after summary/state updates._
 - **Found during:** Task 3 checkpoint feedback
 - **Issue:** Template-tinted symbol rendering and horizontal title/image layout produced unreadable/incorrect visual result.
 - **Fix:** Switched to non-template drawn dot, center-styled attributed title, and vertical image/text layout.
-- **Files modified:** `Sources/PingMonitor/MenuBar/StatusItemController.swift`
+- **Files modified:** `Sources/PingScope/MenuBar/StatusItemController.swift`
 - **Verification:** `swift build`, `swift test`
 - **Committed in:** `e648632`
 
@@ -98,7 +98,7 @@ _Plan metadata commit will be added after summary/state updates._
 - **Found during:** Task 3 checkpoint feedback
 - **Issue:** Status item observed only `menuBarState`, not `isCompactModeEnabled`, so mode toggles never re-rendered title.
 - **Fix:** Added `combineLatest` subscription for state + compact flag and compact title formatter coverage tests.
-- **Files modified:** `Sources/PingMonitor/MenuBar/StatusItemController.swift`, `Tests/PingMonitorTests/StatusItemTitleFormatterTests.swift`
+- **Files modified:** `Sources/PingScope/MenuBar/StatusItemController.swift`, `Tests/PingMonitorTests/StatusItemTitleFormatterTests.swift`
 - **Verification:** `swift test`
 - **Committed in:** `e648632`
 
@@ -106,7 +106,7 @@ _Plan metadata commit will be added after summary/state updates._
 - **Found during:** Task 3 checkpoint feedback
 - **Issue:** `showSettingsWindow:` responder path was not reliably available in current runtime context.
 - **Fix:** Added app activation + responder attempt + fallback `NSWindowController` with `SettingsPlaceholderView` host.
-- **Files modified:** `Sources/PingMonitor/App/AppDelegate.swift`
+- **Files modified:** `Sources/PingScope/App/AppDelegate.swift`
 - **Verification:** `swift build`, `swift test`
 - **Committed in:** `e648632`
 

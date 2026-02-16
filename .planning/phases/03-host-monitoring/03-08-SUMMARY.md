@@ -27,8 +27,8 @@ key-files:
   created:
     - Tests/PingMonitorTests/PingSchedulerTests.swift
   modified:
-    - Sources/PingMonitor/Services/PingScheduler.swift
-    - Sources/PingMonitor/App/AppDelegate.swift
+    - Sources/PingScope/Services/PingScheduler.swift
+    - Sources/PingScope/App/AppDelegate.swift
 
 key-decisions:
   - "Track next due times per host and reschedule from each host's own effective interval to preserve mixed cadences in one session."
@@ -72,8 +72,8 @@ Each task was committed atomically:
 
 ## Files Created/Modified
 
-- `Sources/PingMonitor/Services/PingScheduler.swift` - Adds host-level due-time scheduling loop, effective interval computation, and staggered execution for concurrently due hosts.
-- `Sources/PingMonitor/App/AppDelegate.swift` - Passes global interval fallback explicitly through all scheduler runtime entry points.
+- `Sources/PingScope/Services/PingScheduler.swift` - Adds host-level due-time scheduling loop, effective interval computation, and staggered execution for concurrently due hosts.
+- `Sources/PingScope/App/AppDelegate.swift` - Passes global interval fallback explicitly through all scheduler runtime entry points.
 - `Tests/PingMonitorTests/PingSchedulerTests.swift` - Adds deterministic cadence tests for interval overrides and nil-override fallback behavior.
 
 ## Decisions Made

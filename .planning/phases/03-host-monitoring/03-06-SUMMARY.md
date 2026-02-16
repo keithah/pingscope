@@ -25,8 +25,8 @@ tech-stack:
 
 key-files:
   created:
-    - Sources/PingMonitor/ViewModels/AddHostViewModel.swift
-    - Sources/PingMonitor/Views/AddHostSheet.swift
+    - Sources/PingScope/ViewModels/AddHostViewModel.swift
+    - Sources/PingScope/Views/AddHostSheet.swift
   modified: []
 
 key-decisions:
@@ -68,8 +68,8 @@ Each task was committed atomically:
 2. **Task 2: Create AddHostSheet view** - `e3ec6e7` (feat)
 
 ## Files Created/Modified
-- `Sources/PingMonitor/ViewModels/AddHostViewModel.swift` - Add/edit form state, validation, ping testing, and save/cancel flow.
-- `Sources/PingMonitor/Views/AddHostSheet.swift` - SwiftUI sheet form and toolbar for add/edit host configuration.
+- `Sources/PingScope/ViewModels/AddHostViewModel.swift` - Add/edit form state, validation, ping testing, and save/cancel flow.
+- `Sources/PingScope/Views/AddHostSheet.swift` - SwiftUI sheet form and toolbar for add/edit host configuration.
 
 ## Decisions Made
 - Reused the same view model for add and edit modes, with edit mode pre-populating fields from an existing `Host`.

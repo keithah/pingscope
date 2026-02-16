@@ -26,9 +26,9 @@ tech-stack:
 key-files:
   created: []
   modified:
-    - Sources/PingMonitor/MenuBar/MenuBarStatusEvaluator.swift
-    - Sources/PingMonitor/ViewModels/MenuBarViewModel.swift
-    - Sources/PingMonitor/MenuBar/MenuBarRuntime.swift
+    - Sources/PingScope/MenuBar/MenuBarStatusEvaluator.swift
+    - Sources/PingScope/ViewModels/MenuBarViewModel.swift
+    - Sources/PingScope/MenuBar/MenuBarRuntime.swift
     - Tests/PingMonitorTests/MenuBarViewModelTests.swift
     - Tests/PingMonitorTests/MenuBarIntegrationSmokeTests.swift
 
@@ -73,9 +73,9 @@ Each task was committed atomically:
 
 ## Files Created/Modified
 
-- `Sources/PingMonitor/MenuBar/MenuBarStatusEvaluator.swift` - Evaluator now receives dynamic thresholds and classifies green/yellow/red using normalized threshold boundaries.
-- `Sources/PingMonitor/ViewModels/MenuBarViewModel.swift` - Tracks active selected-host thresholds and passes them into status evaluation.
-- `Sources/PingMonitor/MenuBar/MenuBarRuntime.swift` - Selection sync now passes selected host and global defaults into view-model threshold state.
+- `Sources/PingScope/MenuBar/MenuBarStatusEvaluator.swift` - Evaluator now receives dynamic thresholds and classifies green/yellow/red using normalized threshold boundaries.
+- `Sources/PingScope/ViewModels/MenuBarViewModel.swift` - Tracks active selected-host thresholds and passes them into status evaluation.
+- `Sources/PingScope/MenuBar/MenuBarRuntime.swift` - Selection sync now passes selected host and global defaults into view-model threshold state.
 - `Tests/PingMonitorTests/MenuBarViewModelTests.swift` - Adds targeted host-threshold regression cases and updates evaluator construction.
 - `Tests/PingMonitorTests/MenuBarIntegrationSmokeTests.swift` - Updated smoke tests to current runtime API to unblock filtered test execution.
 
