@@ -176,7 +176,7 @@ Plans:
   1. Test targets compile without stale symbol/signature errors
   2. `StatusItemTitleFormatter` and `ContextMenuActions` test wiring aligns with current production interfaces
   3. Regression suite can run to completion in CI/local verification flow
-**Plans**: 1 plan (to be created)
+**Plans**: 1 plan
 
 Plans:
 - [ ] 09-01-PLAN.md — Repair stale test references and re-establish compile-green regression baseline
@@ -203,3 +203,4 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 8 -> 9
 *Phase 1 planned: 2026-02-14*
 *Phase 3 planned: 2026-02-14*
 *Phase 4 planned: 2026-02-14*
+*Phase 9 planned: 2026-02-16*
