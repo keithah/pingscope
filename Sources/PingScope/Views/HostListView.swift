@@ -104,7 +104,7 @@ struct HostListView_Previews: PreviewProvider {
     static var previews: some View {
         let hosts = [Host.googleDNS, Host.cloudflareDNS]
 
-        HostListView(
+        return HostListView(
             viewModel: HostListViewModel(
                 hosts: hosts,
                 activeHostID: hosts.first?.id,
