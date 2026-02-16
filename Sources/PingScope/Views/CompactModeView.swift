@@ -273,25 +273,29 @@ struct CompactGraphView: View {
     }
 }
 
-#Preview {
-    let defaults = UserDefaults(suiteName: "preview-compact-mode")!
-    let store = DisplayPreferencesStore(userDefaults: defaults, keyPrefix: "preview.compact")
-    let viewModel = DisplayViewModel(preferencesStore: store)
+#if DEBUG
+struct CompactModeView_Previews: PreviewProvider {
+    static var previews: some View {
+        let defaults = UserDefaults(suiteName: "preview-compact-mode")!
+        let store = DisplayPreferencesStore(userDefaults: defaults, keyPrefix: "preview.compact")
+        let viewModel = DisplayViewModel(preferencesStore: store)
 
-    let hosts = [
-        Host(name: "Google", address: "8.8.8.8"),
-        Host(name: "Cloudflare", address: "1.1.1.1")
-    ]
-    viewModel.setHosts(hosts)
-    viewModel.selectHost(id: hosts[0].id)
-    viewModel.ingestSample(hostID: hosts[0].id, timestamp: Date().addingTimeInterval(-25), latencyMS: 9)
-    viewModel.ingestSample(hostID: hosts[0].id, timestamp: Date().addingTimeInterval(-20), latencyMS: 12)
-    viewModel.ingestSample(hostID: hosts[0].id, timestamp: Date().addingTimeInterval(-15), latencyMS: 150)
-    viewModel.ingestSample(hostID: hosts[0].id, timestamp: Date().addingTimeInterval(-10), latencyMS: 7)
-    viewModel.ingestSample(hostID: hosts[0].id, timestamp: Date().addingTimeInterval(-5), latencyMS: 10)
-    viewModel.ingestSample(hostID: hosts[0].id, timestamp: Date(), latencyMS: 11)
+        let hosts = [
+            Host(name: "Google", address: "8.8.8.8"),
+            Host(name: "Cloudflare", address: "1.1.1.1")
+        ]
+        viewModel.setHosts(hosts)
+        viewModel.selectHost(id: hosts[0].id)
+        viewModel.ingestSample(hostID: hosts[0].id, timestamp: Date().addingTimeInterval(-25), latencyMS: 9)
+        viewModel.ingestSample(hostID: hosts[0].id, timestamp: Date().addingTimeInterval(-20), latencyMS: 12)
+        viewModel.ingestSample(hostID: hosts[0].id, timestamp: Date().addingTimeInterval(-15), latencyMS: 150)
+        viewModel.ingestSample(hostID: hosts[0].id, timestamp: Date().addingTimeInterval(-10), latencyMS: 7)
+        viewModel.ingestSample(hostID: hosts[0].id, timestamp: Date().addingTimeInterval(-5), latencyMS: 10)
+        viewModel.ingestSample(hostID: hosts[0].id, timestamp: Date(), latencyMS: 11)
 
-    return CompactModeView(viewModel: viewModel)
-        .frame(width: 260, height: 340)
-        .background(Color(nsColor: .windowBackgroundColor))
+        return CompactModeView(viewModel: viewModel)
+            .frame(width: 260, height: 340)
+            .background(Color(nsColor: .windowBackgroundColor))
+    }
 }
+#endif

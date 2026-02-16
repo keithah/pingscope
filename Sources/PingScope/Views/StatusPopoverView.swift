@@ -87,15 +87,19 @@ struct StatusPopoverView: View {
     }
 }
 
-#Preview {
-    StatusPopoverView(
-        viewModel: StatusPopoverViewModel(
-            initialSnapshot: .init(
-                statusLabel: "Healthy",
-                statusCategory: .green,
-                latencyText: "41 ms",
-                hostSummary: "Google DNS (8.8.8.8)"
+#if DEBUG
+struct StatusPopoverView_Previews: PreviewProvider {
+    static var previews: some View {
+        StatusPopoverView(
+            viewModel: StatusPopoverViewModel(
+                initialSnapshot: .init(
+                    statusLabel: "Healthy",
+                    statusCategory: .green,
+                    latencyText: "41 ms",
+                    hostSummary: "Google DNS (8.8.8.8)"
+                )
             )
         )
-    )
+    }
 }
+#endif

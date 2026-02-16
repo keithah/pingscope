@@ -9,10 +9,15 @@ actor HostStore {
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
-        self.hosts = Self.loadHosts(from: defaults, key: key)
+        let loadedHosts = Self.loadHosts(from: defaults, key: key)
+        let mergedHosts = Self.mergeDefaults(into: loadedHosts)
+        self.hosts = mergedHosts
         self.gatewayHost = nil
 
-        ensureDefaultsPresent()
+        // Avoid calling actor-isolated methods from init (Swift 6 stricter isolation).
+        if mergedHosts != loadedHosts {
+            Self.persistHosts(mergedHosts, to: defaults, key: key)
+        }
     }
 
     private func loadHosts() -> [Host] {
@@ -32,6 +37,15 @@ actor HostStore {
     }
 
     private func persistHosts() {
+        do {
+            let data = try JSONEncoder().encode(hosts)
+            defaults.set(data, forKey: key)
+        } catch {
+            defaults.removeObject(forKey: key)
+        }
+    }
+
+    private static func persistHosts(_ hosts: [Host], to defaults: UserDefaults, key: String) {
         do {
             let data = try JSONEncoder().encode(hosts)
             defaults.set(data, forKey: key)

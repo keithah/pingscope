@@ -100,13 +100,17 @@ struct RecentResultsListView: View {
     }()
 }
 
-#Preview {
-    RecentResultsListView(rows: [
-        .init(timestamp: .init(timeIntervalSinceNow: -5), latencyMS: 11, hostName: "Google"),
-        .init(timestamp: .init(timeIntervalSinceNow: -10), latencyMS: 95, hostName: "Google"),
-        .init(timestamp: .init(timeIntervalSinceNow: -15), latencyMS: nil, hostName: "Cloudflare"),
-        .init(timestamp: .init(timeIntervalSinceNow: -20), latencyMS: 180, hostName: "Google")
-    ], maxVisibleRows: 6, compact: false, showHostName: true)
-    .padding()
-    .frame(width: 320, height: 180)
+#if DEBUG
+struct RecentResultsListView_Previews: PreviewProvider {
+    static var previews: some View {
+        RecentResultsListView(rows: [
+            .init(timestamp: .init(timeIntervalSinceNow: -5), latencyMS: 11, hostName: "Google"),
+            .init(timestamp: .init(timeIntervalSinceNow: -10), latencyMS: 95, hostName: "Google"),
+            .init(timestamp: .init(timeIntervalSinceNow: -15), latencyMS: nil, hostName: "Cloudflare"),
+            .init(timestamp: .init(timeIntervalSinceNow: -20), latencyMS: 180, hostName: "Google")
+        ], maxVisibleRows: 6, compact: false, showHostName: true)
+        .padding()
+        .frame(width: 320, height: 180)
+    }
 }
+#endif

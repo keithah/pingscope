@@ -418,23 +418,27 @@ private extension DisplayTimeRange {
     }
 }
 
-#Preview {
-    let defaults = UserDefaults(suiteName: "preview-full-mode")!
-    let store = DisplayPreferencesStore(userDefaults: defaults, keyPrefix: "preview.full")
-    let viewModel = DisplayViewModel(preferencesStore: store)
+#if DEBUG
+struct FullModeView_Previews: PreviewProvider {
+    static var previews: some View {
+        let defaults = UserDefaults(suiteName: "preview-full-mode")!
+        let store = DisplayPreferencesStore(userDefaults: defaults, keyPrefix: "preview.full")
+        let viewModel = DisplayViewModel(preferencesStore: store)
 
-    let hosts = [
-        Host(name: "Google", address: "8.8.8.8"),
-        Host(name: "Cloudflare", address: "1.1.1.1"),
-        Host(name: "Default Gateway", address: "192.168.1.1")
-    ]
-    viewModel.setHosts(hosts)
-    viewModel.selectHost(id: hosts[0].id)
-    viewModel.ingestSample(hostID: hosts[0].id, timestamp: Date().addingTimeInterval(-20), latencyMS: 42)
-    viewModel.ingestSample(hostID: hosts[0].id, timestamp: Date().addingTimeInterval(-10), latencyMS: 49)
-    viewModel.ingestSample(hostID: hosts[0].id, timestamp: Date(), latencyMS: 37)
+        let hosts = [
+            Host(name: "Google", address: "8.8.8.8"),
+            Host(name: "Cloudflare", address: "1.1.1.1"),
+            Host(name: "Default Gateway", address: "192.168.1.1")
+        ]
+        viewModel.setHosts(hosts)
+        viewModel.selectHost(id: hosts[0].id)
+        viewModel.ingestSample(hostID: hosts[0].id, timestamp: Date().addingTimeInterval(-20), latencyMS: 42)
+        viewModel.ingestSample(hostID: hosts[0].id, timestamp: Date().addingTimeInterval(-10), latencyMS: 49)
+        viewModel.ingestSample(hostID: hosts[0].id, timestamp: Date(), latencyMS: 37)
 
-    return FullModeView(viewModel: viewModel)
-        .frame(width: 420, height: 500)
-        .background(Color(nsColor: .windowBackgroundColor))
+        return FullModeView(viewModel: viewModel)
+            .frame(width: 420, height: 500)
+            .background(Color(nsColor: .windowBackgroundColor))
+    }
 }
+#endif

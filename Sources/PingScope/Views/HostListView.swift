@@ -99,14 +99,18 @@ struct HostListView: View {
     }
 }
 
-#Preview {
-    let hosts = [Host.googleDNS, Host.cloudflareDNS]
+#if DEBUG
+struct HostListView_Previews: PreviewProvider {
+    static var previews: some View {
+        let hosts = [Host.googleDNS, Host.cloudflareDNS]
 
-    HostListView(
-        viewModel: HostListViewModel(
-            hosts: hosts,
-            activeHostID: hosts.first?.id,
-            onSelectHost: { _ in }
+        HostListView(
+            viewModel: HostListViewModel(
+                hosts: hosts,
+                activeHostID: hosts.first?.id,
+                onSelectHost: { _ in }
+            )
         )
-    )
+    }
 }
+#endif

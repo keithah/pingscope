@@ -42,6 +42,10 @@ struct SettingsSceneView: View {
     }
 }
 
-#Preview {
-    SettingsSceneView()
+#if DEBUG
+struct SettingsSceneView_Previews: PreviewProvider {
+    static var previews: some View {
+        SettingsSceneView()
+    }
 }
+#endif

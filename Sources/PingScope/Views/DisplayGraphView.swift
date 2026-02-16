@@ -316,21 +316,25 @@ struct DisplayGraphView: View {
     }
 }
 
-#Preview {
-    DisplayGraphView(points: [
-        .init(timestamp: .init(timeIntervalSinceNow: -50), latencyMS: 12),
-        .init(timestamp: .init(timeIntervalSinceNow: -45), latencyMS: 85),
-        .init(timestamp: .init(timeIntervalSinceNow: -40), latencyMS: 120),
-        .init(timestamp: .init(timeIntervalSinceNow: -35), latencyMS: 45),
-        .init(timestamp: .init(timeIntervalSinceNow: -30), latencyMS: 153),
-        .init(timestamp: .init(timeIntervalSinceNow: -25), latencyMS: 28),
-        .init(timestamp: .init(timeIntervalSinceNow: -20), latencyMS: 15),
-        .init(timestamp: .init(timeIntervalSinceNow: -15), latencyMS: 22),
-        .init(timestamp: .init(timeIntervalSinceNow: -10), latencyMS: 18),
-        .init(timestamp: .init(timeIntervalSinceNow: -5), latencyMS: 25),
-        .init(timestamp: .init(timeIntervalSinceNow: 0), latencyMS: 19)
-    ])
-    .padding()
-    .frame(width: 320, height: 160)
-    .background(Color(nsColor: .windowBackgroundColor))
+#if DEBUG
+struct DisplayGraphView_Previews: PreviewProvider {
+    static var previews: some View {
+        DisplayGraphView(points: [
+            .init(timestamp: .init(timeIntervalSinceNow: -50), latencyMS: 12),
+            .init(timestamp: .init(timeIntervalSinceNow: -45), latencyMS: 85),
+            .init(timestamp: .init(timeIntervalSinceNow: -40), latencyMS: 120),
+            .init(timestamp: .init(timeIntervalSinceNow: -35), latencyMS: 45),
+            .init(timestamp: .init(timeIntervalSinceNow: -30), latencyMS: 153),
+            .init(timestamp: .init(timeIntervalSinceNow: -25), latencyMS: 28),
+            .init(timestamp: .init(timeIntervalSinceNow: -20), latencyMS: 15),
+            .init(timestamp: .init(timeIntervalSinceNow: -15), latencyMS: 22),
+            .init(timestamp: .init(timeIntervalSinceNow: -10), latencyMS: 18),
+            .init(timestamp: .init(timeIntervalSinceNow: -5), latencyMS: 25),
+            .init(timestamp: .init(timeIntervalSinceNow: 0), latencyMS: 19)
+        ])
+        .padding()
+        .frame(width: 320, height: 160)
+        .background(Color(nsColor: .windowBackgroundColor))
+    }
 }
+#endif
