@@ -160,16 +160,16 @@ Which phases cover which requirements. Updated during roadmap creation.
 | VIS-05 | Phase 5 | Pending |
 | VIS-06 | Phase 5 | Pending |
 | VIS-07 | Phase 5 | Pending |
-| NOTF-01 | Phase 6 | Pending |
-| NOTF-02 | Phase 6 | Pending |
-| NOTF-03 | Phase 6 | Pending |
-| NOTF-04 | Phase 6 | Pending |
-| NOTF-05 | Phase 6 | Pending |
-| NOTF-06 | Phase 6 | Pending |
-| NOTF-07 | Phase 6 | Pending |
-| NOTF-08 | Phase 6 | Pending |
-| NOTF-09 | Phase 6 | Pending |
-| NOTF-10 | Phase 6 | Pending |
+| NOTF-01 | Phase 6 | Complete |
+| NOTF-02 | Phase 6 | Complete |
+| NOTF-03 | Phase 6 | Complete |
+| NOTF-04 | Phase 6 | Complete |
+| NOTF-05 | Phase 6 | Complete |
+| NOTF-06 | Phase 6 | Complete |
+| NOTF-07 | Phase 6 | Complete |
+| NOTF-08 | Phase 6 | Complete |
+| NOTF-09 | Phase 6 | Complete |
+| NOTF-10 | Phase 6 | Complete |
 | SETT-01 | Phase 6 | Complete |
 | SETT-02 | Phase 6 | Complete |
 | SETT-03 | Phase 6 | Complete |
@@ -184,4 +184,4 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 ---
 *Requirements defined: 2026-02-13*
-*Last updated: 2026-02-13 after roadmap creation*
+*Last updated: 2026-02-16 after Phase 6 gap closure*

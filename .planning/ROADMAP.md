@@ -121,7 +121,7 @@ Plans:
   3. User can configure notification settings per-host and globally
   4. Settings panel allows host, notification, and display configuration
   5. All settings persist via UserDefaults and survive app restart
-**Plans**: 6 plans
+**Plans**: 8 plans (including 2 gap-closure plans)
 
 Plans:
 - [x] 06-01-PLAN.md — NotificationService actor, AlertType enum, and NotificationPreferencesStore
@@ -130,6 +130,8 @@ Plans:
 - [x] 06-04-PLAN.md — Settings TabView with Host, Notification, and Display tabs
 - [x] 06-05-PLAN.md — Privacy manifest and app lifecycle notification wiring
 - [x] 06-06-PLAN.md — Human verification checkpoint for all Phase 6 requirements
+- [x] 06-07-PLAN.md — Gap closure: restore tabbed Settings shell and wire advanced notification controls
+- [x] 06-08-PLAN.md — Gap closure: human re-verification of Phase 6 settings truths
 
 ### Phase 7: Settings Focus
 **Goal**: Settings are reliable, native-feeling, and changes apply immediately across the running app (no restart required).
@@ -161,7 +163,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7
 | 3. Host Monitoring | 9/9 | Complete | 2026-02-14 |
 | 4. Display Modes | 5/5 | Complete | 2026-02-15 |
 | 5. Visualization | 3/3 | Complete | 2026-02-15 |
-| 6. Notifications & Settings | 6/6 | Complete | 2026-02-16 |
+| 6. Notifications & Settings | 8/8 | Complete | 2026-02-16 |
 | 7. Settings Focus | 4/4 | Complete | 2026-02-16 |
 
 ---
