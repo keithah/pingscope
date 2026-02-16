@@ -43,7 +43,7 @@ struct AddHostSheet: View {
             TextField("Display Name", text: $viewModel.displayName)
 
             Picker("Ping Method", selection: $viewModel.pingMethod) {
-                ForEach(PingMethod.allCases, id: \.self) { method in
+                ForEach(PingMethod.availableCases, id: \.self) { method in
                     Text(method.displayName).tag(method)
                 }
             }
