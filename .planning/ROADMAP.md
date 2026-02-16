@@ -18,7 +18,7 @@ PingMonitor is a macOS menu bar network monitoring app rewritten from a monolith
 - [x] **Phase 6: Notifications & Settings** - Alert system and persistent configuration
 - [x] **Phase 7: Settings Focus** - Settings reliability, live-updating configuration, and end-to-end persistence
 - [x] **Phase 8: Visualization Requirement Reconciliation & Verification** - Close VIS-01 through VIS-07 and produce missing Phase 5 verification artifact
-- [ ] **Phase 9: Regression Test Wiring Recovery** - Restore compile-green automated regression integration coverage
+- [x] **Phase 9: Regression Test Wiring Recovery** - Restore compile-green automated regression integration coverage
 
 ## Phase Details
 
@@ -179,7 +179,7 @@ Plans:
 **Plans**: 1 plan
 
 Plans:
-- [ ] 09-01-PLAN.md — Repair stale test references and re-establish compile-green regression baseline
+- [x] 09-01-PLAN.md — Repair stale test references and re-establish compile-green regression baseline
 
 ## Progress
 
@@ -196,7 +196,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 8 -> 9
 | 6. Notifications & Settings | 8/8 | Complete | 2026-02-16 |
 | 7. Settings Focus | 4/4 | Complete | 2026-02-16 |
 | 8. Visualization Requirement Reconciliation & Verification | 1/1 | Complete | 2026-02-16 |
-| 9. Regression Test Wiring Recovery | 0/1 | Planned | — |
+| 9. Regression Test Wiring Recovery | 1/1 | Complete | 2026-02-16 |
 
 ---
 *Roadmap created: 2026-02-13*
