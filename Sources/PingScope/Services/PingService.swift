@@ -3,6 +3,7 @@ import Network
 
 actor PingService {
     private let connectionWrapper = ConnectionWrapper()
+    private let icmpPinger = ICMPPinger()
     private let defaultTimeout: Duration = .seconds(3)
 
     func ping(host: Host) async -> PingResult {
@@ -18,6 +19,8 @@ actor PingService {
             )
         case .icmpSimulated:
             return await pingICMPSimulated(host: host, timeout: effectiveTimeout)
+        case .icmp:
+            return await pingICMP(host: host, timeout: effectiveTimeout)
         }
     }
 
@@ -50,6 +53,25 @@ actor PingService {
                 port: port,
                 error: .connectionFailed("Use ping(host:) for icmpSimulated probes")
             )
+        case .icmp:
+            return .failure(
+                host: address,
+                port: port,
+                error: .connectionFailed("Use ping(host:) for ICMP pings")
+            )
+        }
+    }
+
+    private func pingICMP(host: Host, timeout: Duration) async -> PingResult {
+        do {
+            let latency = try await icmpPinger.ping(host: host.address, timeout: timeout)
+            return .success(host: host.address, port: 0, latency: latency)
+        } catch let error as PingError {
+            return .failure(host: host.address, port: 0, error: error)
+        } catch is CancellationError {
+            return .failure(host: host.address, port: 0, error: .cancelled)
+        } catch {
+            return .failure(host: host.address, port: 0, error: .connectionFailed(error.localizedDescription))
         }
     }
 
