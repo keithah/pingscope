@@ -18,7 +18,6 @@ struct PingMonitorSettingsView: View {
     @AppStorage("menuBar.mode.stayOnTop") private var stayOnTopEnabled: Bool = false
 
     @State private var startOnLaunchEnabled: Bool = false
-    @State private var preferences: NotificationPreferences
 
     init(
         hostListViewModel: HostListViewModel,
@@ -39,22 +38,33 @@ struct PingMonitorSettingsView: View {
         self.onOpenAbout = onOpenAbout
         self.onClose = onClose
 
-        _preferences = State(initialValue: notificationStore.loadPreferences())
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 12) {
             header
-            Divider()
-            applicationSection
-            displaySection
-            notificationSection
-            hostsSection
-            Spacer(minLength: 0)
+
+            TabView {
+                hostsTab
+                    .tabItem {
+                        Label("Hosts", systemImage: "server.rack")
+                    }
+
+                notificationsTab
+                    .tabItem {
+                        Label("Notifications", systemImage: "bell.badge")
+                    }
+
+                displayTab
+                    .tabItem {
+                        Label("Display", systemImage: "display")
+                    }
+            }
+
             footer
         }
         .padding(16)
-        .frame(width: 540, height: 620)
+        .frame(width: 560, height: 660)
         .onAppear {
             reloadFromStores()
         }
@@ -109,9 +119,52 @@ struct PingMonitorSettingsView: View {
         VStack(alignment: .leading, spacing: 6) {
             Text("PingMonitor Settings")
                 .font(.system(size: 22, weight: .semibold))
-            Text("Manage hosts for network monitoring")
+            Text("Manage hosts, notifications, and display preferences")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
+        }
+    }
+
+    private var hostsTab: some View {
+        ScrollView {
+            hostsSection
+                .padding(.top, 8)
+        }
+    }
+
+    private var notificationsTab: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                NotificationSettingsView(store: notificationStore)
+
+                SettingsGroup(title: "Host Notifications") {
+                    SettingsToggleRow(
+                        systemImage: "rectangle.stack.badge.bell",
+                        tint: .blue,
+                        title: "Enable for all hosts",
+                        isOn: Binding(
+                            get: { allHostsNotificationsEnabled },
+                            set: { setAllHostsNotificationsEnabled($0) }
+                        )
+                    )
+
+                    Text("Individual host notification settings can be configured when editing each host")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .padding(.leading, 28)
+                }
+            }
+            .padding(.top, 8)
+        }
+    }
+
+    private var displayTab: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                applicationSection
+                displaySection
+            }
+            .padding(.top, 8)
         }
     }
 
@@ -210,55 +263,6 @@ struct PingMonitorSettingsView: View {
         }
     }
 
-    private var notificationSection: some View {
-        SettingsGroup(title: "Notifications") {
-            SettingsToggleRow(
-                systemImage: "bell.fill",
-                tint: .purple,
-                title: "Enable Notifications",
-                isOn: binding(for: \NotificationPreferences.globalEnabled)
-            )
-
-            LazyVGrid(
-                columns: [GridItem(.flexible(), alignment: .leading), GridItem(.flexible(), alignment: .leading)],
-                alignment: .leading,
-                spacing: 10
-            ) {
-                SettingsToggleRow(
-                    systemImage: "wifi.slash",
-                    tint: .red,
-                    title: "Alert on no internet",
-                    isOn: enabledAlertTypeBinding(.internetLoss)
-                )
-                .disabled(!preferences.globalEnabled)
-
-                SettingsToggleRow(
-                    systemImage: "globe",
-                    tint: .orange,
-                    title: "Alert on network change",
-                    isOn: enabledAlertTypeBinding(.networkChange)
-                )
-                .disabled(!preferences.globalEnabled)
-            }
-
-            SettingsToggleRow(
-                systemImage: "rectangle.stack.badge.bell",
-                tint: .blue,
-                title: "Enable for all hosts",
-                isOn: Binding(
-                    get: { allHostsNotificationsEnabled },
-                    set: { setAllHostsNotificationsEnabled($0) }
-                )
-            )
-            .disabled(!preferences.globalEnabled)
-
-            Text("Individual host notification settings can be configured when editing each host")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .padding(.leading, 28)
-        }
-    }
-
     private var hostsSection: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
@@ -332,34 +336,8 @@ struct PingMonitorSettingsView: View {
         )
     }
 
-    private func binding<Value>(for keyPath: WritableKeyPath<NotificationPreferences, Value>) -> Binding<Value> {
-        Binding(
-            get: { preferences[keyPath: keyPath] },
-            set: { newValue in
-                preferences[keyPath: keyPath] = newValue
-                notificationStore.savePreferences(preferences)
-            }
-        )
-    }
-
-    private func enabledAlertTypeBinding(_ alertType: AlertType) -> Binding<Bool> {
-        Binding(
-            get: { preferences.enabledAlertTypes.contains(alertType) },
-            set: { enabled in
-                if enabled {
-                    preferences.enabledAlertTypes.insert(alertType)
-                } else {
-                    preferences.enabledAlertTypes.remove(alertType)
-                }
-
-                notificationStore.savePreferences(preferences)
-            }
-        )
-    }
-
     private func reloadFromStores() {
         startOnLaunchEnabled = StartOnLaunchService.isEnabled()
-        preferences = notificationStore.loadPreferences()
     }
 
     private var allHostsNotificationsEnabled: Bool {
