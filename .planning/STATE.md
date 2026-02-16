@@ -10,18 +10,18 @@ See: `.planning/PROJECT.md` (updated 2026-02-13)
 ## Current Position
 
 Phase: 10 of 10 (True ICMP Support)
-Plan: 2 of 4 in phase 10
+Plan: 3 of 4 in phase 10
 Status: In progress
-Last activity: 2026-02-16 - Completed 10-02-PLAN.md
+Last activity: 2026-02-16 - Completed 10-03-PLAN.md
 
-Progress: [█████████░] 95% (41 of 43 plans complete)
+Progress: [██████████] 98% (42 of 43 plans complete)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 41
+- Total plans completed: 42
 - Average duration: 2 min
-- Total execution time: 1.88 hours
+- Total execution time: 1.91 hours
 
 **By Phase:**
 
@@ -38,7 +38,7 @@ Progress: [█████████░] 95% (41 of 43 plans complete)
 | 9. Regression Test Wiring Recovery | 1 | 1 | 2 min |
 
 **Recent Trend:**
-- Last 5 plans: 10-02 (3 min), 10-01 (1 min), 09-01 (2 min), 08-01 (15 min), 07-03 (5 min)
+- Last 5 plans: 10-03 (2 min), 10-02 (3 min), 10-01 (1 min), 09-01 (2 min), 08-01 (15 min)
 - Trend: Stable
 
 *Updated after each plan completion*
@@ -133,6 +133,8 @@ Recent decisions affecting current work:
 - (10-01): ICMP packet primitives use explicit big-endian serialization/parsing and RFC 1071 ones-complement checksum in pure Swift
 - (10-02): ICMPPinger uses non-privileged socket(AF_INET, SOCK_DGRAM, IPPROTO_ICMP) for true ICMP outside sandbox
 - (10-02): ICMP receive validation requires echo-reply type plus identifier/sequence match before success
+- (10-03): PingMethod.availableCases is the single runtime gate for showing true ICMP only when not sandboxed
+- (10-03): PingService treats true ICMP as host-based only and rejects port-overload .icmp calls with explicit guidance
 
 ### Pending Todos
 
@@ -144,6 +146,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-02-16T21:26:42Z
-Stopped at: Completed 10-02-PLAN.md
+Last session: 2026-02-16T21:29:09Z
+Stopped at: Completed 10-03-PLAN.md
 Resume file: None
