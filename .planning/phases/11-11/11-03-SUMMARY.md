@@ -74,7 +74,7 @@ completed: 2026-02-16
 
 - Deleted `HostSettingsView.swift` after confirming no remaining compile references in `Sources`.
 - Kept the project build green with `swift build --build-tests` after source deletion.
-- Rewrote legacy `Sources/PingMonitor/...` references in historical phase summaries to `Sources/PingScope/...` and verified zero remaining matches.
+- Rewrote legacy `PingMonitor`-prefixed source references in historical phase summaries to `Sources/PingScope/...` and verified zero remaining matches.
 
 ## Task Commits
 
