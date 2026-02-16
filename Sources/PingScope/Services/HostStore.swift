@@ -37,12 +37,7 @@ actor HostStore {
     }
 
     private func persistHosts() {
-        do {
-            let data = try JSONEncoder().encode(hosts)
-            defaults.set(data, forKey: key)
-        } catch {
-            defaults.removeObject(forKey: key)
-        }
+        Self.persistHosts(hosts, to: defaults, key: key)
     }
 
     private static func persistHosts(_ hosts: [Host], to defaults: UserDefaults, key: String) {
@@ -75,16 +70,23 @@ actor HostStore {
     }
 
     private static func mergeDefaults(into loadedHosts: [Host]) -> [Host] {
-        var merged = Host.defaults
-
-        for host in loadedHosts {
-            let isDuplicateDefault = host.isDefault && merged.contains { $0.name == host.name }
-            if !isDuplicateDefault {
-                merged.append(host)
-            }
+        guard !loadedHosts.isEmpty else {
+            return Host.defaults
         }
 
-        return merged
+        var merged = loadedHosts
+        let missingDefaults = Host.defaults.filter { defaultHost in
+            !merged.contains { $0.isDefault && $0.name == defaultHost.name }
+        }
+
+        if !missingDefaults.isEmpty {
+            merged.insert(contentsOf: missingDefaults, at: 0)
+        }
+
+        // Keep defaults grouped at the top, mirroring ensureDefaultsPresent().
+        let defaultHosts = merged.filter(\.isDefault)
+        let customHosts = merged.filter { !$0.isDefault }
+        return defaultHosts + customHosts
     }
 
     func add(_ host: Host) {
