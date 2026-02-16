@@ -79,165 +79,30 @@ jobs:
 
     - name: Build Release Binary
       run: |
-        # Build release binary using Swift Package Manager
         swift build -c release
 
-        # Verify binary exists
-        ls -la .build/release/PingScope
-
-    - name: Create App Bundle
+    - name: Build App Bundle
+      id: bundle
       run: |
-        VERSION="${{ steps.version.outputs.VERSION }}"
+        APP_PATH=$(scripts/build-app-bundle.sh release)
+        echo "APP_PATH=$APP_PATH" >> $GITHUB_OUTPUT
 
-        mkdir -p "$PRODUCT_NAME.app/Contents/MacOS"
-        mkdir -p "$PRODUCT_NAME.app/Contents/Resources"
-        cp .build/release/PingScope "$PRODUCT_NAME.app/Contents/MacOS/$PRODUCT_NAME"
-
-        # Create Info.plist
-        cat > "$PRODUCT_NAME.app/Contents/Info.plist" << EOF
-        <?xml version="1.0" encoding="UTF-8"?>
-        <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-        <plist version="1.0">
-        <dict>
-            <key>CFBundleDevelopmentRegion</key>
-            <string>en</string>
-            <key>CFBundleExecutable</key>
-            <string>$PRODUCT_NAME</string>
-            <key>CFBundleIconFile</key>
-            <string>AppIcon</string>
-            <key>CFBundleIdentifier</key>
-            <string>$BUNDLE_ID</string>
-            <key>CFBundleInfoDictionaryVersion</key>
-            <string>6.0</string>
-            <key>CFBundleName</key>
-            <string>$PRODUCT_DISPLAY_NAME</string>
-            <key>CFBundlePackageType</key>
-            <string>APPL</string>
-            <key>CFBundleShortVersionString</key>
-            <string>$VERSION</string>
-            <key>CFBundleVersion</key>
-            <string>$VERSION</string>
-            <key>LSMinimumSystemVersion</key>
-            <string>13.0</string>
-            <key>LSUIElement</key>
-            <true/>
-            <key>NSHighResolutionCapable</key>
-            <true/>
-            <key>NSSupportsAutomaticGraphicsSwitching</key>
-            <true/>
-            <key>NSRequiresAquaSystemAppearance</key>
-            <false/>
-            <key>NSNetworkVolumesUsageDescription</key>
-            <string>PingScope needs network access to perform ping operations and monitor network connectivity.</string>
-            <key>LSApplicationCategoryType</key>
-            <string>public.app-category.utilities</string>
-            <key>NSHumanReadableCopyright</key>
-            <string>Copyright © 2024-2026 Keith Herrington. All rights reserved.</string>
-        </dict>
-        </plist>
-        EOF
-
-        # Convert icon set to icns if needed
-        if [ -d "Assets.xcassets/AppIcon.appiconset" ]; then
-          iconutil -c icns Assets.xcassets/AppIcon.appiconset -o "$PRODUCT_NAME.app/Contents/Resources/AppIcon.icns" 2>/dev/null || \
-          cp Assets.xcassets/AppIcon.appiconset/icon_512x512@2x.png "$PRODUCT_NAME.app/Contents/Resources/AppIcon.icns" 2>/dev/null || true
-        fi
-
-        chmod +x "$PRODUCT_NAME.app/Contents/MacOS/$PRODUCT_NAME"
-
-    - name: Create entitlements
+    - name: Set up notarization credentials
       run: |
-        cat > entitlements.plist << EOF
-        <?xml version="1.0" encoding="UTF-8"?>
-        <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-        <plist version="1.0">
-        <dict>
-            <key>com.apple.security.app-sandbox</key>
-            <false/>
-            <key>com.apple.security.network.client</key>
-            <true/>
-            <key>com.apple.security.network.server</key>
-            <false/>
-            <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
-            <true/>
-            <key>com.apple.security.cs.disable-library-validation</key>
-            <true/>
-        </dict>
-        </plist>
-        EOF
-
-    - name: Sign application
-      run: |
-        echo "🔐 Signing app with: $APP_SIGNING_IDENTITY"
-        codesign --force --deep --sign "$APP_SIGNING_IDENTITY" --options runtime --entitlements entitlements.plist "$PRODUCT_NAME.app"
-
-    - name: Verify code signature
-      run: |
-        echo "🔍 Verifying signature..."
-        codesign -dv --verbose=4 "$PRODUCT_NAME.app"
-        echo "🔍 Testing with spctl..."
-        spctl -a -t exec -vv "$PRODUCT_NAME.app" || echo "⚠️ App will need notarization"
-
-    - name: Create DMG
-      run: |
-        VERSION="${{ steps.version.outputs.VERSION }}"
-        echo "💿 Creating DMG..."
-        hdiutil create -volname "$PRODUCT_NAME v$VERSION" \
-          -srcfolder "$PRODUCT_NAME.app" \
-          -ov -format UDZO \
-          "$PRODUCT_NAME-$VERSION.dmg"
-
-    - name: Create PKG installer
-      run: |
-        VERSION="${{ steps.version.outputs.VERSION }}"
-        echo "📦 Creating PKG..."
-        pkgbuild --root "$PRODUCT_NAME.app" \
-          --identifier "$BUNDLE_ID" \
-          --version "$VERSION" \
-          --install-location "/Applications/$PRODUCT_NAME.app" \
-          "unsigned.pkg"
-
-    - name: Sign PKG
-      run: |
-        VERSION="${{ steps.version.outputs.VERSION }}"
-        echo "🔐 Signing PKG with: $INSTALLER_SIGNING_IDENTITY"
-        productsign --sign "$INSTALLER_SIGNING_IDENTITY" \
-          "unsigned.pkg" \
-          "$PRODUCT_NAME-$VERSION.pkg"
-
-    - name: Notarize DMG and PKG
-      run: |
-        VERSION="${{ steps.version.outputs.VERSION }}"
-        echo "📡 Setting up notarization credentials..."
         xcrun notarytool store-credentials "NotarytoolProfile" \
           --apple-id "${{ secrets.APPLE_ID }}" \
           --password "${{ secrets.APPLE_APP_PASSWORD }}" \
           --team-id "${{ secrets.APPLE_TEAM_ID }}"
 
-        echo "📡 Submitting DMG for notarization..."
-        xcrun notarytool submit "$PRODUCT_NAME-$VERSION.dmg" \
-          --keychain-profile "NotarytoolProfile" \
-          --wait
-
-        echo "📡 Submitting PKG for notarization..."
-        xcrun notarytool submit "$PRODUCT_NAME-$VERSION.pkg" \
-          --keychain-profile "NotarytoolProfile" \
-          --wait
-
-        echo "📎 Stapling notarization tickets..."
-        xcrun stapler staple "$PRODUCT_NAME-$VERSION.dmg"
-        xcrun stapler staple "$PRODUCT_NAME-$VERSION.pkg"
-
-        echo "🔍 Verifying notarization..."
-        spctl -a -t exec -vv "$PRODUCT_NAME.app"
-
-    - name: Generate checksums
+    - name: Sign and Notarize (DMG + PKG)
       run: |
         VERSION="${{ steps.version.outputs.VERSION }}"
-        echo "🔐 Generating checksums..."
-        shasum -a 256 "$PRODUCT_NAME-$VERSION.dmg" > checksums.txt
-        shasum -a 256 "$PRODUCT_NAME-$VERSION.pkg" >> checksums.txt
-        cat checksums.txt
+        deploy/sign-notarize.sh \
+          --version "$VERSION" \
+          --app "${{ steps.bundle.outputs.APP_PATH }}" \
+          --sign-app "$APP_SIGNING_IDENTITY" \
+          --sign-installer "$INSTALLER_SIGNING_IDENTITY" \
+          --notary-profile "NotarytoolProfile"
 
     - name: Create GitHub Release
       uses: softprops/action-gh-release@v1
@@ -266,9 +131,9 @@ jobs:
           ### Requirements
           - macOS 13.0 (Ventura) or later
         files: |
-          ${{ env.PRODUCT_NAME }}-${{ steps.version.outputs.VERSION }}.dmg
-          ${{ env.PRODUCT_NAME }}-${{ steps.version.outputs.VERSION }}.pkg
-          checksums.txt
+          /private/tmp/artifacts/PingScope-v${{ steps.version.outputs.VERSION }}/PingScope-v${{ steps.version.outputs.VERSION }}.dmg
+          /private/tmp/artifacts/PingScope-v${{ steps.version.outputs.VERSION }}/PingScope-v${{ steps.version.outputs.VERSION }}.pkg
+          /private/tmp/artifacts/PingScope-v${{ steps.version.outputs.VERSION }}/checksums-v${{ steps.version.outputs.VERSION }}.txt
         draft: false
         prerelease: false
 
