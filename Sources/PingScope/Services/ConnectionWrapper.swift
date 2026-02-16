@@ -1,13 +1,55 @@
 import Foundation
 import Network
 
+protocol ConnectionLifecycleTracking: Sendable {
+    func register(_ connection: NWConnection) async -> UUID
+    func unregister(_ id: UUID) async
+}
+
 struct ConnectionWrapper: Sendable {
-    private final class ResumeState: @unchecked Sendable {
+    private final class ConnectionState: @unchecked Sendable {
         let lock = NSLock()
         var didResume = false
+        var registrationID: UUID?
+        var didUnregister = false
+
+        func shouldResume() -> Bool {
+            lock.lock()
+            defer { lock.unlock() }
+
+            guard !didResume else {
+                return false
+            }
+
+            didResume = true
+            return true
+        }
+
+        func setRegistrationID(_ id: UUID) {
+            lock.lock()
+            registrationID = id
+            lock.unlock()
+        }
+
+        func takeRegistrationForUnregister() -> UUID? {
+            lock.lock()
+            defer { lock.unlock() }
+
+            guard !didUnregister else {
+                return nil
+            }
+
+            didUnregister = true
+            return registrationID
+        }
     }
 
+    private let lifecycleTracker: (any ConnectionLifecycleTracking)?
     private let queue = DispatchQueue(label: "ConnectionWrapper", qos: .userInitiated)
+
+    init(lifecycleTracker: (any ConnectionLifecycleTracking)? = nil) {
+        self.lifecycleTracker = lifecycleTracker
+    }
 
     func measureConnection(
         host: String,
@@ -25,32 +67,47 @@ struct ConnectionWrapper: Sendable {
             port: endpointPort
         )
         let connection = NWConnection(to: endpoint, using: parameters)
-        let resumeState = ResumeState()
+        let connectionState = ConnectionState()
+
+        if let lifecycleTracker {
+            let registrationID = await lifecycleTracker.register(connection)
+            connectionState.setRegistrationID(registrationID)
+        }
+
+        @Sendable func unregisterIfNeeded() {
+            guard
+                let lifecycleTracker,
+                let registrationID = connectionState.takeRegistrationForUnregister()
+            else {
+                return
+            }
+
+            Task {
+                await lifecycleTracker.unregister(registrationID)
+            }
+        }
 
         try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
                 connection.stateUpdateHandler = { state in
-                    resumeState.lock.lock()
-                    defer { resumeState.lock.unlock() }
-
-                    guard !resumeState.didResume else {
+                    guard connectionState.shouldResume() else {
                         return
                     }
 
                     switch state {
                     case .ready:
-                        resumeState.didResume = true
+                        unregisterIfNeeded()
                         connection.cancel()
                         continuation.resume()
                     case .failed(let error):
-                        resumeState.didResume = true
+                        unregisterIfNeeded()
                         connection.cancel()
                         continuation.resume(throwing: PingError.connectionFailed(error.localizedDescription))
                     case .cancelled:
-                        resumeState.didResume = true
+                        unregisterIfNeeded()
                         continuation.resume(throwing: PingError.cancelled)
                     case .waiting(let error):
-                        resumeState.didResume = true
+                        unregisterIfNeeded()
                         connection.cancel()
                         continuation.resume(throwing: PingError.connectionFailed(error.localizedDescription))
                     default:
@@ -61,6 +118,7 @@ struct ConnectionWrapper: Sendable {
                 connection.start(queue: queue)
             }
         } onCancel: {
+            unregisterIfNeeded()
             connection.cancel()
         }
 
