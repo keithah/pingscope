@@ -29,6 +29,7 @@ Requirements for initial release. Each maps to roadmap phases.
 - [ ] **HOST-08**: Per-host configurable thresholds (good/warning/error)
 - [ ] **HOST-09**: Host management (add, edit, delete custom hosts)
 - [ ] **HOST-10**: Default hosts cannot be deleted (Google, Cloudflare, Gateway)
+- [ ] **HOST-11**: True ICMP ping when running outside sandbox; ICMP option hidden when sandboxed
 
 ### Visualization
 
@@ -110,7 +111,6 @@ Explicitly excluded. Documented to prevent scope creep.
 
 | Feature | Reason |
 |---------|--------|
-| True ICMP ping | App Store sandbox prohibits raw sockets — use TCP simulation |
 | HTTP/HTTPS endpoint monitoring | Different protocol, adds complexity — focus on latency |
 | Webhook integration | Power user feature, adds external dependencies |
 | Cloud sync | No need for local utility app |
@@ -176,10 +176,11 @@ Which phases cover which requirements. Updated during roadmap creation.
 | SETT-04 | Phase 6 | Complete |
 | SETT-05 | Phase 6 | Complete |
 | SETT-06 | Phase 6 | Complete |
+| HOST-11 | Phase 10 | Planned |
 
 **Coverage:**
-- v1 requirements: 43 total
-- Mapped to phases: 43
+- v1 requirements: 44 total
+- Mapped to phases: 44
 - Unmapped: 0
 
 ---

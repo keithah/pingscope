@@ -19,6 +19,7 @@ PingMonitor is a macOS menu bar network monitoring app rewritten from a monolith
 - [x] **Phase 7: Settings Focus** - Settings reliability, live-updating configuration, and end-to-end persistence
 - [x] **Phase 8: Visualization Requirement Reconciliation & Verification** - Close VIS-01 through VIS-07 and produce missing Phase 5 verification artifact
 - [x] **Phase 9: Regression Test Wiring Recovery** - Restore compile-green automated regression integration coverage
+- [ ] **Phase 10: True ICMP Support** - Real ICMP ping when running outside sandbox
 
 ## Phase Details
 
@@ -181,10 +182,25 @@ Plans:
 Plans:
 - [x] 09-01-PLAN.md — Repair stale test references and re-establish compile-green regression baseline
 
+### Phase 10: True ICMP Support
+**Goal:** Enable real ICMP ping when running outside App Store sandbox, with automatic detection and graceful UI hiding when sandboxed.
+**Depends on**: Phase 9
+**Requirements**: HOST-11
+**Success Criteria** (what must be TRUE):
+  1. App detects sandbox status at runtime via environment check
+  2. ICMPPinger service implements raw socket ping with proper timeout handling
+  3. PingMethod.icmp case available and functional when not sandboxed
+  4. ICMP option hidden from host configuration UI when sandboxed
+  5. Existing TCP/UDP/ICMP-simulated methods unchanged
+**Plans**: TBD
+
+Plans:
+- [ ] 10-01-PLAN.md — TBD
+
 ## Progress
 
 **Execution Order:**
-Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 8 -> 9
+Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 8 -> 9 -> 10
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
@@ -197,6 +213,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 8 -> 9
 | 7. Settings Focus | 4/4 | Complete | 2026-02-16 |
 | 8. Visualization Requirement Reconciliation & Verification | 1/1 | Complete | 2026-02-16 |
 | 9. Regression Test Wiring Recovery | 1/1 | Complete | 2026-02-16 |
+| 10. True ICMP Support | 0/? | Planned | — |
 
 ---
 *Roadmap created: 2026-02-13*

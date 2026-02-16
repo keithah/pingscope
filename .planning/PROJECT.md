@@ -18,7 +18,7 @@ Reliable, accurate ping monitoring that users can trust — no false timeouts, n
 
 - [ ] Menu bar status display with color-coded dot and ping time text
 - [ ] Multiple host monitoring (Google DNS, Cloudflare DNS, Default Gateway)
-- [ ] Three ping methods: ICMP (simulated via TCP), UDP, TCP
+- [ ] Four ping methods: True ICMP (non-sandbox only), ICMP-simulated (TCP), UDP, TCP
 - [ ] Auto-detection of default gateway via SystemConfiguration
 - [ ] Real-time latency graph visualization
 - [ ] Ping history list with timestamps
@@ -65,7 +65,7 @@ Reliable, accurate ping monitoring that users can trust — no false timeouts, n
 ## Constraints
 
 - **Platform:** macOS 13.0+ (Ventura) — required for WidgetKit and modern SwiftUI features
-- **Sandbox:** App Store compatible — no raw ICMP sockets, must simulate via TCP connections
+- **Sandbox:** Dual-mode distribution — App Store (sandboxed, TCP/UDP simulation) and Developer ID (non-sandboxed, true ICMP enabled)
 - **Bundle ID:** com.hadm.pingmonitor — maintain existing identifier
 - **Frameworks:** SwiftUI, AppKit, Network.framework, SystemConfiguration — no external dependencies
 
@@ -76,6 +76,7 @@ Reliable, accurate ping monitoring that users can trust — no false timeouts, n
 | Use Swift Concurrency over GCD semaphores | Eliminates race conditions causing false timeouts | — Pending |
 | Modular file structure over single file | Maintainability, testability, separation of concerns | — Pending |
 | Defer widget to v2 | Focus on core app stability first | — Pending |
+| Dual-mode ICMP support | True ICMP when not sandboxed, hidden when sandboxed | — Pending |
 
 ---
 *Last updated: 2026-02-13 after initialization*

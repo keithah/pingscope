@@ -5,16 +5,16 @@
 See: `.planning/PROJECT.md` (updated 2026-02-13)
 
 **Core value:** Reliable, accurate ping monitoring that users can trust — no false timeouts, no stale connections, no crashes.
-**Current focus:** Roadmap complete; all phases verified
+**Current focus:** Phase 10 — True ICMP support for non-sandbox distribution
 
 ## Current Position
 
-Phase: 9 of 9 (Regression Test Wiring Recovery)
-Plan: 1 of 1 in phase 9
-Status: Phase complete and verified
-Last activity: 2026-02-16 - Verified and closed Phase 9 (09-01)
+Phase: 10 of 10 (True ICMP Support)
+Plan: 0 of ? in phase 10
+Status: Phase added, awaiting planning
+Last activity: 2026-02-16 - Added Phase 10 for true ICMP support
 
-Progress: [██████████] 100% (39 of 39 plans complete)
+Progress: [█████████░] 97% (39 of 40+ plans complete)
 
 ## Performance Metrics
 
