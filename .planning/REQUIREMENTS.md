@@ -64,12 +64,12 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### Settings & Persistence
 
-- [ ] **SETT-01**: Settings panel for host management
-- [ ] **SETT-02**: Settings panel for notification configuration
-- [ ] **SETT-03**: Settings panel for display preferences
-- [ ] **SETT-04**: Persist all settings via UserDefaults
-- [ ] **SETT-05**: Settings survive app restart
-- [ ] **SETT-06**: Privacy manifest declares UserDefaults usage
+- [x] **SETT-01**: Settings panel for host management
+- [x] **SETT-02**: Settings panel for notification configuration
+- [x] **SETT-03**: Settings panel for display preferences
+- [x] **SETT-04**: Persist all settings via UserDefaults
+- [x] **SETT-05**: Settings survive app restart
+- [x] **SETT-06**: Privacy manifest declares UserDefaults usage
 
 ### Core Technical
 
@@ -170,12 +170,12 @@ Which phases cover which requirements. Updated during roadmap creation.
 | NOTF-08 | Phase 6 | Pending |
 | NOTF-09 | Phase 6 | Pending |
 | NOTF-10 | Phase 6 | Pending |
-| SETT-01 | Phase 6 | Pending |
-| SETT-02 | Phase 6 | Pending |
-| SETT-03 | Phase 6 | Pending |
-| SETT-04 | Phase 6 | Pending |
-| SETT-05 | Phase 6 | Pending |
-| SETT-06 | Phase 6 | Pending |
+| SETT-01 | Phase 6 | Complete |
+| SETT-02 | Phase 6 | Complete |
+| SETT-03 | Phase 6 | Complete |
+| SETT-04 | Phase 6 | Complete |
+| SETT-05 | Phase 6 | Complete |
+| SETT-06 | Phase 6 | Complete |
 
 **Coverage:**
 - v1 requirements: 43 total

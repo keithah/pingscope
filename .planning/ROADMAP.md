@@ -16,7 +16,7 @@ PingMonitor is a macOS menu bar network monitoring app rewritten from a monolith
 - [x] **Phase 4: Display Modes** - Full view, compact view, and floating window
 - [x] **Phase 5: Visualization** - Latency graph, history table, and statistics
 - [ ] **Phase 6: Notifications & Settings** - Alert system and persistent configuration
-- [ ] **Phase 7: Settings Focus** - Settings reliability, live-updating configuration, and end-to-end persistence
+- [x] **Phase 7: Settings Focus** - Settings reliability, live-updating configuration, and end-to-end persistence
 
 ## Phase Details
 
@@ -124,11 +124,11 @@ Plans:
 **Plans**: 6 plans
 
 Plans:
-- [ ] 06-01-PLAN.md — NotificationService actor, AlertType enum, and NotificationPreferencesStore
-- [ ] 06-02-PLAN.md — Alert detection logic for all 7 alert types with cooldown
-- [ ] 06-03-PLAN.md — Per-host notification settings in Host model and add/edit sheet
-- [ ] 06-04-PLAN.md — Settings TabView with Host, Notification, and Display tabs
-- [ ] 06-05-PLAN.md — Privacy manifest and app lifecycle notification wiring
+- [x] 06-01-PLAN.md — NotificationService actor, AlertType enum, and NotificationPreferencesStore
+- [x] 06-02-PLAN.md — Alert detection logic for all 7 alert types with cooldown
+- [x] 06-03-PLAN.md — Per-host notification settings in Host model and add/edit sheet
+- [x] 06-04-PLAN.md — Settings TabView with Host, Notification, and Display tabs
+- [x] 06-05-PLAN.md — Privacy manifest and app lifecycle notification wiring
 - [ ] 06-06-PLAN.md — Human verification checkpoint for all Phase 6 requirements
 
 ### Phase 7: Settings Focus
@@ -144,15 +144,15 @@ Plans:
 **Plans**: 4 plans
 
 Plans:
-- [ ] 07-01-PLAN.md — Dedicated settings window + single-window behavior + command wiring
-- [ ] 07-02-PLAN.md — Use a shared HostStore (no duplicate stores) so Settings updates apply live
-- [ ] 07-03-PLAN.md — Settings persistence + reload consistency (hosts, display, notifications UI)
-- [ ] 07-04-PLAN.md — Human verification checkpoint for Settings end-to-end
+- [x] 07-01-PLAN.md — Dedicated settings window + single-window behavior + command wiring
+- [x] 07-02-PLAN.md — Use a shared HostStore (no duplicate stores) so Settings updates apply live
+- [x] 07-03-PLAN.md — Settings persistence + reload consistency (hosts, display, notifications UI)
+- [x] 07-04-PLAN.md — Human verification checkpoint for Settings end-to-end
 
 ## Progress
 
 **Execution Order:**
-Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6
+Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
@@ -161,8 +161,8 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6
 | 3. Host Monitoring | 9/9 | Complete | 2026-02-14 |
 | 4. Display Modes | 5/5 | Complete | 2026-02-15 |
 | 5. Visualization | 3/3 | Complete | 2026-02-15 |
-| 6. Notifications & Settings | 0/6 | Not started | - |
-| 7. Settings Focus | 0/4 | Not started | - |
+| 6. Notifications & Settings | 5/6 | In progress | - |
+| 7. Settings Focus | 4/4 | Complete | 2026-02-16 |
 
 ---
 *Roadmap created: 2026-02-13*
