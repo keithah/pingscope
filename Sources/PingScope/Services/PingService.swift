@@ -2,9 +2,45 @@ import Foundation
 import Network
 
 actor PingService {
-    private let connectionWrapper = ConnectionWrapper()
-    private let icmpPinger = ICMPPinger()
+    private struct ConnectionSweeperLifecycleTracker: ConnectionLifecycleTracking {
+        let sweeper: ConnectionSweeper
+
+        func register(_ connection: NWConnection) async -> UUID {
+            await sweeper.register(connection)
+        }
+
+        func unregister(_ id: UUID) async {
+            await sweeper.unregister(id)
+        }
+    }
+
+    private let connectionWrapper: ConnectionWrapper
+    private let connectionSweeper: ConnectionSweeper?
+    private let icmpPinger: ICMPPinger
     private let defaultTimeout: Duration = .seconds(3)
+
+    init(
+        connectionLifecycleTracker: (any ConnectionLifecycleTracking)? = nil,
+        icmpPinger: ICMPPinger = ICMPPinger()
+    ) {
+        self.icmpPinger = icmpPinger
+
+        if let connectionLifecycleTracker {
+            connectionSweeper = nil
+            connectionWrapper = ConnectionWrapper(lifecycleTracker: connectionLifecycleTracker)
+            return
+        }
+
+        let connectionSweeper = ConnectionSweeper()
+        self.connectionSweeper = connectionSweeper
+        connectionWrapper = ConnectionWrapper(
+            lifecycleTracker: ConnectionSweeperLifecycleTracker(sweeper: connectionSweeper)
+        )
+
+        Task {
+            await connectionSweeper.startSweeping()
+        }
+    }
 
     func ping(host: Host) async -> PingResult {
         let effectiveTimeout = host.timeoutOverride ?? defaultTimeout
