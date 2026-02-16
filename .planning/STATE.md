@@ -5,14 +5,14 @@
 See: `.planning/PROJECT.md` (updated 2026-02-13)
 
 **Core value:** Reliable, accurate ping monitoring that users can trust — no false timeouts, no stale connections, no crashes.
-**Current focus:** Phase 8 visualization reconciliation and traceability closure complete
+**Current focus:** Phase 9 regression test wiring recovery readiness
 
 ## Current Position
 
-Phase: 8 of 9 (Visualization Requirement Reconciliation & Verification) - COMPLETE
-Plan: 1 of 1 in phase 8
-Status: Phase complete
-Last activity: 2026-02-16 - Completed 08-01-PLAN.md
+Phase: 9 of 9 (Regression Test Wiring Recovery) - READY
+Plan: 0 of 1 in phase 9
+Status: Phase 8 complete and verified; ready to execute phase 9
+Last activity: 2026-02-16 - Verified and closed Phase 8 (08-01)
 
 Progress: [█████████░] 97% (38 of 39 plans complete)
 

@@ -17,7 +17,7 @@ PingMonitor is a macOS menu bar network monitoring app rewritten from a monolith
 - [x] **Phase 5: Visualization** - Latency graph, history table, and statistics
 - [x] **Phase 6: Notifications & Settings** - Alert system and persistent configuration
 - [x] **Phase 7: Settings Focus** - Settings reliability, live-updating configuration, and end-to-end persistence
-- [ ] **Phase 8: Visualization Requirement Reconciliation & Verification** - Close VIS-01 through VIS-07 and produce missing Phase 5 verification artifact
+- [x] **Phase 8: Visualization Requirement Reconciliation & Verification** - Close VIS-01 through VIS-07 and produce missing Phase 5 verification artifact
 - [ ] **Phase 9: Regression Test Wiring Recovery** - Restore compile-green automated regression integration coverage
 
 ## Phase Details
@@ -162,10 +162,10 @@ Plans:
   1. VIS-01 through VIS-07 are all implemented and verified against current runtime behavior
   2. `.planning/phases/05-visualization/*-VERIFICATION.md` exists and documents pass/fail evidence for each VIS requirement
   3. `.planning/REQUIREMENTS.md` traceability marks VIS-01 through VIS-07 as Complete
-**Plans**: 1 plan (to be created)
+**Plans**: 1 plan
 
 Plans:
-- [ ] 08-01-PLAN.md — Reconcile visualization requirements, fill implementation gaps, and produce Phase 5 verification artifact
+- [x] 08-01-PLAN.md — Reconcile visualization requirements, fill implementation gaps, and produce Phase 5 verification artifact
 
 ### Phase 9: Regression Test Wiring Recovery
 **Goal**: Restore cross-phase test wiring so automated regression checks compile and run cleanly.
@@ -195,7 +195,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 8 -> 9
 | 5. Visualization | 3/3 | Complete | 2026-02-15 |
 | 6. Notifications & Settings | 8/8 | Complete | 2026-02-16 |
 | 7. Settings Focus | 4/4 | Complete | 2026-02-16 |
-| 8. Visualization Requirement Reconciliation & Verification | 0/1 | Planned | — |
+| 8. Visualization Requirement Reconciliation & Verification | 1/1 | Complete | 2026-02-16 |
 | 9. Regression Test Wiring Recovery | 0/1 | Planned | — |
 
 ---
