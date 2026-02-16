@@ -32,6 +32,7 @@ struct SettingsSceneView: View {
                 onSetCompactModeEnabled: { delegate.setCompactModeEnabled($0) },
                 onSetStayOnTopEnabled: { delegate.setStayOnTopEnabled($0) },
                 onResetAll: { delegate.resetToDefaults() },
+                onOpenAbout: { delegate.openAbout() },
                 onClose: { dismiss() }
             )
         } else {

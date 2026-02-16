@@ -53,6 +53,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItemController: StatusItemController?
     lazy var hostListViewModel: HostListViewModel = makeHostListViewModel()
     private var settingsWindowController: NSWindowController?
+    private var aboutWindowController: NSWindowController?
     private var gatewayMonitorTask: Task<Void, Never>?
     private var networkIndicatorTask: Task<Void, Never>?
     private var monitoredHosts: [Host] = []
@@ -256,6 +257,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 onOpenSettings: { [weak self] in
                     self?.openSettings()
                 },
+                onOpenAbout: { [weak self] in
+                    self?.openAbout()
+                },
                 onQuit: { [weak self] in
                     self?.quitApp()
                 }
@@ -390,6 +394,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 onResetAll: { [weak self] in
                     self?.resetToDefaults()
                 },
+                onOpenAbout: { [weak self] in
+                    self?.openAbout()
+                },
                 onClose: { [weak self] in
                     self?.settingsWindowController?.close()
                 }
@@ -407,6 +414,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         settingsWindowController?.showWindow(nil)
         settingsWindowController?.window?.makeKeyAndOrderFront(nil)
+    }
+
+    @objc
+    func openAbout() {
+        NSApp.activate(ignoringOtherApps: true)
+
+        if aboutWindowController == nil {
+            let hostingController = NSHostingController(rootView: AboutView())
+            let window = NSWindow(contentViewController: hostingController)
+            window.title = "About PingScope"
+            window.styleMask = [.titled, .closable, .miniaturizable]
+            window.setContentSize(NSSize(width: 520, height: 560))
+            window.isReleasedWhenClosed = false
+            window.center()
+            aboutWindowController = NSWindowController(window: window)
+        }
+
+        aboutWindowController?.showWindow(nil)
+        aboutWindowController?.window?.makeKeyAndOrderFront(nil)
     }
 
     func resetToDefaults() {

@@ -29,6 +29,11 @@ if [[ -d "${BIN_DIR}/PingScope_PingScope.bundle" ]]; then
   cp -R "${BIN_DIR}/PingScope_PingScope.bundle" "${RESOURCES_DIR}/"
 fi
 
+# App icon (CFBundleIconFile expects it in the main app Resources).
+if [[ -f "Sources/PingScope/Resources/AppIcon.icns" ]]; then
+  cp "Sources/PingScope/Resources/AppIcon.icns" "${RESOURCES_DIR}/AppIcon.icns"
+fi
+
 # Keep a copy of the privacy manifest at the app level as well.
 if [[ -f "Sources/PingScope/Resources/PrivacyInfo.xcprivacy" ]]; then
   cp "Sources/PingScope/Resources/PrivacyInfo.xcprivacy" "${RESOURCES_DIR}/"

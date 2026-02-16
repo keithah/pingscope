@@ -11,6 +11,7 @@ struct PingMonitorSettingsView: View {
     private let onSetCompactModeEnabled: (Bool) -> Void
     private let onSetStayOnTopEnabled: (Bool) -> Void
     private let onResetAll: () -> Void
+    private let onOpenAbout: () -> Void
     private let onClose: () -> Void
 
     @AppStorage("menuBar.mode.compact") private var compactModeEnabled: Bool = false
@@ -26,6 +27,7 @@ struct PingMonitorSettingsView: View {
         onSetCompactModeEnabled: @escaping (Bool) -> Void,
         onSetStayOnTopEnabled: @escaping (Bool) -> Void,
         onResetAll: @escaping () -> Void,
+        onOpenAbout: @escaping () -> Void,
         onClose: @escaping () -> Void
     ) {
         self.hostListViewModel = hostListViewModel
@@ -34,6 +36,7 @@ struct PingMonitorSettingsView: View {
         self.onSetCompactModeEnabled = onSetCompactModeEnabled
         self.onSetStayOnTopEnabled = onSetStayOnTopEnabled
         self.onResetAll = onResetAll
+        self.onOpenAbout = onOpenAbout
         self.onClose = onClose
 
         _preferences = State(initialValue: notificationStore.loadPreferences())
@@ -292,6 +295,10 @@ struct PingMonitorSettingsView: View {
             Button("Reset to Defaults") {
                 onResetAll()
                 reloadFromStores()
+            }
+
+            Button("About...") {
+                onOpenAbout()
             }
 
             Spacer()

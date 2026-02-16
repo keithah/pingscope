@@ -12,6 +12,7 @@ struct ContextMenuActions {
     var onToggleCompactMode: () -> Void
     var onToggleStayOnTop: () -> Void
     var onOpenSettings: () -> Void
+    var onOpenAbout: () -> Void
     var onQuit: () -> Void
 }
 
@@ -21,6 +22,7 @@ enum ContextMenuItemID {
     static let compactMode = NSUserInterfaceItemIdentifier("context.compactMode")
     static let stayOnTop = NSUserInterfaceItemIdentifier("context.stayOnTop")
     static let settings = NSUserInterfaceItemIdentifier("context.settings")
+    static let about = NSUserInterfaceItemIdentifier("context.about")
     static let quit = NSUserInterfaceItemIdentifier("context.quit")
 }
 
@@ -79,6 +81,15 @@ final class ContextMenuFactory {
         settingsItem.identifier = ContextMenuItemID.settings
         menu.addItem(settingsItem)
 
+        let aboutItem = NSMenuItem(
+            title: "About PingScope",
+            action: #selector(MenuActionRelay.openAbout),
+            keyEquivalent: ""
+        )
+        aboutItem.target = relay
+        aboutItem.identifier = ContextMenuItemID.about
+        menu.addItem(aboutItem)
+
         let quitItem = NSMenuItem(
             title: "Quit",
             action: #selector(MenuActionRelay.quitApp),
@@ -124,6 +135,11 @@ private final class MenuActionRelay: NSObject, NSMenuDelegate {
     @objc
     func openSettings() {
         actions.onOpenSettings()
+    }
+
+    @objc
+    func openAbout() {
+        actions.onOpenAbout()
     }
 
     @objc
