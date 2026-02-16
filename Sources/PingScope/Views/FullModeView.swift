@@ -14,15 +14,26 @@ struct FullModeView: View {
     var isStayOnTopEnabled: Bool = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            if viewModel.showsMonitoredHosts {
-                hostPills
+        GeometryReader { proxy in
+            let layout = FullModeLayout(
+                containerHeight: proxy.size.height,
+                showsHosts: viewModel.showsMonitoredHosts,
+                historyVisible: viewModel.modeState(for: .full).historyVisible,
+                showsStats: showingStats
+            )
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    if viewModel.showsMonitoredHosts {
+                        hostPills
+                    }
+                    graphSection(graphHeight: layout.graphHeight)
+                    historySection(maxVisibleRows: layout.historyVisibleRows)
+                }
+                .padding(14)
+                .frame(maxWidth: .infinity, minHeight: proxy.size.height, alignment: .topLeading)
             }
-            graphSection
-            historySection
         }
-        .padding(14)
-        .frame(maxWidth: .infinity, alignment: .topLeading)
         .onAppear {
             viewModel.setDisplayMode(.full)
             showingStats = viewModel.showsHistorySummary
@@ -137,7 +148,7 @@ struct FullModeView: View {
         .buttonStyle(.plain)
     }
 
-    private var graphSection: some View {
+    private func graphSection(graphHeight: CGFloat) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
                 Button {
@@ -162,7 +173,7 @@ struct FullModeView: View {
 
             if viewModel.modeState(for: .full).graphVisible {
                 DisplayGraphView(points: viewModel.selectedHostGraphPoints)
-                    .frame(height: 150)
+                    .frame(height: graphHeight)
             }
         }
     }
@@ -192,7 +203,7 @@ struct FullModeView: View {
         .buttonStyle(.plain)
     }
 
-    private var historySection: some View {
+    private func historySection(maxVisibleRows: Int?) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
                 Button {
@@ -254,7 +265,7 @@ struct FullModeView: View {
 
                 RecentResultsListView(
                     rows: viewModel.selectedHostRecentResults,
-                    maxVisibleRows: 10,
+                    maxVisibleRows: maxVisibleRows,
                     compact: false,
                     showHostName: true
                 )
@@ -286,18 +297,36 @@ struct FullModeView: View {
                 .font(.system(size: 11, design: .monospaced))
                 .foregroundStyle(.secondary)
 
-            Text("\(transmitted) packets transmitted, \(received) packets received, \(String(format: "%.1f", lossPercent))% packet loss")
-                .font(.system(size: 11, design: .monospaced))
-                .foregroundStyle(.primary)
-
-            Text("round-trip min/avg/max/stddev = \(String(format: "%.3f", minLatency))/\(String(format: "%.3f", avgLatency))/\(String(format: "%.3f", maxLatency))/\(String(format: "%.3f", stddev)) ms")
-                .font(.system(size: 11, design: .monospaced))
-                .foregroundStyle(.primary)
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 110), spacing: 8)], spacing: 6) {
+                statsMetric(title: "Transmitted", value: "\(transmitted)")
+                statsMetric(title: "Received", value: "\(received)")
+                statsMetric(title: "Packet Loss", value: "\(String(format: "%.1f", lossPercent))%")
+                statsMetric(title: "Min", value: "\(String(format: "%.3f", minLatency)) ms")
+                statsMetric(title: "Avg", value: "\(String(format: "%.3f", avgLatency)) ms")
+                statsMetric(title: "Max", value: "\(String(format: "%.3f", maxLatency)) ms")
+                statsMetric(title: "Stddev", value: "\(String(format: "%.3f", stddev)) ms")
+            }
         }
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color.black.opacity(0.2))
         .clipShape(RoundedRectangle(cornerRadius: 6))
+    }
+
+    private func statsMetric(title: String, value: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title)
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+
+            Text(value)
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func copyScreenshotToClipboard() {
@@ -327,6 +356,27 @@ struct FullModeView: View {
                 showCopiedFeedback = false
             }
         }
+    }
+}
+
+private struct FullModeLayout {
+    let graphHeight: CGFloat
+    let historyVisibleRows: Int?
+
+    init(containerHeight: CGFloat, showsHosts: Bool, historyVisible: Bool, showsStats: Bool) {
+        let clampedHeight = max(280, containerHeight)
+
+        let graphTarget = clampedHeight * 0.3
+        graphHeight = min(180, max(96, graphTarget))
+
+        guard historyVisible else {
+            historyVisibleRows = nil
+            return
+        }
+
+        let fixedSectionsHeight: CGFloat = (showsHosts ? 86 : 0) + graphHeight + (showsStats ? 118 : 0) + 120
+        let availableForRows = max(80, clampedHeight - fixedSectionsHeight)
+        historyVisibleRows = max(3, Int(availableForRows / 26))
     }
 }
 
