@@ -240,11 +240,13 @@ struct FullModeView: View {
                 // Column headers
                 HStack(spacing: 10) {
                     Text("TIME")
-                        .frame(minWidth: 65, alignment: .leading)
+                        .frame(width: 65, alignment: .leading)
                     Text("HOST")
-                    Spacer()
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    Text("PING")
+                        .frame(width: 56, alignment: .trailing)
                     Text("STATUS")
-                        .frame(width: 60, alignment: .trailing)
+                        .frame(width: 64, alignment: .trailing)
                 }
                 .font(.caption2.weight(.semibold))
                 .foregroundStyle(.secondary)

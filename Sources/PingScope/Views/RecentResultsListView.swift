@@ -7,6 +7,9 @@ struct RecentResultsListView: View {
     var showHostName: Bool = true
 
     private let rowHeight: CGFloat = 22
+    private let timeColumnWidth: CGFloat = 65
+    private let pingColumnWidth: CGFloat = 56
+    private let statusColumnWidth: CGFloat = 64
 
     var body: some View {
         Group {
@@ -32,32 +35,34 @@ struct RecentResultsListView: View {
     @ViewBuilder
     private func rowView(_ row: DisplayViewModel.RecentResultRow) -> some View {
         HStack(spacing: compact ? 6 : 10) {
-            // Time (12h format)
             Text(Self.timeFormatter.string(from: row.timestamp))
                 .font(.system(size: compact ? 11 : 12).monospacedDigit())
                 .foregroundStyle(.secondary)
-                .frame(minWidth: compact ? 58 : 65, alignment: .leading)
+                .frame(width: compact ? 58 : timeColumnWidth, alignment: .leading)
 
             if showHostName, let hostName = row.hostName {
                 Text(hostName)
                     .font(.system(size: compact ? 11 : 12))
                     .foregroundStyle(.primary)
                     .lineLimit(1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
 
-            Spacer(minLength: 0)
+            Text(pingTimeText(for: row))
+                .font(.system(size: compact ? 11 : 12, weight: .medium).monospacedDigit())
+                .foregroundStyle(.primary)
+                .frame(width: compact ? 48 : pingColumnWidth, alignment: .trailing)
 
-            // Status: dot + colorized ping time
             HStack(spacing: 6) {
                 Circle()
                     .fill(statusColor(for: row))
                     .frame(width: 6, height: 6)
 
-                Text(latencyText(for: row))
+                Text(statusText(for: row))
                     .font(.system(size: compact ? 11 : 12, weight: .medium).monospacedDigit())
                     .foregroundColor(statusColor(for: row))
             }
-            .frame(minWidth: compact ? 40 : 60, alignment: .trailing)
+            .frame(width: compact ? 56 : statusColumnWidth, alignment: .trailing)
         }
         .frame(height: rowHeight)
     }
@@ -85,12 +90,16 @@ struct RecentResultsListView: View {
         }
     }
 
-    private func latencyText(for row: DisplayViewModel.RecentResultRow) -> String {
+    private func pingTimeText(for row: DisplayViewModel.RecentResultRow) -> String {
         guard let latencyMS = row.latencyMS else {
-            return "Failed"
+            return "--"
         }
 
         return "\(Int(latencyMS.rounded()))ms"
+    }
+
+    private func statusText(for row: DisplayViewModel.RecentResultRow) -> String {
+        row.latencyMS == nil ? "FAIL" : "OK"
     }
 
     private static let timeFormatter: DateFormatter = {
