@@ -7,6 +7,7 @@ struct FullModeView: View {
     @State private var showingStats: Bool = false
     @State private var showCopiedFeedback: Bool = false
     @State private var showCopiedStatsFeedback: Bool = false
+    @State private var historyExpanded: Bool = false
     var onToggleCompact: (() -> Void)?
     var onToggleStayOnTop: (() -> Void)?
     var onOpenSettings: (() -> Void)?
@@ -20,7 +21,8 @@ struct FullModeView: View {
                 containerHeight: proxy.size.height,
                 showsHosts: viewModel.showsMonitoredHosts,
                 historyVisible: viewModel.modeState(for: .full).historyVisible,
-                showsStats: showingStats
+                showsStats: showingStats,
+                historyExpanded: historyExpanded
             )
 
             ScrollView {
@@ -42,6 +44,11 @@ struct FullModeView: View {
         .onReceive(viewModel.$showsHistorySummary) { newValue in
             showingStats = newValue
         }
+        .background(KeyPressHandler(key: "i") {
+            withAnimation(.easeInOut(duration: 0.2)) {
+                historyExpanded.toggle()
+            }
+        })
     }
 
     private var hostPills: some View {
@@ -398,7 +405,7 @@ private struct FullModeLayout {
     let graphHeight: CGFloat
     let historyVisibleRows: Int?
 
-    init(containerHeight: CGFloat, showsHosts: Bool, historyVisible: Bool, showsStats: Bool) {
+    init(containerHeight: CGFloat, showsHosts: Bool, historyVisible: Bool, showsStats: Bool, historyExpanded: Bool) {
         let clampedHeight = max(280, containerHeight)
 
         let graphTarget = clampedHeight * 0.3
@@ -411,7 +418,42 @@ private struct FullModeLayout {
 
         let fixedSectionsHeight: CGFloat = (showsHosts ? 86 : 0) + graphHeight + (showsStats ? 118 : 0) + 120
         let availableForRows = max(80, clampedHeight - fixedSectionsHeight)
-        historyVisibleRows = max(3, Int(availableForRows / 26))
+        let calculatedRows = max(3, Int(availableForRows / 26))
+
+        // When expanded, show at least 5 rows (or more if space allows)
+        historyVisibleRows = historyExpanded ? max(5, calculatedRows) : calculatedRows
+    }
+}
+
+private struct KeyPressHandler: NSViewRepresentable {
+    let key: String
+    let action: () -> Void
+
+    func makeNSView(context: Context) -> NSView {
+        let view = KeyPressView()
+        view.keyHandler = { [key, action] event in
+            if event.charactersIgnoringModifiers == key && event.modifierFlags.intersection(.deviceIndependentFlagsMask).isEmpty {
+                action()
+                return true
+            }
+            return false
+        }
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {}
+
+    class KeyPressView: NSView {
+        var keyHandler: ((NSEvent) -> Bool)?
+
+        override var acceptsFirstResponder: Bool { true }
+
+        override func keyDown(with event: NSEvent) {
+            if let handler = keyHandler, handler(event) {
+                return
+            }
+            super.keyDown(with: event)
+        }
     }
 }
 
