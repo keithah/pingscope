@@ -7,7 +7,6 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		53AA6F632F441E05009FEF3A /* PingScope in Frameworks */ = {isa = PBXBuildFile; productRef = 53AA6F622F441E05009FEF3A /* PingScope */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -34,6 +33,11 @@
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
+		53AA6F652F441E20009FEF3A /* Sources */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = Sources;
+			sourceTree = "<group>";
+		};
 		53AA6F472F441DAD009FEF3A /* PingScopeTests */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = PingScopeTests;
@@ -51,7 +55,6 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				53AA6F632F441E05009FEF3A /* PingScope in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -75,6 +78,7 @@
 		53AA6F2E2F441DAB009FEF3A = {
 			isa = PBXGroup;
 			children = (
+				53AA6F652F441E20009FEF3A /* Sources */,
 				53AA6F472F441DAD009FEF3A /* PingScopeTests */,
 				53AA6F512F441DAD009FEF3A /* PingScopeUITests */,
 				53AA6F382F441DAB009FEF3A /* Products */,
@@ -106,9 +110,11 @@
 			);
 			dependencies = (
 			);
+			fileSystemSynchronizedGroups = (
+				53AA6F652F441E20009FEF3A /* Sources */,
+			);
 			name = PingScopeApp;
 			packageProductDependencies = (
-				53AA6F622F441E05009FEF3A /* PingScope */,
 			);
 			productName = PingScope;
 			productReference = 53AA6F372F441DAB009FEF3A /* PingScope.app */;
@@ -193,7 +199,6 @@
 			mainGroup = 53AA6F2E2F441DAB009FEF3A;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
-				53AA6F642F441E10009FEF3A /* XCLocalSwiftPackageReference "." */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 53AA6F382F441DAB009FEF3A /* Products */;
@@ -592,20 +597,6 @@
 		};
 /* End XCConfigurationList section */
 
-/* Begin XCLocalSwiftPackageReference section */
-		53AA6F642F441E10009FEF3A /* XCLocalSwiftPackageReference "." */ = {
-			isa = XCLocalSwiftPackageReference;
-			relativePath = .;
-		};
-/* End XCLocalSwiftPackageReference section */
-
-/* Begin XCSwiftPackageProductDependency section */
-		53AA6F622F441E05009FEF3A /* PingScope */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = 53AA6F642F441E10009FEF3A /* XCLocalSwiftPackageReference "." */;
-			productName = PingScope;
-		};
-/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 53AA6F2F2F441DAB009FEF3A /* Project object */;
 }
