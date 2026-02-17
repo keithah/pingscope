@@ -31,7 +31,7 @@ Complete menu bar ping monitor rewrite with stable async architecture, multi-hos
 
 - [x] **Phase 13: Xcode Infrastructure Setup** - Create dual-build Xcode project with sandbox-aware configurations
 - [x] **Phase 14: Privacy and Compliance** - Complete privacy manifest and App Store compliance requirements
-- [ ] **Phase 15: App Store Metadata and Assets** - Create screenshots, description, and marketing materials
+- [x] **Phase 15: App Store Metadata and Assets** - Create screenshots, description, and marketing materials (completed 2026-02-17)
 - [ ] **Phase 16: Submission and Distribution** - Submit to App Store and establish CI/CD workflows
 
 ## Phase Details
@@ -124,5 +124,5 @@ Phases execute in numeric order: 13 → 14 → 15 → 16
 | 1-12. v1.0 MVP | v1.0 | 50/50 | Complete | 2026-02-17 |
 | 13. Xcode Infrastructure Setup | v1.1 | 4/4 | Complete | 2026-02-16 |
 | 14. Privacy and Compliance | v1.1 | 3/3 | Complete | 2026-02-17 |
-| 15. App Store Metadata and Assets | v1.1 | 0/2 | Not started | - |
+| 15. App Store Metadata and Assets | v1.1 | Complete    | 2026-02-17 | - |
 | 16. Submission and Distribution | v1.1 | 0/TBD | Not started | - |
