@@ -146,7 +146,16 @@ actor HostStore {
     func isValidHost(_ host: Host) -> Bool {
         !host.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
             !host.address.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
-            host.port > 0
+            isValidPort(for: host)
+    }
+
+    private func isValidPort(for host: Host) -> Bool {
+        switch host.pingMethod {
+        case .icmp:
+            return host.port == 0
+        case .tcp, .udp:
+            return host.port > 0
+        }
     }
 
     func hostExists(address: String, port: UInt16) -> Bool {
