@@ -19,6 +19,14 @@ echo "2. Position app window center-screen"
 echo "3. Follow prompts to capture each screenshot"
 echo ""
 
+# Screenshot descriptions and setup instructions
+declare -A descriptions
+descriptions["01-menu-bar-full-interface"]="Menu bar icon + full interface|Open full mode (click menu bar icon), position center-screen, show menu bar with PingScope icon visible"
+descriptions["02-multi-host-graph"]="Multi-host tabs + real-time graph|Switch to host with populated graph, ensure visible latency curve, show multiple host tabs"
+descriptions["03-settings-panel"]="Settings panel|Open Settings (Cmd+,), show Hosts or Notifications tab, ensure content is readable"
+descriptions["04-ping-history-stats"]="Ping history with statistics|Show full mode, scroll history to show multiple entries with Success/Failed states"
+descriptions["05-compact-mode"]="Compact mode view|Toggle to compact mode (Display > Compact Mode), position center-screen, show latency and status"
+
 screenshots=(
     "01-menu-bar-full-interface"
     "02-multi-host-graph"
@@ -28,8 +36,15 @@ screenshots=(
 )
 
 for name in "${screenshots[@]}"; do
-    echo "Capturing: $name"
-    echo "Click the window to capture (or Esc to skip)..."
+    IFS='|' read -r title instructions <<< "${descriptions[$name]}"
+
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "Screenshot: $title"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo ""
+    echo "Setup: $instructions"
+    echo ""
+    read -p "Press Enter when ready to capture (or Ctrl+C to abort)..."
 
     # -o: opens captured image in Preview for review
     # -w: captures window (interactive selection)
@@ -48,6 +63,10 @@ for name in "${screenshots[@]}"; do
             sips -z "$REQUIRED_HEIGHT" "$REQUIRED_WIDTH" "$OUTPUT_DIR/${name}.png"
             echo "✓ Resized to ${REQUIRED_WIDTH}x${REQUIRED_HEIGHT}"
         fi
+        echo ""
+        echo "Screenshot opened in Preview for review."
+        echo "Close Preview or press Enter to continue to next screenshot..."
+        read
     else
         echo "⚠ Skipped"
     fi
