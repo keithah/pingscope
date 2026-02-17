@@ -46,5 +46,9 @@
     <!-- App Store Marketing -->
     <key>NSHumanReadableCopyright</key>
     <string>Copyright © 2024 Keith Herrington. All rights reserved.</string>
+
+    <!-- Export Compliance -->
+    <key>ITSAppUsesNonExemptEncryption</key>
+    <false/>
 </dict>
 </plist>
