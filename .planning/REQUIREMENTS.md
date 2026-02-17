@@ -176,7 +176,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | SETT-04 | Phase 6 | Complete |
 | SETT-05 | Phase 6 | Complete |
 | SETT-06 | Phase 6 | Complete |
-| HOST-11 | Phase 10 | Planned |
+| HOST-11 | Phase 10 | Complete |
 
 **Coverage:**
 - v1 requirements: 44 total
@@ -185,4 +185,4 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 ---
 *Requirements defined: 2026-02-13*
-*Last updated: 2026-02-16 after Phase 8 visualization reconciliation*
+*Last updated: 2026-02-17 after Phase 12 HOST-11 closure verification*
