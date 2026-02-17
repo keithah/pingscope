@@ -1,0 +1,1 @@
+Track multiple hosts with real-time latency graphs. Automatic gateway detection. Full and compact modes. Smart notifications. Professional network monitoring.

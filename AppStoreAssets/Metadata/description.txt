@@ -1,0 +1,32 @@
+Professional network latency monitoring from your Mac menu bar. Track multiple hosts simultaneously with real-time graphs, automatic gateway detection, and comprehensive ping statistics. Choose between full and compact display modes.
+
+MULTI-HOST MONITORING
+• Monitor multiple hosts at once with independent intervals
+• Automatic gateway detection via network topology analysis
+• Default hosts included (Google DNS, Cloudflare DNS)
+• Custom host support with TCP, UDP, or ICMP methods
+
+REAL-TIME VISUALIZATION
+• Live latency graph with 1hr/10m/5m/1m time ranges
+• Activity Monitor-style gradient visualization
+• Detailed ping history with timestamps and statistics
+• Color-coded status indicators (green/yellow/red)
+
+FLEXIBLE DISPLAY MODES
+• Full mode: comprehensive interface with graphs and history
+• Compact mode: streamlined view for less screen space
+• Stay-on-top floating window option
+• Menu bar status with live latency updates
+
+SMART NOTIFICATIONS
+• Seven alert types (host down, restored, high latency, packet loss, gateway change, internet loss, intermittent)
+• Per-host notification overrides
+• Cooldown behavior to prevent alert fatigue
+• Configurable thresholds for latency and packet loss
+
+DUAL PING METHODS
+• TCP ping: universal compatibility, works through most firewalls
+• UDP ping: low overhead for DNS servers
+• True ICMP ping: available in non-sandboxed Developer ID distribution
+
+Requires macOS 13.0 or later. Designed for network administrators, developers, remote workers, and anyone monitoring network reliability.
