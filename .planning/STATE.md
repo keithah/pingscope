@@ -5,15 +5,14 @@
 See: `.planning/PROJECT.md` (updated 2026-02-17)
 
 **Core value:** Reliable, accurate ping monitoring that users can trust — no false timeouts, no stale connections, no crashes.
-**Current focus:** v1.0 shipped, planning v2.0
+**Current focus:** v2.0 App Store Release
 
 ## Current Position
 
-Milestone: v1.0 shipped 2026-02-17
-Next milestone: v2.0 (Widget + Data Export)
-Status: Ready for new milestone
-
-Progress: v1.0 complete (12 phases, 50 plans)
+Phase: Not started (defining requirements)
+Plan: —
+Status: Defining requirements
+Last activity: 2026-02-17 — Milestone v2.0 started
 
 ## Performance Metrics
 

@@ -1,8 +1,8 @@
-# PingMonitor
+# PingScope
 
 ## What This Is
 
-A macOS menu bar application that monitors network connectivity by pinging configurable hosts. It displays real-time latency in the menu bar with color-coded status, provides historical graphs and ping history in a dropdown interface, and supports multiple hosts including auto-detected default gateway. This is a rewrite of an existing single-file implementation to be more stable, efficient, and maintainable.
+A macOS menu bar application that monitors network connectivity by pinging configurable hosts. It displays real-time latency in the menu bar with color-coded status, provides historical graphs and ping history in a dropdown interface, and supports multiple hosts including auto-detected default gateway. Available via both Mac App Store (sandboxed) and direct download (with true ICMP support).
 
 ## Core Value
 
@@ -29,53 +29,66 @@ Reliable, accurate ping monitoring that users can trust — no false timeouts, n
 
 ### Active
 
-- Data export (CSV, JSON, Text)
-- Widget extension (small/medium/large sizes)
+(Building toward v2.0 - App Store Release)
 
 ### Out of Scope
 
 - OAuth/cloud sync — not needed for local utility app
 - Multi-platform — macOS only
+- Widget extension — defer to v3
+- Data export — defer to v3
+
+## Current Milestone: v2.0 App Store Release
+
+**Goal:** Make PingScope available in the Mac App Store while maintaining Developer ID direct downloads.
+
+**Target deliverables:**
+- Mac App Store distribution (sandboxed build)
+- Developer ID distribution (non-sandboxed with true ICMP)
+- Xcode project with dual build configurations
+- App Store metadata and screenshots
+- Automated build/submission workflows
 
 ## Context
 
-**Existing implementation:** A ~125KB single-file Swift app (`~/src/old_pingmonitor/PingMonitor.swift`) that works but has issues:
-- Monolithic structure makes maintenance difficult
-- Uses `DispatchSemaphore` for synchronous waiting which causes race conditions
-- Timeout handlers race with connection state handlers causing false timeouts
-- Connections not always properly cleaned up causing stale connections
-- No clear separation of concerns
+**v1.0 shipped (2026-02-17):**
+- Complete rewrite from single-file to modular MVVM architecture
+- Async/await eliminating race conditions and false timeouts
+- Multi-host monitoring with gateway detection
+- Real-time visualization with full/compact modes
+- 7 notification alert types with per-host overrides
+- True ICMP support for non-sandboxed builds
 
-**Rewrite goals:**
-- Modular MVVM architecture matching the documentation in this repo
-- Swift Concurrency (async/await) instead of semaphores for cleaner async handling
-- Proper connection lifecycle management to prevent stale connections
-- Accurate timeout handling to eliminate false timeouts
-- Lower CPU and memory usage
-- Same UI/UX as existing app — users shouldn't notice the difference except improved reliability
+**Current distribution:**
+- Developer ID signed releases via GitHub Actions
+- Direct download from GitHub releases
+- Not yet in Mac App Store
 
-**Reference documentation:**
-- `ARCHITECTURE.md` — System architecture and component interactions
-- `MODELS.md` — Data model specifications
-- `SERVICES.md` — Service layer documentation
-- `VIEWS.md` — View layer and UI components
-- `CONFIGURATION.md` — Constants and configuration options
+**v2.0 focus:**
+- Dual-channel distribution (App Store + Developer ID)
+- Both builds use same codebase with configuration differences
+- App Store build is fully sandboxed (TCP/UDP ping only)
+- Developer ID build runs non-sandboxed (true ICMP available)
 
 ## Constraints
 
-- **Platform:** macOS 13.0+ (Ventura) — required for WidgetKit and modern SwiftUI features
-- **Sandbox:** Dual-mode distribution — App Store (sandboxed, TCP/UDP simulation) and Developer ID (non-sandboxed, true ICMP enabled)
-- **Bundle ID:** com.hadm.pingmonitor — maintain existing identifier
+- **Platform:** macOS 13.0+ (Ventura) — required for modern SwiftUI features
+- **Distribution:** Dual-channel — App Store (sandboxed) and Developer ID (non-sandboxed)
+- **Bundle ID:** com.hadm.pingscope — consistent across both distributions
 - **Frameworks:** SwiftUI, AppKit, Network.framework, SystemConfiguration — no external dependencies
+- **App Store:** Free tier, sandboxed, no privileged operations
+- **Signing:** Requires App Store distribution certificate + Developer ID certificate
 
 ## Key Decisions
 
 | Decision | Rationale | Outcome |
 |----------|-----------|---------|
-| Use Swift Concurrency over GCD semaphores | Eliminates race conditions causing false timeouts | — Pending |
-| Modular file structure over single file | Maintainability, testability, separation of concerns | — Pending |
-| Defer widget to v2 | Focus on core app stability first | — Pending |
-| Dual-mode ICMP support | True ICMP when not sandboxed, hidden when sandboxed | — Pending |
+| Use Swift Concurrency over GCD semaphores | Eliminates race conditions causing false timeouts | ✓ Good (v1.0) |
+| Modular file structure over single file | Maintainability, testability, separation of concerns | ✓ Good (v1.0) |
+| Dual-mode ICMP support | True ICMP when not sandboxed, hidden when sandboxed | ✓ Good (v1.0) |
+| Free App Store pricing | Maximize adoption, monetize later if needed | — Pending |
+| Single codebase for both distributions | Reduces maintenance, uses build configurations | — Pending |
+| Defer widget/export to v3 | Focus on distribution first | — Pending |
 
 ## Current State
 
@@ -84,4 +97,4 @@ Reliable, accurate ping monitoring that users can trust — no false timeouts, n
 **Tech stack:** SwiftUI, AppKit, Network.framework, SystemConfiguration
 
 ---
-*Last updated: 2026-02-17 after v1.0 milestone*
+*Last updated: 2026-02-17 after starting v2.0 milestone*
