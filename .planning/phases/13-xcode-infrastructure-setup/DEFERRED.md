@@ -1,0 +1,1 @@
+- Add Escape key handler to close settings panel
