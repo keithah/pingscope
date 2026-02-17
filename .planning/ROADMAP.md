@@ -30,7 +30,7 @@ Complete menu bar ping monitor rewrite with stable async architecture, multi-hos
 **Milestone Goal:** Make PingScope available in the Mac App Store while maintaining Developer ID direct downloads.
 
 - [x] **Phase 13: Xcode Infrastructure Setup** - Create dual-build Xcode project with sandbox-aware configurations
-- [ ] **Phase 14: Privacy and Compliance** - Complete privacy manifest and App Store compliance requirements
+- [x] **Phase 14: Privacy and Compliance** - Complete privacy manifest and App Store compliance requirements
 - [ ] **Phase 15: App Store Metadata and Assets** - Create screenshots, description, and marketing materials
 - [ ] **Phase 16: Submission and Distribution** - Submit to App Store and establish CI/CD workflows
 
@@ -72,9 +72,16 @@ Plans:
 **Plans**: 3 plans
 
 Plans:
-- [ ] 14-01-PLAN.md — Export compliance, privacy manifest verification, and sandbox verification script
-- [ ] 14-02-PLAN.md — Complete App Store Connect questionnaires (Privacy Nutrition Label and Age Rating)
-- [ ] 14-03-PLAN.md — Archive and verify sandboxed App Store build
+- [x] 14-01-PLAN.md — Export compliance, privacy manifest verification, and sandbox verification script
+- [x] 14-02-PLAN.md — Complete App Store Connect questionnaires (Privacy Nutrition Label and Age Rating)
+- [x] 14-03-PLAN.md — Archive and verify sandboxed App Store build
+
+**Status**: ✅ COMPLETED (2026-02-17)
+- Privacy manifest verified complete (UserDefaults with CA92.1 reason code)
+- Export compliance declared (ITSAppUsesNonExemptEncryption=false)
+- Verification tooling created (Scripts/verify-sandbox.sh with 6 automated checks)
+- App Store Connect questionnaires completed (Privacy: Data Not Collected, Age Rating: 4+)
+- App Store archive created and verified (sandbox enabled, ICMP hidden, TCP/UDP functional)
 
 ### Phase 15: App Store Metadata and Assets
 **Goal**: Create all required App Store listing content including screenshots and descriptions
@@ -114,7 +121,7 @@ Phases execute in numeric order: 13 → 14 → 15 → 16
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
 | 1-12. v1.0 MVP | v1.0 | 50/50 | Complete | 2026-02-17 |
-| 13. Xcode Infrastructure Setup | v1.1 | 0/4 | Not started | - |
-| 14. Privacy and Compliance | v1.1 | 0/TBD | Not started | - |
+| 13. Xcode Infrastructure Setup | v1.1 | 4/4 | Complete | 2026-02-16 |
+| 14. Privacy and Compliance | v1.1 | 3/3 | Complete | 2026-02-17 |
 | 15. App Store Metadata and Assets | v1.1 | 0/TBD | Not started | - |
 | 16. Submission and Distribution | v1.1 | 0/TBD | Not started | - |
