@@ -19,8 +19,8 @@ PingMonitor is a macOS menu bar network monitoring app rewritten from a monolith
 - [x] **Phase 7: Settings Focus** - Settings reliability, live-updating configuration, and end-to-end persistence
 - [x] **Phase 8: Visualization Requirement Reconciliation & Verification** - Close VIS-01 through VIS-07 and produce missing Phase 5 verification artifact
 - [x] **Phase 9: Regression Test Wiring Recovery** - Restore compile-green automated regression integration coverage
-- [ ] **Phase 10: True ICMP Support** - Real ICMP ping when running outside sandbox
-- [ ] **Phase 11: Tech Debt Closure** - Close non-blocking v1.0 debt in runtime wiring, settings UX, and planning traceability
+- [x] **Phase 10: True ICMP Support** - Real ICMP ping when running outside sandbox
+- [x] **Phase 11: Tech Debt Closure** - Close non-blocking v1.0 debt in runtime wiring, settings UX, and planning traceability
 
 ## Phase Details
 
@@ -196,10 +196,10 @@ Plans:
 **Plans**: 4 plans
 
 Plans:
-- [ ] 10-01-PLAN.md — SandboxDetector utility and ICMPPacket structures
-- [ ] 10-02-PLAN.md — ICMPPinger service with non-privileged socket ping
-- [ ] 10-03-PLAN.md — PingMethod.icmp case, PingService routing, and AddHostSheet filtering
-- [ ] 10-04-PLAN.md — Human verification checkpoint for ICMP support end-to-end
+- [x] 10-01-PLAN.md — SandboxDetector utility and ICMPPacket structures
+- [x] 10-02-PLAN.md — ICMPPinger service with non-privileged socket ping
+- [x] 10-03-PLAN.md — PingMethod.icmp case, PingService routing, and AddHostSheet filtering
+- [x] 10-04-PLAN.md — Human verification checkpoint for ICMP support end-to-end
 
 ### Phase 11: Tech Debt Closure
 
@@ -214,10 +214,10 @@ Plans:
 **Plans:** 4 plans
 
 Plans:
-- [ ] 11-01-PLAN.md — Wire ConnectionSweeper into production ping lifecycle with regression coverage
-- [ ] 11-02-PLAN.md — Add active settings host-level notification override editor and persistence tests
-- [ ] 11-03-PLAN.md — Remove legacy HostSettingsView and normalize planning summary path conventions
-- [ ] 11-04-PLAN.md — Run debt-closure verification checks and human acceptance checkpoint
+- [x] 11-01-PLAN.md — Wire ConnectionSweeper into production ping lifecycle with regression coverage
+- [x] 11-02-PLAN.md — Add active settings host-level notification override editor and persistence tests
+- [x] 11-03-PLAN.md — Remove legacy HostSettingsView and normalize planning summary path conventions
+- [x] 11-04-PLAN.md — Run debt-closure verification checks and human acceptance checkpoint
 
 **Details:**
 This phase intentionally targets non-blocking debt identified by the v1.0 audit to reduce maintenance overhead and tighten runtime/UX traceability before future feature work.
@@ -238,8 +238,8 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 8 -> 9 -> 10
 | 7. Settings Focus | 4/4 | Complete | 2026-02-16 |
 | 8. Visualization Requirement Reconciliation & Verification | 1/1 | Complete | 2026-02-16 |
 | 9. Regression Test Wiring Recovery | 1/1 | Complete | 2026-02-16 |
-| 10. True ICMP Support | 0/4 | Planned | — |
-| 11. Tech Debt Closure | 0/4 | Planned | — |
+| 10. True ICMP Support | 4/4 | Complete | 2026-02-16 |
+| 11. Tech Debt Closure | 4/4 | Complete | 2026-02-17 |
 
 ---
 *Roadmap created: 2026-02-13*
