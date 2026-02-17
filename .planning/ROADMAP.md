@@ -96,8 +96,15 @@ Plans:
 **Plans**: 2 plans
 
 Plans:
-- [ ] 15-01-PLAN.md — Create metadata text files with validation (app name, subtitle, description, keywords, promotional text, legal notices, review notes)
-- [ ] 15-02-PLAN.md — Capture and validate five screenshots at 2880x1800 resolution
+- [x] 15-01-PLAN.md — Create metadata text files with validation (app name, subtitle, description, keywords, promotional text, legal notices, review notes)
+- [x] 15-02-PLAN.md — Capture and validate five screenshots at 2880x1800 resolution
+
+**Status**: ✅ COMPLETED (2026-02-17)
+- All 8 metadata text files created and validated within character limits
+- 5 screenshots captured at 2880x1800 resolution with automation
+- Metadata validation script created
+- Screenshot capture script created for future updates
+- Ready for Phase 16 submission
 
 ### Phase 16: Submission and Distribution
 **Goal**: Submit first build to App Store Review and establish automated release workflows
@@ -109,10 +116,13 @@ Plans:
   3. Internal TestFlight testers confirm App Store build works identically to Developer ID build (except ICMP)
   4. First submission to App Review completed with all metadata, screenshots, and review notes
   5. Manual submission workflow documented for reproducibility
-**Plans**: TBD
+**Plans**: 4 plans
 
 Plans:
-- [ ] 16-01: TBD
+- [ ] 16-01-PLAN.md — Archive App Store build and validate locally
+- [ ] 16-02-PLAN.md — Upload to App Store Connect and test via TestFlight
+- [ ] 16-03-PLAN.md — Submit for App Review and document workflow
+- [ ] 16-04-PLAN.md — Create CI/CD automation workflow
 
 ## Progress
 
@@ -124,5 +134,5 @@ Phases execute in numeric order: 13 → 14 → 15 → 16
 | 1-12. v1.0 MVP | v1.0 | 50/50 | Complete | 2026-02-17 |
 | 13. Xcode Infrastructure Setup | v1.1 | 4/4 | Complete | 2026-02-16 |
 | 14. Privacy and Compliance | v1.1 | 3/3 | Complete | 2026-02-17 |
-| 15. App Store Metadata and Assets | v1.1 | Complete    | 2026-02-17 | - |
-| 16. Submission and Distribution | v1.1 | 0/TBD | Not started | - |
+| 15. App Store Metadata and Assets | v1.1 | 2/2 | Complete | 2026-02-17 |
+| 16. Submission and Distribution | v1.1 | 0/4 | Not started | - |
