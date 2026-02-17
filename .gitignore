@@ -35,4 +35,4 @@ pingmonitor_*
 
 # Build artifacts
 *.o
-*.dSYM
+*.dSYMdist/
