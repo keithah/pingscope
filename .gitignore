@@ -7,6 +7,12 @@ build/
 *.perspectivev3
 *.xcuserstate
 *.xcworkspace/xcuserdata/
+xcuserdata/
+DerivedData/
+*.xcodeproj/*
+!*.xcodeproj/project.pbxproj
+!*.xcodeproj/xcshareddata/
+.xcschemes-ready/
 
 # Swift Package Manager
 .build/
