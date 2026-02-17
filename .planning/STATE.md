@@ -10,18 +10,18 @@ See: `.planning/PROJECT.md` (updated 2026-02-17)
 ## Current Position
 
 Phase: 14 of 16 (Privacy and Compliance)
-Plan: Ready to plan
-Status: Ready for planning
-Last activity: 2026-02-16 — Completed Phase 13 (Xcode Infrastructure Setup)
+Plan: 1 of 3
+Status: In progress
+Last activity: 2026-02-17 — Completed 14-01 (File-Based Compliance)
 
 Progress: [█████████████████░░░] 81% (v1.1: 13/16 phases complete)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 56
+- Total plans completed: 57
 - Average duration: 2 min
-- Total execution time: 2.45 hours
+- Total execution time: 2.48 hours
 
 **By Phase:**
 
@@ -40,13 +40,14 @@ Progress: [█████████████████░░░] 81% (v1
 | 11. Tech Debt Closure | 4 | 4 | 7 min |
 | 12. ICMP Host Persistence | 3 | 3 | 2 min |
 | 13. Xcode Infrastructure Setup | 4 | 4 | 2 min |
+| 14. Privacy and Compliance | 1 | 3 | 2 min |
 
 **Recent Trend:**
-- Last 5 plans: 13-04 (3 min), 13-03 (2 min), 13-02 (2 min), 13-01 (2 min), 12-03 (2 min)
+- Last 5 plans: 14-01 (2 min), 13-04 (3 min), 13-03 (2 min), 13-02 (2 min), 13-01 (2 min)
 - Trend: Stable
 
 *Updated after each plan completion*
-| Phase 13 P04 | 2 | 2 tasks | 4 files |
+| Phase 14 P01 | 2 | 3 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -63,6 +64,8 @@ Recent decisions affecting current work:
 - v1.1: Python PIL for alpha channel removal → sips insufficient for RGBA to RGB conversion
 - [Phase 13-02]: Use .entitlements extension for entitlement files (Xcode requirement)
 - [Phase 13-02]: Separate CFBundleShortVersionString and CFBundleVersion to prevent duplicate binary errors
+- [Phase 14-01]: ITSAppUsesNonExemptEncryption=false for export compliance (no custom encryption)
+- [Phase 14-01]: Omit NSPrivacyCollectedDataTypes entirely (Data Not Collected best practice)
 
 ### Pending Todos
 
@@ -76,7 +79,10 @@ None.
 - Deferred: Escape key UX improvement (post-submission enhancement)
 
 **Phase 14:**
-- Privacy manifest required reason codes for UserDefaults need verification
+- ✅ Privacy manifest verified complete (UserDefaults with CA92.1)
+- ✅ Export compliance declared (ITSAppUsesNonExemptEncryption=false)
+- ✅ Verification tooling created (Scripts/verify-sandbox.sh)
+- Pending: Screenshot preparation and metadata (Plan 14-02)
 - Sandbox testing requires clean macOS environment or VM
 
 **Phase 16:**
@@ -90,6 +96,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-02-16
-Stopped at: Completed Phase 13 (Xcode Infrastructure Setup) - Ready for Phase 14 planning
+Last session: 2026-02-17
+Stopped at: Completed 14-01-PLAN.md (File-Based Compliance) - Ready for 14-02
 Resume file: None
