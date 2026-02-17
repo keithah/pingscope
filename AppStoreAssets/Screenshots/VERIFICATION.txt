@@ -1,0 +1,13 @@
+Screenshot Dimension Verification
+==================================
+
+Captured: Mon Feb 16 22:51:05 PST 2026
+Required: 2880x1800 (16:10 aspect ratio)
+
+✓ PASS - 01-menu-bar-full-interface.png: 2880x1800 (594K)
+✓ PASS - 02-multi-host-graph.png: 2880x1800 (595K)
+✓ PASS - 03-settings-panel.png: 2880x1800 (482K)
+✓ PASS - 04-ping-history-stats.png: 2880x1800 (734K)
+✓ PASS - 05-compact-mode.png: 2880x1800 (1.1M)
+
+All screenshots ready for App Store Connect upload.
