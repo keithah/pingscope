@@ -10,19 +10,19 @@ See: `.planning/PROJECT.md` (updated 2026-02-13)
 ## Current Position
 
 Phase: 11 of 11 (Tech Debt Closure)
-Plan: 2 of 4 in phase 11
+Plan: 3 of 4 in phase 11
 Status: In progress
-Last activity: 2026-02-16 - Completed 11-02-PLAN.md
-Next Phase: Remaining Phase 11 plans (11-01 and 11-04)
+Last activity: 2026-02-16 - Completed 11-01-PLAN.md
+Next Phase: Remaining Phase 11 plan (11-04)
 
-Progress: [██████████] 96% (45 of 47 plans complete)
+Progress: [██████████] 98% (46 of 47 plans complete)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 45
+- Total plans completed: 46
 - Average duration: 2 min
-- Total execution time: 2.00 hours
+- Total execution time: 2.25 hours
 
 **By Phase:**
 
@@ -38,9 +38,10 @@ Progress: [██████████] 96% (45 of 47 plans complete)
 | 8. Visualization Reconciliation | 1 | 1 | 15 min |
 | 9. Regression Test Wiring Recovery | 1 | 1 | 2 min |
 | 10. True ICMP Support | 4 | 4 | 3 min |
+| 11. Tech Debt Closure | 3 | 4 | 8 min |
 
 **Recent Trend:**
-- Last 5 plans: 10-04 (5 min), 10-03 (2 min), 10-02 (3 min), 10-01 (1 min), 09-01 (2 min)
+- Last 5 plans: 11-01 (15 min), 11-03 (4 min), 11-02 (3 min), 10-04 (5 min), 10-03 (2 min)
 - Trend: Stable
 
 *Updated after each plan completion*
@@ -142,6 +143,8 @@ Recent decisions affecting current work:
 - (11-02): Active host rows open HostNotificationOverrideEditorView via sheet using shared NotificationPreferencesStore wiring
 - (11-03): Remove orphaned HostSettingsView after confirming no compile references remain in Sources
 - (11-03): Normalize legacy summary source paths from Sources/PingMonitor/ to Sources/PingScope/ via scripted textual replacement
+- (11-01): PingService now injects a default ConnectionSweeper lifecycle tracker and starts sweep cadence during service initialization
+- (11-01): ConnectionWrapper resumes cancellation directly and unregisters tracked connections exactly once across terminal state races
 
 ### Pending Todos
 
@@ -157,6 +160,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-02-16T23:49:38Z
-Stopped at: Completed 11-02-PLAN.md
+Last session: 2026-02-17T00:03:26Z
+Stopped at: Completed 11-01-PLAN.md
 Resume file: None
