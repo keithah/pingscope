@@ -1,0 +1,35 @@
+DUAL DISTRIBUTION MODEL
+
+PingScope is distributed in two configurations:
+
+1. APP STORE (SANDBOXED)
+   - Sandbox enabled per App Store requirements
+   - ICMP ping method hidden from UI (requires raw sockets not available in sandbox)
+   - TCP and UDP ping methods fully functional
+   - All other features identical to non-sandboxed build
+
+2. DEVELOPER ID (NON-SANDBOXED)
+   - Direct download from developer website
+   - ICMP ping method available (uses non-privileged datagram ICMP sockets)
+   - TCP and UDP ping methods also available
+   - No sandbox restrictions
+
+TESTING INSTRUCTIONS
+
+For this App Store submission:
+1. Method dropdown shows only TCP and UDP (ICMP correctly hidden)
+2. TCP ping works (try port 80 to google.com)
+3. UDP ping works (try port 53 to 8.8.8.8)
+4. Menu bar updates with live latency values
+5. All non-ICMP features function identically to v1.0
+
+The app uses SandboxDetector utility to determine runtime environment and filters UI accordingly. This is NOT feature limitation - it's appropriate sandbox behavior. Users who need ICMP will use our Developer ID distribution.
+
+PRIVACY & COMPLIANCE
+
+- Privacy manifest embedded (UserDefaults with CA92.1)
+- Export compliance declared (ITSAppUsesNonExemptEncryption=false)
+- No data collection (Privacy Nutrition Label: Data Not Collected)
+- Network client entitlement for TCP/UDP ping functionality
+
+TEST CREDENTIALS: None required - app works without account/login.
