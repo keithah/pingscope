@@ -46,11 +46,13 @@ Complete menu bar ping monitor rewrite with stable async architecture, multi-hos
   3. Developer ID build shows all three ping methods (ICMP, TCP, UDP) as in v1.0
   4. Both builds produce functionally identical apps except for sandbox-gated features
   5. Asset catalog contains valid 1024x1024 opaque PNG app icon meeting App Store requirements
-**Plans**: TBD
+**Plans**: 4 plans
 
 Plans:
-- [ ] 13-01: TBD
-- [ ] 13-02: TBD
+- [ ] 13-01-PLAN.md — Prepare asset catalog and configuration directory
+- [ ] 13-02-PLAN.md — Create dual entitlements and migrate Info.plist
+- [ ] 13-03-PLAN.md — Create Xcode project with dual build schemes
+- [ ] 13-04-PLAN.md — Verify dual-build sandbox behavior
 
 ### Phase 14: Privacy and Compliance
 **Goal**: Complete all App Store compliance requirements including privacy manifest and export declarations
@@ -105,7 +107,7 @@ Phases execute in numeric order: 13 → 14 → 15 → 16
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
 | 1-12. v1.0 MVP | v1.0 | 50/50 | Complete | 2026-02-17 |
-| 13. Xcode Infrastructure Setup | v1.1 | 0/TBD | Not started | - |
+| 13. Xcode Infrastructure Setup | v1.1 | 0/4 | Not started | - |
 | 14. Privacy and Compliance | v1.1 | 0/TBD | Not started | - |
 | 15. App Store Metadata and Assets | v1.1 | 0/TBD | Not started | - |
 | 16. Submission and Distribution | v1.1 | 0/TBD | Not started | - |
