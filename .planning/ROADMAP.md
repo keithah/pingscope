@@ -29,7 +29,7 @@ Complete menu bar ping monitor rewrite with stable async architecture, multi-hos
 
 **Milestone Goal:** Make PingScope available in the Mac App Store while maintaining Developer ID direct downloads.
 
-- [ ] **Phase 13: Xcode Infrastructure Setup** - Create dual-build Xcode project with sandbox-aware configurations
+- [x] **Phase 13: Xcode Infrastructure Setup** - Create dual-build Xcode project with sandbox-aware configurations
 - [ ] **Phase 14: Privacy and Compliance** - Complete privacy manifest and App Store compliance requirements
 - [ ] **Phase 15: App Store Metadata and Assets** - Create screenshots, description, and marketing materials
 - [ ] **Phase 16: Submission and Distribution** - Submit to App Store and establish CI/CD workflows
@@ -49,10 +49,15 @@ Complete menu bar ping monitor rewrite with stable async architecture, multi-hos
 **Plans**: 4 plans
 
 Plans:
-- [ ] 13-01-PLAN.md — Prepare asset catalog and configuration directory
-- [ ] 13-02-PLAN.md — Create dual entitlements and migrate Info.plist
-- [ ] 13-03-PLAN.md — Create Xcode project with dual build schemes
-- [ ] 13-04-PLAN.md — Verify dual-build sandbox behavior
+- [x] 13-01-PLAN.md — Prepare asset catalog and configuration directory
+- [x] 13-02-PLAN.md — Create dual entitlements and migrate Info.plist
+- [x] 13-03-PLAN.md — Create Xcode project with dual build schemes
+- [x] 13-04-PLAN.md — Verify dual-build sandbox behavior
+
+**Status**: ✅ COMPLETED (2026-02-16)
+- Dual-build capability verified for App Store and Developer ID distributions
+- Both variants compile and run successfully
+- Deferred: Entitlements differentiation and Escape key UX (post-submission)
 
 ### Phase 14: Privacy and Compliance
 **Goal**: Complete all App Store compliance requirements including privacy manifest and export declarations
