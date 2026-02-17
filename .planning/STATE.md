@@ -5,23 +5,23 @@
 See: `.planning/PROJECT.md` (updated 2026-02-17)
 
 **Core value:** Reliable, accurate ping monitoring that users can trust — no false timeouts, no stale connections, no crashes.
-**Current focus:** Phase 14 - Privacy and Compliance (v1.1 App Store Release)
+**Current focus:** Phase 15 - App Store Metadata and Assets (v1.1 App Store Release)
 
 ## Current Position
 
-Phase: 14 of 16 (Privacy and Compliance)
-Plan: 3 of 3
-Status: Complete
-Last activity: 2026-02-17 — Completed 14-03 (Archive and Verify Sandbox Build)
+Phase: 15 of 16 (App Store Metadata and Assets)
+Plan: 1 of 2
+Status: In Progress
+Last activity: 2026-02-17 — Completed 15-01 (App Store Metadata)
 
 Progress: [█████████████████░░░] 88% (v1.1: 14/16 phases complete)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 59
+- Total plans completed: 60
 - Average duration: 2 min
-- Total execution time: 2.62 hours
+- Total execution time: 2.65 hours
 
 **By Phase:**
 
@@ -41,15 +41,17 @@ Progress: [█████████████████░░░] 88% (v1
 | 12. ICMP Host Persistence | 3 | 3 | 2 min |
 | 13. Xcode Infrastructure Setup | 4 | 4 | 2 min |
 | 14. Privacy and Compliance | 3 | 3 | 4 min |
+| 15. App Store Metadata and Assets | 1 | 2 | 2 min |
 
 **Recent Trend:**
-- Last 5 plans: 14-03 (8 min), 14-02 (manual), 14-01 (2 min), 13-04 (3 min), 13-03 (2 min)
+- Last 5 plans: 15-01 (2 min), 14-03 (8 min), 14-02 (manual), 14-01 (2 min), 13-04 (3 min)
 - Trend: Stable
 
 *Updated after each plan completion*
 | Phase 14 P01 | 2 | 3 tasks | 2 files |
 | Phase 14 P02 | manual | 1 task | 0 files |
 | Phase 14 P03 | 8 | 2 tasks | 1 files |
+| Phase 15 P01 | 2 | 3 tasks | 10 files |
 
 ## Accumulated Context
 
@@ -72,6 +74,9 @@ Recent decisions affecting current work:
 - [Phase 14-02]: Age rating 4+ confirmed (no objectionable content)
 - [Phase 14-03]: Fixed codesign XML format output for automated verification
 - [Phase 14-03]: Validated dual-mode sandbox behavior in production build
+- [Phase 15]: App name PingScope (9 chars) within 30-char limit
+- [Phase 15]: Keywords avoid ping due to golf trademark concern
+- [Phase 15]: Review notes explain dual sandbox model comprehensively for App Review
 
 ### Pending Todos
 
@@ -90,7 +95,12 @@ None.
 - Verification tooling created and fixed (Scripts/verify-sandbox.sh)
 - App Store Connect questionnaires complete (Privacy Nutrition Label: Data Not Collected, Age Rating: 4+)
 - App Store archive created and verified (sandbox enabled, ICMP hidden, TCP/UDP functional)
-- Ready for Phase 15 (App Store Screenshots & Metadata)
+
+**Phase 15:** In Progress
+- Plan 15-01 complete: App Store metadata text files created and validated
+- All 8 metadata files within character limits
+- Review notes explain dual sandbox distribution for App Review
+- Next: Plan 15-02 (App Store screenshots)
 
 **Phase 16:**
 - First submission may reveal unexpected validation errors
@@ -104,5 +114,5 @@ None.
 ## Session Continuity
 
 Last session: 2026-02-17
-Stopped at: Completed 14-03-PLAN.md (Archive and Verify Sandbox Build) - Phase 14 complete, ready for Phase 15
+Stopped at: Completed 15-01-PLAN.md (App Store Metadata) - Phase 15 in progress
 Resume file: None
