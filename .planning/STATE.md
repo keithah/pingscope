@@ -10,17 +10,17 @@ See: `.planning/PROJECT.md` (updated 2026-02-13)
 ## Current Position
 
 Phase: 12 of 12 (ICMP Host Persistence + Verification Closure)
-Plan: 1 of 3 in phase 12
+Plan: 2 of 3 in phase 12
 Status: In progress
-Last activity: 2026-02-17 - Completed 12-01-PLAN.md
-Next Phase: 12-02-PLAN.md
+Last activity: 2026-02-17 - Completed 12-02-PLAN.md
+Next Phase: 12-03-PLAN.md
 
-Progress: [█████████░] 96% (48 of 50 plans complete)
+Progress: [█████████░] 98% (49 of 50 plans complete)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 48
+- Total plans completed: 49
 - Average duration: 2 min
 - Total execution time: 2.25 hours
 
@@ -41,7 +41,7 @@ Progress: [█████████░] 96% (48 of 50 plans complete)
 | 11. Tech Debt Closure | 4 | 4 | 7 min |
 
 **Recent Trend:**
-- Last 5 plans: 12-01 (2 min), 11-04 (4 min), 11-01 (15 min), 11-03 (4 min), 11-02 (3 min)
+- Last 5 plans: 12-02 (2 min), 12-01 (2 min), 11-04 (4 min), 11-01 (15 min), 11-03 (4 min)
 - Trend: Stable
 
 *Updated after each plan completion*
@@ -147,6 +147,7 @@ Recent decisions affecting current work:
 - (11-01): ConnectionWrapper resumes cancellation directly and unregisters tracked connections exactly once across terminal state races
 - (11-04): Human approval closes checkpoint-only debt-closure acceptance once targeted regression checks pass
 - (12-01): HostStore port validation is method-aware; ICMP requires port 0 while TCP/UDP require port > 0
+- (12-02): ICMP persistence closure coverage must reload hosts from HostStore and assert scheduler execution plus result delivery
 
 ### Pending Todos
 
@@ -163,6 +164,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-02-17T01:04:45Z
-Stopped at: Completed 12-01-PLAN.md
+Last session: 2026-02-17T01:08:15Z
+Stopped at: Completed 12-02-PLAN.md
 Resume file: None
