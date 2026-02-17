@@ -2,20 +2,18 @@
 
 ## Project Reference
 
-See: `.planning/PROJECT.md` (updated 2026-02-13)
+See: `.planning/PROJECT.md` (updated 2026-02-17)
 
 **Core value:** Reliable, accurate ping monitoring that users can trust — no false timeouts, no stale connections, no crashes.
-**Current focus:** Milestone closure and verification traceability complete
+**Current focus:** v1.0 shipped, planning v2.0
 
 ## Current Position
 
-Phase: 12 of 12 (ICMP Host Persistence + Verification Closure)
-Plan: 3 of 3 in phase 12
-Status: Phase complete
-Last activity: 2026-02-17 - Completed 12-03-PLAN.md
-Next Phase: None - roadmap complete
+Milestone: v1.0 shipped 2026-02-17
+Next milestone: v2.0 (Widget + Data Export)
+Status: Ready for new milestone
 
-Progress: [██████████] 100% (50 of 50 plans complete)
+Progress: v1.0 complete (12 phases, 50 plans)
 
 ## Performance Metrics
 
@@ -166,6 +164,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-02-17T01:11:42Z
-Stopped at: Completed 12-03-PLAN.md
+Last session: 2026-02-17
+Stopped at: v1.0 milestone completed and archived
 Resume file: None

@@ -12,29 +12,28 @@ Reliable, accurate ping monitoring that users can trust — no false timeouts, n
 
 ### Validated
 
-(None yet — ship to validate)
+- Menu bar status display with color-coded dot and ping time text — v1.0
+- Multiple host monitoring (Google DNS, Cloudflare DNS, Default Gateway) — v1.0
+- Four ping methods: True ICMP (non-sandbox only), ICMP-simulated (TCP), UDP, TCP — v1.0
+- Auto-detection of default gateway via SystemConfiguration — v1.0
+- Real-time latency graph visualization — v1.0
+- Ping history list with timestamps — v1.0
+- Full view mode (450x500) with host tabs, graph, history — v1.0
+- Compact view mode (280x220) with condensed display — v1.0
+- Stay-on-top floating window option — v1.0
+- Settings panel for host management — v1.0
+- 7 notification alert types (no response, high latency, recovery, degradation, intermittent, network change, internet loss) — v1.0
+- Persistent settings via UserDefaults — v1.0
+- Left-click opens popover, right-click shows context menu — v1.0
+- Statistics display (transmitted, received, packet loss, min/avg/max/stddev) — v1.0
 
 ### Active
 
-- [ ] Menu bar status display with color-coded dot and ping time text
-- [ ] Multiple host monitoring (Google DNS, Cloudflare DNS, Default Gateway)
-- [ ] Four ping methods: True ICMP (non-sandbox only), ICMP-simulated (TCP), UDP, TCP
-- [ ] Auto-detection of default gateway via SystemConfiguration
-- [ ] Real-time latency graph visualization
-- [ ] Ping history list with timestamps
-- [ ] Full view mode (450x500) with host tabs, graph, history
-- [ ] Compact view mode (280x220) with condensed display
-- [ ] Stay-on-top floating window option
-- [ ] Settings panel for host management
-- [ ] Data export (CSV, JSON, Text)
-- [ ] 7 notification alert types (no response, high latency, recovery, degradation, intermittent, network change, internet loss)
-- [ ] Persistent settings via UserDefaults
-- [ ] Left-click opens popover, right-click shows context menu
-- [ ] Statistics display (transmitted, received, packet loss, min/avg/max/stddev)
+- Data export (CSV, JSON, Text)
+- Widget extension (small/medium/large sizes)
 
 ### Out of Scope
 
-- Widget extension — defer to v2, focus on core app stability first
 - OAuth/cloud sync — not needed for local utility app
 - Multi-platform — macOS only
 
@@ -78,5 +77,11 @@ Reliable, accurate ping monitoring that users can trust — no false timeouts, n
 | Defer widget to v2 | Focus on core app stability first | — Pending |
 | Dual-mode ICMP support | True ICMP when not sandboxed, hidden when sandboxed | — Pending |
 
+## Current State
+
+**Version:** v1.0 shipped 2026-02-17
+**Codebase:** ~8000 LOC Swift, 54 source files
+**Tech stack:** SwiftUI, AppKit, Network.framework, SystemConfiguration
+
 ---
-*Last updated: 2026-02-13 after initialization*
+*Last updated: 2026-02-17 after v1.0 milestone*
