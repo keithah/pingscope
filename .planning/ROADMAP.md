@@ -93,10 +93,11 @@ Plans:
   3. Five screenshots at 2880x1800 resolution showing: (1) menu bar + full interface, (2) multi-host tabs + graph, (3) settings, (4) ping history, (5) compact mode
   4. Support URL, copyright notice, and promotional text created
   5. Review notes explain dual sandbox modes and how to test both distributions
-**Plans**: TBD
+**Plans**: 2 plans
 
 Plans:
-- [ ] 15-01: TBD
+- [ ] 15-01-PLAN.md — Create metadata text files with validation (app name, subtitle, description, keywords, promotional text, legal notices, review notes)
+- [ ] 15-02-PLAN.md — Capture and validate five screenshots at 2880x1800 resolution
 
 ### Phase 16: Submission and Distribution
 **Goal**: Submit first build to App Store Review and establish automated release workflows
@@ -123,5 +124,5 @@ Phases execute in numeric order: 13 → 14 → 15 → 16
 | 1-12. v1.0 MVP | v1.0 | 50/50 | Complete | 2026-02-17 |
 | 13. Xcode Infrastructure Setup | v1.1 | 4/4 | Complete | 2026-02-16 |
 | 14. Privacy and Compliance | v1.1 | 3/3 | Complete | 2026-02-17 |
-| 15. App Store Metadata and Assets | v1.1 | 0/TBD | Not started | - |
+| 15. App Store Metadata and Assets | v1.1 | 0/2 | Not started | - |
 | 16. Submission and Distribution | v1.1 | 0/TBD | Not started | - |
