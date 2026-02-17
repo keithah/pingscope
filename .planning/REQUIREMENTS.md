@@ -90,13 +90,52 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| (To be populated by roadmapper) | | |
+| INFRA-01 | Phase 13 | Pending |
+| INFRA-02 | Phase 13 | Pending |
+| INFRA-03 | Phase 13 | Pending |
+| INFRA-04 | Phase 13 | Pending |
+| INFRA-05 | Phase 13 | Pending |
+| INFRA-06 | Phase 13 | Pending |
+| INFRA-07 | Phase 13 | Pending |
+| INFRA-08 | Phase 13 | Pending |
+| PRIV-01 | Phase 14 | Pending |
+| PRIV-02 | Phase 14 | Pending |
+| PRIV-03 | Phase 14 | Pending |
+| PRIV-04 | Phase 14 | Pending |
+| PRIV-05 | Phase 14 | Pending |
+| PRIV-06 | Phase 14 | Pending |
+| PRIV-07 | Phase 14 | Pending |
+| PRIV-08 | Phase 14 | Pending |
+| META-01 | Phase 15 | Pending |
+| META-02 | Phase 15 | Pending |
+| META-03 | Phase 15 | Pending |
+| META-04 | Phase 15 | Pending |
+| META-05 | Phase 15 | Pending |
+| META-06 | Phase 15 | Pending |
+| META-07 | Phase 15 | Pending |
+| META-08 | Phase 15 | Pending |
+| META-09 | Phase 15 | Pending |
+| META-10 | Phase 15 | Pending |
+| META-11 | Phase 15 | Pending |
+| META-12 | Phase 15 | Pending |
+| META-13 | Phase 15 | Pending |
+| META-14 | Phase 15 | Pending |
+| SUBM-01 | Phase 16 | Pending |
+| SUBM-02 | Phase 16 | Pending |
+| SUBM-03 | Phase 16 | Pending |
+| SUBM-04 | Phase 16 | Pending |
+| SUBM-05 | Phase 16 | Pending |
+| SUBM-06 | Phase 16 | Pending |
+| SUBM-07 | Phase 16 | Pending |
+| SUBM-08 | Phase 16 | Pending |
+| SUBM-09 | Phase 16 | Pending |
+| SUBM-10 | Phase 16 | Pending |
 
 **Coverage:**
-- v1.1 requirements: 42 total
-- Mapped to phases: 0 (pending roadmap)
-- Unmapped: 42 ⚠️
+- v1.1 requirements: 40 total
+- Mapped to phases: 40 (100% coverage)
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-02-17*
-*Last updated: 2026-02-17 after initial definition*
+*Last updated: 2026-02-17 after roadmap creation*

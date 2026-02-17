@@ -5,14 +5,16 @@
 See: `.planning/PROJECT.md` (updated 2026-02-17)
 
 **Core value:** Reliable, accurate ping monitoring that users can trust — no false timeouts, no stale connections, no crashes.
-**Current focus:** v2.0 App Store Release
+**Current focus:** Phase 13 - Xcode Infrastructure Setup (v1.1 App Store Release)
 
 ## Current Position
 
-Phase: Not started (defining requirements)
-Plan: —
-Status: Defining requirements
-Last activity: 2026-02-17 — Milestone v2.0 started
+Phase: 13 of 16 (Xcode Infrastructure Setup)
+Plan: 0 of TBD in current phase
+Status: Ready to plan
+Last activity: 2026-02-17 — v1.1 roadmap created, starting App Store distribution work
+
+Progress: [████████████████░░░░] 75% (v1.0 complete: 12/16 phases)
 
 ## Performance Metrics
 
@@ -36,6 +38,7 @@ Last activity: 2026-02-17 — Milestone v2.0 started
 | 9. Regression Test Wiring Recovery | 1 | 1 | 2 min |
 | 10. True ICMP Support | 4 | 4 | 3 min |
 | 11. Tech Debt Closure | 4 | 4 | 7 min |
+| 12. ICMP Host Persistence | 3 | 3 | 2 min |
 
 **Recent Trend:**
 - Last 5 plans: 12-03 (2 min), 12-02 (2 min), 12-01 (2 min), 11-04 (4 min), 11-01 (15 min)
@@ -50,103 +53,11 @@ Last activity: 2026-02-17 — Milestone v2.0 started
 Decisions are logged in PROJECT.md Key Decisions table.
 Recent decisions affecting current work:
 
-- (init): Use Swift Concurrency over GCD semaphores to eliminate race conditions
-- (init): Modular file structure over single file for maintainability
-- (init): Defer widget to v2 to focus on core app stability
-- (01-01): Used Duration instead of TimeInterval for type-safe timing
-- (01-01): All models conform to Sendable for actor isolation
-- (01-02): Use fresh NWConnection instances per measurement for reliability
-- (01-02): Timeout racing uses withThrowingTaskGroup with immediate loser cancellation
-- (01-02): pingAll default concurrency limit remains 10
-- (01-03): Host down state requires 3 consecutive failures tracked per host
-- (01-03): Connection sweeper defaults to 10-second cadence with 30-second max age
-- (01-03): Ping scheduling spreads execution across 80% of interval with cancel-before-restart updates
-- (01-04): PingService tests use real DNS endpoints to verify timeout racing and pingAll behavior
-- (01-04): Timeout assertions use bounded tolerance windows to avoid flaky scheduling-edge failures
-- (01-04): ConnectionSweeper tests use short 100ms/200ms timing for deterministic fast cleanup checks
-- (02-01): Menu status thresholds use <=80ms for green and reserve red for sustained failures
-- (02-01): Sustained failure threshold for red status is 3 consecutive failures
-- (02-01): Display text smoothing uses bounded EMA (alpha 0.35, max step 40ms)
-- (02-03): Popover section order is fixed as status first, quick actions second
-- (02-03): Popover snapshot sanitizes blank or missing host/latency to N/A
-- (02-02): Render status dot with SF Symbol tint and keep title compact to preserve menu-bar width
-- (02-02): Route ctrl-click and cmd-click through the same context-menu path as right-click
-- (02-02): Build menu sections from runtime state and persist mode toggles with a dedicated preference store
-- (02-04): Status item uses a non-template drawn dot plus centered stacked text for reliable menu-bar contrast
-- (02-04): Compact mode changes are observed alongside scheduler state so status rendering updates immediately
-- (02-04): Settings action first tries showSettingsWindow and falls back to a dedicated NSWindow in accessory mode
-- (03-01): Use responsive global defaults of 2s interval/timeout and 50ms/150ms thresholds for host monitoring
-- (03-01): Preserve Host decode compatibility for legacy protocolType/timeout persisted payloads
-- (03-02): Detect default gateway from sysctl route table and avoid NWPath gateway fields for stability
-- (03-02): Debounce connected-path gateway updates at 200ms but emit unavailable immediately on disconnect
-- (03-03): Route icmpSimulated through dedicated host-level probe sequencing across ports 53/80/443/22/25
-- (03-03): Keep single-port ping overload limited to tcp/udp paths with explicit icmpSimulated misuse failure
-- (03-04): Persist host lists with JSONEncoder/JSONDecoder while excluding the ephemeral gateway host
-- (03-04): Enforce default-host restoration and default->gateway->custom host ordering from HostStore
-- (03-05): Represent row latency with tri-state mapping (missing=blank, nil=Failed, value=ms text)
-- (03-05): Keep host-row indicator slots fixed-width so checkmark/lock toggles do not shift row content
-- (03-06): Keep add/edit sheet save gating tied to required fields; test ping failures warn but do not block save
-- (03-06): Persist per-host interval/timeout/threshold overrides only when their custom toggles are enabled
-- (03-07): Embed host list management directly in the popover for one-click host operations
-- (03-07): Drive scheduler host targets from HostStore so add/remove changes apply immediately
-- (03-07): Surface gateway churn via a brief runtime network change indicator
-- (03-08): Schedule pings per host using Host.effectiveInterval with a runtime global fallback instead of one shared loop interval
-- (03-08): Keep stagger behavior for concurrently due hosts while allowing shorter-interval hosts to run more frequently
-- (03-08): Add deterministic PingScheduler cadence tests using injected ping and health test doubles
-- (03-09): Pass effective green/yellow thresholds into menu status evaluation on each update instead of static bounds
-- (03-09): Recompute menu status immediately when selected host changes so threshold boundary updates are instant
-- (04-01): Persist display state as one Codable payload split into shared/full/compact partitions
-- (04-01): Keep deterministic mode defaults with full (450x500) and compact (280x220) frame data
-- (04-01): Expose focused DisplayPreferencesStore APIs for shared and per-mode updates
-- (04-02): Use one DisplayViewModel to preserve selected host/time range across mode switches while panel visibility persists per mode
-- (04-02): Keep bounded per-host sample buffers and project recent results newest-first for full/compact history surfaces
-- (04-03): Re-anchor floating shell from status-item screen rect on each open/mode handoff and clamp to active visibleFrame
-- (04-03): Enforce current-Space floating behavior with collectionBehavior [.transient, .moveToActiveSpace] and no all-spaces flags
-- (04-03): Keep floating movement handle-only by leaving isMovableByWindowBackground disabled
-- (04-04): Delegate status-item open/close through DisplayModeCoordinator so mode and shell toggles re-anchor active presentation consistently
-- (04-04): Bind settings display toggles to menuBar.mode persisted keys and route writes through AppDelegate runtime setters
-- (04-04): Preserve display selected host/time range across compact/full switches by reusing a single app-lifecycle DisplayViewModel
-- (04-05): Host pill status indicators derive from most recent ping result per host instead of hardcoded green
-- (06-01): Persist per-host notification overrides in NotificationPreferences as a [UUID: HostNotificationOverride] dictionary for efficient lookup
-- (06-02): Intermittent failures count uses a time window (seconds) because failures are stored as timestamps
-- (06-02): Per-host enabled alert types are intersected with global enabled alert types (overrides can restrict but not expand)
-- (06-03): Host.notificationsEnabled defaults to true and decodes missing values as true for backwards compatibility
-- (06-04): Settings window originally used a Settings-scene TabView with Hosts/Notifications/Display tabs (superseded in 07-02)
-- (06-05): AppDelegate requests notification permission at launch and forwards scheduler/gateway events into NotificationService
-- (06-05): Added PrivacyInfo.xcprivacy and SwiftPM resource processing for App Store UserDefaults declaration
-- (07-01): Always open Settings via a dedicated NSWindowController for LSUIElement reliability
-- (07-01): Lazily initialize UNUserNotificationCenter only when running as a bundled .app
-- (07-02): Settings scene renders PingMonitorSettingsView wired to AppDelegate shared view models/stores (no ad-hoc HostStore)
-- (07-02): Expose AppDelegate shared HostListViewModel/DisplayViewModel + NotificationPreferencesStore at module scope for reuse
-- (07-03): Reload Settings local state on window focus so reopened windows reflect canonical persisted values
-- (07-03): Declare DisplaySharedState defaults at property level; History Summary is enabled by default
-- (07-04): Human verification approval is sufficient to close checkpoint-only settings validation plan when all criteria pass
-- (06-06): Human verification approval is sufficient to close checkpoint-only phase acceptance plans when all criteria pass
-- (06-07): Active Settings shell uses one shared TabView with Hosts/Notifications/Display for both Cmd+, and dedicated settings window entrypoints
-- (06-07): Notifications tab routes through NotificationSettingsView bound to NotificationPreferencesStore, including cooldown/threshold/intermittent controls persisted via UserDefaults
-- (06-08): Human re-verification approval is sufficient to close the Phase 6 gap-checkpoint plan when all checks pass
-- (08-01): VIS-04 is satisfied only with explicitly separated timestamp/host/ping/status fields in history rows
-- (08-01): Runtime clipping during full-mode resize is treated as blocking visualization correctness and must be fixed before acceptance
-- (09-01): Remove obsolete StatusItemTitleFormatterTests when equivalent compactLatencyText coverage exists in MenuBarViewModelTests
-- (09-01): PingService timeout tests accept timeout or immediate network outcomes, but enforce timeout timing bounds when timeout is returned
-- (10-01): Sandbox detection uses NSHomeDirectory() container-path matching to gate true ICMP availability at runtime
-- (10-01): ICMP packet primitives use explicit big-endian serialization/parsing and RFC 1071 ones-complement checksum in pure Swift
-- (10-02): ICMPPinger uses non-privileged socket(AF_INET, SOCK_DGRAM, IPPROTO_ICMP) for true ICMP outside sandbox
-- (10-02): ICMP receive validation requires echo-reply type plus identifier/sequence match before success
-- (10-03): PingMethod.availableCases is the single runtime gate for showing true ICMP only when not sandboxed
-- (10-03): PingService treats true ICMP as host-based only and rejects port-overload .icmp calls with explicit guidance
-- (10-04): Human verification approval is sufficient to close checkpoint-only ICMP acceptance plan when all criteria pass
-- (11-02): Host override settings state uses explicit inheritance mode so reset-to-global clears NotificationPreferences.hostOverrides entries
-- (11-02): Active host rows open HostNotificationOverrideEditorView via sheet using shared NotificationPreferencesStore wiring
-- (11-03): Remove orphaned HostSettingsView after confirming no compile references remain in Sources
-- (11-03): Normalize legacy summary source paths from Sources/PingMonitor/ to Sources/PingScope/ via scripted textual replacement
-- (11-01): PingService now injects a default ConnectionSweeper lifecycle tracker and starts sweep cadence during service initialization
-- (11-01): ConnectionWrapper resumes cancellation directly and unregisters tracked connections exactly once across terminal state races
-- (11-04): Human approval closes checkpoint-only debt-closure acceptance once targeted regression checks pass
-- (12-01): HostStore port validation is method-aware; ICMP requires port 0 while TCP/UDP require port > 0
-- (12-02): ICMP persistence closure coverage must reload hosts from HostStore and assert scheduler execution plus result delivery
-- (12-03): Phase 10 requires a formal VERIFICATION artifact linking runtime behavior and persistence/scheduler regression evidence to close HOST-11 governance
-- (12-03): HOST-11 is only considered closed when verification, milestone audit, and requirements traceability are synchronized to passed/complete state
+- v1.0: Use Swift Concurrency over GCD semaphores → Eliminated race conditions
+- v1.0: Modular file structure over single file → Better maintainability
+- v1.0: Dual-mode ICMP support → True ICMP when not sandboxed, hidden when sandboxed
+- v1.1: Free App Store pricing → Maximize adoption
+- v1.1: Single codebase for both distributions → Reduces maintenance burden
 
 ### Pending Todos
 
@@ -154,15 +65,25 @@ None.
 
 ### Blockers/Concerns
 
-None.
+**Phase 13:**
+- Xcode project wrapper pattern needs validation (SPM + Xcode hybrid)
+- Dual entitlement configuration must be tested with actual certificates
+
+**Phase 14:**
+- Privacy manifest required reason codes for UserDefaults need verification
+- Sandbox testing requires clean macOS environment or VM
+
+**Phase 16:**
+- First submission may reveal unexpected validation errors
+- TestFlight external testing may require App Review for dual-mode explanation
 
 ### Roadmap Evolution
 
-- Phase 11 added: 11
-- Phase 12 added: 3
+- v1.0 (Phases 1-12): Complete (shipped 2026-02-17)
+- v1.1 (Phases 13-16): Starting App Store release
 
 ## Session Continuity
 
 Last session: 2026-02-17
-Stopped at: v1.0 milestone completed and archived
+Stopped at: v1.1 roadmap created, ready to begin Phase 13 planning
 Resume file: None
