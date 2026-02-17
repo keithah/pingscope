@@ -5,22 +5,22 @@
 See: `.planning/PROJECT.md` (updated 2026-02-13)
 
 **Core value:** Reliable, accurate ping monitoring that users can trust — no false timeouts, no stale connections, no crashes.
-**Current focus:** Phase 11 tech-debt closure execution
+**Current focus:** Phase 12 ICMP persistence and verification closure
 
 ## Current Position
 
-Phase: 11 of 11 (Tech Debt Closure)
-Plan: 4 of 4 in phase 11
-Status: Phase complete
-Last activity: 2026-02-17 - Completed 11-04-PLAN.md
-Next Phase: None (roadmap complete)
+Phase: 12 of 12 (ICMP Host Persistence + Verification Closure)
+Plan: 1 of 3 in phase 12
+Status: In progress
+Last activity: 2026-02-17 - Completed 12-01-PLAN.md
+Next Phase: 12-02-PLAN.md
 
-Progress: [██████████] 100% (47 of 47 plans complete)
+Progress: [█████████░] 96% (48 of 50 plans complete)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 47
+- Total plans completed: 48
 - Average duration: 2 min
 - Total execution time: 2.25 hours
 
@@ -41,7 +41,7 @@ Progress: [██████████] 100% (47 of 47 plans complete)
 | 11. Tech Debt Closure | 4 | 4 | 7 min |
 
 **Recent Trend:**
-- Last 5 plans: 11-04 (4 min), 11-01 (15 min), 11-03 (4 min), 11-02 (3 min), 10-04 (5 min)
+- Last 5 plans: 12-01 (2 min), 11-04 (4 min), 11-01 (15 min), 11-03 (4 min), 11-02 (3 min)
 - Trend: Stable
 
 *Updated after each plan completion*
@@ -146,6 +146,7 @@ Recent decisions affecting current work:
 - (11-01): PingService now injects a default ConnectionSweeper lifecycle tracker and starts sweep cadence during service initialization
 - (11-01): ConnectionWrapper resumes cancellation directly and unregisters tracked connections exactly once across terminal state races
 - (11-04): Human approval closes checkpoint-only debt-closure acceptance once targeted regression checks pass
+- (12-01): HostStore port validation is method-aware; ICMP requires port 0 while TCP/UDP require port > 0
 
 ### Pending Todos
 
@@ -158,9 +159,10 @@ None.
 ### Roadmap Evolution
 
 - Phase 11 added: 11
+- Phase 12 added: 3
 
 ## Session Continuity
 
-Last session: 2026-02-17T00:10:00Z
-Stopped at: Completed 11-04-PLAN.md
+Last session: 2026-02-17T01:04:45Z
+Stopped at: Completed 12-01-PLAN.md
 Resume file: None
