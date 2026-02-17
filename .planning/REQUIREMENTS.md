@@ -1,0 +1,102 @@
+# Requirements: PingScope
+
+**Defined:** 2026-02-17
+**Core Value:** Reliable, accurate ping monitoring that users can trust — no false timeouts, no stale connections, no crashes.
+
+## v1.1 Requirements
+
+Requirements for App Store release. Each maps to roadmap phases.
+
+### Infrastructure
+
+- [ ] **INFRA-01**: Xcode project wrapper created referencing Package.swift as local dependency
+- [ ] **INFRA-02**: Asset catalog created with 1024x1024 opaque PNG app icon
+- [ ] **INFRA-03**: AppStore build scheme configured with App Store distribution certificate
+- [ ] **INFRA-04**: DeveloperID build scheme configured with Developer ID certificate
+- [ ] **INFRA-05**: PingScope-AppStore.entitlements file created with sandbox enabled
+- [ ] **INFRA-06**: PingScope-DeveloperID.entitlements file created with hardened runtime only
+- [ ] **INFRA-07**: Info.plist migrated to Xcode management with version automation
+- [ ] **INFRA-08**: Both build schemes produce functional apps (sandbox detection works)
+
+### Privacy & Compliance
+
+- [ ] **PRIV-01**: PrivacyInfo.xcprivacy created declaring network client access
+- [ ] **PRIV-02**: Privacy manifest explicitly states "Data Not Collected"
+- [ ] **PRIV-03**: Privacy Nutrition Label questionnaire completed in App Store Connect
+- [ ] **PRIV-04**: Age rating questionnaire completed (4+ rating)
+- [ ] **PRIV-05**: Export compliance declaration added (ITSAppUsesNonExemptEncryption = NO)
+- [ ] **PRIV-06**: Archived App Store build tested in sandbox environment
+- [ ] **PRIV-07**: ICMP option correctly hidden in App Store sandboxed build
+- [ ] **PRIV-08**: TCP/UDP options work correctly in App Store sandboxed build
+
+### Metadata & Assets
+
+- [ ] **META-01**: App name finalized in App Store Connect
+- [ ] **META-02**: App subtitle created (≤30 chars: "Network Latency Monitor")
+- [ ] **META-03**: App description written (highlighting differentiators, ≤4000 chars)
+- [ ] **META-04**: Keywords optimized (≤100 chars, comma-separated)
+- [ ] **META-05**: Screenshots captured (5 images at 2880x1800 resolution)
+- [ ] **META-06**: Screenshot 1 shows menu bar status + full interface
+- [ ] **META-07**: Screenshot 2 shows multi-host tabs + real-time graph
+- [ ] **META-08**: Screenshot 3 shows settings panel
+- [ ] **META-09**: Screenshot 4 shows ping history with statistics
+- [ ] **META-10**: Screenshot 5 shows compact mode view
+- [ ] **META-11**: Promotional text created (170 chars updateable)
+- [ ] **META-12**: Support URL configured (GitHub repo or dedicated page)
+- [ ] **META-13**: Copyright notice added
+- [ ] **META-14**: Review notes written explaining dual sandbox modes
+
+### Submission & Distribution
+
+- [ ] **SUBM-01**: App built with Xcode 26+ using macOS 26 SDK
+- [ ] **SUBM-02**: App Store distribution certificate obtained
+- [ ] **SUBM-03**: App Store provisioning profile configured
+- [ ] **SUBM-04**: App bundle validated locally with xcrun altool --validate-app
+- [ ] **SUBM-05**: App uploaded to App Store Connect via Transporter
+- [ ] **SUBM-06**: TestFlight internal build tested (up to 100 users)
+- [ ] **SUBM-07**: First submission to App Review completed
+- [ ] **SUBM-08**: Manual submission workflow documented
+- [ ] **SUBM-09**: GitHub Actions workflow created for App Store builds (.github/workflows/appstore-release.yml)
+- [ ] **SUBM-10**: CI/CD workflow tested with manual trigger
+
+## v1.2+ Requirements
+
+Deferred to future releases.
+
+### Post-Approval Optimization
+
+- **META-15**: App preview video created (20-30 seconds)
+- **META-16**: TestFlight external testing with public beta users
+- **META-17**: Keyword optimization using ASO tools (AppTweak, Asolytics)
+- **META-18**: Localization for top 5-10 languages
+- **META-19**: Custom product pages for A/B testing
+- **META-20**: Multiple screenshot sizes (all 4 resolutions)
+
+## Out of Scope
+
+| Feature | Reason |
+|---------|--------|
+| Widget extension | Defer to v2.0 — focus on distribution first |
+| Data export features | Defer to v2.0 — focus on distribution first |
+| App preview video | Defer to v1.2 — manual submission first, optimize after approval |
+| External TestFlight | Defer to v1.2 — internal testing sufficient for first submission |
+| ASO tool optimization | Defer to v1.2 — manual keyword research for initial launch |
+| Multi-language support | Defer to v2.0+ — English-only for initial release |
+| Custom product pages | Defer to v2.0+ — requires App Store presence first |
+
+## Traceability
+
+Which phases cover which requirements. Updated during roadmap creation.
+
+| Requirement | Phase | Status |
+|-------------|-------|--------|
+| (To be populated by roadmapper) | | |
+
+**Coverage:**
+- v1.1 requirements: 42 total
+- Mapped to phases: 0 (pending roadmap)
+- Unmapped: 42 ⚠️
+
+---
+*Requirements defined: 2026-02-17*
+*Last updated: 2026-02-17 after initial definition*

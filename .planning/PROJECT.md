@@ -38,7 +38,7 @@ Reliable, accurate ping monitoring that users can trust — no false timeouts, n
 - Widget extension — defer to v3
 - Data export — defer to v3
 
-## Current Milestone: v2.0 App Store Release
+## Current Milestone: v1.1 App Store Release
 
 **Goal:** Make PingScope available in the Mac App Store while maintaining Developer ID direct downloads.
 
