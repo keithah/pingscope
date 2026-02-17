@@ -21,7 +21,7 @@ PingMonitor is a macOS menu bar network monitoring app rewritten from a monolith
 - [x] **Phase 9: Regression Test Wiring Recovery** - Restore compile-green automated regression integration coverage
 - [x] **Phase 10: True ICMP Support** - Real ICMP ping when running outside sandbox
 - [x] **Phase 11: Tech Debt Closure** - Close non-blocking v1.0 debt in runtime wiring, settings UX, and planning traceability
-- [ ] **Phase 12: ICMP Host Persistence + Verification Closure** - Close remaining HOST-11 integration and verification blockers from milestone audit
+- [x] **Phase 12: ICMP Host Persistence + Verification Closure** - Close remaining HOST-11 integration and verification blockers from milestone audit
 
 ## Phase Details
 
@@ -237,9 +237,9 @@ This phase intentionally targets non-blocking debt identified by the v1.0 audit 
 **Plans:** 3 plans
 
 Plans:
-- [ ] 12-01-PLAN.md — Fix ICMP host CRUD persistence validation semantics and add HostStore regression tests
-- [ ] 12-02-PLAN.md — Add ICMP persistence-to-scheduler integration regression coverage
-- [ ] 12-03-PLAN.md — Produce Phase 10 verification artifact and close HOST-11 audit/traceability blockers
+- [x] 12-01-PLAN.md — Fix ICMP host CRUD persistence validation semantics and add HostStore regression tests
+- [x] 12-02-PLAN.md — Add ICMP persistence-to-scheduler integration regression coverage
+- [x] 12-03-PLAN.md — Produce Phase 10 verification artifact and close HOST-11 audit/traceability blockers
 
 ## Progress
 
@@ -259,7 +259,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 8 -> 9 -> 10
 | 9. Regression Test Wiring Recovery | 1/1 | Complete | 2026-02-16 |
 | 10. True ICMP Support | 4/4 | Complete | 2026-02-16 |
 | 11. Tech Debt Closure | 4/4 | Complete | 2026-02-17 |
-| 12. ICMP Host Persistence + Verification Closure | 0/3 | Planned | — |
+| 12. ICMP Host Persistence + Verification Closure | 3/3 | Complete | 2026-02-17 |
 
 ---
 *Roadmap created: 2026-02-13*
@@ -270,3 +270,4 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 8 -> 9 -> 10
 *Phase 10 planned: 2026-02-16*
 *Phase 11 planned: 2026-02-16*
 *Phase 12 planned: 2026-02-17*
+*Phase 12 completed: 2026-02-17*
