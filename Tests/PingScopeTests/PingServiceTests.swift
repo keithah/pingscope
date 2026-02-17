@@ -1,5 +1,29 @@
 import XCTest
+import Network
 @testable import PingScope
+
+private actor ConnectionLifecycleTrackerSpy: ConnectionLifecycleTracking {
+    private var registeredIDs: [UUID] = []
+    private var unregisteredIDs: [UUID] = []
+
+    func register(_ connection: NWConnection) async -> UUID {
+        let id = UUID()
+        registeredIDs.append(id)
+        return id
+    }
+
+    func unregister(_ id: UUID) async {
+        unregisteredIDs.append(id)
+    }
+
+    func counts() -> (registered: Int, unregistered: Int) {
+        (registeredIDs.count, unregisteredIDs.count)
+    }
+
+    func idsMatch() -> Bool {
+        Set(registeredIDs) == Set(unregisteredIDs)
+    }
+}
 
 final class PingServiceTests: XCTestCase {
     private var pingService: PingService!
@@ -129,5 +153,72 @@ final class PingServiceTests: XCTestCase {
         )
 
         XCTAssertFalse(result.host.isEmpty)
+    }
+
+    func testTCPLifecycleTrackerUnregistersAfterSuccessfulPing() async {
+        let tracker = ConnectionLifecycleTrackerSpy()
+        pingService = PingService(connectionLifecycleTracker: tracker)
+
+        let result = await pingService.ping(
+            address: "8.8.8.8",
+            port: 443,
+            pingMethod: .tcp,
+            timeout: .seconds(5)
+        )
+
+        XCTAssertTrue(result.isSuccess)
+        await waitForLifecycleCleanup(on: tracker, expectedUnregisterCount: 1)
+
+        let counts = await tracker.counts()
+        let idsMatch = await tracker.idsMatch()
+        XCTAssertEqual(counts.registered, 1)
+        XCTAssertEqual(counts.unregistered, 1)
+        XCTAssertTrue(idsMatch)
+    }
+
+    func testTCPLifecycleTrackerUnregistersAfterCancelledPingTask() async {
+        let tracker = ConnectionLifecycleTrackerSpy()
+        pingService = PingService(connectionLifecycleTracker: tracker)
+
+        let task = Task {
+            await pingService.ping(
+                address: "192.0.2.1",
+                port: 12345,
+                pingMethod: .tcp,
+                timeout: .seconds(5)
+            )
+        }
+
+        try? await Task.sleep(for: .milliseconds(50))
+        task.cancel()
+
+        let result = await task.value
+        XCTAssertFalse(result.isSuccess)
+
+        await waitForLifecycleCleanup(on: tracker, expectedUnregisterCount: 1)
+
+        let counts = await tracker.counts()
+        let idsMatch = await tracker.idsMatch()
+        XCTAssertEqual(counts.registered, 1)
+        XCTAssertEqual(counts.unregistered, 1)
+        XCTAssertTrue(idsMatch)
+    }
+
+    private func waitForLifecycleCleanup(
+        on tracker: ConnectionLifecycleTrackerSpy,
+        expectedUnregisterCount: Int,
+        timeout: Duration = .seconds(1)
+    ) async {
+        let clock = ContinuousClock()
+        let deadline = clock.now + timeout
+
+        while clock.now < deadline {
+            let counts = await tracker.counts()
+            if counts.unregistered >= expectedUnregisterCount {
+                return
+            }
+
+            try? await Task.sleep(for: .milliseconds(10))
+        }
     }
 }

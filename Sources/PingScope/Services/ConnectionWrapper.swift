@@ -10,19 +10,34 @@ struct ConnectionWrapper: Sendable {
     private final class ConnectionState: @unchecked Sendable {
         let lock = NSLock()
         var didResume = false
+        var continuation: CheckedContinuation<Void, Error>?
         var registrationID: UUID?
         var didUnregister = false
 
-        func shouldResume() -> Bool {
+        func setContinuation(_ continuation: CheckedContinuation<Void, Error>) {
             lock.lock()
-            defer { lock.unlock() }
+            self.continuation = continuation
+            lock.unlock()
+        }
 
+        func resume(with result: Result<Void, Error>) {
+            lock.lock()
             guard !didResume else {
-                return false
+                lock.unlock()
+                return
             }
 
             didResume = true
-            return true
+            let continuation = self.continuation
+            self.continuation = nil
+            lock.unlock()
+
+            switch result {
+            case .success:
+                continuation?.resume()
+            case .failure(let error):
+                continuation?.resume(throwing: error)
+            }
         }
 
         func setRegistrationID(_ id: UUID) {
@@ -89,27 +104,25 @@ struct ConnectionWrapper: Sendable {
 
         try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-                connection.stateUpdateHandler = { state in
-                    guard connectionState.shouldResume() else {
-                        return
-                    }
+                connectionState.setContinuation(continuation)
 
+                connection.stateUpdateHandler = { state in
                     switch state {
                     case .ready:
                         unregisterIfNeeded()
                         connection.cancel()
-                        continuation.resume()
+                        connectionState.resume(with: .success(()))
                     case .failed(let error):
                         unregisterIfNeeded()
                         connection.cancel()
-                        continuation.resume(throwing: PingError.connectionFailed(error.localizedDescription))
+                        connectionState.resume(with: .failure(PingError.connectionFailed(error.localizedDescription)))
                     case .cancelled:
                         unregisterIfNeeded()
-                        continuation.resume(throwing: PingError.cancelled)
+                        connectionState.resume(with: .failure(PingError.cancelled))
                     case .waiting(let error):
                         unregisterIfNeeded()
                         connection.cancel()
-                        continuation.resume(throwing: PingError.connectionFailed(error.localizedDescription))
+                        connectionState.resume(with: .failure(PingError.connectionFailed(error.localizedDescription)))
                     default:
                         break
                     }
@@ -120,6 +133,7 @@ struct ConnectionWrapper: Sendable {
         } onCancel: {
             unregisterIfNeeded()
             connection.cancel()
+            connectionState.resume(with: .failure(PingError.cancelled))
         }
 
         return ContinuousClock.now - startTime
