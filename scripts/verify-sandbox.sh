@@ -16,7 +16,7 @@ EXIT_CODE=0
 
 # 1. Check sandbox entitlement
 echo "1. Checking sandbox entitlement..."
-SANDBOX_STATUS=$(codesign -d --entitlements - "$APP_PATH" 2>/dev/null | grep -A1 "com.apple.security.app-sandbox")
+SANDBOX_STATUS=$(codesign -d --entitlements :- "$APP_PATH" 2>/dev/null | grep -A1 "com.apple.security.app-sandbox")
 
 if echo "$SANDBOX_STATUS" | grep -q "<true/>"; then
     echo "✓ Sandbox: ENABLED (correct for App Store)"
@@ -31,7 +31,7 @@ fi
 # 2. Check network client entitlement
 echo
 echo "2. Checking network client entitlement..."
-NETWORK_STATUS=$(codesign -d --entitlements - "$APP_PATH" 2>/dev/null | grep -A1 "com.apple.security.network.client")
+NETWORK_STATUS=$(codesign -d --entitlements :- "$APP_PATH" 2>/dev/null | grep -A1 "com.apple.security.network.client")
 
 if echo "$NETWORK_STATUS" | grep -q "<true/>"; then
     echo "✓ Network Client: ENABLED (required for TCP/UDP)"
