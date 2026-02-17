@@ -69,10 +69,12 @@ Plans:
   3. Age rating questionnaire completed with 4+ rating
   4. Export compliance declaration added to Info.plist (ITSAppUsesNonExemptEncryption = NO)
   5. Archived App Store build tested on clean macOS environment - runs sandboxed, ICMP hidden, TCP/UDP work
-**Plans**: TBD
+**Plans**: 3 plans
 
 Plans:
-- [ ] 14-01: TBD
+- [ ] 14-01-PLAN.md — Export compliance, privacy manifest verification, and sandbox verification script
+- [ ] 14-02-PLAN.md — Complete App Store Connect questionnaires (Privacy Nutrition Label and Age Rating)
+- [ ] 14-03-PLAN.md — Archive and verify sandboxed App Store build
 
 ### Phase 15: App Store Metadata and Assets
 **Goal**: Create all required App Store listing content including screenshots and descriptions
