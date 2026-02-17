@@ -1,351 +1,314 @@
-# Domain Pitfalls: macOS Menu Bar Network Monitoring App
+# Pitfalls Research: Mac App Store Submission
 
-**Domain:** macOS menu bar app with Network.framework TCP/UDP connectivity monitoring
-**Researched:** 2026-02-13
-**Context:** Rewrite of existing app that suffered from stale connections and false timeouts
-
----
+**Domain:** Adding Mac App Store distribution to existing menu bar app
+**Researched:** 2026-02-16
+**Confidence:** MEDIUM
 
 ## Critical Pitfalls
 
-Mistakes that cause rewrites or major stability issues. These directly address the problems in the previous implementation.
+### Pitfall 1: Raw Socket ICMP Incompatibility with App Sandbox
 
-### Pitfall 1: DispatchSemaphore with Swift Concurrency (Cooperative Thread Pool Deadlock)
+**What goes wrong:**
+The app's core ping functionality fails completely in sandboxed builds. Raw sockets (required for ICMP) are blocked by the App Sandbox, resulting in "Operation not permitted" errors. No entitlement exists to permit raw socket access in sandboxed apps.
 
-**What goes wrong:** Using `DispatchSemaphore` to make async operations synchronous causes deadlocks when running on Swift's cooperative thread pool. The semaphore blocks the thread, but the work needed to signal it cannot run because all cooperative threads are blocked.
+**Why it happens:**
+Raw sockets require root privileges, and sandboxed apps cannot escalate privileges. Developers assume network entitlements (`com.apple.security.network.client`) will allow ping operations, but these only cover standard TCP/UDP connections, not raw ICMP sockets.
 
-**Why it happens:** Developers familiar with GCD try to bridge async/await code with semaphores for synchronous interfaces. Swift Concurrency's cooperative thread pool has limited parallelism (often just CPU core count), and blocking any thread violates the forward-progress guarantee.
+**How to avoid:**
+- Implement network reachability fallback (TCP-based connection testing)
+- Use `ping` command-line tool via Process (if `com.apple.security.temporary-exception.apple-events` allows)
+- Document in app description that sandbox limitations affect ICMP functionality
+- Consider maintaining separate Developer ID and App Store builds with different feature sets
 
-**Consequences:**
-- App freezes/hangs unpredictably
-- Deadlocks that only reproduce under load
-- Race conditions that cause false timeouts (previous app's issue)
+**Warning signs:**
+- Ping operations work in dev builds but fail in archived/sandboxed builds
+- Runtime sandbox detection shows sandboxed environment but ping still attempted
+- Console logs show "Operation not permitted" for socket creation
 
-**Prevention:**
-- Never use `DispatchSemaphore.wait()` in any code path that may run on the cooperative thread pool
-- Use `async/await` throughout the networking stack
-- If you must bridge sync/async, use `Task { }` and callbacks, not semaphores
-- Use [AsyncSemaphore](https://github.com/groue/Semaphore) if semaphore semantics are truly needed
-
-**Detection:**
-- Thread Sanitizer warnings about blocking
-- Hangs that correlate with multiple concurrent connection checks
-- Timeouts that fire before the actual network timeout elapses
-- Inconsistent timing behavior under load
-
-**Phase mapping:** Foundation phase - establish async/await patterns from day one
-
-**Confidence:** HIGH (verified via [Apple Developer Forums](https://developer.apple.com/forums/thread/124155) and [Swift Forums](https://forums.swift.org/t/cooperative-pool-deadlock-when-calling-into-an-opaque-subsystem/70685))
+**Phase to address:**
+Phase 1 (Sandbox Verification) - Test actual ping functionality in sandboxed environment, not just sandbox detection.
 
 ---
 
-### Pitfall 2: NWConnection State Race Between `.ready` and `.failed`
+### Pitfall 2: Privacy Manifest Missing or Incomplete
 
-**What goes wrong:** An NWConnection can transition from `.ready` to `.failed` while your code believes it's still ready. Send operations appear to succeed but the data never arrives because the connection was already reset internally.
+**What goes wrong:**
+App rejection with error: "Missing or incomplete privacy manifest." Starting May 1, 2024, apps that don't describe their use of required reason APIs in their privacy manifest file aren't accepted by App Store Connect.
 
-**Why it happens:** TCP connections can be reset by the remote peer at any time. The NWConnection state machine processes this asynchronously, creating a window where `state == .ready` but the connection is actually dead.
+**Why it happens:**
+Developers assume privacy manifests are only for iOS, or only for apps that track users. In reality, any app using "required reason APIs" (file timestamps, disk space, system boot time, active keyboard layouts, user defaults) must declare why they use these APIs.
 
-**Consequences:**
-- "Stale connections" - previous app's primary issue
-- Ping checks report success when actually failing
-- Misleading uptime statistics
+**How to avoid:**
+- Create `PrivacyInfo.xcprivacy` file in app bundle
+- Declare all required reason API usage with approved reason codes
+- Include `NSPrivacyAccessedAPITypes` array even if not tracking
+- Document network domains if using `NSPrivacyTrackingDomains`
+- Test validation with `xcrun altool --validate-app` before submission
 
-**Prevention:**
-- Always have a pending `receive()` operation - NWConnection only notices dead connections if there's a receive pending
-- Implement response validation - for TCP "ping", expect a response or connection close
-- Use heartbeat timeouts independent of connection state
-- Treat any send/receive error as connection death, regardless of current state
+**Warning signs:**
+- App uses UserDefaults, file system APIs, or system info calls
+- Third-party dependencies (even via SPM) may use required APIs
+- Asset validation passes but App Store Connect upload fails
 
-**Detection:**
-- Connections that appear ready but never complete operations
-- Discrepancy between "connection established" and actual data flow
-- Reports of servers being "up" when they're actually down
-
-**Phase mapping:** Core networking phase - build receive-pending pattern into connection wrapper
-
-**Confidence:** HIGH (verified via [GitHub NWWebSocket issue #23](https://github.com/pusher/NWWebSocket/issues/23) and [Apple Developer Forums](https://developer.apple.com/forums/thread/113809))
+**Phase to address:**
+Phase 2 (Privacy Compliance) - Audit all API usage and create complete privacy manifest.
 
 ---
 
-### Pitfall 3: Custom Timeout Race Conditions
+### Pitfall 3: Entitlement Configuration Discrepancy Between Build Systems
 
-**What goes wrong:** Implementing timeouts with Timer or Task.sleep without proper cancellation creates race conditions where the timeout fires after a successful operation, or the operation completes but timeout cleanup races with result handling.
+**What goes wrong:**
+App builds successfully with Developer ID but fails App Store validation with "invalid entitlements" or "missing App Sandbox entitlement." Hybrid SPM/Xcode projects may have entitlements configured in one place but not propagated to the App Store build.
 
-**Why it happens:** Swift's structured concurrency uses cooperative cancellation - cancelling a Task doesn't stop it immediately, it only sets a flag. If the operation and timeout complete near-simultaneously, both code paths may execute.
+**Why it happens:**
+Developer ID builds don't require App Sandbox (`com.apple.security.app-sandbox = true`), but App Store builds do. Developers test with Developer ID configuration and assume App Store build will work identically. Entitlements may be set in Xcode project but not in SPM package targets, or vice versa.
 
-**Consequences:**
-- False timeout reports (previous app's issue)
-- Double-handling of results (success + timeout)
-- Resource leaks from operations that complete after timeout cleanup
+**How to avoid:**
+- Create separate entitlement files: `App.entitlements` (Dev ID) and `AppStore.entitlements` (App Store)
+- Use build configurations to switch entitlement files
+- Always enable `com.apple.security.app-sandbox = true` for App Store builds
+- Test archive builds, not just run-from-Xcode builds
+- Verify entitlements with: `codesign -d --entitlements - /path/to/app`
 
-**Prevention:**
-- Use `withTaskGroup` to race operation vs timeout, cancelling the loser
-- Check `Task.isCancelled` immediately after any await point
-- Use a single source of truth for operation result (actor-isolated state)
-- Consider Swift 6's `withTimeout` API if available
+**Warning signs:**
+- App runs fine from Xcode but fails when archived
+- Validation shows "app must be sandboxed for App Store"
+- Different behavior between "Product > Run" and "Product > Archive"
 
-**Detection:**
-- Timeout errors that don't match actual network conditions
-- Occasional double-callbacks or duplicate state updates
-- Log entries showing operation completed but was reported as timeout
-
-**Phase mapping:** Core networking phase - implement timeout handling as first-class pattern
-
-**Confidence:** HIGH (verified via [Donny Wals blog](https://www.donnywals.com/implementing-task-timeout-with-swift-concurrency/) and [WWDC23 Beyond structured concurrency](https://developer.apple.com/videos/play/wwdc2023/10170/))
+**Phase to address:**
+Phase 1 (Sandbox Verification) - Establish separate build configurations with proper entitlement files.
 
 ---
 
-### Pitfall 4: NWConnection Memory Leaks via Retain Cycles
+### Pitfall 4: LSUIElement Without Proper App Presence
 
-**What goes wrong:** The `stateUpdateHandler` closure captures `self` strongly, preventing the connection (and its owner) from being deallocated. Connections accumulate over time, causing memory growth and eventual resource exhaustion.
+**What goes wrong:**
+App rejected for "insufficient functionality" or "looks incomplete." Menu bar apps using `LSUIElement = true` (no Dock icon) are perceived as unfinished if they lack standard UI elements like preferences windows or About panels.
 
-**Why it happens:** Easy to forget `[weak self]` in handler closures. The framework releases handlers when connection reaches `.cancelled` state, but if you never properly cancel (or the cancel races with deallocation), leaks occur.
+**Why it happens:**
+App reviewers evaluate completeness in 5-10 minutes. Menu bar-only apps appear skeletal without visible UI. Reviewers don't realize menu bar is intentional design, thinking Dock icon removal indicates incomplete development.
 
-**Consequences:**
-- Memory growth over hours/days of operation
-- Socket exhaustion (file descriptor limits)
-- App becomes slow, then crashes
+**How to avoid:**
+- Include Preferences window (even if minimal)
+- Provide About panel with app info
+- Add keyboard shortcuts (signals "finished app")
+- Include Help menu item with documentation
+- In app description, explicitly state "menu bar utility" and "does not appear in Dock"
+- Add screenshot showing menu bar dropdown in App Store listing
 
-**Prevention:**
-- Always use `[weak self]` in `stateUpdateHandler` and `receiveHandler`
-- Explicitly call `connection.cancel()` before releasing reference
-- Set handlers to `nil` after cancellation (belt and suspenders)
-- Implement proper deinit logging to verify cleanup
+**Warning signs:**
+- App has no UI beyond menu bar dropdown
+- No visual indication of what app does when launched
+- Reviewers unable to find app after installation
 
-**Detection:**
-- Instruments Leaks/Allocations showing NWConnection growth
-- File descriptor count increasing over time (`lsof -p <pid> | wc -l`)
-- Memory warnings in Console
-
-**Phase mapping:** Core networking phase - wrap NWConnection in managed class with proper lifecycle
-
-**Confidence:** HIGH (verified via [Apple stateUpdateHandler docs](https://developer.apple.com/documentation/network/nwconnection/stateupdatehandler))
+**Phase to address:**
+Phase 3 (App Store Polish) - Add standard UI affordances even if minimal.
 
 ---
 
-### Pitfall 5: NSStatusItem Disappearing (Reference Not Retained)
+### Pitfall 5: Asset Validation Failures
 
-**What goes wrong:** The menu bar icon disappears because `NSStatusItem` was stored in a local variable instead of a persistent property. As soon as the variable goes out of scope, the item is deallocated.
+**What goes wrong:**
+Upload to App Store Connect fails with "Asset validation failed" errors related to app icons, missing files, or corrupted binaries.
 
-**Why it happens:** Unlike most UI objects, `NSStatusItem` is not retained by the system's status bar. It follows normal Swift memory management and will be deallocated when unreferenced.
+**Why it happens:**
+- App Store icon (1024x1024) contains transparency or alpha channel (rejected)
+- Icon not in Asset Catalog or wrong format (must be PNG, not JPEG)
+- Missing `PrivacyInfo.xcprivacy` interpreted as corrupt asset
+- Archive built with wrong SDK version (pre-iOS 26 SDK after April 28, 2026)
 
-**Consequences:**
-- Menu bar icon vanishes randomly
-- App appears to crash (still running but invisible)
-- Users can't quit the app
+**How to avoid:**
+- Ensure 1024x1024 app icon is opaque PNG in Asset Catalog
+- Use RGB color space, no alpha channel
+- Build with current SDK (iOS 26+ after April 2026)
+- Validate before upload: `xcrun altool --validate-app -f app.pkg -t macos`
+- If validation fails, try Apple's Transporter app instead of Xcode
+- Increment build number, not just version, if resubmitting
 
-**Prevention:**
-- Store `NSStatusItem` as a property on AppDelegate or long-lived object
-- Initialize in `applicationDidFinishLaunching`, not in `init`
-- Never store as local variable in any method
+**Warning signs:**
+- Icons work in development but fail validation
+- Error message mentions "corrupted binaries" without specifics
+- Upload succeeds but processing fails in App Store Connect
 
-**Detection:**
-- Icon disappears shortly after launch
-- Icon disappears after first interaction
-- Running app with no visible UI
-
-**Phase mapping:** UI/menu bar phase - establish correct retention pattern immediately
-
-**Confidence:** HIGH (verified via [Apple Developer Forums](https://developer.apple.com/forums/thread/130073) and multiple SwiftUI menu bar tutorials)
-
----
-
-## Moderate Pitfalls
-
-Mistakes that cause delays, bugs, or technical debt.
-
-### Pitfall 6: Using NSPopover Instead of NSMenu for Instant Response
-
-**What goes wrong:** Using `NSPopover` for menu bar dropdown creates noticeable delay and non-native dismissal behavior. Users expect menu bar items to behave like system menus.
-
-**Why it happens:** NSPopover looks modern and supports rich SwiftUI content, making it tempting. But it's designed for secondary UI, not primary menu bar interaction.
-
-**Prevention:**
-- Use `NSMenu` with custom `NSMenuItem` views for instant response
-- If using SwiftUI, embed views in NSHostingView within menu items
-- Reserve NSPopover for secondary panels/settings, not main menu
-
-**Detection:**
-- Perceptible delay when clicking menu bar icon
-- Menu doesn't dismiss when clicking away
-- Users report "feels sluggish"
-
-**Phase mapping:** UI/menu bar phase
-
-**Confidence:** MEDIUM (multiple blog sources agree, not officially documented)
+**Phase to address:**
+Phase 4 (Submission Preparation) - Final asset validation before first upload.
 
 ---
 
-### Pitfall 7: UDP Send Size Limitations (Undocumented Truncation)
+### Pitfall 6: Duplicate Binary / Version Number Confusion
 
-**What goes wrong:** UDP sends larger than ~1024 bytes may be silently truncated, even though the documented limit is 9216 bytes. Data arrives incomplete without error.
+**What goes wrong:**
+Resubmission after rejection fails with "Redundant Binary Upload" or "bundle version already exists." Developers cannot upload new binary with same version number even if previous build was rejected.
 
-**Why it happens:** Apple's documentation states 9216 byte limit, but real-world testing shows truncation at much lower sizes (1024 local, 2048 internet). This is undocumented Network.framework behavior.
+**Why it happens:**
+Confusion between CFBundleVersion (build number) and CFBundleShortVersionString (version). Both must be unique per upload. Incrementing only one causes rejection.
 
-**Consequences:**
-- Incomplete data transmission
-- Silent data corruption
-- Debugging nightmare (no errors reported)
+**How to avoid:**
+- Use semantic versioning for CFBundleShortVersionString (1.0.0, 1.0.1)
+- Use incrementing integers for CFBundleVersion (1, 2, 3...)
+- After rejection, increment CFBundleVersion (not CFBundleShortVersionString unless new features)
+- Document build number policy in project README
+- Automate version bumping in CI/CD
 
-**Prevention:**
-- Cap UDP payloads to 1024 bytes maximum
-- If larger data needed, fragment at application layer
-- Verify complete data receipt in testing
+**Warning signs:**
+- Second upload attempt with "same" version fails
+- Error mentions duplicate build number
+- Cannot figure out which number to increment
 
-**Detection:**
-- Intermittent data corruption
-- Works locally, fails over network
-- Payload-size-correlated failures
-
-**Phase mapping:** Core networking phase - if UDP monitoring is used
-
-**Confidence:** MEDIUM (verified via [NetworkExperiments repo](https://github.com/OperatorFoundation/NetworkExperiments), third-party testing)
+**Phase to address:**
+Phase 4 (Submission Preparation) - Establish version numbering strategy before first submission.
 
 ---
 
-### Pitfall 8: Ignoring NWConnection `.waiting` State
+### Pitfall 7: Helper Tools / Privileged Operations Not Allowed
 
-**What goes wrong:** Treating `.waiting` state as failure, or ignoring it entirely. The waiting state means the connection cannot currently be established but may succeed if network conditions change (e.g., VPN reconnects, WiFi switches).
+**What goes wrong:**
+App using SMJobBless or privileged helper tools rejected. App Store apps cannot install helper tools requiring elevated privileges.
 
-**Why it happens:** Developers expect binary success/failure. The `.waiting` state is a third option specific to Network.framework's "wait for connectivity" model.
+**Why it happens:**
+Developers port existing Developer ID app that uses helper tool for privileged operations (like monitoring network interfaces at low level). App Store sandboxing prohibits privileged helper tool installation.
 
-**Prevention:**
-- Implement explicit `.waiting` handling in state handler
-- Decide policy: wait indefinitely, timeout, or report as degraded
-- Log waiting state with associated error for debugging
+**How to avoid:**
+- Remove SMJobBless / helper tool code from App Store build
+- Use sandbox-compatible alternatives: `SMAppService` (macOS 13+) for unprivileged launch agents
+- Request only permissions available via entitlements
+- Document in app description if App Store version has reduced functionality
+- Consider maintaining two codebases: full-featured Developer ID, limited App Store
 
-**Detection:**
-- Connections that never complete (stuck in waiting)
-- Connections that "fail" then work after network change
-- Inconsistent behavior on unreliable networks
+**Warning signs:**
+- Code references `SMJobBless`, `AuthorizationCreate`, or privileged helper
+- App requests admin password
+- Functionality requires reading system logs or monitoring other apps
 
-**Phase mapping:** Core networking phase
-
-**Confidence:** HIGH (verified via [Apple documentation](https://developer.apple.com/documentation/network/nwconnection/state/waiting))
-
----
-
-### Pitfall 9: Energy Impact from Aggressive Polling
-
-**What goes wrong:** Frequent network checks (e.g., every second) keep CPU active, preventing system sleep and draining battery. macOS reports "Using Significant Energy" for the app.
-
-**Why it happens:** Developers optimize for responsiveness without considering energy. Menu bar apps run continuously, so even small inefficiencies compound.
-
-**Consequences:**
-- Battery drain complaints
-- macOS energy warnings
-- Potential App Store review issues
-- Users force-quit the app
-
-**Prevention:**
-- Default to reasonable intervals (30s-60s for background monitoring)
-- Implement backoff when repeated failures occur
-- Use app nap friendly patterns (let system coalesce timers)
-- Provide user control over check frequency
-- Test with Activity Monitor's Energy tab
-
-**Detection:**
-- Activity Monitor shows high energy impact
-- Battery icon shows app "Using Significant Energy"
-- CPU usage stays elevated when idle
-
-**Phase mapping:** Settings/configuration phase - make intervals configurable
-
-**Confidence:** HIGH (common knowledge, [Activity Monitor docs](https://support.apple.com/guide/activity-monitor/view-energy-consumption-actmntr43697/mac))
+**Phase to address:**
+Phase 1 (Sandbox Verification) - Identify all privileged operations and remove/replace.
 
 ---
 
-### Pitfall 10: App Store Sandbox ICMP Restriction
+## Technical Debt Patterns
 
-**What goes wrong:** Attempting to use raw ICMP ping in a sandboxed App Store app fails silently or causes rejection.
+| Shortcut | Immediate Benefit | Long-term Cost | When Acceptable |
+|----------|-------------------|----------------|-----------------|
+| Single entitlements file for both Dev ID and App Store | Faster initial setup | Build failures, wrong entitlements in wrong build | Never - separate from start |
+| Skip privacy manifest for "simple" app | Faster submission prep | Guaranteed rejection if using required APIs | Never after May 1, 2024 |
+| Assume sandbox detection = sandbox compatibility | Tests pass, code ships | Runtime failures in production sandbox | Never - test in actual sandbox |
+| Reuse same version number after rejection | Avoid updating docs/changelog | Upload fails, confusion | Never - always increment build |
+| Copy entitlements from template without audit | Fast configuration | Missing or excessive entitlements trigger rejection | Only if template verified for your use case |
 
-**Why it happens:** ICMP requires raw socket access, which is restricted by App Store sandbox. Developers coming from command-line tools expect ping to work the same way.
+## Integration Gotchas
 
-**Prevention:**
-- Use TCP or UDP for connectivity checks (not raw ICMP)
-- Design around port-based checking from the start
-- Document this as a known limitation for users expecting traditional ping
+| Integration | Common Mistake | Correct Approach |
+|-------------|----------------|------------------|
+| SPM + Xcode hybrid | Entitlements only in Xcode project, not in SPM package | Define entitlements in build settings, reference from both |
+| Developer ID + App Store | Using same signing identity | Separate certificates: "Developer ID Application" vs "Mac App Distribution" |
+| Notarization + App Store | Assuming notarization = App Store ready | Notarization validates non-App Store. App Store has different validation |
+| Third-party dependencies | Assuming SPM packages include privacy manifests | Audit all dependencies for required API usage, add to your manifest |
+| Network monitoring | Using raw sockets / packet capture | Use Network Extension framework (requires separate entitlement request from Apple) |
 
-**Detection:**
-- Ping operations fail silently in sandbox
-- Works in debug but not in release/App Store build
-- App Store rejection citing sandbox violation
+## Performance Traps
 
-**Phase mapping:** Architecture phase - make TCP/UDP-only approach explicit from start
+Not applicable - App Store submission process has no performance-related pitfalls distinct from general macOS development.
 
-**Confidence:** HIGH (documented App Store sandbox limitation)
+## Security Mistakes
 
----
+| Mistake | Risk | Prevention |
+|---------|------|------------|
+| Excessive entitlements "just in case" | Rejection for requesting unnecessary permissions | Request only entitlements actually used, justify each in review notes |
+| Hardcoding credentials/API keys | Rejection for embedded secrets, security vulnerability | Use Keychain, exclude from repository, use obfuscation |
+| Skipping sandbox testing | App fails at runtime for users, negative reviews | Test archived builds in sandbox, use clean VM or test user account |
+| Privacy manifest with wrong reason codes | Rejection for privacy violation | Use only approved reason codes from Apple's TN3183 documentation |
+| Temporary exception entitlements in production | Apple likely to reject, flags "trying to circumvent sandbox" | Use only for development, remove before submission |
 
-## Minor Pitfalls
+## UX Pitfalls
 
-Issues that cause annoyance but are straightforward to fix.
+| Pitfall | User Impact | Better Approach |
+|---------|-------------|-----------------|
+| Menu bar app with no visible UI | Users can't find app after install, think it didn't work | Show welcome window on first launch, include Preferences |
+| No indication app is running | Users reinstall thinking it crashed | Status icon in menu bar, notification on launch |
+| Different features in App Store vs Developer ID | Confusion, negative reviews "feature missing" | Clearly document version differences, explain sandbox limitations |
+| Automatic updates removed (App Store handles it) | Update code runs but does nothing, confusing logs | Disable update checks in App Store build via build flag |
+| Screenshots don't show menu bar interaction | Users don't understand what app does | Use menu bar screenshot guide, show dropdown in context |
 
-### Pitfall 11: Timer Invalidation in Wrong Context
+## "Looks Done But Isn't" Checklist
 
-**What goes wrong:** Timers created on background threads or invalidated from wrong thread cause crashes or silent failures.
+- [ ] **Privacy Manifest:** Often missing network domain declarations — verify `NSPrivacyTrackingDomains` populated if tracking
+- [ ] **Entitlements:** Often missing sandbox entitlement — verify `com.apple.security.app-sandbox = true` in archive
+- [ ] **Icons:** Often contain alpha channel — verify 1024x1024 icon is opaque RGB PNG
+- [ ] **Sandbox testing:** Often only tested in dev builds — verify archived build runs correctly on clean system
+- [ ] **App description:** Often generic/incomplete — verify mentions "menu bar utility" and feature limitations
+- [ ] **Helper tools:** Often left in from Dev ID build — verify no SMJobBless or privileged operations
+- [ ] **Third-party dependencies:** Often not audited for privacy APIs — verify all SPM packages checked for required reason APIs
+- [ ] **Build configuration:** Often only one configuration — verify separate Dev ID and App Store configs exist
+- [ ] **Screenshots:** Often desktop screenshots — verify menu bar app shown in context per Apple guidelines
+- [ ] **Version numbers:** Often confuse version vs build — verify both increment on resubmission
 
-**Prevention:**
-- Use `Timer.publish()` with Combine or `Task.sleep()` with async/await
-- If using classic Timer, always invalidate on same RunLoop it was created
+## Recovery Strategies
 
-**Phase mapping:** Core networking phase
+| Pitfall | Recovery Cost | Recovery Steps |
+|---------|---------------|----------------|
+| Raw socket sandbox violation | MEDIUM | Implement TCP-based fallback, update app description, resubmit with reduced functionality |
+| Missing privacy manifest | LOW | Create PrivacyInfo.xcprivacy, declare API usage, increment build number, reupload |
+| Wrong entitlements | LOW | Create correct .entitlements file, update build settings, re-archive, validate, reupload |
+| Insufficient functionality rejection | MEDIUM | Add Preferences window, About panel, Help documentation, update screenshots, resubmit |
+| Asset validation failure | LOW | Fix icon transparency, ensure PNG format, increment build number, reupload |
+| Duplicate binary error | LOW | Increment CFBundleVersion, re-archive, upload new build |
+| Privileged helper rejection | HIGH | Remove helper tool, refactor to sandbox-compatible approach, extensive testing, resubmit |
+| Metadata rejection | LOW | Update app description per guidelines, remove placeholder text, resubmit metadata |
+| Privacy manifest wrong reason codes | LOW | Correct reason codes per TN3183, increment build, reupload |
+| SDK version too old (post-April 2026) | LOW | Update Xcode to version 26+, rebuild with new SDK, reupload |
 
----
+## Pitfall-to-Phase Mapping
 
-### Pitfall 12: Missing Quit Menu Item
-
-**What goes wrong:** After hiding from Dock, users have no way to quit the app (no Dock context menu, no Cmd+Q if not foreground).
-
-**Prevention:**
-- Always include "Quit" in menu bar dropdown
-- Consider "Quit" as bottom item, separated by divider
-
-**Phase mapping:** UI/menu bar phase
-
----
-
-### Pitfall 13: Icon Sizing Issues with Custom Images
-
-**What goes wrong:** Menu bar icon appears too large, too small, or blurry due to incorrect asset sizes or improper loading.
-
-**Prevention:**
-- Use SF Symbols when possible (automatically sized)
-- For custom images, provide @1x (18x18) and @2x (36x36) versions
-- Load as NSImage first, set `isTemplate = true` for proper dark mode
-
-**Phase mapping:** UI/menu bar phase
-
----
-
-## Phase-Specific Warnings
-
-| Phase | Likely Pitfall | Mitigation |
-|-------|----------------|------------|
-| Foundation/Architecture | DispatchSemaphore usage, sandbox ICMP | Establish async/await-only patterns, TCP/UDP from start |
-| Core Networking | State races, timeout races, memory leaks | Wrap NWConnection with proper lifecycle management |
-| UI/Menu Bar | NSStatusItem retention, NSPopover vs NSMenu | Follow established patterns, test icon persistence |
-| Settings/Config | Energy impact from polling | Configurable intervals, reasonable defaults |
-| Testing/QA | Works in debug but not sandbox | Test sandboxed release build early |
-
----
+| Pitfall | Prevention Phase | Verification |
+|---------|------------------|--------------|
+| Raw socket sandbox violation | Phase 1: Sandbox Verification | Run archived build in sandboxed test account, verify ping works or falls back gracefully |
+| Privacy manifest missing | Phase 2: Privacy Compliance | Validate with `xcrun altool`, verify PrivacyInfo.xcprivacy in bundle |
+| Entitlement configuration discrepancy | Phase 1: Sandbox Verification | `codesign -d --entitlements -` on archive shows correct entitlements |
+| LSUIElement perceived as incomplete | Phase 3: App Store Polish | Include Preferences/About in screenshots, test reviewer first-launch experience |
+| Asset validation failures | Phase 4: Submission Preparation | `xcrun altool --validate-app` passes before upload |
+| Duplicate binary version numbers | Phase 4: Submission Preparation | Version/build numbering strategy documented and automated |
+| Helper tools not allowed | Phase 1: Sandbox Verification | No SMJobBless references, no privilege escalation in code |
+| Metadata rejection | Phase 4: Submission Preparation | Review app description against Apple guidelines checklist |
+| Third-party dependency privacy issues | Phase 2: Privacy Compliance | Audit all SPM packages, include their API usage in manifest |
+| Separate build for App Store vs Dev ID | Phase 1: Sandbox Verification | Build configurations tested, feature flags work correctly |
 
 ## Sources
 
-### High Confidence (Official/Verified)
-- [Apple Developer Forums: DispatchSemaphore Anti-Pattern](https://developer.apple.com/forums/thread/124155)
-- [Apple: stateUpdateHandler documentation](https://developer.apple.com/documentation/network/nwconnection/stateupdatehandler)
-- [Apple: NWConnection.State.waiting](https://developer.apple.com/documentation/network/nwconnection/state/waiting)
-- [Apple: connectionTimeout TCP option](https://developer.apple.com/documentation/network/nwprotocoltcp/options/connectiontimeout)
-- [WWDC23: Beyond the basics of structured concurrency](https://developer.apple.com/videos/play/wwdc2023/10170/)
-- [Swift Forums: Cooperative pool deadlock](https://forums.swift.org/t/cooperative-pool-deadlock-when-calling-into-an-opaque-subsystem/70685)
+**Critical Requirements (HIGH confidence):**
+- [macOS App Entitlements Guide: Part 1 — Foundation & Network Access](https://medium.com/@info_4533/macos-app-entitlements-guide-b563287c07e1) - Network entitlements and raw socket limitations
+- [Raw Socket: Operation not permitted - Apple Developer Forums](https://developer.apple.com/forums/thread/660179) - Raw socket sandbox blocking
+- [Privacy manifest files - Apple Developer Documentation](https://developer.apple.com/documentation/bundleresources/privacy-manifest-files) - Official privacy manifest requirements
+- [TN3183: Adding required reason API entries - Apple Developer Documentation](https://developer.apple.com/documentation/technotes/tn3183-adding-required-reason-api-entries-to-your-privacy-manifest) - Required reason API codes
+- [Privacy updates for App Store submissions - Apple Developer](https://developer.apple.com/news/?id=3d8a9yyh) - May 1, 2024 enforcement date
+- [Reminder: Privacy requirement starts May 1 - Apple Developer](https://developer.apple.com/news/?id=pvszzano) - Mandatory privacy manifest
+- [Configuring the macOS App Sandbox - Apple Developer Documentation](https://developer.apple.com/documentation/xcode/configuring-the-macos-app-sandbox) - Sandbox configuration
 
-### Medium Confidence (Community Verified)
-- [GitHub: NWWebSocket issue #23 - failed vs waiting states](https://github.com/pusher/NWWebSocket/issues/23)
-- [GitHub: NetworkExperiments - UDP size limitations](https://github.com/OperatorFoundation/NetworkExperiments)
-- [GitHub: AsyncSemaphore alternative](https://github.com/groue/Semaphore)
-- [Donny Wals: Task timeout with Swift Concurrency](https://www.donnywals.com/implementing-task-timeout-with-swift-concurrency/)
-- [Apple Developer Forums: NSStatusItem retention](https://developer.apple.com/forums/thread/130073)
+**Submission Issues (MEDIUM confidence):**
+- [What I Learned Building a Native macOS Menu Bar App](https://medium.com/@p_anhphong/what-i-learned-building-a-native-macos-menu-bar-app-eacbc16c2e14) - Menu bar app best practices, LSUIElement, insufficient functionality issues
+- [Apple App Store Submission Changes — April 2026](https://medium.com/@thakurneeshu280/apple-app-store-submission-changes-april-2026-5fa8bc265bbe) - April 28, 2026 SDK requirement
+- [App Review Guidelines - Apple Developer](https://developer.apple.com/app-store/review/guidelines/) - Official review guidelines
+- [App Store Review Guidelines 2026: Updated Checklist](https://adapty.io/blog/how-to-pass-app-store-review/) - Common rejection reasons
+- [The ultimate guide to App Store rejections - RevenueCat](https://www.revenuecat.com/blog/growth/the-ultimate-guide-to-app-store-rejections/) - Metadata rejection patterns
 
-### Low Confidence (Single Source/Unverified)
-- NSPopover vs NSMenu performance comparison (blog sources)
+**Asset and Build Issues (MEDIUM confidence):**
+- [Build Error: Asset Validation Failed - Adalo](https://help.adalo.com/testing-your-app/publishing-to-the-apple-app-store/submit-your-build-to-the-app-store/build-error-asset-validation-failed-invalid-app-store-icon) - Icon transparency issues
+- [Screenshot specifications - Apple Developer](https://developer.apple.com/help/app-store-connect/reference/screenshot-specifications/) - Official screenshot requirements
+- [How to Assemble Menu Bar App Screenshots for Mac App Store](https://christiantietze.de/posts/2022/04/menu-bar-screenshots/) - Menu bar screenshot guide
+- [When uploading a new version - Apple Developer Forums](https://developer.apple.com/forums/thread/61099) - Duplicate binary issues
+- [App Store Connect shows wrong build number - Apple Developer Forums](https://developer.apple.com/forums/thread/690481) - Version vs build number confusion
+
+**Privileged Operations (HIGH confidence):**
+- [Do we need to have a privileged helper - Apple Developer Forums](https://developer.apple.com/forums/thread/744930) - Helper tool restrictions
+- [Elevating Privileges Safely - Apple Developer Archive](https://developer.apple.com/library/archive/documentation/Security/Conceptual/SecureCodingGuide/Articles/AccessControl.html) - SMJobBless and alternatives
+- [Sandboxing on macOS - Mark Rowe](https://bdash.net.nz/posts/sandboxing-on-macos/) - Sandbox limitations
+
+**Sandbox and Distribution (MEDIUM confidence):**
+- [Distributing macOS applications - AugmentedMind](https://www.augmentedmind.de/2021/06/13/distributing-macos-applications/) - App Store vs Developer ID
+- [Updating Mac Software - Apple Developer Documentation](https://developer.apple.com/documentation/security/updating-mac-software) - Update mechanisms
+- [Discovering and diagnosing App Sandbox violations - Apple Developer Documentation](https://developer.apple.com/documentation/security/discovering-and-diagnosing-app-sandbox-violations) - Sandbox debugging
+- [A Well-formed macOS Menu Bar Application in Sandbox](https://zhaoxin.pro/technology/15788123971580.html) - Sandbox constraints for menu bar apps
+
+---
+*Pitfalls research for: PingScope App Store submission*
+*Researched: 2026-02-16*
+*Confidence: MEDIUM - Based on official Apple documentation (HIGH confidence), developer forums and recent blog posts (MEDIUM confidence), and web search findings (requires validation during execution)*

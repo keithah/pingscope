@@ -1,684 +1,620 @@
-# Architecture Patterns
+# Architecture Research: App Store Distribution Integration
 
-**Domain:** macOS Menu Bar Network Monitoring App
-**Researched:** 2026-02-13
-**Confidence:** HIGH (verified with Apple documentation patterns and community best practices)
+**Domain:** macOS App Store distribution for existing SPM-based menu bar app
+**Researched:** 2026-02-16
+**Confidence:** MEDIUM-HIGH
 
-## Recommended Architecture
+## Executive Summary
 
-MVVM with Service Layer, using SwiftUI for views and AppKit (NSStatusItem/NSPopover) for menu bar integration.
+Adding App Store distribution to an existing SPM-only architecture requires a **hybrid SPM + Xcode project** approach. The SPM Package.swift remains the source of truth for code organization and dependencies, while a wrapper Xcode project provides App Store-specific capabilities (entitlements, sandboxing, provisioning profiles). Both Developer ID and App Store builds share the same codebase, using build schemes and entitlement files to differentiate distribution channels.
 
-```
-+------------------+     +------------------+     +------------------+
-|                  |     |                  |     |                  |
-|   Menu Bar       |---->|   ViewModels     |---->|   Services       |
-|   Controller     |     |   (per View)     |     |   (Business)     |
-|                  |     |                  |     |                  |
-+------------------+     +------------------+     +------------------+
-        |                        |                        |
-        v                        v                        v
-+------------------+     +------------------+     +------------------+
-|                  |     |                  |     |                  |
-|   SwiftUI Views  |     |   AppState       |     |   Models         |
-|                  |     |   (Shared)       |     |   (Data)         |
-|                  |     |                  |     |                  |
-+------------------+     +------------------+     +------------------+
-```
+**Key architectural insight:** Xcode projects can reference local SPM packages, allowing the Swift Package to remain independent while the Xcode project handles platform-specific build configurations and code signing requirements that Apple's App Store mandates.
 
-### Component Boundaries
+## Current Architecture (Developer ID Only)
 
-| Component | Responsibility | Communicates With | Isolation |
-|-----------|---------------|-------------------|-----------|
-| **MenuBarController** | NSStatusItem lifecycle, NSPopover management, click handling | ViewModels (reads state), AppDelegate | @MainActor |
-| **PingViewModel** | Per-host ping state, latency history, statistics | PingService, Models | @MainActor |
-| **SettingsViewModel** | Host configuration, preferences state | PersistenceService, Models | @MainActor |
-| **AppState** | Shared app-wide state (selected host, view mode, alerts) | ViewModels (publish), Views (subscribe) | @MainActor |
-| **PingService** | Network.framework connections, latency measurement | Models (produces), Network APIs | Actor-isolated |
-| **NetworkMonitorService** | NWPathMonitor, connectivity state | AppState (publishes changes) | Actor-isolated |
-| **NotificationService** | Alert scheduling, condition evaluation | AppState (reads), UNUserNotificationCenter | @MainActor |
-| **PersistenceService** | UserDefaults read/write, data export | Models (serializes) | @MainActor |
-| **GatewayService** | SCDynamicStore, default gateway detection | NetworkMonitorService | Actor-isolated |
-| **Views (SwiftUI)** | UI rendering, user interaction | ViewModels (via @StateObject/@ObservedObject) | @MainActor |
-| **Models** | Data structures (PingResult, HostConfig, etc.) | All layers (passive data) | Sendable |
-
-### Data Flow
+### System Overview
 
 ```
-User Action Flow:
-┌──────────┐    ┌──────────────┐    ┌─────────────┐    ┌──────────┐
-│ View     │───>│ ViewModel    │───>│ Service     │───>│ External │
-│ (tap)    │    │ (process)    │    │ (execute)   │    │ (network)│
-└──────────┘    └──────────────┘    └─────────────┘    └──────────┘
-                       │                    │
-                       v                    v
-                ┌──────────────┐    ┌─────────────┐
-                │ AppState     │<───│ Model       │
-                │ (update)     │    │ (result)    │
-                └──────────────┘    └─────────────┘
-                       │
-                       v
-                ┌──────────────┐
-                │ View         │
-                │ (re-render)  │
-                └──────────────┘
-
-Timer-Driven Flow (Ping Cycle):
-┌──────────────┐    ┌─────────────┐    ┌──────────────┐
-│ ViewModel    │───>│ PingService │───>│ NWConnection │
-│ (timer fire) │    │ (ping host) │    │ (connect)    │
-└──────────────┘    └─────────────┘    └──────────────┘
-                           │                  │
-                           │<─────────────────┘
-                           │    (latency result)
-                           v
-                    ┌─────────────┐    ┌──────────────┐
-                    │ ViewModel   │───>│ View         │
-                    │ (update)    │    │ (re-render)  │
-                    └─────────────┘    └──────────────┘
+┌─────────────────────────────────────────────────────────────┐
+│                   GitHub Actions (CI)                        │
+│  ┌────────────┐   ┌────────────┐   ┌──────────────┐        │
+│  │ swift build│ → │ manual .app│ → │ codesign +   │        │
+│  │ -c release │   │ assembly   │   │ notarization │        │
+│  └────────────┘   └────────────┘   └──────────────┘        │
+└─────────────────────────────────────────────────────────────┘
+                            ↓
+┌─────────────────────────────────────────────────────────────┐
+│                   Source Organization                        │
+│  ┌──────────────────────────────────────────────────────┐   │
+│  │  Package.swift (SPM Definition)                      │   │
+│  │    • Executable target: PingScope                    │   │
+│  │    • Test target: PingScopeTests                     │   │
+│  │    • Resources: AppIcon.icns, PrivacyInfo.xcprivacy  │   │
+│  └──────────────────────────────────────────────────────┘   │
+│                                                              │
+│  ┌──────────────────────────────────────────────────────┐   │
+│  │  Sources/PingScope/ (MVVM Structure)                 │   │
+│  │    ├── App/           - App lifecycle, delegates     │   │
+│  │    ├── Services/      - Business logic               │   │
+│  │    ├── ViewModels/    - State management             │   │
+│  │    ├── Views/         - SwiftUI components           │   │
+│  │    ├── MenuBar/       - Menu bar coordination        │   │
+│  │    ├── Models/        - Data types                   │   │
+│  │    ├── Utilities/     - Helpers (ICMPPacket)         │   │
+│  │    └── Resources/     - Assets, Privacy manifest     │   │
+│  └──────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────┘
+                            ↓
+┌─────────────────────────────────────────────────────────────┐
+│                   Build Artifacts                            │
+│  ┌──────────────────────────────────────────────────────┐   │
+│  │  PingScope.app (manually assembled)                  │   │
+│  │    ├── Contents/MacOS/PingScope (SPM binary)         │   │
+│  │    ├── Contents/Info.plist (static file)             │   │
+│  │    └── Contents/Resources/ (icns, privacy, bundles)  │   │
+│  └──────────────────────────────────────────────────────┘   │
+│                                                              │
+│  Signed with: Developer ID Application certificate          │
+│  Notarized with: notarytool                                  │
+│  Distributed via: DMG + PKG on GitHub Releases               │
+└─────────────────────────────────────────────────────────────┘
 ```
 
-## Core Components Detail
+### Key Characteristics
 
-### 1. MenuBarController (AppKit Bridge)
+- **Pure SPM:** No Xcode project file exists
+- **Manual bundle creation:** `scripts/build-app-bundle.sh` assembles `.app` structure
+- **Static Info.plist:** Version management requires manual editing
+- **No entitlements:** Developer ID with hardened runtime, no sandbox
+- **CI-driven signing:** GitHub Actions imports certificates, signs, notarizes
+- **Runtime feature detection:** `SandboxDetector.isRunningInSandbox` gates ICMP availability
 
-Manages the NSStatusItem and NSPopover lifecycle. This is the bridge between AppKit's menu bar system and SwiftUI views.
+## Target Architecture (Dual Distribution)
 
+### System Overview
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                   Source of Truth (Unchanged)                │
+│  ┌──────────────────────────────────────────────────────┐   │
+│  │  Package.swift                                        │   │
+│  │    • Executable target: PingScope                    │   │
+│  │    • Test target: PingScopeTests                     │   │
+│  │    • Resources: AppIcon.icns, PrivacyInfo.xcprivacy  │   │
+│  └──────────────────────────────────────────────────────┘   │
+│                                                              │
+│  ┌──────────────────────────────────────────────────────┐   │
+│  │  Sources/PingScope/ (MVVM - No Changes)              │   │
+│  │    All existing code remains in SPM package          │   │
+│  └──────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────┘
+                            ↑ (local path dependency)
+┌─────────────────────────────────────────────────────────────┐
+│            NEW: Xcode Wrapper Project                        │
+│  ┌──────────────────────────────────────────────────────┐   │
+│  │  PingScope.xcodeproj                                  │   │
+│  │    ├── Target: PingScope (App)                       │   │
+│  │    │   ├── Depends on: local SPM package             │   │
+│  │    │   ├── Build Schemes:                            │   │
+│  │    │   │   • AppStore (sandbox enabled)              │   │
+│  │    │   │   • DeveloperID (sandbox disabled)          │   │
+│  │    │   └── Capabilities: Configured via Xcode UI     │   │
+│  │    └── Target: PingScopeTests (Optional)             │   │
+│  └──────────────────────────────────────────────────────┘   │
+│                                                              │
+│  ┌──────────────────────────────────────────────────────┐   │
+│  │  NEW: Entitlement Files                               │   │
+│  │    ├── PingScope-AppStore.entitlements               │   │
+│  │    │   • com.apple.security.app-sandbox = true       │   │
+│  │    │   • com.apple.security.network.client = true    │   │
+│  │    │   • (no ICMP-related entitlements)              │   │
+│  │    │                                                  │   │
+│  │    └── PingScope-DeveloperID.entitlements            │   │
+│  │        • com.apple.security.app-sandbox = false      │   │
+│  │        • Hardened runtime options                    │   │
+│  └──────────────────────────────────────────────────────┘   │
+│                                                              │
+│  ┌──────────────────────────────────────────────────────┐   │
+│  │  Info.plist (Xcode-managed)                           │   │
+│  │    • Version numbers: Pulled from build settings     │   │
+│  │    • Bundle ID: Same for both distributions          │   │
+│  │    • All existing keys preserved                     │   │
+│  └──────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────┘
+                            ↓
+┌─────────────────────────────────────────────────────────────┐
+│                   Build Workflows                            │
+│  ┌───────────────────────────┐  ┌──────────────────────┐   │
+│  │ Developer ID (Existing)   │  │ App Store (New)      │   │
+│  ├───────────────────────────┤  ├──────────────────────┤   │
+│  │ 1. swift build -c release │  │ 1. xcodebuild        │   │
+│  │ 2. Manual .app assembly   │  │    -scheme AppStore  │   │
+│  │ 3. Sign with Dev ID cert  │  │ 2. Archive           │   │
+│  │ 4. Notarize               │  │ 3. Export for Store  │   │
+│  │ 5. Create DMG/PKG         │  │ 4. Upload via Xcode  │   │
+│  │ 6. GitHub Release         │  │    or transporter    │   │
+│  └───────────────────────────┘  └──────────────────────┘   │
+│         (scripts/build-app-bundle.sh + CI)                   │
+│         (deploy/sign-notarize.sh)                            │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Integration Points
+
+| Component | Current State | Modified/New | Purpose |
+|-----------|--------------|--------------|---------|
+| **Package.swift** | Exists | Unmodified | Source of truth for code organization |
+| **Sources/** | Exists | Unmodified | All application code stays in SPM |
+| **Xcode project** | None | **NEW** | Wrapper for App Store requirements |
+| **Entitlements** | None | **NEW** | Sandbox and capability configuration |
+| **Info.plist** | Static file | **MODIFIED** | Move to Xcode, version automation |
+| **Build scripts** | SPM-based | **PRESERVED** | Developer ID workflow unchanged |
+| **CI workflows** | GitHub Actions | **EXTENDED** | Add App Store build job |
+| **SandboxDetector** | Exists | Unmodified | Runtime detection already implemented |
+
+## Component Responsibilities
+
+### Existing Components (Unmodified)
+
+| Component | Responsibility | Why It Stays the Same |
+|-----------|----------------|----------------------|
+| Package.swift | Define targets, dependencies, resources | SPM remains source of truth |
+| Sources/PingScope/ | All application logic (MVVM) | Code is distribution-agnostic |
+| Tests/ | Unit and integration tests | Testing logic doesn't change |
+| SandboxDetector | Runtime sandbox detection | Already handles both environments |
+| PingMethod.availableCases | Feature gating based on sandbox | Already filters ICMP in sandbox |
+
+### New Components (App Store Support)
+
+| Component | Responsibility | Implementation |
+|-----------|----------------|----------------|
+| **PingScope.xcodeproj** | Xcode project wrapper | References local SPM package at `.` (root) |
+| **PingScope-AppStore.entitlements** | App Store sandbox config | XML plist with sandbox + network.client |
+| **PingScope-DeveloperID.entitlements** | Developer ID hardened runtime | XML plist with hardened runtime flags |
+| **Build Schemes** | Differentiate build types | AppStore scheme vs DeveloperID scheme |
+| **Provisioning Profiles** | App Store signing | Managed by Xcode, not in version control |
+
+### Modified Components (Integration Points)
+
+| Component | Current | Change Required | Rationale |
+|-----------|---------|-----------------|-----------|
+| **Info.plist** | Static file in root | Move to Xcode project, use build settings | Version automation, Xcode management |
+| **GitHub Actions** | Single Developer ID job | Add parallel App Store job | Dual distribution from same commit |
+| **.gitignore** | SPM build artifacts | Add Xcode artifacts (DerivedData, *.xcworkspace) | Ignore Xcode-generated files |
+
+## Data Flow
+
+### Dependency Flow
+
+```
+┌─────────────────────────────────────────────┐
+│  Xcode Project (Wrapper)                    │
+│    • Target configuration                   │
+│    • Entitlements selection                 │
+│    • Code signing settings                  │
+└────────────┬────────────────────────────────┘
+             │ (local package dependency)
+             ↓
+┌─────────────────────────────────────────────┐
+│  Package.swift (SPM)                        │
+│    • Source code location                   │
+│    • Resource processing                    │
+│    • Test targets                           │
+└────────────┬────────────────────────────────┘
+             │
+             ↓
+┌─────────────────────────────────────────────┐
+│  Sources/PingScope/                         │
+│    • Application code (unchanged)           │
+│    • SwiftUI views                          │
+│    • Services and ViewModels                │
+└─────────────────────────────────────────────┘
+```
+
+### Build-Time Data Flow
+
+**Developer ID Build (Existing):**
+```
+SPM → Binary → Manual .app → Sign → Notarize → DMG/PKG → GitHub
+```
+
+**App Store Build (New):**
+```
+Xcode → Archive → Export → Validate → Upload → TestFlight/Review
+  ↓
+  Uses SPM package as dependency
+  ↓
+  Applies AppStore.entitlements
+  ↓
+  Signs with Distribution certificate
+```
+
+### Runtime Data Flow (Unchanged)
+
+```
+App Launch
+    ↓
+SandboxDetector.isRunningInSandbox
+    ↓
+    ├─ true  → PingMethod.availableCases = [TCP, UDP]
+    └─ false → PingMethod.availableCases = [TCP, UDP, ICMP]
+    ↓
+User sees appropriate ping methods in UI
+```
+
+## Recommended Project Structure
+
+```
+pingscope/
+├── Package.swift                          # [UNCHANGED] SPM definition
+├── Sources/                               # [UNCHANGED] All app code
+│   └── PingScope/
+│       ├── App/
+│       ├── Services/
+│       ├── ViewModels/
+│       ├── Views/
+│       ├── MenuBar/
+│       ├── Models/
+│       ├── Utilities/
+│       └── Resources/
+│           ├── AppIcon.icns
+│           └── PrivacyInfo.xcprivacy
+├── Tests/                                 # [UNCHANGED] Test code
+├── PingScope.xcodeproj/                   # [NEW] Xcode wrapper
+│   ├── project.pbxproj                    # Main project file
+│   └── xcshareddata/
+│       └── xcschemes/
+│           ├── AppStore.xcscheme          # App Store build scheme
+│           └── DeveloperID.xcscheme       # Developer ID build scheme
+├── Configuration/                         # [NEW] Xcode support files
+│   ├── Info.plist                         # Moved from root, managed by Xcode
+│   ├── PingScope-AppStore.entitlements
+│   └── PingScope-DeveloperID.entitlements
+├── scripts/                               # [PRESERVED] Developer ID scripts
+│   ├── build-app-bundle.sh
+│   └── dev-run-app.sh
+├── deploy/                                # [PRESERVED] Developer ID signing
+│   ├── sign-notarize.sh
+│   └── README.md
+├── .github/workflows/                     # [MODIFIED] Dual distribution
+│   ├── production-release.yml             # Developer ID (existing)
+│   └── appstore-release.yml               # [NEW] App Store builds
+└── .gitignore                             # [MODIFIED] Add Xcode artifacts
+```
+
+### Structure Rationale
+
+- **Package.swift at root:** SPM packages conventionally live at repository root; Xcode can reference it as local dependency
+- **Sources/ unchanged:** All code stays in SPM structure; no migration required
+- **Configuration/ folder:** Groups Xcode-specific files (entitlements, Info.plist) separate from source code
+- **Parallel workflows:** Developer ID and App Store builds coexist without interference
+- **Script preservation:** Existing build tooling continues to work for Developer ID
+
+## Architectural Patterns
+
+### Pattern 1: Xcode Project Wrapping Local SPM Package
+
+**What:** Xcode project references the root-level Package.swift as a local package dependency, allowing Xcode to build SPM code without duplicating sources.
+
+**When to use:** When adding Xcode-specific capabilities (App Store, entitlements, provisioning) to existing SPM executable projects.
+
+**Trade-offs:**
+- **Pro:** Zero code duplication; SPM remains source of truth
+- **Pro:** Existing SPM workflows (tests, command-line builds) unaffected
+- **Pro:** Modular architecture preserved
+- **Con:** Two build systems to maintain (SPM + Xcode)
+- **Con:** Requires Xcode for App Store builds (can't use pure SPM)
+
+**Example:**
 ```swift
-@MainActor
-final class MenuBarController: NSObject {
-    private var statusItem: NSStatusItem?
-    private var popover: NSPopover?
-    private let viewModel: PingViewModel
-
-    // Initialize lazily to avoid assertion errors
-    func setup() {
-        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        // Configure button, click handlers
-    }
-
-    // Toggle popover on click
-    func togglePopover(_ sender: NSStatusBarButton) {
-        if let popover, popover.isShown {
-            popover.performClose(sender)
-        } else {
-            showPopover(sender)
-        }
-    }
-
-    // Lazy popover creation (memory optimization)
-    private func showPopover(_ sender: NSStatusBarButton) {
-        if popover == nil {
-            popover = NSPopover()
-            popover?.contentViewController = NSHostingController(rootView: MainView())
-            popover?.behavior = .transient
-        }
-        popover?.show(relativeTo: sender.bounds, of: sender, preferredEdge: .minY)
-    }
-}
+// In Xcode Project Settings → Frameworks, Libraries, and Embedded Content
+// Add local package: File → Add Package Dependencies → Add Local...
+// Select repository root (where Package.swift lives)
+// Xcode automatically discovers the executable target
 ```
 
-**Why this pattern:**
-- Lazy popover creation saves memory when popover never opened
-- @MainActor ensures all UI work happens on main thread
-- NSObject inheritance required for menu bar delegate protocols
+### Pattern 2: Build Scheme Differentiation
 
-### 2. ViewModels (@MainActor + @Observable)
+**What:** Use Xcode build schemes to configure different entitlements, signing, and settings for the same codebase.
 
-Each ViewModel manages state for its domain and coordinates with services.
+**When to use:** When same app needs to be distributed through multiple channels with different security requirements.
 
+**Trade-offs:**
+- **Pro:** Single codebase, multiple distributions
+- **Pro:** Compile-time and runtime feature gating possible
+- **Pro:** Clear separation of concerns (scheme = distribution method)
+- **Con:** Must maintain multiple entitlement files
+- **Con:** Risk of building wrong scheme accidentally
+
+**Example:**
+```
+AppStore Scheme:
+  - Entitlements: PingScope-AppStore.entitlements
+  - Code Signing: Apple Distribution certificate
+  - Archive exports for App Store
+
+DeveloperID Scheme:
+  - Entitlements: PingScope-DeveloperID.entitlements
+  - Code Signing: Developer ID Application certificate
+  - Archive exports for direct distribution
+```
+
+### Pattern 3: Runtime Sandbox Detection for Feature Gating
+
+**What:** Detect sandbox environment at runtime and adjust available features accordingly (already implemented in PingScope).
+
+**When to use:** When app has features unavailable in sandboxed environments (e.g., raw ICMP sockets).
+
+**Trade-offs:**
+- **Pro:** Single binary adapts to environment
+- **Pro:** No compile-time branching required
+- **Pro:** User sees consistent UI, just with filtered options
+- **Con:** Must ship code for features that may never be available
+- **Con:** Could confuse users if feature disappears after changing distribution
+
+**Example:**
 ```swift
-@MainActor
-@Observable
-final class PingViewModel {
-    // Published state
-    var currentLatency: Double?
-    var status: ConnectionStatus = .unknown
-    var history: [PingResult] = []
-    var statistics: PingStatistics?
+// Already implemented in PingScope
+enum PingMethod {
+    case tcp, udp, icmp
 
-    // Dependencies
-    private let pingService: PingService
-    private var pingTask: Task<Void, Never>?
-
-    // Timer-driven ping cycle
-    func startMonitoring() {
-        pingTask = Task {
-            while !Task.isCancelled {
-                await performPing()
-                try? await Task.sleep(for: .seconds(pingInterval))
-            }
+    static var availableCases: [PingMethod] {
+        if SandboxDetector.isRunningInSandbox {
+            return [.tcp, .udp]  // ICMP unavailable in sandbox
         }
-    }
-
-    private func performPing() async {
-        do {
-            let result = await pingService.ping(host: currentHost)
-            // Already on @MainActor, safe to update
-            self.currentLatency = result.latency
-            self.history.append(result)
-            self.updateStatistics()
-        } catch {
-            self.status = .error(error)
-        }
-    }
-
-    func stopMonitoring() {
-        pingTask?.cancel()
-        pingTask = nil
+        return allCases
     }
 }
 ```
 
-**Why @MainActor on ViewModels:**
-- All @Published/@Observable properties must update on main thread
-- SwiftUI observes these properties and requires main thread updates
-- Eliminates "Publishing changes from background threads" warnings
-- With Swift 6.2's Approachable Concurrency, this is the recommended default
+### Pattern 4: Entitlement File Per Distribution Channel
 
-### 3. Services (Actor-Isolated)
+**What:** Maintain separate `.entitlements` files for each distribution method, selected by build scheme.
 
-Services handle async operations with proper isolation. The PingService is the most critical.
+**When to use:** Always, when supporting multiple distribution channels for macOS apps.
 
-```swift
-actor PingService {
-    private var activeConnections: [String: NWConnection] = [:]
+**Trade-offs:**
+- **Pro:** Explicit, reviewable security configuration
+- **Pro:** Compiler/Xcode validates entitlement correctness
+- **Pro:** Easy to see differences between distributions
+- **Con:** Must remember to update both files when adding capabilities
 
-    func ping(host: HostConfig) async -> PingResult {
-        let startTime = ContinuousClock.now
+**Example:**
+```xml
+<!-- PingScope-AppStore.entitlements -->
+<key>com.apple.security.app-sandbox</key>
+<true/>
+<key>com.apple.security.network.client</key>
+<true/>
 
-        // Create connection with timeout
-        let connection = NWConnection(
-            host: NWEndpoint.Host(host.address),
-            port: NWEndpoint.Port(integerLiteral: host.port),
-            using: host.connectionType.parameters
-        )
-
-        // Track for cleanup
-        activeConnections[host.id] = connection
-        defer {
-            connection.cancel()
-            activeConnections.removeValue(forKey: host.id)
-        }
-
-        do {
-            try await withTimeout(seconds: host.timeout) {
-                try await self.awaitConnection(connection)
-            }
-            let elapsed = startTime.duration(to: .now)
-            return PingResult(
-                host: host,
-                latency: elapsed.milliseconds,
-                timestamp: Date(),
-                status: .success
-            )
-        } catch is TimeoutError {
-            return PingResult(
-                host: host,
-                latency: nil,
-                timestamp: Date(),
-                status: .timeout
-            )
-        } catch {
-            return PingResult(
-                host: host,
-                latency: nil,
-                timestamp: Date(),
-                status: .error(error)
-            )
-        }
-    }
-
-    private func awaitConnection(_ connection: NWConnection) async throws {
-        try await withCheckedThrowingContinuation { continuation in
-            connection.stateUpdateHandler = { state in
-                switch state {
-                case .ready:
-                    continuation.resume()
-                case .failed(let error):
-                    continuation.resume(throwing: error)
-                case .cancelled:
-                    continuation.resume(throwing: CancellationError())
-                default:
-                    break
-                }
-            }
-            connection.start(queue: .global())
-        }
-    }
-
-    // Cancel all active connections (for cleanup)
-    func cancelAll() {
-        for connection in activeConnections.values {
-            connection.cancel()
-        }
-        activeConnections.removeAll()
-    }
-}
+<!-- PingScope-DeveloperID.entitlements -->
+<key>com.apple.security.app-sandbox</key>
+<false/>
+<key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+<true/>
 ```
 
-**Why Actor isolation for PingService:**
-- Multiple concurrent pings possible (multi-host monitoring)
-- Connection dictionary access must be synchronized
-- Actor prevents data races without manual locking
-- Clean cancellation semantics with Task cancellation
-
-### 4. AppState (Shared Observable)
-
-Single source of truth for app-wide state that multiple views need.
-
-```swift
-@MainActor
-@Observable
-final class AppState {
-    // View mode
-    var viewMode: ViewMode = .full
-    var isFloatingWindow: Bool = false
-
-    // Host selection
-    var selectedHostId: String?
-    var hosts: [HostConfig] = []
-
-    // Network status
-    var networkStatus: NWPath.Status = .satisfied
-    var hasInternetAccess: Bool = true
-
-    // Alerts
-    var pendingAlerts: [PingAlert] = []
-}
-```
-
-**Distribution via Environment:**
-```swift
-@main
-struct PingMonitorApp: App {
-    @State private var appState = AppState()
-
-    var body: some Scene {
-        MenuBarExtra {
-            MainView()
-                .environment(appState)
-        } label: {
-            StatusItemView()
-        }
-        .menuBarExtraStyle(.window)
-    }
-}
-```
-
-### 5. Models (Sendable Data)
-
-Pure data structures that can safely cross actor boundaries.
-
-```swift
-struct PingResult: Sendable, Codable, Identifiable {
-    let id: UUID
-    let host: HostConfig
-    let latency: Double?  // milliseconds, nil if timeout
-    let timestamp: Date
-    let status: PingStatus
-}
-
-struct HostConfig: Sendable, Codable, Identifiable, Hashable {
-    let id: String
-    var name: String
-    var address: String
-    var port: UInt16
-    var connectionType: ConnectionType
-    var timeout: TimeInterval
-    var isEnabled: Bool
-}
-
-enum ConnectionType: String, Sendable, Codable {
-    case tcp
-    case udp
-    case icmpSimulated  // TCP to port 7 or 80 as ICMP proxy
-
-    var parameters: NWParameters {
-        switch self {
-        case .tcp, .icmpSimulated: return .tcp
-        case .udp: return .udp
-        }
-    }
-}
-
-struct PingStatistics: Sendable {
-    let transmitted: Int
-    let received: Int
-    let packetLoss: Double
-    let minLatency: Double
-    let avgLatency: Double
-    let maxLatency: Double
-    let stdDev: Double
-}
-```
-
-## Patterns to Follow
-
-### Pattern 1: Structured Concurrency for Timers
-
-Use Swift Concurrency instead of Timer or DispatchSourceTimer for cleaner cancellation.
-
-**What:** Replace Timer.scheduledTimer with Task + Task.sleep
-**When:** Any repeating background work
-**Why:** Automatic cancellation with Task.cancel(), no retain cycles
-
-```swift
-@MainActor
-final class PingViewModel {
-    private var monitoringTask: Task<Void, Never>?
-
-    func startMonitoring() {
-        monitoringTask = Task {
-            while !Task.isCancelled {
-                await performPing()
-                try? await Task.sleep(for: .seconds(interval))
-            }
-        }
-    }
-
-    func stopMonitoring() {
-        monitoringTask?.cancel()
-    }
-
-    deinit {
-        monitoringTask?.cancel()
-    }
-}
-```
-
-### Pattern 2: withTimeout for Network Operations
-
-Wrap async network calls with explicit timeout to prevent hanging.
-
-**What:** Timeout wrapper using Task.sleep race
-**When:** Any NWConnection operation
-**Why:** NWConnection doesn't have built-in timeout for ready state
-
-```swift
-func withTimeout<T: Sendable>(
-    seconds: TimeInterval,
-    operation: @escaping @Sendable () async throws -> T
-) async throws -> T {
-    try await withThrowingTaskGroup(of: T.self) { group in
-        group.addTask {
-            try await operation()
-        }
-        group.addTask {
-            try await Task.sleep(for: .seconds(seconds))
-            throw TimeoutError()
-        }
-
-        let result = try await group.next()!
-        group.cancelAll()
-        return result
-    }
-}
-```
-
-### Pattern 3: Connection Lifecycle Management
-
-Always track and clean up NWConnections to prevent stale connections.
-
-**What:** Explicit connection tracking with defer cleanup
-**When:** Every NWConnection creation
-**Why:** Uncancelled connections cause resource leaks and stale state
-
-```swift
-actor PingService {
-    private var activeConnections: [String: NWConnection] = [:]
-
-    func ping(host: HostConfig) async -> PingResult {
-        let connection = createConnection(for: host)
-        activeConnections[host.id] = connection
-
-        defer {
-            connection.cancel()
-            activeConnections.removeValue(forKey: host.id)
-        }
-
-        // ... perform ping ...
-    }
-
-    func cancelAll() {
-        for connection in activeConnections.values {
-            connection.cancel()
-        }
-        activeConnections.removeAll()
-    }
-}
-```
-
-### Pattern 4: Lazy Popover Creation
-
-Don't create NSPopover and hosting controller until first use.
-
-**What:** Create popover on first click, not at app launch
-**When:** Menu bar apps with potentially unused popovers
-**Why:** Memory savings, especially important for background apps
-
-```swift
-@MainActor
-final class MenuBarController {
-    private var popover: NSPopover?
-
-    func showPopover(from button: NSStatusBarButton) {
-        let popover = self.popover ?? createPopover()
-        self.popover = popover
-        popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
-    }
-
-    private func createPopover() -> NSPopover {
-        let popover = NSPopover()
-        popover.contentViewController = NSHostingController(
-            rootView: MainView()
-                .environment(appState)
-        )
-        popover.behavior = .transient
-        return popover
-    }
-}
-```
-
-### Pattern 5: Continuation-Based NWConnection
-
-Convert callback-based NWConnection to async/await cleanly.
-
-**What:** Use withCheckedThrowingContinuation for state transitions
-**When:** Waiting for NWConnection.ready state
-**Why:** Cleaner than DispatchSemaphore, no deadlock risk
-
-```swift
-private func awaitReady(_ connection: NWConnection) async throws {
-    try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-        var resumed = false
-
-        connection.stateUpdateHandler = { state in
-            guard !resumed else { return }
-
-            switch state {
-            case .ready:
-                resumed = true
-                continuation.resume()
-            case .failed(let error):
-                resumed = true
-                continuation.resume(throwing: error)
-            case .cancelled:
-                resumed = true
-                continuation.resume(throwing: CancellationError())
-            default:
-                break
-            }
-        }
-
-        connection.start(queue: .global())
-    }
-}
-```
-
-## Anti-Patterns to Avoid
-
-### Anti-Pattern 1: DispatchSemaphore for Async Waiting
-
-**What:** Using semaphore.wait() to block until async operation completes
-**Why bad:** Blocks thread, can deadlock, races with timeout handlers
-**Consequence:** False timeouts when timeout fires before state handler
-**Instead:** Use async/await with continuation
-
-```swift
-// BAD - causes race conditions
-func pingSync(host: String) -> Double? {
-    let semaphore = DispatchSemaphore(value: 0)
-    var result: Double?
-
-    connection.stateUpdateHandler = { state in
-        if state == .ready {
-            result = latency
-            semaphore.signal()  // May race with timeout
-        }
-    }
-
-    // Timeout handler
-    DispatchQueue.global().asyncAfter(deadline: .now() + 5) {
-        semaphore.signal()  // RACE: may fire before ready
-    }
-
-    semaphore.wait()
-    return result
-}
-
-// GOOD - no races
-func ping(host: String) async throws -> Double {
-    try await withTimeout(seconds: 5) {
-        try await awaitReady(connection)
-        return latency
-    }
-}
-```
-
-### Anti-Pattern 2: Updating @Published from Background Thread
-
-**What:** Modifying @Published or @Observable properties from non-main thread
-**Why bad:** SwiftUI crashes or shows stale UI
-**Consequence:** "Publishing changes from background threads" warning, undefined behavior
-**Instead:** Mark ViewModel as @MainActor, or use MainActor.run
-
-```swift
-// BAD
-class PingViewModel: ObservableObject {
-    @Published var latency: Double?
-
-    func ping() async {
-        let result = await service.ping()
-        latency = result  // WARNING: background thread!
-    }
-}
-
-// GOOD
-@MainActor
-@Observable
-final class PingViewModel {
-    var latency: Double?
-
-    func ping() async {
-        let result = await service.ping()
-        latency = result  // Safe: @MainActor ensures main thread
-    }
-}
-```
-
-### Anti-Pattern 3: Not Cancelling NWConnections
-
-**What:** Creating connections without ensuring cleanup
-**Why bad:** Connections stay in .ready state, accumulate over time
-**Consequence:** Resource exhaustion, stale connection handlers firing
-**Instead:** Track connections, use defer for cleanup, cancel on deinit
-
-### Anti-Pattern 4: Shared Mutable State Without Isolation
-
-**What:** Multiple tasks accessing same dictionary/array
-**Why bad:** Data races, undefined behavior
-**Consequence:** Crashes, corrupted state
-**Instead:** Use actor isolation or @MainActor
-
-### Anti-Pattern 5: Timer in MenuBarExtra View
-
-**What:** Creating Timer directly in SwiftUI view within MenuBarExtra
-**Why bad:** Timer may not fire when popover closed (run loop blocked)
-**Consequence:** Monitoring stops when popover closes
-**Instead:** Timer/Task in ViewModel or Service that persists independently
-
-## Build Order (Dependency Graph)
-
-Components should be built in this order based on dependencies:
+## Anti-Patterns
+
+### Anti-Pattern 1: Migrating Code Out of SPM Package
+
+**What people do:** Move source code from `Sources/PingScope/` into the Xcode project's target directly.
+
+**Why it's wrong:**
+- Breaks existing SPM workflows (tests, command-line builds)
+- Duplicates source management
+- Loses modular architecture benefits
+- Forces all developers to use Xcode
+
+**Do this instead:** Keep all code in SPM package; Xcode project is just a wrapper that references the package.
+
+### Anti-Pattern 2: Single Entitlements File with Preprocessor Directives
+
+**What people do:** Try to use `#if DEBUG` or build settings to conditionally enable sandboxing in one entitlements file.
+
+**Why it's wrong:**
+- Entitlements files are XML plists, not compiled code—preprocessor doesn't work
+- Distribution type (App Store vs Developer ID) isn't about Debug vs Release
+- Increases risk of shipping wrong entitlements
+
+**Do this instead:** Use separate entitlement files, one per distribution channel, selected by build scheme.
+
+### Anti-Pattern 3: Duplicating Info.plist Between Builds
+
+**What people do:** Maintain separate Info.plist files for SPM builds and Xcode builds with manual version syncing.
+
+**Why it's wrong:**
+- Version number drift between distributions
+- Double maintenance burden
+- Easy to forget updating one
+
+**Do this instead:**
+- Move Info.plist to Xcode management
+- Use Xcode build settings for version numbers
+- SPM-only builds can read version from git tags or environment variables
+
+### Anti-Pattern 4: Abandoning Developer ID Distribution
+
+**What people do:** Once App Store distribution works, stop supporting Developer ID builds.
+
+**Why it's wrong:**
+- Loses fast-track notarization workflow for testing
+- Loses direct distribution channel (some users prefer DMG)
+- Loses ability to ship features unavailable in sandbox (ICMP)
+- Reduces distribution flexibility
+
+**Do this instead:** Maintain both workflows in parallel; they complement each other.
+
+## Integration Sequence (Migration Path)
+
+### Phase 1: Create Xcode Project (No Build Changes)
+
+1. **Create wrapper project:**
+   ```bash
+   # From repository root
+   open -a Xcode
+   # File → New → Project → macOS → App
+   # Save as "PingScope.xcodeproj" in repository root
+   # Delete auto-generated source files (keep project only)
+   ```
+
+2. **Add local SPM package dependency:**
+   - File → Add Package Dependencies → Add Local
+   - Select repository root (where Package.swift lives)
+   - Xcode discovers executable target automatically
+
+3. **Configure target:**
+   - Set Bundle Identifier: `com.hadm.pingscope` (matches existing)
+   - Set Deployment Target: macOS 13.0
+   - Set Display Name: PingScope
+   - Verify executable links to SPM target
+
+4. **Verify build:**
+   ```bash
+   xcodebuild -scheme PingScope -configuration Debug
+   # Should produce same app as SPM build
+   ```
+
+**Verification:** Xcode build produces functional .app, existing `swift build` still works.
+
+### Phase 2: Add Entitlements (Still No Sandbox)
+
+1. **Create DeveloperID entitlements:**
+   - Xcode → Target → Signing & Capabilities → + Capability → Hardened Runtime
+   - Save generated entitlements as `Configuration/PingScope-DeveloperID.entitlements`
+   - Edit to disable sandbox explicitly
+
+2. **Create DeveloperID scheme:**
+   - Product → Scheme → Manage Schemes → Duplicate
+   - Name: "DeveloperID"
+   - Edit Scheme → Build Configuration → Release
+   - Edit Scheme → Archive → set entitlements file
+
+3. **Test DeveloperID archive:**
+   ```bash
+   xcodebuild -scheme DeveloperID archive -archivePath build/DeveloperID.xcarchive
+   xcodebuild -exportArchive -archivePath build/DeveloperID.xcarchive \
+     -exportPath build/export -exportOptionsPlist export-developerid.plist
+   ```
+
+**Verification:** Xcode-built Developer ID archive works identically to SPM-built version, ICMP available.
+
+### Phase 3: Add App Store Support
+
+1. **Create AppStore entitlements:**
+   - Create `Configuration/PingScope-AppStore.entitlements`
+   - Enable: App Sandbox, Outgoing Connections (Client)
+   - Disable: All others (minimalist approach)
+
+2. **Create AppStore scheme:**
+   - Product → Scheme → Manage Schemes → Duplicate DeveloperID
+   - Name: "AppStore"
+   - Edit Scheme → set AppStore entitlements file
+
+3. **Configure provisioning:**
+   - Xcode → Target → Signing & Capabilities
+   - AppStore scheme: Use "Apple Distribution" certificate
+   - Enable automatic signing or use manual provisioning profile
+
+4. **Test App Store archive:**
+   ```bash
+   xcodebuild -scheme AppStore archive -archivePath build/AppStore.xcarchive
+   xcodebuild -exportArchive -archivePath build/AppStore.xcarchive \
+     -exportPath build/export -exportOptionsPlist export-appstore.plist
+   ```
+
+5. **Verify runtime behavior:**
+   ```bash
+   # Extract and run sandboxed build
+   # Check: PingMethod.availableCases should return [TCP, UDP] only
+   # Check: UI shows only TCP/UDP options
+   ```
+
+**Verification:** App Store archive validates in Xcode, sandbox detection works, ICMP correctly hidden.
+
+### Phase 4: CI/CD Integration
+
+1. **Preserve existing Developer ID workflow:**
+   - Keep `.github/workflows/production-release.yml` unchanged
+   - Existing DMG/PKG generation continues to work
+
+2. **Add App Store workflow:**
+   - Create `.github/workflows/appstore-release.yml`
+   - Trigger: Manual or on specific tags (e.g., `v*-appstore`)
+   - Steps: xcodebuild archive → exportArchive → upload via `xcrun altool`
+
+3. **Environment secrets:**
+   - Add App Store Connect API key to GitHub Secrets
+   - Add App Distribution certificate and provisioning profile
+
+**Verification:** Both workflows run independently, produce correct artifacts.
+
+### Phase 5: Validation and Testing
+
+1. **Developer ID testing:**
+   - Build with DeveloperID scheme
+   - Verify ICMP available
+   - Test notarization
+
+2. **App Store testing:**
+   - Build with AppStore scheme
+   - Verify ICMP hidden
+   - Upload to TestFlight
+   - Test in sandboxed environment
+
+3. **Feature parity check:**
+   - All features work in both distributions (except ICMP)
+   - UI responds correctly to sandbox detection
+   - No crashes or permission errors
+
+**Verification:** Both distributions functionally identical except for documented sandbox limitations.
+
+## Build Order Dependencies
 
 ```
-Phase 1: Foundation
-├── Models (no dependencies)
-├── Constants/Configuration (no dependencies)
-└── Error types (no dependencies)
-
-Phase 2: Services
-├── PersistenceService (depends on: Models)
-├── GatewayService (depends on: Models)
-├── PingService (depends on: Models)
-└── NetworkMonitorService (depends on: Models, GatewayService)
-
-Phase 3: State Management
-├── AppState (depends on: Models)
-└── NotificationService (depends on: Models, AppState)
-
-Phase 4: ViewModels
-├── PingViewModel (depends on: PingService, AppState, Models)
-├── SettingsViewModel (depends on: PersistenceService, AppState, Models)
-└── HistoryViewModel (depends on: AppState, Models)
-
-Phase 5: AppKit Integration
-└── MenuBarController (depends on: ViewModels, AppState)
-
-Phase 6: Views
-├── MainView (depends on: ViewModels, AppState)
-├── GraphView (depends on: Models)
-├── HistoryView (depends on: ViewModels)
-├── SettingsView (depends on: ViewModels)
-├── StatusItemView (depends on: ViewModels)
-└── ExportView (depends on: ViewModels)
-
-Phase 7: App Entry
-└── PingMonitorApp (depends on: All)
+1. SPM Package (Package.swift + Sources/)
+   ↓
+2. Xcode Project Creation
+   ↓
+3. Local Package Reference in Xcode
+   ↓
+4. Entitlements Files (DeveloperID, AppStore)
+   ↓
+5. Build Schemes (DeveloperID, AppStore)
+   ↓
+6. Code Signing Configuration
+   ↓
+7. Archive and Export
+   ↓
+8. CI/CD Workflow Integration
 ```
 
-**Why this order:**
-1. Models first: Everything depends on data structures
-2. Services second: Business logic independent of UI
-3. State third: Shared state that ViewModels observe
-4. ViewModels fourth: Coordinate services with state
-5. MenuBar fifth: Needs ViewModels to read state
-6. Views sixth: Need ViewModels and AppState
-7. App last: Wires everything together
+**Critical path:** Must have working SPM build before Xcode integration. Entitlements must be finalized before CI/CD automation.
 
-## Concurrency Model Summary
+## Confidence Assessment
 
-| Component Type | Isolation | Rationale |
-|---------------|-----------|-----------|
-| ViewModels | @MainActor | UI state must update on main thread |
-| AppState | @MainActor | Shared UI state, observed by views |
-| Views | @MainActor | SwiftUI requirement |
-| MenuBarController | @MainActor | AppKit APIs require main thread |
-| PingService | actor | Concurrent pings, connection tracking |
-| NetworkMonitorService | actor | NWPathMonitor callback handling |
-| GatewayService | actor | SystemConfiguration API isolation |
-| PersistenceService | @MainActor | UserDefaults fine on main, simpler API |
-| NotificationService | @MainActor | UNUserNotificationCenter requires main |
-| Models | Sendable | Cross-boundary data transfer |
+| Topic | Confidence | Rationale |
+|-------|-----------|-----------|
+| Xcode wrapper pattern | HIGH | Well-documented Apple pattern, confirmed by recent 2025-2026 articles on modularization |
+| Entitlements configuration | HIGH | Official Apple documentation on sandbox and network.client entitlement |
+| Build scheme differentiation | HIGH | Standard Xcode feature, widely used for multi-environment apps |
+| SPM local package reference | MEDIUM-HIGH | Confirmed by Swift forums and 2026 articles, but less documentation than other topics |
+| Migration path | MEDIUM | Based on common patterns, but project-specific details may vary |
+| CI/CD automation | MEDIUM | Xcode command-line tools well-documented, but workflow-specific testing needed |
 
 ## Sources
 
-- [Apple Developer: Building and customizing the menu bar with SwiftUI](https://developer.apple.com/documentation/SwiftUI/Building-and-customizing-the-menu-bar-with-SwiftUI)
-- [Clean Architecture for SwiftUI - Alexey Naumov](https://nalexn.github.io/clean-architecture-swiftui/)
-- [SwiftLee: MVVM architectural coding pattern for SwiftUI](https://www.avanderlee.com/swiftui/mvvm-architectural-coding-pattern-to-structure-views/)
-- [SwiftLee: Approachable Concurrency in Swift 6.2](https://www.avanderlee.com/concurrency/approachable-concurrency-in-swift-6-2-a-clear-guide/)
-- [Donny Wals: Swift 6.2 Main Actor isolation](https://www.donnywals.com/should-you-opt-in-to-swift-6-2s-main-actor-isolation/)
-- [Swift by Sundell: MainActor attribute](https://www.swiftbysundell.com/articles/the-main-actor-attribute/)
-- [Apple Developer: NSStatusItem](https://developer.apple.com/documentation/appkit/nsstatusitem)
-- [Multi Blog: Pushing the limits of NSStatusItem](https://multi.app/blog/pushing-the-limits-nsstatusitem)
-- [SwiftyPing: ICMP ping client for Swift](https://github.com/samiyr/SwiftyPing)
+- [Modern iOS Architecture: Build Modular Apps with Swift Package Manager (2025 Guide)](https://ravi6997.medium.com/modern-ios-architecture-building-a-modular-project-with-swift-package-manager-033d8de9799f)
+- [macOS App Entitlements Guide: Part 1 — Foundation & Network Access (Jan 2026)](https://medium.com/@info_4533/macos-app-entitlements-guide-b563287c07e1)
+- [Configuring the macOS App Sandbox | Apple Developer Documentation](https://developer.apple.com/documentation/xcode/configuring-the-macos-app-sandbox)
+- [Managing different Environments using XCode Build Schemes and Configurations](https://ali-akhtar.medium.com/managing-different-environments-using-xcode-build-schemes-and-configurations-af7c43f5be19)
+- [Entitlements | Apple Developer Documentation](https://developer.apple.com/documentation/bundleresources/entitlements)
+- [How to add local Swift Packages to an iOS project](https://tanaschita.com/spm-add-local-packages/)
+- [Xcode project with SPM dependencies - Swift Forums](https://forums.swift.org/t/xcode-project-with-spm-dependencies/18157)
+- [Local SPM (Part 2) — Mastering Modularization with Swift Package Manager (Xcode 26)](https://medium.com/@guycohendev/local-spm-part-2-mastering-modularization-with-swift-package-manager-xcode-15-16-d5a11ddd166c)
+- [com.apple.security.network.client | Apple Developer Documentation](https://developer.apple.com/documentation/bundleresources/entitlements/com.apple.security.network.client)
+- [Signing Mac Software with Developer ID - Apple Developer](https://developer.apple.com/developer-id/)
+
+---
+*Architecture research for: App Store distribution integration with existing SPM-based macOS menu bar app*
+*Researched: 2026-02-16*
