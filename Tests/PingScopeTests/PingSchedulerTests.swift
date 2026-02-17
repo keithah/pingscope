@@ -47,6 +47,40 @@ final class PingSchedulerTests: XCTestCase {
         )
     }
 
+    func testMixedPingMethodsReceiveResultsAcrossCadenceLoop() async {
+        let icmpHost = PingScope.Host(
+            name: "ICMP",
+            address: "icmp.local",
+            port: 0,
+            pingMethod: .icmp,
+            intervalOverride: .milliseconds(140)
+        )
+        let tcpHost = PingScope.Host(
+            name: "TCP",
+            address: "tcp.local",
+            port: 443,
+            pingMethod: .tcp,
+            intervalOverride: .milliseconds(210)
+        )
+
+        let counts = await runScheduler(
+            hosts: [icmpHost, tcpHost],
+            fallbackInterval: Duration.seconds(1),
+            window: Duration.milliseconds(850)
+        )
+
+        XCTAssertGreaterThan(
+            counts[icmpHost.address, default: 0],
+            0,
+            "ICMP host should be scheduled and produce results in mixed-method host sets"
+        )
+        XCTAssertGreaterThan(
+            counts[tcpHost.address, default: 0],
+            0,
+            "Non-ICMP host should remain scheduled and produce results in mixed-method host sets"
+        )
+    }
+
     private func runScheduler(
         hosts: [PingScope.Host],
         fallbackInterval: Duration,
