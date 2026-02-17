@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Hardened runtime enabled, sandbox disabled for ICMP -->
+	<key>com.apple.security.app-sandbox</key>
+	<false/>
+
+	<!-- Hardened runtime: disable unsigned executable memory -->
+	<key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+	<false/>
+
+	<!-- Hardened runtime: disable environment variables -->
+	<key>com.apple.security.cs.allow-dyld-environment-variables</key>
+	<false/>
+</dict>
+</plist>
