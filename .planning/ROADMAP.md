@@ -20,6 +20,7 @@ PingMonitor is a macOS menu bar network monitoring app rewritten from a monolith
 - [x] **Phase 8: Visualization Requirement Reconciliation & Verification** - Close VIS-01 through VIS-07 and produce missing Phase 5 verification artifact
 - [x] **Phase 9: Regression Test Wiring Recovery** - Restore compile-green automated regression integration coverage
 - [ ] **Phase 10: True ICMP Support** - Real ICMP ping when running outside sandbox
+- [ ] **Phase 11: Tech Debt Closure** - Close non-blocking v1.0 debt in runtime wiring, settings UX, and planning traceability
 
 ## Phase Details
 
@@ -200,10 +201,31 @@ Plans:
 - [ ] 10-03-PLAN.md — PingMethod.icmp case, PingService routing, and AddHostSheet filtering
 - [ ] 10-04-PLAN.md — Human verification checkpoint for ICMP support end-to-end
 
+### Phase 11: Tech Debt Closure
+
+**Goal:** Close non-critical v1.0 tech debt so production wiring and active settings UX are fully aligned with implemented capabilities.
+**Depends on:** Phase 10
+**Requirements:** Debt closure follow-up from v1.0 milestone audit
+**Success Criteria** (what must be TRUE):
+  1. ConnectionSweeper is wired into active TCP/UDP ping lifecycle (not orphaned)
+  2. Active Settings flow includes per-host notification override configuration path
+  3. Unused legacy HostSettingsView is removed from the codebase
+  4. Planning summaries use consistent `Sources/PingScope` source path references
+**Plans:** 4 plans
+
+Plans:
+- [ ] 11-01-PLAN.md — Wire ConnectionSweeper into production ping lifecycle with regression coverage
+- [ ] 11-02-PLAN.md — Add active settings host-level notification override editor and persistence tests
+- [ ] 11-03-PLAN.md — Remove legacy HostSettingsView and normalize planning summary path conventions
+- [ ] 11-04-PLAN.md — Run debt-closure verification checks and human acceptance checkpoint
+
+**Details:**
+This phase intentionally targets non-blocking debt identified by the v1.0 audit to reduce maintenance overhead and tighten runtime/UX traceability before future feature work.
+
 ## Progress
 
 **Execution Order:**
-Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 8 -> 9 -> 10
+Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 8 -> 9 -> 10 -> 11
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
@@ -217,6 +239,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 8 -> 9 -> 10
 | 8. Visualization Requirement Reconciliation & Verification | 1/1 | Complete | 2026-02-16 |
 | 9. Regression Test Wiring Recovery | 1/1 | Complete | 2026-02-16 |
 | 10. True ICMP Support | 0/4 | Planned | — |
+| 11. Tech Debt Closure | 0/4 | Planned | — |
 
 ---
 *Roadmap created: 2026-02-13*
@@ -225,3 +248,4 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 8 -> 9 -> 10
 *Phase 4 planned: 2026-02-14*
 *Phase 9 planned: 2026-02-16*
 *Phase 10 planned: 2026-02-16*
+*Phase 11 planned: 2026-02-16*
