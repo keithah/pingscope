@@ -2,16 +2,12 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<!-- Required for App Store -->
+	<!-- App sandbox required for widget extensions -->
 	<key>com.apple.security.app-sandbox</key>
 	<true/>
 
-	<!-- Network access for ping operations -->
+	<!-- Network access for future direct ping capability -->
 	<key>com.apple.security.network.client</key>
-	<true/>
-
-	<!-- File access for future export features -->
-	<key>com.apple.security.files.user-selected.read-write</key>
 	<true/>
 
 	<!-- App Groups for widget data sharing -->

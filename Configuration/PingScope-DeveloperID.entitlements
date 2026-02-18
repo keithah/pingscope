@@ -13,5 +13,11 @@
 	<!-- Hardened runtime: disable environment variables -->
 	<key>com.apple.security.cs.allow-dyld-environment-variables</key>
 	<false/>
+
+	<!-- App Groups for widget data sharing -->
+	<key>com.apple.security.application-groups</key>
+	<array>
+		<string>6R7S5GA944.group.com.hadm.PingScope</string>
+	</array>
 </dict>
 </plist>
