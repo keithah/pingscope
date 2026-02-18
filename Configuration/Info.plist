@@ -50,5 +50,18 @@
     <!-- Export Compliance -->
     <key>ITSAppUsesNonExemptEncryption</key>
     <false/>
+
+    <!-- Deep Linking for Widget Integration -->
+    <key>CFBundleURLTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleURLName</key>
+            <string>com.hadm.pingscope</string>
+            <key>CFBundleURLSchemes</key>
+            <array>
+                <string>pingscope</string>
+            </array>
+        </dict>
+    </array>
 </dict>
 </plist>

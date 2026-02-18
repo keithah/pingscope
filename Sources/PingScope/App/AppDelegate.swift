@@ -51,6 +51,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     )
     private var previousGatewayIP: String? = nil
     private var latestHostUpStates: [UUID: Bool] = [:]
+    private var latestPingResults: [UUID: PingResult] = [:]
 
     private var statusItemController: StatusItemController?
     lazy var hostListViewModel: HostListViewModel = makeHostListViewModel()
@@ -61,6 +62,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var monitoredHosts: [Host] = []
     private var cancellables: Set<AnyCancellable> = []
     private var instanceLockFD: Int32 = -1
+
+    // Widget data store for sharing ping results with widgets
+    private let widgetDataStore = WidgetDataStore(
+        groupIdentifier: "6R7S5GA944.group.com.hadm.PingScope"
+    )
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         guard enforceSingleInstance() else {
@@ -121,6 +127,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         releaseInstanceLock()
     }
 
+    func application(_ application: NSApplication, open urls: [URL]) {
+        // Handle pingscope://open by activating app
+        NSApp.activate(ignoringOtherApps: true)
+
+        // Future: parse URL path for specific actions (e.g., open settings, select host)
+    }
+
     private func startScheduler() {
         Task { [weak self] in
             guard let self else { return }
@@ -144,6 +157,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     let latencyMS = result.latency.map(Self.durationToMilliseconds)
                     self.hostListViewModel.updateLatency(for: matchedHostID, latencyMS: latencyMS)
 
+                    // Store latest ping result for widget updates
+                    self.latestPingResults[matchedHostID] = result
+
                     if let host = self.monitoredHosts.first(where: { $0.id == matchedHostID }) {
                         self.latestHostUpStates[matchedHostID] = isHostUp
 #if DEBUG
@@ -158,6 +174,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     Task {
                         let hostResults = await self.collectHostResults()
                         await self.notificationService.evaluateInternetLoss(hostResults: hostResults)
+                    }
+
+                    // Update widget data store after processing result
+                    Task {
+                        let allHosts = await self.runtime.hostStore.allHosts
+                        let allResults = await self.collectAllPingResults()
+                        await self.widgetDataStore.savePingResults(allResults, hosts: allHosts)
                     }
                 }
             }
@@ -342,6 +365,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let currentHostIDs = Set(hosts.map(\.id))
         latestHostUpStates = latestHostUpStates.filter { currentHostIDs.contains($0.key) }
+        latestPingResults = latestPingResults.filter { currentHostIDs.contains($0.key) }
 
         let selectedHost = runtime.syncSelection(with: hosts, preferredHostID: preferredHostID)
         hostListViewModel.hosts = hosts
@@ -362,6 +386,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         monitoredHosts.map { host in
             let isUp = latestHostUpStates[host.id] ?? true
             return (host, isUp)
+        }
+    }
+
+    private func collectAllPingResults() async -> [PingResult] {
+        monitoredHosts.compactMap { host in
+            latestPingResults[host.id]
         }
     }
 

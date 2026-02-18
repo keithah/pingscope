@@ -59,6 +59,7 @@ struct LargeWidgetView: View {
         .containerBackground(for: .widget) {
             Color(nsColor: .controlBackgroundColor)
         }
+        .widgetURL(URL(string: "pingscope://open"))
     }
 
     private func statusColor(for result: WidgetData.SimplifiedPingResult) -> Color {
