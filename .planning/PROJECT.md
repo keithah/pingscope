@@ -27,9 +27,14 @@ Reliable, accurate ping monitoring that users can trust — no false timeouts, n
 - Left-click opens popover, right-click shows context menu — v1.0
 - Statistics display (transmitted, received, packet loss, min/avg/max/stddev) — v1.0
 
+- Xcode dual-build infrastructure (App Store + Developer ID) — v1.1
+- Privacy manifest and App Store compliance — v1.1
+- App Store metadata and screenshots — v1.1
+- App Store submission and review process — v1.1
+
 ### Active
 
-(Building toward v2.0 - App Store Release)
+(Ready for next milestone)
 
 ### Out of Scope
 
@@ -38,16 +43,9 @@ Reliable, accurate ping monitoring that users can trust — no false timeouts, n
 - Widget extension — defer to v3
 - Data export — defer to v3
 
-## Current Milestone: v1.1 App Store Release
+## Current Milestone: None (Between Milestones)
 
-**Goal:** Make PingScope available in the Mac App Store while maintaining Developer ID direct downloads.
-
-**Target deliverables:**
-- Mac App Store distribution (sandboxed build)
-- Developer ID distribution (non-sandboxed with true ICMP)
-- Xcode project with dual build configurations
-- App Store metadata and screenshots
-- Automated build/submission workflows
+Ready to plan next milestone with `/gsd:new-milestone`.
 
 ## Context
 
@@ -64,11 +62,12 @@ Reliable, accurate ping monitoring that users can trust — no false timeouts, n
 - Direct download from GitHub releases
 - Not yet in Mac App Store
 
-**v2.0 focus:**
-- Dual-channel distribution (App Store + Developer ID)
-- Both builds use same codebase with configuration differences
-- App Store build is fully sandboxed (TCP/UDP ping only)
-- Developer ID build runs non-sandboxed (true ICMP available)
+**v1.1 shipped (2026-02-18):**
+- Dual-channel distribution established (App Store + Developer ID)
+- Xcode project with dual build schemes (PingScope-AppStore, PingScope-DeveloperID)
+- App Store listing created with metadata and 5 professional screenshots
+- First build submitted for App Store Review (in review as of 2026-02-17)
+- Both builds use same codebase with sandbox-aware configuration
 
 ## Constraints
 
@@ -86,15 +85,18 @@ Reliable, accurate ping monitoring that users can trust — no false timeouts, n
 | Use Swift Concurrency over GCD semaphores | Eliminates race conditions causing false timeouts | ✓ Good (v1.0) |
 | Modular file structure over single file | Maintainability, testability, separation of concerns | ✓ Good (v1.0) |
 | Dual-mode ICMP support | True ICMP when not sandboxed, hidden when sandboxed | ✓ Good (v1.0) |
-| Free App Store pricing | Maximize adoption, monetize later if needed | — Pending |
-| Single codebase for both distributions | Reduces maintenance, uses build configurations | — Pending |
-| Defer widget/export to v3 | Focus on distribution first | — Pending |
+| Free App Store pricing | Maximize adoption, monetize later if needed | ✓ Good (v1.1) |
+| Single codebase for both distributions | Reduces maintenance, uses build configurations | ✓ Good (v1.1) |
+| Manual ICNS creation for App Store icons | Xcode asset catalog compilation incomplete | ⚠️ Workaround (v1.1) |
+| Use Transporter for App Store uploads | xcrun altool deprecated by Apple | ✓ Good (v1.1) |
 
 ## Current State
 
-**Version:** v1.0 shipped 2026-02-17
+**Version:** v1.1 in App Store Review (submitted 2026-02-17), v1.0 available via direct download
 **Codebase:** ~8000 LOC Swift, 54 source files
 **Tech stack:** SwiftUI, AppKit, Network.framework, SystemConfiguration
+**Distribution:** Dual-channel (App Store pending approval, Developer ID active)
+**Known issues:** CI/CD automation deferred (Plan 16-04), manual release workflow documented
 
 ---
-*Last updated: 2026-02-17 after starting v2.0 milestone*
+*Last updated: 2026-02-18 after v1.1 milestone completion*

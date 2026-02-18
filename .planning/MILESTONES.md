@@ -25,3 +25,30 @@
 **What's next:** Widget extension and data export for v2.0
 
 ---
+
+## v1.1 App Store Release (Shipped: 2026-02-18)
+
+**Delivered:** PingScope submitted to Mac App Store with dual-distribution strategy (App Store + Developer ID)
+
+**Phases completed:** 13-16 (13 plans total)
+
+**Key accomplishments:**
+- Dual-build Xcode configuration supporting both App Store (sandboxed) and Developer ID (non-sandboxed) distributions
+- Complete App Store compliance: privacy manifest, export declarations, age rating, and privacy nutrition label
+- Professional App Store listing: optimized metadata, 5 screenshots at 2880x1800, review notes
+- First build (v1.0 build 1) uploaded and submitted for App Store Review
+- Manual ICNS creation workflow for App Store icon requirements
+- Automated validation tooling for pre-submission confidence
+
+**Stats:**
+- 4 phases, 13 plans
+- Build uploaded: 2.2MB package with complete icon set
+- App Store listing created with metadata and screenshots
+- In review as of 2026-02-17
+
+**Git range:** `e16880f` → `0efd9cc`
+
+**What's next:** CI/CD automation and v2.0 feature expansion
+
+---
+
