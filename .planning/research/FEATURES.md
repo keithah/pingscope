@@ -1,437 +1,344 @@
-# Feature Research: App Store Submission
+# Feature Research
 
-**Domain:** App Store Submission Requirements (macOS)
-**Researched:** 2026-02-16
+**Domain:** WidgetKit ping monitoring widgets & cross-platform architecture
+**Researched:** 2026-02-17
 **Confidence:** HIGH
-
-## Context
-
-This is **v2.0 milestone research** — focused exclusively on App Store submission requirements. v1.0 product features are complete and working. This research covers what's needed to prepare PingScope for Mac App Store distribution.
 
 ## Feature Landscape
 
-### Table Stakes (Apple Requires These)
+### Table Stakes (Users Expect These)
 
-Features required by App Store. Missing these = app rejection or submission blocked.
+Features users assume exist. Missing these = product feels incomplete.
 
 | Feature | Why Expected | Complexity | Notes |
 |---------|--------------|------------|-------|
-| App Metadata (name, subtitle, description, keywords) | Apple requires for product page | LOW | 30-char subtitle, 170-char promo text, 100-char keywords (comma-separated, no spaces) |
-| App Icon (1024x1024 PNG) | Displayed on product page and in search | LOW | Must support Display P3 wide-gamut color, square with no rounded corners |
-| Screenshots (1-10 images) | Users need to see the app before downloading | MEDIUM | 16:10 aspect ratio (1280x800 to 2880x1800), .png or .jpeg, max 10MB each |
-| Age Rating | Apple requires for all apps | LOW | Complete questionnaire in App Store Connect (4+, 9+, 13+, 16+, 18+) — deadline Jan 31, 2026 |
-| App Category | Determines where app appears in store | LOW | Primary category required (e.g., Utilities, Developer Tools) |
-| Privacy Manifest (PrivacyInfo.xcprivacy) | Required since May 1, 2024 for all apps | MEDIUM | Document data collection and required reason APIs used |
-| Privacy Nutrition Label | Auto-generated from privacy details in App Store Connect | LOW | Declare data practices for app and third-party SDKs |
-| App Sandbox Entitlements | Mac App Store requirement | MEDIUM | Enable sandboxing, configure network access entitlements (outgoing connections) |
-| Code Signing (App Store certificate) | Validates app authenticity | LOW | Requires active Apple Developer Program membership ($99/year) |
-| Export Compliance Declaration | Required if app uses encryption | LOW | Declare encryption use in Info.plist or App Store Connect (HTTPS = exempt) |
-| Xcode 26+ Build | Required starting April 28, 2026 | LOW | Build with macOS 26 SDK using Xcode 26 or later |
-| App Bundle Validation | App must pass validation checks | LOW | Use Xcode or Application Loader to validate before submission |
-| Support URL | Users need way to contact developer | LOW | URL for app support page or contact form |
-| Copyright Notice | Legal requirement | LOW | Copyright year and holder name |
-
-**Dependencies on v1.0:**
-- Privacy Manifest requires understanding what data v1.0 collects (answer: none — all network monitoring is local)
-- App Sandbox requires v1.0 to work without privileged operations (already supported via TCP/UDP ping modes)
-- Screenshots require v1.0 UI to be complete (already done)
+| Widget size variants (Small/Medium/Large) | WidgetKit standard, users expect all 3 sizes | MEDIUM | Each size needs layout adaptation. Small = single host, Medium = 3 hosts horizontal, Large = all hosts list |
+| Real-time status display | Widgets exist to show current state at a glance | LOW | Already have data pipeline from main app, just need timeline updates |
+| Visual status indicators | Color-coded dots are universal in network monitoring | LOW | Reuse existing status evaluation logic (green/yellow/red/gray) |
+| Ping time display | Core value proposition of ping monitoring | LOW | Format existing ping time data for widget display |
+| Update timestamps | Users need to trust data freshness | LOW | Standard WidgetKit timeline entry date display |
+| Tap to open main app | Standard widget interaction pattern | LOW | Deep link using widgetURL modifier for small, Link views for medium/large |
+| Shared data pipeline | Widget must show same data as main app | MEDIUM | App Group container already documented, needs implementation |
+| Widget configuration name/description | Users see these in widget gallery | LOW | Static metadata in widget configuration |
 
 ### Differentiators (Competitive Advantage)
 
-Features that improve discoverability and conversion. Not required, but valuable.
+Features that set the product apart. Not required, but valuable.
 
 | Feature | Value Proposition | Complexity | Notes |
 |---------|-------------------|------------|-------|
-| App Preview Videos (1-3) | Shows app in action, increases conversion 20-30% | MEDIUM | 15-30 seconds, H.264/ProRes, max 500MB, .mov/.m4v/.mp4 |
-| Promotional Text (170 chars) | Updateable without new build, highlights current features/sales | LOW | Appears at top of description, doesn't affect search ranking |
-| TestFlight Beta Testing | Find bugs before public release, gather feedback | LOW | Up to 100 internal + 10,000 external testers, 90-day build validity |
-| Custom Product Pages | A/B test different messaging/screenshots | MEDIUM | Test variations for different user segments (network admins vs. developers) |
-| Product Page Optimization | Test icon/screenshot variations | MEDIUM | Built-in A/B testing in App Store Connect |
-| Multiple Screenshot Sizes | Provide optimal resolution for all displays | MEDIUM | All 4 sizes: 1280x800, 1440x900, 2560x1600, 2880x1800 |
-| Localization | Reach non-English users | HIGH | Translate name, description, keywords, screenshots (40 languages available) |
-| Accessibility Information | Highlight VoiceOver, Voice Control support | LOW | Auto-generates Accessibility Nutrition Label on product page |
-| Compelling Description | Convert browsers to installers | LOW | Clear value proposition, feature bullets, avoid generic claims ("best", "world's #1") |
-| Strategic Keywords | Improve search visibility | LOW | Research competitors, use ASO tools, avoid trademarked terms |
-| What's New Text | Communicate updates to existing users | LOW | Required for updates, max 4,000 chars, explain improvements |
+| Multi-host summary view | Glanceable network health across all monitored endpoints | MEDIUM | Most network monitors show single host. We can show Google + Cloudflare + Gateway in medium widget |
+| Mini latency graph | Visual trend data in widget without opening app | HIGH | Small sparkline chart in medium/large widgets. Requires historical data aggregation and chart rendering |
+| Intelligent refresh timing | Respect system widget budget while staying current | MEDIUM | Timeline provider with multiple entries vs single entry with refresh policy. 40-70 updates/day budget |
+| Host-specific deep links | Tap widget to open app to specific host | MEDIUM | Use Link views with URL parameters to navigate to selected host |
+| Graceful degradation | Widget shows useful info even when app isn't running | LOW | Use last-known-good data from shared container with staleness indicator |
+| Platform-aware UI | Widget adapts to desktop vs Notification Center context | MEDIUM | Use widgetRenderingMode environment to detect full-color vs accented display |
+| Statistics summary | Show min/avg/max ping in large widget | LOW | Reuse existing statistics calculation, format for widget display |
 
-**Dependencies on v1.0:**
-- App Preview Video requires v1.0 UI to be visually complete (done)
-- Strategic Keywords require understanding v1.0's unique value (multi-host monitoring, ICMP support, visualization)
-- Compelling Description requires knowing v1.0 differentiators (7 notification types, dual sandbox modes, etc.)
+### Anti-Features (Commonly Requested, Often Problematic)
 
-### Anti-Features (Common Rejection Reasons)
-
-Features that seem good but create problems or cause rejection.
+Features that seem good but create problems.
 
 | Feature | Why Requested | Why Problematic | Alternative |
 |---------|---------------|-----------------|-------------|
-| Keyword Stuffing in Description | Trying to improve search ranking | Description doesn't affect search; looks spammy; violates guidelines | Use dedicated 100-char keyword field strategically; focus on readability |
-| Mentioning Competitors | Trying to capture competitor searches | Violates trademark guidelines, causes rejection | Focus on unique value proposition ("multi-host monitoring", not "better than SimplePing") |
-| Generic Superlatives ("Best", "World's #1") | Trying to sound impressive | Prohibited by App Review Guidelines 2.3.8 | Use specific, measurable claims ("monitor up to 10 hosts simultaneously") |
-| Repeating App Name in Keywords | Trying to boost ranking | Wastes character limit; name already indexed automatically | Use keywords for features, use cases, alternatives ("ping monitor", "latency tracker", "network status") |
-| Including iOS in macOS Metadata | Copy-paste from iOS app | Causes rejection (cross-platform references prohibited) | Write platform-specific metadata for macOS only |
-| Excessive Permissions/Entitlements | "Might need it later" approach | Privacy concerns, increases review scrutiny, delays approval | Request only what's needed (outgoing network for PingScope); add more later if required |
-| Using Non-Exempt Encryption Without Declaration | Avoiding paperwork | Causes export compliance rejection | Declare encryption use in Info.plist: ITSAppUsesNonExemptEncryption = NO (HTTPS is exempt) |
-| White-Label/Clone Apps | Trying to reach more users with similar apps | Violates Guideline 4.3 (Spam), instant rejection | Build unique value, differentiate from similar apps (PingScope's differentiators: multi-host, ICMP modes, 7 notification types) |
-| Incomplete Test Info | Rushing submission | Delays review or causes rejection | Provide detailed review notes explaining dual sandbox modes, how to test ICMP vs. TCP/UDP |
-| Placeholder Content | Submitting before ready | Guideline 2.1 rejection (incomplete app) | Wait until fully functional (v1.0 is ready — no placeholders) |
-| App Store/TestFlight Confusion | Submitting TestFlight build to App Store | Different certificates, different configs | Use separate build schemes: "App Store" vs. "TestFlight" vs. "Developer ID" |
-
-**Risks specific to PingScope:**
-- Dual sandbox modes (App Store sandboxed vs. Developer ID non-sandboxed) might confuse reviewers — provide clear review notes
-- Network monitoring might raise privacy concerns — Privacy Manifest must clearly state "no data collection, local monitoring only"
-- ICMP might seem like privileged operation — explain TCP/UDP fallback, no root required
+| Real-time continuous updates | "I want to see every ping result" | Widget refresh budget is 40-70/day. Continuous updates = battery drain and budget exhaustion | Timeline with 5-minute intervals + app writes to shared container on every ping. Widget shows latest data within budget |
+| Interactive controls in widget | "Let me start/stop pinging from widget" | Widgets are glanceable displays, not control panels. No button support in small widgets | Tap widget to open app settings. Keep widget read-only |
+| Per-widget host selection | "Let me configure which host each widget shows" | Widget intents add significant complexity for marginal benefit | Small widget shows primary host, medium shows top 3, large shows all. User controls host priority in main app |
+| Live Activities | "Show notifications as Live Activities" | Live Activities are for time-sensitive events (timers, sports, delivery). Ping monitoring is ambient awareness | Use standard widgets + existing notification system |
+| Custom widget refresh interval | "Let me choose 1 second updates" | System controls widget budget. App can't override. Users misunderstand widget limitations | Document actual refresh behavior (timeline + shared data) in widget description |
 
 ## Feature Dependencies
 
 ```
-App Store Submission
-    ├──requires──> App Metadata (name, subtitle, description, keywords)
-    ├──requires──> App Icon (1024x1024)
-    ├──requires──> Screenshots (1-10)
-    ├──requires──> Privacy Manifest
-    ├──requires──> Age Rating
-    ├──requires──> App Category
-    ├──requires──> Support URL
-    ├──requires──> Copyright Notice
-    ├──requires──> Export Compliance Declaration
-    ├──requires──> App Sandbox Entitlements
-    ├──requires──> Code Signing Certificate
-    ├──requires──> Xcode 26+ Build
-    └──requires──> App Bundle Validation
+WidgetKit Extension
+    └──requires──> App Group Container Configuration
+                       └──requires──> Shared Data Models
 
-TestFlight Beta Testing
-    ├──requires──> Code Signing Certificate (separate from App Store cert)
-    ├──requires──> Export Compliance Declaration
-    └──optional──> App Review (first build for external testers only)
+WidgetKit Extension
+    └──requires──> Timeline Provider Implementation
+                       └──requires──> Placeholder Data
 
-App Preview Videos
-    ├──enhances──> Screenshots
-    ├──requires──> Same localization as screenshots
-    └──depends-on──> v1.0 UI being visually complete ✓
+Widget Deep Links
+    └──requires──> Main App URL Handling
+                       └──requires──> NavigationStack in Main App
 
-Localization
-    ├──requires──> Translated App Metadata
-    ├──optional──> Localized Screenshots
-    └──optional──> Localized App Preview Videos
+Cross-Platform Architecture
+    └──requires──> Platform UI Separation
+                       └──requires──> Shared ViewModels
 
-Privacy Manifest
-    ├──requires──> Privacy Nutrition Label entries in App Store Connect
-    ├──auto-generates──> Privacy Nutrition Label on product page
-    └──depends-on──> Understanding v1.0 data collection (none)
+Cross-Platform Architecture
+    └──enhances──> Future iOS/iPadOS Support
 
-App Sandbox Entitlements
-    ├──requires──> com.apple.security.app-sandbox = true
-    ├──requires──> com.apple.security.network.client = true
-    └──depends-on──> v1.0 working in sandbox mode ✓
+Mini Latency Graph
+    └──requires──> Historical Data Aggregation
+                       └──requires──> Shared Data Models with History
+
+Host-Specific Deep Links
+    └──requires──> Widget Deep Links (base feature)
 ```
 
 ### Dependency Notes
 
-- **App Store Submission requires all table stakes features:** Apple's validation process checks for completeness. Missing any required item blocks submission.
-- **TestFlight requires App Review for first external build:** Internal testing (up to 100 users with App Store Connect access) doesn't require review. External testing (up to 10,000) requires review for first build only; subsequent builds may skip review.
-- **App Preview Videos enhance Screenshots:** Videos show the app in action; screenshots are still required. Videos appear before screenshots on product page.
-- **Privacy Manifest generates Privacy Nutrition Label:** Create PrivacyInfo.xcprivacy file → complete privacy questionnaire in App Store Connect → Apple auto-generates nutrition label.
-- **Localization requires translated metadata:** If adding a language, provide translated name, description, keywords, and optionally screenshots. Screenshots default to primary language if not provided.
-- **v1.0 completeness gates v2.0:** All App Store submission assets (screenshots, videos, descriptions) require v1.0 UI to be final. **Status: v1.0 shipped 2026-02-17 — gate satisfied.**
+- **WidgetKit Extension requires App Group Container:** Widgets run in separate process. App Groups are the standard inter-process data sharing mechanism. Must configure entitlements and shared container ID.
+- **Timeline Provider requires Placeholder Data:** WidgetKit calls placeholder(in:) synchronously for widget gallery. Must return immediately with sample data.
+- **Widget Deep Links require Main App URL Handling:** Widget taps deliver URLs to app. App needs onOpenURL handler and navigation logic to route to specific views.
+- **Cross-Platform Architecture requires Platform UI Separation:** macOS uses AppKit menu bar, iOS uses different navigation patterns. Need platform-specific UI wrappers around shared ViewModels.
+- **Mini Latency Graph requires Historical Data Aggregation:** Current app stores full ping history. Widget needs summarized/bucketed data (last 20 pings?) to render mini sparkline efficiently.
 
 ## MVP Definition
 
-### Launch With (v2.0 - App Store Submission)
+### Launch With (v2.0)
 
-Minimum required to get PingScope approved and listed.
+Minimum viable WidgetKit + cross-platform support.
 
-- [ ] **App Metadata** — Name: "PingScope", Subtitle (≤30 chars): "Network Latency Monitor", Description (≤4000 chars), Keywords (≤100 chars): "ping,latency,network,monitor,icmp,uptime,status,connection"
-- [ ] **App Icon** — 1024x1024 PNG with Display P3 color support, export from existing app icon asset
-- [ ] **Screenshots** — 3-5 screenshots at 2880x1800 (16:10 ratio) showing: (1) menu bar + full interface, (2) multi-host tabs + graph, (3) settings panel, (4) ping history, (5) compact mode
-- [ ] **Privacy Manifest** — PrivacyInfo.xcprivacy declaring network access (com.apple.security.network.client), no user data collection
-- [ ] **Privacy Nutrition Label** — Declare "Data Not Collected" in App Store Connect (PingScope monitors locally, no telemetry)
-- [ ] **Age Rating** — 4+ (no objectionable content, no in-app purchases, no user-generated content)
-- [ ] **App Category** — "Utilities" (primary), no secondary category
-- [ ] **Support URL** — GitHub repo (https://github.com/keithah/pingscope) or dedicated support page
-- [ ] **Copyright Notice** — "© 2026 Keith Harris" (or appropriate entity)
-- [ ] **Export Compliance** — Declare HTTPS exempt encryption in Info.plist: ITSAppUsesNonExemptEncryption = NO
-- [ ] **App Sandbox Entitlements** — Enable sandbox (com.apple.security.app-sandbox = YES), outgoing network connections (com.apple.security.network.client = YES)
-- [ ] **Code Signing** — App Store distribution certificate and provisioning profile (requires Apple Developer Program membership)
-- [ ] **Xcode 26+ Build** — Build with macOS 26 SDK (required April 28, 2026)
-- [ ] **App Bundle Validation** — Pass Xcode validation: Product > Archive > Validate App
-- [ ] **Review Notes** — Explain dual-mode ICMP support: "App Store build uses TCP/UDP ping (sandboxed). Developer ID build supports true ICMP (non-sandboxed). Test using Settings > Ping Method."
+- [x] Small widget (single host, status dot, ping time) — Core value, simplest implementation
+- [x] Medium widget (3 hosts horizontal) — Multi-host differentiator without complexity of graphs
+- [x] Large widget (all hosts list) — Complete data, expected widget size
+- [x] App Group container with shared data models — Required for widget to show live data
+- [x] Timeline provider with reasonable refresh (5-15 min) — Balance freshness with budget
+- [x] Basic deep links (widget tap opens app) — Expected interaction
+- [x] Placeholder data for widget gallery — WidgetKit requirement
+- [x] Platform UI separation (macOS-specific + shared layer) — Foundation for future cross-platform
+- [x] Shared ViewModels extracted from macOS-specific code — Enables code reuse across platforms
 
-### Add After Approval (v2.1)
+### Add After Validation (v2.x)
 
-Features to improve conversion and discoverability after initial approval.
+Features to add once core widgets are working.
 
-- [ ] **Promotional Text** — Highlight key features (170 chars): "Monitor multiple hosts with real-time graphs. 7 notification types. Supports ICMP, TCP, and UDP ping. Free on the App Store."
-- [ ] **App Preview Video** — 20-30 second demo showing: (1) menu bar status, (2) clicking to open popover, (3) switching host tabs, (4) real-time graph updating, (5) opening settings
-- [ ] **TestFlight Beta** — Invite 10-20 external testers to test updates before public release
-- [ ] **Strategic Keyword Optimization** — Research ASO tools (AppTweak, Asolytics), test keyword variations, monitor App Store search rankings
-- [ ] **What's New Updates** — Write compelling update notes for each version: focus on user benefits, not technical details
+- [ ] Mini latency graph in medium/large widgets — Validates user interest in trend visualization
+- [ ] Host-specific deep links — Add after confirming users tap widgets regularly
+- [ ] Platform-aware rendering (widgetRenderingMode) — Polish after core functionality works
+- [ ] Statistics summary in large widget — Nice-to-have enhancement
+- [ ] Staleness indicators (show if data > 5 min old) — Adds trust after users adopt widgets
 
 ### Future Consideration (v3+)
 
-Features to defer until App Store presence is established.
+Features to defer until product-market fit is established.
 
-- [ ] **Localization** — Translate to top 5-10 languages (Spanish, French, German, Japanese, Chinese Simplified)
-- [ ] **Custom Product Pages** — A/B test messaging for different user segments (network admins: "Monitor uptime and latency" vs. developers: "Debug network issues")
-- [ ] **Product Page Optimization** — Test icon variations (different colors, styles) and screenshot variations (light vs. dark mode)
-- [ ] **Accessibility Documentation** — Highlight VoiceOver support if implemented (current status unknown — requires v1.0 accessibility audit)
-- [ ] **In-App Events** — Promote new features or seasonal campaigns (if applicable)
-- [ ] **Multiple Screenshot Sizes** — Provide all 4 resolutions (1280x800, 1440x900, 2560x1600, 2880x1800) instead of just highest
+- [ ] iOS/iPadOS support — Requires App Store iOS build, testing across iPhone/iPad sizes
+- [ ] Widget intents (user-configurable widgets) — Significant complexity, unclear demand
+- [ ] Interactive widgets (iOS 17+) — Button support in widgets, limited use cases for ping monitoring
+- [ ] Multiple widget types (separate widgets per host) — Adds clutter to widget gallery
 
 ## Feature Prioritization Matrix
 
 | Feature | User Value | Implementation Cost | Priority |
 |---------|------------|---------------------|----------|
-| App Metadata | HIGH (blocks submission) | LOW (2 hours writing) | P1 |
-| App Icon | HIGH (blocks submission) | LOW (export from Xcode) | P1 |
-| Screenshots | HIGH (blocks submission) | MEDIUM (4-6 hours design) | P1 |
-| Privacy Manifest | HIGH (blocks submission) | MEDIUM (2-3 hours research + implementation) | P1 |
-| Age Rating | HIGH (blocks submission) | LOW (15 min questionnaire) | P1 |
-| App Category | HIGH (blocks submission) | LOW (select from dropdown) | P1 |
-| Support URL | HIGH (blocks submission) | LOW (use GitHub repo) | P1 |
-| Copyright | HIGH (blocks submission) | LOW (enter in App Store Connect) | P1 |
-| Export Compliance | HIGH (blocks submission) | LOW (add Info.plist key) | P1 |
-| Sandbox Entitlements | HIGH (blocks submission) | MEDIUM (configure Xcode, test thoroughly) | P1 |
-| Code Signing | HIGH (blocks submission) | LOW (enroll in Developer Program, create cert) | P1 |
-| Xcode 26 Build | HIGH (blocks submission after Apr 28) | LOW (update Xcode) | P1 |
-| Bundle Validation | HIGH (blocks submission) | LOW (run validator) | P1 |
-| Review Notes | HIGH (prevents rejection) | LOW (1 hour writing) | P1 |
-| Promotional Text | MEDIUM (improves conversion) | LOW (30 min writing) | P2 |
-| App Preview Video | MEDIUM (improves conversion 20-30%) | MEDIUM (4-8 hours production) | P2 |
-| TestFlight Beta | MEDIUM (reduces bugs in production) | LOW (1 hour setup) | P2 |
-| Keyword Optimization | MEDIUM (improves discoverability) | LOW (2-3 hours research) | P2 |
-| What's New Text | MEDIUM (keeps users engaged) | LOW (15 min per update) | P2 |
-| Multiple Screenshot Sizes | LOW (minor quality improvement) | MEDIUM (2x work for screenshots) | P3 |
-| Localization | LOW (expands market) | HIGH (translation + maintenance) | P3 |
-| Custom Product Pages | LOW (A/B testing) | MEDIUM (create variations) | P3 |
-| Product Page Optimization | LOW (conversion optimization) | MEDIUM (test multiple variants) | P3 |
+| Small widget with status | HIGH | LOW | P1 |
+| Medium widget with 3 hosts | HIGH | LOW | P1 |
+| Large widget with all hosts | MEDIUM | LOW | P1 |
+| App Group container setup | HIGH | LOW | P1 |
+| Timeline provider implementation | HIGH | MEDIUM | P1 |
+| Basic widget deep links | MEDIUM | LOW | P1 |
+| Platform UI separation | HIGH | MEDIUM | P1 |
+| Shared ViewModels | HIGH | MEDIUM | P1 |
+| Mini latency graph | MEDIUM | HIGH | P2 |
+| Host-specific deep links | LOW | MEDIUM | P2 |
+| Platform-aware rendering | LOW | LOW | P2 |
+| Statistics summary | LOW | LOW | P2 |
+| Staleness indicators | MEDIUM | LOW | P2 |
+| iOS/iPadOS support | HIGH | HIGH | P3 |
+| Widget intents | LOW | HIGH | P3 |
+| Interactive widgets | LOW | MEDIUM | P3 |
 
 **Priority key:**
-- **P1:** Must have for initial submission (table stakes) — blocks App Store listing if missing
-- **P2:** Should have to improve conversion (add immediately after approval or in v2.1) — improves downloads and user satisfaction
-- **P3:** Nice to have for expansion (defer to v3+) — diminishing returns, high cost
+- P1: Must have for v2.0 launch (WidgetKit MVP)
+- P2: Should have for v2.x (enhances core widgets)
+- P3: Nice to have for v3+ (future platforms)
 
-## App Store Category Analysis
+## Competitor Feature Analysis
 
-### Primary Category Candidates for PingScope
+| Feature | Network Utility Apps | System Monitor Widgets | Our Approach |
+|---------|---------------------|------------------------|--------------|
+| Widget sizes | Usually only 1-2 sizes | All 3 sizes standard | Support all 3 (small/medium/large) — table stakes |
+| Multi-host display | Rare, usually single target | N/A (CPU/memory focus) | Medium widget shows 3 hosts — differentiator |
+| Visual trends | Sometimes in large widget | Common (CPU graphs) | Defer mini graph to v2.x — validate demand first |
+| Refresh frequency | Often unclear/inconsistent | 1-5 min common | Timeline with 5 min + shared data — balance freshness and budget |
+| Deep links | Basic (open app) | Often to specific tab | Start basic, add host-specific in v2.x |
+| Cross-platform | iOS-only or macOS-only | macOS-focused | Foundation for future iOS — strategic advantage |
 
-| Category | Fit | Pros | Cons | Recommendation |
-|----------|-----|------|------|----------------|
-| Utilities | HIGH | Most accurate — system monitoring tool | Competitive, many utility apps | **Use this** |
-| Developer Tools | MEDIUM | Network monitoring useful for developers | Might limit audience perception (not just for developers) | Defer to v3 if "Utilities" doesn't work |
-| Business | LOW | Could fit for IT/network admin use | Not primary target audience; too broad | Avoid |
+## Widget-Specific Patterns & Best Practices
 
-**Recommendation:** Use **Utilities** as primary category. It accurately describes PingScope as a system monitoring tool for general macOS users (network admins, developers, power users, anyone troubleshooting connectivity).
+### Timeline Management
 
-**Rationale:**
-- PingScope is a utility first, developer tool second
-- "Utilities" aligns with competitors (SimplePing, iStat Menus network module)
-- Broader audience than "Developer Tools"
-- Easier to find via browse/filter
+**Pattern:** Provide multiple timeline entries vs single entry with refresh policy
 
-## Screenshot Strategy
+**Our Approach:**
+- Single timeline entry with `.after(nextUpdateDate)` policy
+- 5-minute refresh interval (well under 40-70/day budget)
+- Main app writes to shared container on every ping result
+- Widget reads latest data on each timeline refresh
 
-### Recommended Screenshot Set (5 images, 2880x1800)
+**Rationale:** Ping data changes unpredictably. Can't pre-generate meaningful timeline. Single entry + frequent app writes = fresh data without complex timeline logic.
 
-1. **Menu Bar Status + Full Interface** — Show colored dot, ping time in menu bar, and full dropdown with graph. Overlay text: "Real-time network monitoring in your menu bar"
-2. **Multi-Host Tabs + Live Graph** — Demonstrate multiple hosts (Google DNS, Cloudflare, Default Gateway) with live graph updating. Overlay text: "Monitor multiple hosts simultaneously"
-3. **Settings Panel + Host Management** — Show host management interface, add/edit/remove capabilities. Overlay text: "Flexible host configuration with ICMP, TCP, and UDP support"
-4. **Ping History Table** — Display detailed history with timestamps, color-coded status (green/yellow/red). Overlay text: "Complete ping history for debugging and analysis"
-5. **Compact Mode** — Show space-efficient compact view option. Overlay text: "Compact mode for minimal menu bar footprint"
+### Data Sharing Strategy
 
-**Design Guidelines:**
-- Use 2880x1800 resolution (16:10 ratio) — highest quality, Apple scales down automatically
-- Add subtle text overlays highlighting key features (white text with shadow for readability)
-- Show realistic data (not Lorem ipsum) — use actual ping times (10-50ms range looks healthy)
-- Maintain consistent visual style across all screenshots
-- Use macOS light mode for consistency (App Store screenshots traditionally use light mode; can provide dark mode screenshots later)
-- Include menu bar in screenshots 1, 2, and 5 (shows app in context)
-- Use clean, uncluttered desktop background (solid color or subtle gradient)
+**Pattern:** App Group containers are standard for widget data sharing
 
-### Screenshot Production Workflow
+**Our Approach:**
+- App Group ID: `group.com.hadm.pingmonitor.shared` (already documented)
+- JSON file: `pingdata.json` with array of host status objects
+- Main app writes on every ping result (already updating for existing widget spec)
+- Widget reads synchronously in timeline provider
 
-1. Launch PingScope v1.0
-2. Configure 3-4 hosts (Google DNS, Cloudflare, Default Gateway, custom)
-3. Let app run for 5-10 minutes to generate realistic graph data
-4. Capture screenshots at 2880x1800 using macOS Screenshot tool (Cmd+Shift+4, then Space to capture window)
-5. Add text overlays using Sketch, Figma, or Pixelmator Pro
-6. Export as PNG at 100% quality
-7. Validate file size < 10MB per screenshot
+**Rationale:** Simple, proven pattern. JSON serialization is straightforward. No complex database needed for small dataset (3-10 hosts).
 
-## Metadata Copywriting
+### Glanceable Information Design
 
-### App Name (30 chars max)
-**"PingScope"** (9 chars) — Short, memorable, descriptive
+**Pattern:** Widgets show status, not controls. Color coding + minimal text.
 
-### Subtitle (30 chars max)
-**"Network Latency Monitor"** (24 chars)
+**Our Approach:**
+- Small: Single host, large status dot (16x16), ping time, host name
+- Medium: 3 hosts side-by-side, smaller dots (12x12), abbreviated names
+- Large: List of all hosts, tiny dots (8x8), full names, ping times right-aligned
 
-Alternatives:
-- "Multi-Host Ping Monitor" (23 chars)
-- "Real-time Ping Monitor" (22 chars)
+**Color scheme:** Green (good <50ms), Yellow (slow 50-150ms), Red (poor >150ms), Gray (timeout)
 
-### Description (4000 chars max, ~600 words)
+**Rationale:** Users should understand status in <1 second glance. Color is fastest signal. Text is secondary.
 
-**Structure:**
-1. **Hook** (1-2 sentences) — What is it, who is it for
-2. **Key Features** (bullet list) — 7-10 differentiators from v1.0
-3. **Use Cases** (1 paragraph) — When to use it
-4. **Technical Details** (1 paragraph) — ICMP/TCP/UDP, sandbox modes
-5. **Call to Action** (1 sentence) — Download now, it's free
+### Widget Size Interaction Patterns
 
-**Draft:**
+**Pattern:** Small widgets = single tap target. Medium/Large = multiple tap targets.
 
+**Our Approach:**
+- Small: `widgetURL` modifier, opens main app (no specific host)
+- Medium: `Link` views per host, opens to specific host detail
+- Large: `Link` views per host row, opens to specific host detail
+
+**Rationale:** Small widget limited to single URL. Medium/Large can have multiple interactive zones using Link.
+
+### Placeholder Data Requirements
+
+**Pattern:** WidgetKit requires synchronous placeholder(in:) for widget gallery
+
+**Our Approach:**
+- Static sample data: Google (12.3ms, good), Cloudflare (8.7ms, good), Gateway (2.1ms, good)
+- Representative of typical good network state
+- No disk I/O, returns immediately
+
+**Rationale:** Placeholder shows in widget gallery before user adds widget. Must be instant and look realistic.
+
+### Platform-Aware Rendering
+
+**Pattern:** Widgets adapt to desktop vs Notification Center context via environment
+
+**Our Approach:**
+- Check `widgetRenderingMode` environment variable
+- `.fullColor`: Use full color palette (desktop widgets)
+- `.accented`: Adapt to system accent color (Notification Center)
+
+**Implementation:** Defer to P2. Both modes work without this, but accented mode integration is polish.
+
+### Refresh Budget Management
+
+**Pattern:** System limits widget updates to 40-70/day budget per widget
+
+**Our Approach:**
+- 5-minute timeline refresh = 288 potential updates/day
+- System throttles to ~40-70 actual updates based on widget visibility and user interaction
+- App writes to shared container on every ping (5-15 sec) = data always fresh
+- Widget shows latest data within budget constraints
+
+**Rationale:** We can't control budget, but we can ensure data is fresh whenever widget does refresh.
+
+## Cross-Platform Architecture Patterns
+
+### Platform UI Separation
+
+**Pattern:** Platform-specific UI wrappers around shared business logic
+
+**Our Approach:**
 ```
-PingScope is a professional network monitoring tool for macOS that displays real-time ping latency in your menu bar. Monitor multiple hosts simultaneously with beautiful graphs, detailed history, and intelligent notifications.
-
-KEY FEATURES:
-
-• Multi-Host Monitoring — Track Google DNS, Cloudflare, your router, or any custom IP/hostname
-• Real-time Visualization — Live latency graphs with smooth animations
-• Intelligent Notifications — 7 notification types: connection loss, high latency, recovery, degradation, intermittent issues, network changes, and internet outages
-• Detailed History — Complete ping history table with timestamps and color-coded status
-• Flexible Display Modes — Full interface (450x500) or compact mode (280x220) to save menu bar space
-• Stay-on-Top Option — Floating window for monitoring while you work
-• Data Export — Export ping history to CSV, JSON, or plain text for analysis
-• Dual Ping Modes — ICMP for accuracy (Developer ID builds) or TCP/UDP for sandboxed environments (App Store)
-• Privacy-Focused — All monitoring is local; no external servers, no telemetry, no data collection
-
-PERFECT FOR:
-
-Network administrators troubleshooting connectivity issues. Developers debugging API latency. Remote workers monitoring VPN stability. Gamers checking ping before matches. Anyone who needs reliable, accurate network monitoring.
-
-TECHNICAL DETAILS:
-
-PingScope supports true ICMP ping (when run outside the sandbox) and TCP/UDP simulation (when sandboxed for App Store distribution). All network monitoring is performed locally using macOS native frameworks — no external servers required. Configure ping intervals from 1 to 60 seconds. Supports both IPv4 and IPv6 hosts.
-
-Download PingScope now and take control of your network monitoring.
-```
-
-**Character count:** ~1,450 / 4,000 (room to expand with testimonials, awards, or additional features)
-
-### Keywords (100 chars max, comma-separated, no spaces)
-
-**"ping,latency,network,monitor,icmp,uptime,status,connection,tcp,udp,menubar,utility,graph,statistics"** (97 chars)
-
-**Keyword Strategy:**
-- **Primary keywords:** ping, latency, network, monitor (high traffic, high relevance)
-- **Technical keywords:** icmp, tcp, udp (low traffic, high intent — users who search these know what they want)
-- **Use case keywords:** uptime, status, connection (medium traffic, broad appeal)
-- **Feature keywords:** menubar, utility, graph, statistics (differentiate from generic network tools)
-
-**Avoid:**
-- Competitor names (SimplePing, iStat, etc.) — trademark violation
-- Generic terms (app, mac, macos) — waste of space, already indexed
-- Repeated words from app name (PingScope) — already indexed automatically
-
-### Promotional Text (170 chars max)
-
-**"Monitor multiple hosts with real-time graphs and 7 notification types. Supports ICMP, TCP, and UDP ping. Privacy-focused with local monitoring. Free on the App Store."** (169 chars)
-
-**Strategy:**
-- Highlight key differentiators (multi-host, 7 notifications, ICMP/TCP/UDP)
-- Emphasize privacy (no data collection)
-- Call out free pricing
-- Update seasonally or for new features (this field is editable without new build)
-
-## Export Compliance Determination
-
-### Encryption Use Analysis
-
-**Does PingScope use encryption?**
-- YES — Uses HTTPS for checking internet connectivity (optional feature)
-- YES — Uses TLS for secure connections (standard macOS frameworks)
-
-**Is this encryption exempt?**
-- YES — HTTPS/TLS via URLSession is standard encryption built into the OS
-- YES — No proprietary or non-standard encryption algorithms
-- YES — Qualifies for exemption under U.S. Export Administration Regulations
-
-**Required Declaration:**
-
-Add to Info.plist:
-```xml
-<key>ITSAppUsesNonExemptEncryption</key>
-<false/>
+Sources/
+  PingScope/              # Shared code (models, services, view models)
+  PingScope-macOS/        # macOS-specific (AppDelegate, MenuBar)
+  PingScope-iOS/          # Future: iOS-specific (scenes, tab bar)
+  PingScope-Shared/       # Shared SwiftUI views
+  PingMonitorWidget/      # Widget extension
 ```
 
-**Rationale:** PingScope uses only standard encryption provided by macOS (HTTPS via URLSession). This is explicitly exempt from export compliance documentation upload requirements per Apple's guidelines.
+**Rationale:** SwiftUI views can be shared. Platform integration (menu bar, navigation) cannot. Separate targets for each platform.
 
-**Export Compliance Documentation:** None required (exempt)
+### Shared ViewModels Pattern
 
-## Privacy Manifest Requirements
+**Pattern:** MVVM with platform-agnostic ViewModels
 
-### PrivacyInfo.xcprivacy Content
+**Our Approach:**
+- Extract `PingViewModel` to shared code (already exists)
+- Extract `HostListViewModel` to shared code (already exists)
+- Create `StatusPopoverViewModel` for shared display logic
+- macOS wraps in menu bar popover, iOS wraps in sheet/tab
 
-**Data Collection:** NONE
+**Rationale:** Business logic and state management is identical across platforms. Only presentation differs.
 
-**Network Access:**
-- **Purpose:** Ping monitoring (ICMP, TCP, UDP)
-- **Destination:** User-configured hosts (e.g., 8.8.8.8, 1.1.1.1, custom IPs)
-- **Data Sent:** ICMP echo requests or TCP/UDP packets (no user data)
-- **Data Received:** ICMP echo replies or TCP/UDP responses (latency only)
+### Conditional Compilation
 
-**Required Reason APIs Used:** NONE
-- No access to user data
-- No access to device identifiers
-- No file timestamp APIs
-- No system boot time APIs
+**Pattern:** Use `#if os(macOS)` / `#if os(iOS)` sparingly for platform differences
 
-**Third-Party SDKs:** NONE
-- PingScope uses only Apple frameworks (SwiftUI, AppKit, Network.framework, SystemConfiguration)
+**Our Approach:**
+- Prefer separate files per platform over #if blocks
+- Use #if only for small API differences (NSImage vs UIImage)
+- Keep shared code truly shared (no platform checks)
 
-**PrivacyInfo.xcprivacy Template:**
+**Rationale:** Separate files are easier to maintain and test than scattered #if blocks.
 
-```xml
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>NSPrivacyCollectedDataTypes</key>
-    <array/>
-    <key>NSPrivacyTrackingDomains</key>
-    <array/>
-    <key>NSPrivacyTracking</key>
-    <false/>
-    <key>NSPrivacyAccessedAPITypes</key>
-    <array/>
-</dict>
-</plist>
-```
+### Platform-Specific Features
 
-**Privacy Nutrition Label (App Store Connect):**
-- **Data Used to Track You:** None
-- **Data Linked to You:** None
-- **Data Not Linked to You:** None
-- **Summary:** "PingScope does not collect any user data. All network monitoring is performed locally on your device."
+**Pattern:** Features available on one platform but not others
+
+**Our Approach:**
+- Menu bar integration: macOS only
+- ICMP ping: macOS non-sandboxed only
+- Today widget: iOS only (if we add iOS support)
+- Desktop widgets: macOS only
+
+**Rationale:** Embrace platform differences. Don't force UI patterns across platforms.
+
+## Complexity Assessment
+
+### Simple (1-2 days)
+
+- Widget size variants layout (3 SwiftUI views)
+- Real-time status display (reuse existing data models)
+- Visual status indicators (reuse existing color logic)
+- Ping time display (format existing data)
+- Update timestamps (TimelineEntry.date)
+- Basic widget deep links (widgetURL modifier)
+- Widget configuration metadata (static strings)
+- Placeholder data (static sample data)
+
+### Moderate (3-5 days)
+
+- App Group container setup (entitlements, shared container access)
+- Timeline provider implementation (load data, create timeline, refresh policy)
+- Shared data pipeline (write from app, read from widget)
+- Platform UI separation (restructure Xcode project, separate targets)
+- Shared ViewModels extraction (refactor existing VMs to be platform-agnostic)
+- Host-specific deep links (URL parameters, navigation routing)
+- Platform-aware rendering (environment detection, color adaptation)
+
+### Complex (5+ days)
+
+- Mini latency graph (data aggregation, chart rendering, layout in widget constraints)
+- Full iOS/iPadOS support (new target, testing, App Store submission)
+- Widget intents (intent definition, configuration UI, dynamic widget)
 
 ## Sources
 
-### Official Apple Documentation (HIGH Confidence)
-- [Submitting to App Store](https://developer.apple.com/app-store/submitting/)
-- [Screenshot Specifications](https://developer.apple.com/help/app-store-connect/reference/app-information/screenshot-specifications/)
-- [Privacy Manifest Files](https://developer.apple.com/documentation/bundleresources/privacy-manifest-files)
-- [Configuring the macOS App Sandbox](https://developer.apple.com/documentation/xcode/configuring-the-macos-app-sandbox)
-- [Complying with Encryption Export Regulations](https://developer.apple.com/documentation/security/complying-with-encryption-export-regulations)
-- [Age Ratings Values and Definitions](https://developer.apple.com/help/app-store-connect/reference/app-information/age-ratings-values-and-definitions/)
-- [App Store Categories and Discoverability](https://developer.apple.com/app-store/categories/)
-- [App Review Guidelines](https://developer.apple.com/app-store/review/guidelines/)
-- [App Store Search Optimization](https://developer.apple.com/app-store/search/)
-- [TestFlight Overview](https://developer.apple.com/help/app-store-connect/test-a-beta-version/testflight-overview/)
-
-### Recent Updates (MEDIUM Confidence)
-- [Apple App Store Submission Changes — April 2026](https://medium.com/@thakurneeshu280/apple-app-store-submission-changes-april-2026-5fa8bc265bbe) — Xcode 26 requirement starting April 28, 2026
-- [Age Rating Updates (Jan 2026)](https://developer.apple.com/news/upcoming-requirements/?id=07242025a) — New age rating questionnaire deadline Jan 31, 2026
-- [macOS App Entitlements Guide (Medium, Jan 2026)](https://medium.com/@info_4533/macos-app-entitlements-guide-b563287c07e1) — Network access entitlements for sandboxed apps
-
-### Third-Party Resources (MEDIUM Confidence)
-- [App Store Screenshot Guidelines 2026](https://theapplaunchpad.com/blog/app-store-screenshots-guidelines-in-2026)
-- [14 Common Apple App Store Rejections](https://onemobile.ai/common-app-store-rejections-and-how-to-avoid-them/)
-- [App Store Promotional Text Guide](https://www.shyftup.com/blog/a-complete-guide-app-store-promotional-text/)
-- [App Store Descriptions Best Practices 2026](https://adapty.io/blog/app-store-description/)
-- [App Store Keyword Optimization 2026](https://splitmetrics.com/blog/app-store-keyword-optimization/)
+- [WidgetKit | Apple Developer Documentation](https://developer.apple.com/documentation/widgetkit)
+- [Developing a WidgetKit strategy | Apple Developer Documentation](https://developer.apple.com/documentation/widgetkit/developing-a-widgetkit-strategy)
+- [Keeping a widget up to date | Apple Developer Documentation](https://developer.apple.com/documentation/widgetkit/keeping-a-widget-up-to-date)
+- [TimelineProvider | Apple Developer Documentation](https://developer.apple.com/documentation/widgetkit/timelineprovider)
+- [Supporting additional widget sizes | Apple Developer Documentation](https://developer.apple.com/documentation/widgetkit/supporting-additional-widget-sizes)
+- [Linking to specific app scenes from your widget | Apple Developer Documentation](https://developer.apple.com/documentation/widgetkit/linking-to-specific-app-scenes-from-your-widget-or-live-activity)
+- [Building a Unified Multiplatform Architecture with SwiftUI](https://medium.com/@mrhotfix/building-a-unified-multiplatform-architecture-with-swiftui-ios-macos-and-visionos-6214b307466a)
+- [Improving multiplatform SwiftUI code · Jesse Squires](https://www.jessesquires.com/blog/2023/03/23/improve-multiplatform-swiftui-code/)
+- [Setting up a multi-platform SwiftUI project](https://blog.scottlogic.com/2021/03/04/Multiplatform-SwiftUI.html)
+- [Add and customize widgets on Mac - Apple Support](https://support.apple.com/guide/mac-help/add-and-customize-widgets-mchl52be5da5/mac)
+- [How to Update or Refresh a Widget? - Swift Senpai](https://swiftsenpai.com/development/refreshing-widget/)
+- [Understanding the Limitations of Widgets Runtime in iOS App Development](https://medium.com/@telawittig/understanding-the-limitations-of-widgets-runtime-in-ios-app-development-and-strategies-for-managing-a3bb018b9f5a)
+- [WidgetKit refresh rate limitations discussion - Apple Developer Forums](https://developer.apple.com/forums/thread/654331)
 
 ---
-*Feature research for: App Store Submission (macOS)*
-*Researched: 2026-02-16*
-*Context: v2.0 milestone — v1.0 product features complete, focusing exclusively on App Store submission requirements*
+*Feature research for: WidgetKit ping monitoring widgets & cross-platform architecture*
+*Researched: 2026-02-17*

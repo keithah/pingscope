@@ -1,230 +1,222 @@
 # Project Research Summary
 
-**Project:** PingScope v2.0 - Mac App Store Distribution
-**Domain:** macOS App Store Submission
-**Researched:** 2026-02-16
-**Confidence:** MEDIUM-HIGH
+**Project:** PingScope v2.0 - WidgetKit & Cross-Platform
+**Domain:** macOS menu bar network monitoring with widgets and iOS preparation
+**Researched:** 2026-02-17
+**Confidence:** HIGH
 
 ## Executive Summary
 
-PingScope v2.0 adds Mac App Store distribution to an existing, fully-functional menu bar network monitoring app currently distributed via Developer ID. The research reveals this is fundamentally an **integration and compliance challenge**, not a feature development effort. The v1.0 codebase already supports sandboxed operation via runtime detection, but requires infrastructure additions: Xcode project wrapper (SPM alone cannot submit to App Store), dual entitlement configurations (sandbox-enabled for App Store, sandbox-disabled for Developer ID), and compliance artifacts (privacy manifest, metadata, screenshots).
+PingScope v2.0 adds WidgetKit widgets and cross-platform architecture to the existing v1.1 macOS menu bar network monitoring app. The research reveals this is a **data sharing challenge** rather than a UI challenge. Widgets run in separate processes and cannot perform network operations due to system constraints (40-70 update/day budget, <1 second runtime). The recommended approach uses App Groups + shared UserDefaults as the data pipeline: the main app performs continuous ping monitoring and writes results to shared storage, while widgets display cached status through WidgetKit's TimelineProvider.
 
-The recommended approach is a **hybrid SPM + Xcode architecture** where Package.swift remains the source of truth for code organization, while an Xcode project wrapper provides App Store-specific capabilities (asset catalogs, provisioning profiles, build schemes). Both distribution channels share the same codebase with zero code duplication. The existing runtime sandbox detection (`SandboxDetector.isRunningInSandbox`) elegantly gates ICMP availability—App Store builds show TCP/UDP options only, Developer ID builds show all three.
+The key architectural decision is **platform separation over premature abstraction**. Models and services (PingService, HostStore) are fully shareable across macOS, iOS, and widgets. ViewModels should be shared at the business logic level but split at the platform level (MenuBarViewModel stays macOS-only; future iOS needs separate AppViewModel). This approach balances code reuse with platform-specific strengths while avoiding conditional compilation sprawl.
 
-The primary risk is **underestimating App Store compliance requirements**. Privacy manifest creation (mandatory since May 1, 2024), asset validation (opaque 1024x1024 PNG icon), entitlement configuration (separate files per distribution), and sandbox testing (archived builds, not just run-from-Xcode) are all rejection triggers if skipped. The critical deadline is **April 28, 2026**: Xcode 26+ with macOS 26 SDK becomes mandatory for all submissions. Secondary risk is menu bar apps being perceived as "incomplete" without visible UI—mitigated by including Preferences window, About panel, and explicit App Store description stating "menu bar utility."
+**Critical risks:** Widget update budget exhaustion from over-refreshing, macOS Sequoia App Groups requiring Team ID prefix (not `group.` like iOS), and network calls blocking widget timeline rendering. These are all preventable with proper architecture in Phase 1. The cross-platform preparation sets up the codebase for future iOS support without requiring iOS implementation in v2.0.
 
 ## Key Findings
 
 ### Recommended Stack
 
-v2.0 introduces **zero new runtime dependencies** for the application itself. All additions are build-time and distribution infrastructure. The v1.0 stack (Swift 6, SwiftUI with MenuBarExtra, Network.framework for TCP/UDP, actors for concurrency, UserDefaults for persistence) remains unchanged. The new stack components are **tooling-focused**: Xcode 26+ (mandatory April 2026), Xcode project wrapper (references local SPM package), Asset Catalog (for App Store icon requirements), and dual signing certificates (3rd Party Mac Developer Application/Installer for App Store vs. existing Developer ID certificates for GitHub releases).
+PingScope benefits from Swift 6 concurrency, WidgetKit (macOS 11+), and modern SwiftUI patterns. The existing v1.1 stack (Swift Concurrency, Network.framework, ObservableObject, UserDefaults) remains solid—v2.0 adds WidgetKit infrastructure and App Groups for data sharing.
 
 **Core technologies:**
-- **Xcode Project Wrapper**: Provides App Store submission capabilities SPM cannot — references Package.swift as local dependency, zero code migration required
-- **Asset Catalog (.xcassets)**: App Store mandates asset catalogs for icons (not manual .icns files) — 1024x1024 master icon, auto-generates runtime sizes
-- **Entitlement Files (dual)**: PingScope-AppStore.entitlements (sandbox enabled) vs. PingScope-DeveloperID.entitlements (hardened runtime only) — selected by build scheme
-- **Privacy Manifest (PrivacyInfo.xcprivacy)**: Mandatory since May 2024 for App Store — declares network access, no user data collection
-- **Build Schemes (dual)**: AppStore scheme vs. DeveloperID scheme — same codebase, different signing/entitlements/export configurations
+- **WidgetKit + TimelineProvider**: Apple's widget framework, required for macOS widgets — standard pattern since macOS 11
+- **App Groups + UserDefaults**: Data sharing between app and widget extension — uses Team ID prefix on macOS (not `group.` prefix)
+- **Network.framework**: TCP/UDP ping operations — already implemented, cross-platform (macOS + iOS)
+- **SwiftUI + ObservableObject**: State management — keep existing pattern for macOS 13 compatibility (skip @Observable)
+- **Swift Concurrency (async/await)**: Actor-based services — existing architecture is correct, fully shareable
 
-**Critical version requirement:** Xcode 26+ with macOS 26 SDK mandatory starting April 28, 2026 (official Apple requirement verified).
+**v2.0-specific additions:**
+- Widget Extension target (Xcode-only, SPM cannot create extensions)
+- Shared UserDefaults with suite name for app-widget communication
+- Compiler directives (`#if os(macOS)`) for platform isolation (minimize usage)
+- Asset catalog for widget icons
+
+**Critical constraint:** WidgetKit imposes 40-70 updates/day budget. Widgets cannot run continuous monitoring. Main app writes to shared storage on every ping; widgets refresh timeline every 5-15 minutes to read cached data.
 
 ### Expected Features
 
-v2.0 is **submission-focused, not feature-focused**. All v1.0 product features are complete (multi-host monitoring, 7 notification types, ICMP/TCP/UDP support, graph visualization, compact mode, CSV export). The "features" in this context are App Store compliance artifacts.
+Users expect widgets to show **glanceable network status**, not real-time updates. The research identifies clear table stakes vs competitive features.
 
 **Must have (table stakes):**
-- **App Metadata** — Name, subtitle (≤30 chars: "Network Latency Monitor"), description (≤4000 chars with key differentiators), keywords (≤100 chars: "ping,latency,network,monitor,icmp,uptime,status,connection,tcp,udp,menubar,utility,graph,statistics")
-- **App Icon** — 1024x1024 opaque PNG in asset catalog (Display P3 color space, no alpha channel)
-- **Screenshots** — 3-5 images at 2880x1800 showing menu bar + full interface, multi-host tabs, settings, history, compact mode
-- **Privacy Manifest** — PrivacyInfo.xcprivacy declaring network client access, explicitly stating "Data Not Collected"
-- **Privacy Nutrition Label** — App Store Connect questionnaire confirming no tracking, no data collection
-- **Age Rating** — 4+ (no objectionable content, deadline Jan 31, 2026 for new questionnaire)
-- **App Sandbox Entitlements** — `com.apple.security.app-sandbox = true`, `com.apple.security.network.client = true`
-- **Export Compliance** — Info.plist key: `ITSAppUsesNonExemptEncryption = NO` (HTTPS is exempt)
-- **Review Notes** — Explain dual sandbox modes to reviewers: "App Store build uses TCP/UDP (sandboxed), Developer ID supports ICMP (non-sandboxed)"
+- Small/Medium/Large widget size variants — users expect all 3 sizes
+- Visual status indicators (color-coded dots) — universal in network monitoring
+- Ping time display — core value proposition
+- Tap widget to open app — standard interaction
+- Update timestamps — users need to trust freshness
 
 **Should have (competitive):**
-- **Promotional Text** — 170-char updateable field highlighting differentiators: "Monitor multiple hosts with real-time graphs and 7 notification types. Supports ICMP, TCP, and UDP ping. Privacy-focused. Free."
-- **App Preview Video** — 20-30 second demo (increases conversion 20-30%): menu bar status → open popover → switch tabs → live graph → settings
-- **TestFlight Beta** — Test App Store builds with 10-20 external testers before public release
-- **Strategic Keywords** — Use ASO tools to optimize 100-char keyword field for discoverability
+- Multi-host summary view in medium widget — most competitors show single host
+- Shared data pipeline via App Groups — required for widget functionality
+- Platform UI separation (macOS-specific + shared layer) — foundation for iOS
 
-**Defer (v3+):**
-- **Localization** — Translate to top 5-10 languages (high cost, expands addressable market)
-- **Custom Product Pages** — A/B test messaging for different user segments (network admins vs. developers)
-- **Multiple Screenshot Sizes** — Provide all 4 resolutions instead of just highest (minor quality improvement, 2x work)
+**Defer (v2.x+):**
+- Mini latency graph in widgets — validates user interest in trends after core widgets work
+- Host-specific deep links — add after confirming users tap widgets
+- iOS/iPadOS support — requires App Store iOS build, separate milestone
+- Widget intents (user configuration) — significant complexity, unclear demand
+
+**Anti-features to avoid:**
+- Real-time continuous updates (exhausts budget)
+- Interactive controls in widgets (complexity, limited value)
+- Custom widget refresh intervals (system controlled)
 
 ### Architecture Approach
 
-v2.0 architecture is **additive, not disruptive**. The existing SPM-based MVVM structure (`App/`, `Services/`, `ViewModels/`, `Views/`, `MenuBar/`, `Models/`, `Utilities/`, `Resources/`) remains completely unchanged. The pattern is **Xcode project wrapping local SPM package**: Xcode project references the root-level Package.swift as a local dependency, allowing Xcode to build SPM code without source duplication. Build schemes differentiate distributions: AppStore scheme applies sandbox entitlements and uses App Distribution certificates; DeveloperID scheme applies hardened runtime entitlements and uses Developer ID certificates.
+The architecture uses **actor-based services + @MainActor ViewModels + coordinator pattern**. This existing structure works well and should be preserved. The v2.0 addition is a shared data layer accessible to widgets.
 
 **Major components:**
-1. **Xcode Project Wrapper** — PingScope.xcodeproj references Package.swift via local package dependency, provides App Store submission capabilities (asset catalogs, provisioning profiles, build configs)
-2. **Dual Entitlement Configuration** — PingScope-AppStore.entitlements (sandbox enabled, network.client only) vs. PingScope-DeveloperID.entitlements (sandbox disabled, hardened runtime flags), selected by build scheme
-3. **Build Scheme Differentiation** — AppStore scheme (sandbox, App Distribution cert, export for App Store Connect) vs. DeveloperID scheme (hardened runtime, Developer ID cert, export for DMG/PKG), single codebase serves both
-4. **CI/CD Workflow Split** — Parallel workflows: production-release.yml (Developer ID, GitHub releases, existing) + appstore-release.yml (App Store, Transporter upload, new), triggered independently
-5. **Runtime Sandbox Detection** — SandboxDetector.isRunningInSandbox gates ICMP availability (already implemented in v1.0), App Store builds show TCP/UDP only, Developer ID builds show all three methods
 
-**Data flow unchanged:** App launch → sandbox detection → feature gating → user sees appropriate ping methods. Build-time flow splits: SPM → manual .app assembly → Developer ID signing (existing) vs. Xcode → archive → App Store export → upload (new).
+1. **WidgetExtension target** — Separate build target with TimelineProvider, widget views, reads shared UserDefaults
+2. **Shared data models** — Move Host, PingResult to shared code accessible by app + widget
+3. **WidgetDataStore service** — Encapsulates UserDefaults(suiteName:) access, called by main app after ping results
+4. **Platform separation** — macOS/ folder for menu bar code, Shared/ folder for models/services/ViewModels
+5. **WidgetCenter integration** — AppDelegate calls `WidgetCenter.shared.reloadAllTimelines()` on state changes (not every ping)
+
+**Data flow:** PingService (actor) → PingScheduler → AppDelegate.ingestResult() → [MenuBarViewModel + WidgetDataStore.save()] → WidgetCenter.reload() → Widget TimelineProvider reads UserDefaults → Widget views
+
+**Cross-platform pattern:** Share models (100%), services (100%), ViewModels (business logic 100%, presentation layer split), views (leaf views 80%, root views 0%). Use `#if os()` only for platform API differences (SystemConfiguration on macOS, alternative on iOS).
 
 ### Critical Pitfalls
 
-**1. Raw Socket ICMP Incompatibility** — App Sandbox blocks raw sockets; no entitlement exists to permit ICMP in sandboxed apps. **Mitigation**: PingScope already implements TCP/UDP fallback. Runtime detection gates ICMP availability. App Store description must explain sandbox limitations. Both distributions coexist peacefully.
+1. **Widget update budget exhaustion** — Updating widgets every few minutes exhausts 40-70/day budget, causing widgets to freeze. **Avoidance:** Timeline entries spaced 5-15 minutes minimum, main app writes to shared storage on every ping (data fresh), widget shows cached data.
 
-**2. Privacy Manifest Missing/Incomplete** — Mandatory since May 1, 2024. Apps using "required reason APIs" (UserDefaults, file timestamps, system boot time) must declare usage with approved reason codes. **Mitigation**: Create PrivacyInfo.xcprivacy declaring network access, explicitly state "Data Not Collected" (PingScope monitors locally, no telemetry). Validate with `xcrun altool --validate-app` before submission.
+2. **App Groups Team ID prefix on macOS Sequoia** — Using iOS-style `group.` prefix fails silently on macOS. **Avoidance:** macOS uses `<TEAMID>.com.hadm.pingscope.shared` format, iOS uses `group.com.hadm.pingscope.shared`, conditional entitlements if supporting both.
 
-**3. Entitlement Configuration Discrepancy** — Developer ID doesn't require sandbox, App Store does. Developers test with Developer ID and assume App Store works identically. **Mitigation**: Separate entitlement files (PingScope-AppStore.entitlements vs. PingScope-DeveloperID.entitlements), build schemes select correct file, test archived builds (not just run-from-Xcode), verify with `codesign -d --entitlements -`.
+3. **Network calls blocking widget timeline** — Attempting to ping hosts in widget causes "Unable to Load Widget" errors (10-15 second timeout, ping operations exceed this). **Avoidance:** Widget displays pre-computed results from shared UserDefaults, main app performs all network operations.
 
-**4. Menu Bar App Perceived as Incomplete** — LSUIElement = true (no Dock icon) triggers "insufficient functionality" rejection if reviewers can't find app UI. **Mitigation**: Include Preferences window (already exists in v1.0), About panel, keyboard shortcuts. App Store description explicitly states "menu bar utility, does not appear in Dock." Screenshot 1 shows menu bar in context.
+4. **Premature cross-platform abstraction** — Scattering `#if os(macOS)` conditionals throughout ViewModels creates maintenance burden. **Avoidance:** Platform-specific ViewModels (MenuBarViewModel for macOS, AppViewModel for iOS future), shared business logic in services, file organization separates macOS/ vs Shared/ vs iOS/.
 
-**5. Asset Validation Failures** — 1024x1024 icon with alpha channel rejected; asset catalog required for App Store (manual .icns not accepted). **Mitigation**: Ensure icon is opaque RGB PNG in asset catalog, validate before upload with `xcrun altool --validate-app`, increment build number if resubmitting.
+5. **Widget/app state synchronization** — Widgets show stale data if app doesn't trigger reloads. **Avoidance:** `WidgetCenter.shared.reloadTimelines()` called after UserDefaults writes, wrapped in helper function to ensure consistency.
+
+6. **@Observable minimum version lock-in** — Adopting @Observable forces macOS 14+, cutting off macOS 13 users. **Avoidance:** Keep existing ObservableObject for v2.0, maintain macOS 13.0 support.
 
 ## Implications for Roadmap
 
-Based on research, suggested 4-phase structure optimized for **incremental validation** and **risk reduction**:
+Based on research, suggested 2-phase structure for v2.0:
 
-### Phase 1: Xcode Infrastructure Setup
-**Rationale:** Must establish dual-build capability before compliance work. SPM alone cannot submit to App Store—Xcode project wrapper is prerequisite. This phase has zero impact on existing Developer ID workflow (all changes additive).
+### Phase 1: Widget Foundation
+**Rationale:** Data sharing and widget infrastructure must come first. Widgets require App Groups configuration and shared data access before any UI can work. This phase addresses the highest-risk pitfalls (budget exhaustion, App Groups misconfiguration, network blocking).
 
-**Delivers:**
-- PingScope.xcodeproj created, references Package.swift as local dependency
-- Dual build schemes (AppStore, DeveloperID) configured with separate entitlement files
-- Asset catalog with 1024x1024 opaque icon (migrated from existing .icns)
-- Info.plist moved to Xcode management, version automation enabled
-- Both builds produce identical functionality (sandbox detection already implemented)
+**Delivers:** Working widgets (small/medium/large) displaying live ping status from main app
 
-**Addresses (STACK.md):** Xcode project wrapper pattern, build scheme differentiation, entitlement file per distribution channel
+**Addresses:**
+- Widget size variants (table stakes from FEATURES.md)
+- Real-time status display via shared data
+- Visual status indicators (reuse existing logic)
+- App Group container setup (required for widget access)
+- Timeline provider with 5-15 min refresh
 
-**Avoids (PITFALLS.md):** Entitlement configuration discrepancy (separate files from start), asset validation failures (icon compliance verified early)
+**Avoids:**
+- Widget update budget exhaustion (timeline spacing)
+- App Groups Team ID mismatch (macOS-specific configuration)
+- Network calls blocking timeline (widgets read only)
+- Widget/app state drift (WidgetCenter reload triggers)
 
-**Research flag:** Standard Xcode integration pattern—skip `/gsd:research-phase`, use established patterns from ARCHITECTURE.md Phase 1-2 migration steps.
+**Stack elements:**
+- WidgetKit framework
+- TimelineProvider protocol
+- App Groups entitlement
+- UserDefaults(suiteName:)
 
-### Phase 2: Privacy and Compliance
-**Rationale:** Privacy manifest is mandatory (May 2024 requirement) and most common rejection cause after entitlement errors. Completing compliance artifacts before submission preparation prevents last-minute scrambles.
+**Architecture:**
+- Widget Extension target (Xcode)
+- WidgetDataStore service
+- TimelineEntry model
+- Widget views (small/medium/large)
 
-**Delivers:**
-- PrivacyInfo.xcprivacy created, declares network.client access, states "Data Not Collected"
-- Privacy Nutrition Label questionnaire completed in App Store Connect (dry-run, not submitted)
-- Export compliance declaration added to Info.plist: ITSAppUsesNonExemptEncryption = NO
-- Age rating questionnaire completed (4+, deadline Jan 31, 2026)
-- Sandbox testing completed (archived App Store build runs on clean macOS VM, ICMP correctly hidden)
+**Research flags:** None — WidgetKit patterns are well-documented. Standard implementation.
 
-**Addresses (FEATURES.md):** Privacy Manifest, Privacy Nutrition Label, Export Compliance, Age Rating (all table stakes)
+### Phase 2: Cross-Platform Architecture
+**Rationale:** With widgets working, restructure codebase for future iOS support. This phase doesn't ship iOS but sets up platform separation so iOS can be added later without major refactoring. Addresses premature abstraction pitfall by establishing clear boundaries.
 
-**Avoids (PITFALLS.md):** Privacy manifest missing/incomplete, wrong reason codes, sandbox testing skipped
+**Delivers:** Platform-separated codebase (macOS/, Shared/, future iOS/) with shared ViewModels and services
 
-**Research flag:** Compliance requirements are well-documented—skip `/gsd:research-phase`, follow official Apple TN3183 for required reason API codes.
+**Addresses:**
+- Platform UI separation (competitive feature)
+- Shared ViewModels extracted from macOS code
+- Foundation for future iOS/iPadOS support
 
-### Phase 3: App Store Metadata and Assets
-**Rationale:** Metadata creation requires understanding v1.0 product value (complete after Phase 2 sandbox testing confirms feature parity). Screenshot production requires stable UI (v1.0 already shipped). This phase is pure content creation with zero code changes.
+**Avoids:**
+- Premature cross-platform abstraction (file organization, not conditionals)
+- Shared ViewModel pollution (MenuBarViewModel stays macOS-only)
 
-**Delivers:**
-- App metadata: Name, subtitle ("Network Latency Monitor"), description (600 words highlighting differentiators), keywords (97 chars optimized)
-- Screenshots: 5 images at 2880x1800 showing (1) menu bar + full interface, (2) multi-host tabs + graph, (3) settings, (4) ping history, (5) compact mode
-- App icon: 1024x1024 verified opaque RGB PNG in asset catalog (from Phase 1)
-- Support URL: GitHub repo or dedicated support page
-- Copyright notice: © 2026 Keith Harris (or appropriate entity)
-- Review notes: Explain dual sandbox modes, how to test ICMP vs. TCP/UDP
+**Stack elements:**
+- Compiler directives (`#if os(macOS)`)
+- Platform abstraction patterns
+- Shared Package.swift structure
 
-**Addresses (FEATURES.md):** App Metadata, Screenshots, App Icon, Support URL, Copyright, Review Notes (all table stakes)
+**Architecture:**
+- Folder reorganization (macOS/, Shared/, WidgetExtension/)
+- Platform-specific ViewModels
+- Shared services remain actors
 
-**Avoids (PITFALLS.md):** Menu bar app perceived as incomplete (screenshots show app in context, description states "menu bar utility"), metadata rejection (follows App Review Guidelines)
-
-**Research flag:** Standard metadata creation—skip `/gsd:research-phase`, use copywriting templates from FEATURES.md sections 262-336.
-
-### Phase 4: CI/CD and Submission
-**Rationale:** Automation only after manual submission succeeds. First submission likely hits unexpected validation errors—manual workflow allows rapid iteration. CI/CD automation deferred until approval proves configuration correct.
-
-**Delivers:**
-- Manual submission workflow documented: xcodebuild archive → exportArchive → validate → upload via Transporter
-- App Store Connect configuration: app listing created, metadata entered, screenshots uploaded
-- TestFlight build uploaded for internal testing (up to 100 users, no review required)
-- First submission to App Review (expect 24-48 hour review time)
-- CI/CD workflow (.github/workflows/appstore-release.yml) created but not automated (manual trigger only)
-
-**Addresses (FEATURES.md):** App Bundle Validation, Code Signing, Xcode 26+ Build, TestFlight Beta (P1-P2)
-
-**Avoids (PITFALLS.md):** Duplicate binary version confusion (version numbering strategy established), asset validation failures (validated before upload), wrong build scheme (manual process forces verification)
-
-**Research flag:** Submission process is well-documented—skip `/gsd:research-phase`, follow official Apple "Submitting to App Store" guide. Note: First submission will likely reveal edge cases not in research—plan for 1-2 iteration cycles.
+**Research flags:** None — SwiftUI multiplatform patterns are well-established. Reorganization is low-risk with proper testing.
 
 ### Phase Ordering Rationale
 
-- **Infrastructure first (Phase 1):** Cannot create compliance artifacts until dual-build capability exists. Xcode project is prerequisite for asset catalogs, entitlements, provisioning.
-- **Compliance second (Phase 2):** Privacy manifest creation requires understanding what v1.0 collects (answer: nothing). Sandbox testing validates runtime detection works in actual App Store environment, not just development sandbox.
-- **Content third (Phase 3):** Screenshots require stable UI (v1.0 done). Metadata requires understanding differentiators (validated via Phase 2 testing). No dependencies on Phase 4.
-- **Submission last (Phase 4):** Manual workflow first allows learning from validation errors. CI/CD automation deferred until configuration proven correct.
+- **Widget Foundation first:** Widgets cannot function without data sharing. App Groups setup and WidgetDataStore are prerequisites for any widget UI. Research shows widget budget exhaustion is the #1 pitfall—addressing this in Phase 1 prevents rework.
 
-**Dependency chain:** Phase 1 (Xcode project) → Phase 2 (uses Phase 1 build schemes for sandbox testing) → Phase 3 (uses Phase 2 sandbox testing for screenshot realism) → Phase 4 (uses Phase 1-3 artifacts for submission).
+- **Cross-Platform second:** Restructuring is safer after widgets work. Phase 1 validates the shared data model design. Phase 2 can then extract shared code confidently, knowing what actually needs to be shared vs platform-specific.
 
-**Pitfall avoidance:** Incremental validation catches errors early. Phase 1 verifies build infrastructure before compliance work. Phase 2 verifies sandbox compatibility before content creation. Phase 3 verifies metadata quality before submission. Phase 4 validates everything together.
+- **Defer enhancements:** Mini latency graphs, host-specific deep links, iOS implementation deferred to v2.x+. Research shows these are nice-to-have; core widget functionality validates user demand first.
+
+**Phase dependencies:**
+- Phase 1 has no dependencies (can start immediately)
+- Phase 2 depends on Phase 1 complete (validates shared models)
+
+**Testing strategy per phase:**
+- Phase 1: Monitor widget updates over 48 hours (verify budget), test shared UserDefaults access (verify Team ID prefix), measure timeline provider completion time (verify <2 sec)
+- Phase 2: Count `#if os()` occurrences (<10), verify platform VMs cleanly separated, test macOS app + widget still work after reorganization
 
 ### Research Flags
 
-**Needs research:**
-- **None** — All phases use well-documented patterns from Apple official docs and verified 2025-2026 sources.
+**Phases with standard patterns (skip research-phase):**
+- **Phase 1 (Widget Foundation):** WidgetKit is well-documented with clear examples. App Groups + UserDefaults pattern is established. No research needed.
+- **Phase 2 (Cross-Platform Architecture):** SwiftUI multiplatform patterns are standard. File organization is straightforward refactoring, not novel architecture.
 
-**Standard patterns (skip research-phase):**
-- **Phase 1:** Xcode integration patterns documented in ARCHITECTURE.md Phase 1-3 migration steps. Local SPM package reference is standard Xcode feature.
-- **Phase 2:** Privacy manifest requirements in official TN3183. Export compliance in official Apple docs. Sandbox entitlements in official Apple docs.
-- **Phase 3:** Screenshot specifications in official App Store Connect docs. Metadata guidelines in App Review Guidelines 2.3-2.4.
-- **Phase 4:** Submission workflow in official "Submitting to App Store" guide. xcodebuild command-line tools in Xcode documentation.
-
-**Special note:** Phase 4 (first submission) will likely reveal edge cases not in research. Budget 1-2 iteration cycles for validation errors. Common first-submission issues: icon transparency (should be caught in Phase 1), privacy manifest format errors (should be caught in Phase 2), metadata guideline violations (should be caught in Phase 3). If unexpected rejection occurs, use recovery strategies from PITFALLS.md section 245-259.
+**No phases require /gsd:research-phase** — All patterns are documented and understood.
 
 ## Confidence Assessment
 
 | Area | Confidence | Notes |
 |------|------------|-------|
-| Stack | HIGH | Xcode 26 requirement official Apple announcement. Asset catalog requirement verified in multiple sources. SPM + Xcode hybrid pattern confirmed in 2025-2026 articles. |
-| Features | HIGH | App Store requirements from official Apple docs (screenshot specs, privacy manifest, age rating). Metadata best practices from multiple verified sources. |
-| Architecture | MEDIUM-HIGH | Xcode wrapper pattern well-documented. Entitlement differentiation standard practice. SPM local package reference confirmed but fewer sources than other topics. |
-| Pitfalls | MEDIUM | Critical pitfalls (sandbox blocking ICMP, privacy manifest mandatory) verified in official Apple docs and forums. Recovery strategies based on common patterns but project-specific validation needed. |
+| Stack | HIGH | WidgetKit, App Groups, Network.framework all verified in Apple docs and community sources. macOS Sequoia Team ID requirement confirmed in Apple Developer Forums. |
+| Features | HIGH | Widget size expectations are WidgetKit standard. Table stakes vs competitive features validated across competitor analysis. Anti-features grounded in system constraints. |
+| Architecture | HIGH | Actor-based services + TimelineProvider pattern is established. Data sharing via App Groups is official Apple approach. Cross-platform separation patterns have strong community consensus. |
+| Pitfalls | MEDIUM-HIGH | Widget budget exhaustion (HIGH — Apple docs + community), Team ID prefix (HIGH — Apple Forums), network blocking (HIGH — WidgetKit docs), premature abstraction (MEDIUM — community patterns). |
 
-**Overall confidence:** MEDIUM-HIGH
-
-Research quality is high for official Apple requirements (Xcode 26 mandate, privacy manifest, sandbox entitlements, asset catalog). Medium for implementation patterns (Xcode wrapper, build schemes) due to fewer authoritative sources, but multiple 2025-2026 articles confirm approach. Low confidence areas identified and flagged for validation during execution (first submission edge cases, CI/CD workflow-specific details).
+**Overall confidence:** HIGH
 
 ### Gaps to Address
 
-**Gap 1: First-submission edge cases** — Research covers documented requirements, but every app hits unique validation errors. **Handling:** Phase 4 uses manual submission workflow first (not automated CI/CD). Budget 1-2 iteration cycles. Common issues documented in PITFALLS.md recovery strategies (section 245-259). Use `xcrun altool --validate-app` before upload to catch most issues locally.
+- **Widget refresh timing optimization:** Research suggests 5-15 minute intervals, but optimal value depends on user behavior. Phase 1 should implement configurable interval with 5-min default, gather analytics to tune in v2.1.
 
-**Gap 2: TestFlight external testing approval** — External TestFlight requires App Review for first build only. Unclear if PingScope's dual sandbox modes will trigger extra scrutiny. **Handling:** Start with internal TestFlight (up to 100 users, no review). If internal testing succeeds, proceed to external. Review notes explain dual modes clearly.
+- **App Groups container size limits:** Research identified 10 MB warning threshold, but macOS-specific limits unclear. Phase 1 should log UserDefaults data size, monitor during beta testing.
 
-**Gap 3: App Store Connect API automation** — Research shows CLI tools exist (`xcrun altool --upload-package`, App Store Connect API with JWT), but less documentation for macOS than iOS. **Handling:** Phase 4 uses manual Transporter upload for first submission. CI/CD automation (using `xcrun altool`) deferred to post-approval based on manual workflow learnings.
+- **@Observable adoption timeline:** Research recommends keeping ObservableObject for macOS 13 support. Decision point: v3.0 could bump to macOS 14 and adopt @Observable if user base shifts. Monitor macOS version analytics.
 
-**Gap 4: Keyword optimization effectiveness** — Research provides keyword strategy, but ASO tools (AppTweak, Asolytics) require subscription and historical data. **Handling:** Phase 3 uses manual keyword research (competitor analysis, avoiding trademarked terms). ASO tool optimization deferred to v2.1 after App Store presence established.
+- **iOS timeline differences:** Research notes iOS Lock Screen widgets may have different budget constraints. Validate during iOS implementation (Phase 3+).
 
-**No critical gaps:** All table-stakes requirements (entitlements, privacy manifest, sandbox testing, asset compliance) are well-documented with official Apple sources. Implementation risks are mitigated by incremental validation (Phase 1 verifies builds, Phase 2 verifies compliance, Phase 3 verifies content, Phase 4 integrates everything).
+- **Widget interaction patterns:** Research defers host-specific deep links. Phase 1 should track widget tap analytics to validate demand for this feature in v2.x.
 
 ## Sources
 
 ### Primary (HIGH confidence)
-- **Official Apple Documentation:**
-  - [TN3151: Choosing the right networking API](https://developer.apple.com/documentation/technotes/tn3151-choosing-the-right-networking-api) — Network.framework for TCP/UDP, ICMP limitations confirmed
-  - [Xcode 26 requirement (April 28, 2026)](https://developer.apple.com/news/upcoming-requirements/) — Mandatory for all App Store submissions
-  - [Privacy manifest files](https://developer.apple.com/documentation/bundleresources/privacy-manifest-files) — Mandatory since May 1, 2024
-  - [TN3183: Required reason API codes](https://developer.apple.com/documentation/technotes/tn3183-adding-required-reason-api-entries-to-your-privacy-manifest) — UserDefaults, file timestamps, system boot time APIs
-  - [Configuring the macOS App Sandbox](https://developer.apple.com/documentation/xcode/configuring-the-macos-app-sandbox) — Entitlement configuration
-  - [Screenshot specifications](https://developer.apple.com/help/app-store-connect/reference/screenshot-specifications/) — 2880x1800, 16:10 ratio, max 10MB
-  - [App Review Guidelines](https://developer.apple.com/app-store/review/guidelines/) — Section 2.3.8 (no generic superlatives), 4.3 (spam/clones)
+- Apple Developer Documentation: WidgetKit, TimelineProvider, App Groups, Network.framework, Swift Concurrency
+- Apple Developer Forums: App Groups Team ID requirement (macOS Sequoia), widget budget limits, UserDefaults sharing
+- WWDC sessions: WidgetKit strategy, keeping widgets up to date
 
 ### Secondary (MEDIUM confidence)
-- **2025-2026 Developer Articles:**
-  - [Modern iOS Architecture: Build Modular Apps with Swift Package Manager (2025)](https://ravi6997.medium.com/modern-ios-architecture-building-a-modular-project-with-swift-package-manager-033d8de9799f) — SPM + Xcode hybrid pattern
-  - [macOS App Entitlements Guide (Jan 2026)](https://medium.com/@info_4533/macos-app-entitlements-guide-b563287c07e1) — Network access entitlements, raw socket limitations
-  - [What I Learned Building a Native macOS Menu Bar App](https://medium.com/@p_anhphong/what-i-learned-building-a-native-macos-menu-bar-app-eacbc16c2e14) — LSUIElement, insufficient functionality issues
-  - [App Store Screenshot Guidelines 2026](https://theapplaunchpad.com/blog/app-store-screenshots-guidelines-in-2026) — Screenshot strategy, text overlays
-  - [14 Common App Store Rejections](https://onemobile.ai/common-app-store-rejections-and-how-to-avoid-them/) — Metadata violations, privacy issues
+- Community articles: SwiftUI multiplatform architecture (Jesse Squires, Medium), WidgetKit pitfalls (Medium), cross-platform patterns (Kodeco)
+- Technical blogs: Widget data sharing (Use Your Loaf), UserDefaults with widgets (SwiftLee), compiler directives (Swift by Sundell)
 
-- **Apple Developer Forums:**
-  - [Network.Framework ICMP/Ping](https://developer.apple.com/forums/thread/709256) — Confirms ICMP unavailable in sandbox, no entitlement exists
-  - [Raw Socket: Operation not permitted](https://developer.apple.com/forums/thread/660179) — Raw socket sandbox blocking
+### Tertiary (LOW confidence)
+- Widget budget "400 entry limit" — community reported, not in official docs (needs validation)
+- iOS Lock Screen widget budget differences — assumed different, needs iOS testing
 
-### Tertiary (LOW confidence - requires validation)
-- [App Store Keyword Optimization 2026](https://splitmetrics.com/blog/app-store-keyword-optimization/) — ASO strategy, needs validation with actual App Store placement
-- [Local SPM (Part 2) — Mastering Modularization (Xcode 26)](https://medium.com/@guycohendev/local-spm-part-2-mastering-modularization-with-swift-package-manager-xcode-15-16-d5a11ddd166c) — Local package reference, confirmed but single source
+**All sources aggregated from:** STACK.md, FEATURES.md, ARCHITECTURE.md, PITFALLS.md
 
 ---
-*Research completed: 2026-02-16*
+*Research completed: 2026-02-17*
 *Ready for roadmap: yes*
