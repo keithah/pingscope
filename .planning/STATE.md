@@ -5,56 +5,30 @@
 See: `.planning/PROJECT.md` (updated 2026-02-17)
 
 **Core value:** Reliable, accurate ping monitoring that users can trust — no false timeouts, no stale connections, no crashes.
-**Current focus:** Phase 15 - App Store Metadata and Assets (v1.1 App Store Release)
+**Current focus:** Defining requirements for v2.0 (Widgets & Cross-Platform Architecture)
 
 ## Current Position
 
-Phase: 16 of 16 (Submission and Distribution)
-Plan: 1 of 4
-Status: In Progress
-Last activity: 2026-02-17 — Completed 16-01 (App Store Build Archiving and Validation)
+Phase: Not started (defining requirements)
+Plan: —
+Status: Defining requirements
+Last activity: 2026-02-17 — Milestone v2.0 started
 
-Progress: [█████████████████░░░] 94% (v1.1: 15/16 phases complete, 1/4 plans in Phase 16)
+Progress: [░░░░░░░░░░░░░░░░░░░░] 0% (v2.0: requirements definition in progress)
 
 ## Performance Metrics
 
-**Velocity:**
-- Total plans completed: 62
-- Average duration: 3 min
-- Total execution time: 3.46 hours
+**Previous milestones:**
+- v1.0: 50 plans across 12 phases
+- v1.1: 13 plans across 4 phases
+- Combined: 63 plans, ~3.5 hours total execution
 
-**By Phase:**
+**v2.0 (current):**
+- Plans completed: 0
+- Phases complete: 0
+- Status: Requirements definition
 
-| Phase | Plans | Total | Avg/Plan |
-|-------|-------|-------|----------|
-| 1. Foundation | 4 | 4 | 2 min |
-| 2. Menu Bar & State | 4 | 4 | 3 min |
-| 3. Host Monitoring | 9 | 9 | 2 min |
-| 4. Display Modes | 5 | 5 | 3 min |
-| 5. Visualization | 3 | 3 | 2 min |
-| 6. Notifications & Settings | 8 | 8 | 3 min |
-| 7. Settings Focus | 4 | 4 | 3 min |
-| 8. Visualization Reconciliation | 1 | 1 | 15 min |
-| 9. Regression Test Wiring Recovery | 1 | 1 | 2 min |
-| 10. True ICMP Support | 4 | 4 | 3 min |
-| 11. Tech Debt Closure | 4 | 4 | 7 min |
-| 12. ICMP Host Persistence | 3 | 3 | 2 min |
-| 13. Xcode Infrastructure Setup | 4 | 4 | 2 min |
-| 14. Privacy and Compliance | 3 | 3 | 4 min |
-| 15. App Store Metadata and Assets | 2 | 2 | 25 min |
-| 16. Submission and Distribution | 1 | 4 | 1 min |
-
-**Recent Trend:**
-- Last 5 plans: 16-01 (1 min), 15-02 (48 min), 15-01 (2 min), 14-03 (8 min), 14-02 (manual)
-- Trend: Stable with manual verification steps
-
-*Updated after each plan completion*
-| Phase 14 P01 | 2 | 3 tasks | 2 files |
-| Phase 14 P02 | manual | 1 task | 0 files |
-| Phase 14 P03 | 8 | 2 tasks | 1 files |
-| Phase 15 P01 | 2 | 3 tasks | 10 files |
-| Phase 15 P02 | 48 | 3 tasks | 7 files |
-| Phase 16 P01 | 1 | 3 tasks | 5 files |
+*Will track velocity as execution begins*
 
 ## Accumulated Context
 
@@ -93,40 +67,16 @@ None.
 
 ### Blockers/Concerns
 
-**Phase 13:** ✅ Complete
-- Dual-build capability verified for App Store and Developer ID distributions
-- Deferred: Entitlements differentiation (will address during final distribution setup)
-- Deferred: Escape key UX improvement (post-submission enhancement)
-
-**Phase 14:** ✅ Complete
-- Privacy manifest verified complete (UserDefaults with CA92.1)
-- Export compliance declared (ITSAppUsesNonExemptEncryption=false)
-- Verification tooling created and fixed (Scripts/verify-sandbox.sh)
-- App Store Connect questionnaires complete (Privacy Nutrition Label: Data Not Collected, Age Rating: 4+)
-- App Store archive created and verified (sandbox enabled, ICMP hidden, TCP/UDP functional)
-
-**Phase 15:** ✅ Complete
-- Plan 15-01 complete: App Store metadata text files created and validated
-- Plan 15-02 complete: Five App Store screenshots captured at 2880x1800 with automation
-- All 8 metadata files within character limits
-- All 5 screenshots professionally composed and dimension-verified
-- Screenshot capture script created for future updates
-- Ready for Phase 16 (App Store submission)
-
-**Phase 16:** In Progress (1/4 plans complete)
-- ✅ Plan 16-01 complete: App Store package validated and uploaded (build ID: 78b4f2cc-34f8-43c0-b6f4-07a25da439f3)
-- Package status: PROCESSING in App Store Connect (no errors, no warnings)
-- Icon issue resolved: Manual ICNS creation with 512x512@2x required
-- Pending: App Store Connect metadata configuration, TestFlight setup, review submission
-- TestFlight external testing may require App Review for dual-mode sandbox explanation
+None — v2.0 requirements definition in progress.
 
 ### Roadmap Evolution
 
 - v1.0 (Phases 1-12): Complete (shipped 2026-02-17)
-- v1.1 (Phases 13-16): Starting App Store release
+- v1.1 (Phases 13-16): Complete (shipped 2026-02-18)
+- v2.0: Requirements definition phase
 
 ## Session Continuity
 
 Last session: 2026-02-17
-Stopped at: Completed 16-01-PLAN.md (App Store Build Archiving and Validation) - Package uploaded to App Store Connect
-Resume file: None
+Milestone: v2.0 started
+Status: Gathering requirements

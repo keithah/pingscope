@@ -34,18 +34,27 @@ Reliable, accurate ping monitoring that users can trust — no false timeouts, n
 
 ### Active
 
-(Ready for next milestone)
+- [ ] WidgetKit support for macOS (desktop and Notification Center)
+- [ ] Cross-platform architecture preparation for future iOS app
+- [ ] Platform UI separation (extract AppKit-specific code)
+- [ ] Shared view models for cross-platform compatibility
 
 ### Out of Scope
 
 - OAuth/cloud sync — not needed for local utility app
-- Multi-platform — macOS only
-- Widget extension — defer to v3
-- Data export — defer to v3
+- Data export — defer to v3+
+- iOS app shipping — v2.0 is architecture prep only, iOS ships in v3+
+- watchOS support — not planned
 
-## Current Milestone: None (Between Milestones)
+## Current Milestone: v2.0 Widgets & Cross-Platform Architecture
 
-Ready to plan next milestone with `/gsd:new-milestone`.
+**Goal:** Add WidgetKit support for macOS and refactor architecture for future cross-platform expansion.
+
+**Target features:**
+- WidgetKit widgets (desktop + Notification Center) with small/medium/large sizes
+- Platform-agnostic business logic layer
+- Shared view models ready for iOS
+- Widget content: ping status, latency graphs, multi-host summary, statistics
 
 ## Context
 
@@ -99,4 +108,4 @@ Ready to plan next milestone with `/gsd:new-milestone`.
 **Known issues:** CI/CD automation deferred (Plan 16-04), manual release workflow documented
 
 ---
-*Last updated: 2026-02-18 after v1.1 milestone completion*
+*Last updated: 2026-02-17 after v2.0 milestone start*
