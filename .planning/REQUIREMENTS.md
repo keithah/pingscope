@@ -88,13 +88,37 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| (Empty — filled by roadmapper) | | |
+| WI-01 | Phase 17 | Pending |
+| WI-02 | Phase 17 | Pending |
+| WI-03 | Phase 17 | Pending |
+| WI-04 | Phase 17 | Pending |
+| WI-05 | Phase 17 | Pending |
+| WI-06 | Phase 17 | Pending |
+| WI-07 | Phase 17 | Pending |
+| WUI-01 | Phase 17 | Pending |
+| WUI-02 | Phase 17 | Pending |
+| WUI-03 | Phase 17 | Pending |
+| WUI-04 | Phase 17 | Pending |
+| WUI-05 | Phase 17 | Pending |
+| WUI-06 | Phase 17 | Pending |
+| WUI-07 | Phase 17 | Pending |
+| WUI-08 | Phase 17 | Pending |
+| WUI-09 | Phase 17 | Pending |
+| WUI-10 | Phase 17 | Pending |
+| XP-01 | Phase 18 | Pending |
+| XP-02 | Phase 18 | Pending |
+| XP-03 | Phase 18 | Pending |
+| XP-04 | Phase 18 | Pending |
+| XP-05 | Phase 18 | Pending |
+| XP-06 | Phase 18 | Pending |
+| XP-07 | Phase 18 | Pending |
+| XP-08 | Phase 18 | Pending |
 
 **Coverage:**
 - v2.0 requirements: 25 total
-- Mapped to phases: 0
-- Unmapped: 25 ⚠️
+- Mapped to phases: 25
+- Unmapped: 0 ✓
 
 ---
 *Requirements defined: 2026-02-17*
-*Last updated: 2026-02-17 after initial definition*
+*Last updated: 2026-02-17 after roadmap creation*

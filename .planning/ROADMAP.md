@@ -4,6 +4,7 @@
 
 - ✅ **v1.0 MVP** - Phases 1-12 (shipped 2026-02-17)
 - ✅ **v1.1 App Store Release** - Phases 13-16 (shipped 2026-02-18)
+- 🚧 **v2.0 Widgets & Cross-Platform** - Phases 17-18 (in progress)
 
 ## Phases
 
@@ -44,9 +45,55 @@ See: [.planning/milestones/v1.1-ROADMAP.md](milestones/v1.1-ROADMAP.md)
 
 </details>
 
+### 🚧 v2.0 Widgets & Cross-Platform (In Progress)
+
+**Milestone Goal:** Add WidgetKit support for macOS and refactor architecture for future cross-platform expansion.
+
+- [ ] **Phase 17: Widget Foundation** - Working widgets (small/medium/large) displaying live ping status
+- [ ] **Phase 18: Cross-Platform Architecture** - Platform-separated codebase ready for iOS
+
+## Phase Details
+
+### Phase 17: Widget Foundation
+**Goal**: Users can view ping status and latency in macOS widgets (desktop and Notification Center)
+**Depends on**: Phase 16 (App Store Release complete)
+**Requirements**: WI-01, WI-02, WI-03, WI-04, WI-05, WI-06, WI-07, WUI-01, WUI-02, WUI-03, WUI-04, WUI-05, WUI-06, WUI-07, WUI-08, WUI-09, WUI-10
+**Success Criteria** (what must be TRUE):
+  1. User can add small widget showing single host status with color-coded indicator and current latency
+  2. User can add medium widget showing multi-host summary (3 hosts) with status indicators
+  3. User can add large widget showing all configured hosts with statistics (packet loss, avg latency)
+  4. Widget displays last update timestamp and shows stale data indicator when >15 minutes old
+  5. Tapping any widget opens main PingScope app
+  6. Widgets update within 5-15 minutes showing current ping status from running app
+  7. Widgets display correctly in both light and dark mode
+**Plans**: TBD
+
+Plans:
+- [ ] 17-01: TBD
+- [ ] 17-02: TBD
+- [ ] 17-03: TBD
+
+### Phase 18: Cross-Platform Architecture
+**Goal**: Codebase is organized for future iOS support with clean platform separation
+**Depends on**: Phase 17
+**Requirements**: XP-01, XP-02, XP-03, XP-04, XP-05, XP-06, XP-07, XP-08
+**Success Criteria** (what must be TRUE):
+  1. Platform-specific code (MenuBarViewModel, AppDelegate) organized in macOS/ folder
+  2. Shared models and services (PingService, HostStore, Host, PingResult) organized in Shared/ folder
+  3. Widget extension code organized in WidgetExtension/ folder
+  4. PingService, HostStore, and data models build without warnings on macOS target
+  5. Compiler directives (#if os) used in fewer than 10 locations across codebase
+  6. macOS app and widgets continue working after reorganization (validated via manual testing)
+**Plans**: TBD
+
+Plans:
+- [ ] 18-01: TBD
+- [ ] 18-02: TBD
+
 ## Progress
 
-All v1.1 phases complete. Ready to plan next milestone.
+**Execution Order:**
+Phases execute in numeric order: 17 → 18
 
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
@@ -55,3 +102,5 @@ All v1.1 phases complete. Ready to plan next milestone.
 | 14. Privacy and Compliance | v1.1 | 3/3 | Complete | 2026-02-17 |
 | 15. App Store Metadata and Assets | v1.1 | 2/2 | Complete | 2026-02-17 |
 | 16. Submission and Distribution | v1.1 | 4/4 | Complete | 2026-02-18 |
+| 17. Widget Foundation | v2.0 | 0/3 | Not started | - |
+| 18. Cross-Platform Architecture | v2.0 | 0/2 | Not started | - |
