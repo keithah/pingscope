@@ -66,12 +66,12 @@ See: [.planning/milestones/v1.1-ROADMAP.md](milestones/v1.1-ROADMAP.md)
   5. Tapping any widget opens main PingScope app
   6. Widgets update within 5-15 minutes showing current ping status from running app
   7. Widgets display correctly in both light and dark mode
-**Plans**: TBD
+**Plans**: 3 plans
 
 Plans:
-- [ ] 17-01: TBD
-- [ ] 17-02: TBD
-- [ ] 17-03: TBD
+- [ ] 17-01-PLAN.md — Widget infrastructure (App Groups, extension target, WidgetDataStore)
+- [ ] 17-02-PLAN.md — Widget UI (TimelineProvider, small/medium/large views)
+- [ ] 17-03-PLAN.md — Integration and verification (deep linking, app wiring, testing)
 
 ### Phase 18: Cross-Platform Architecture
 **Goal**: Codebase is organized for future iOS support with clean platform separation
