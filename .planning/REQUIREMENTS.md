@@ -1,88 +1,86 @@
-# Requirements: PingScope
+# Requirements: PingScope v2.0
 
 **Defined:** 2026-02-17
 **Core Value:** Reliable, accurate ping monitoring that users can trust — no false timeouts, no stale connections, no crashes.
 
-## v1.1 Requirements
+## v2.0 Requirements
 
-Requirements for App Store release. Each maps to roadmap phases.
+Requirements for WidgetKit and cross-platform architecture milestone. Each maps to roadmap phases.
 
-### Infrastructure
+### Widget Infrastructure
 
-- [ ] **INFRA-01**: Xcode project wrapper created referencing Package.swift as local dependency
-- [ ] **INFRA-02**: Asset catalog created with 1024x1024 opaque PNG app icon
-- [ ] **INFRA-03**: AppStore build scheme configured with App Store distribution certificate
-- [ ] **INFRA-04**: DeveloperID build scheme configured with Developer ID certificate
-- [ ] **INFRA-05**: PingScope-AppStore.entitlements file created with sandbox enabled
-- [ ] **INFRA-06**: PingScope-DeveloperID.entitlements file created with hardened runtime only
-- [ ] **INFRA-07**: Info.plist migrated to Xcode management with version automation
-- [ ] **INFRA-08**: Both build schemes produce functional apps (sandbox detection works)
+- [ ] **WI-01**: App Groups entitlement configured with correct Team ID prefix for macOS Sequoia
+- [ ] **WI-02**: Shared UserDefaults accessible from both main app and widget extension
+- [ ] **WI-03**: Widget Extension target created in Xcode with proper bundle ID and entitlements
+- [ ] **WI-04**: WidgetDataStore service writes ping results to shared UserDefaults
+- [ ] **WI-05**: WidgetCenter reloadTimelines() called after UserDefaults writes
+- [ ] **WI-06**: TimelineProvider reads cached ping data from shared UserDefaults
+- [ ] **WI-07**: Timeline entries spaced 5+ minutes apart to respect system budget (40-70/day)
 
-### Privacy & Compliance
+### Widget UI
 
-- [ ] **PRIV-01**: PrivacyInfo.xcprivacy created declaring network client access
-- [ ] **PRIV-02**: Privacy manifest explicitly states "Data Not Collected"
-- [ ] **PRIV-03**: Privacy Nutrition Label questionnaire completed in App Store Connect
-- [ ] **PRIV-04**: Age rating questionnaire completed (4+ rating)
-- [ ] **PRIV-05**: Export compliance declaration added (ITSAppUsesNonExemptEncryption = NO)
-- [ ] **PRIV-06**: Archived App Store build tested in sandbox environment
-- [ ] **PRIV-07**: ICMP option correctly hidden in App Store sandboxed build
-- [ ] **PRIV-08**: TCP/UDP options work correctly in App Store sandboxed build
+- [ ] **WUI-01**: Small widget displays single host status with color-coded indicator
+- [ ] **WUI-02**: Small widget shows current ping latency value
+- [ ] **WUI-03**: Medium widget displays multi-host summary (3 hosts horizontal)
+- [ ] **WUI-04**: Medium widget shows status indicators for each host
+- [ ] **WUI-05**: Large widget displays all configured hosts in list format
+- [ ] **WUI-06**: Large widget shows statistics (packet loss, avg latency) per host
+- [ ] **WUI-07**: All widget sizes display last update timestamp
+- [ ] **WUI-08**: Tapping any widget opens main app
+- [ ] **WUI-09**: Widgets show stale data indicator when >15 minutes old
+- [ ] **WUI-10**: Widget views support both light and dark mode
 
-### Metadata & Assets
+### Cross-Platform Architecture
 
-- [ ] **META-01**: App name finalized in App Store Connect
-- [ ] **META-02**: App subtitle created (≤30 chars: "Network Latency Monitor")
-- [ ] **META-03**: App description written (highlighting differentiators, ≤4000 chars)
-- [ ] **META-04**: Keywords optimized (≤100 chars, comma-separated)
-- [ ] **META-05**: Screenshots captured (5 images at 2880x1800 resolution)
-- [ ] **META-06**: Screenshot 1 shows menu bar status + full interface
-- [ ] **META-07**: Screenshot 2 shows multi-host tabs + real-time graph
-- [ ] **META-08**: Screenshot 3 shows settings panel
-- [ ] **META-09**: Screenshot 4 shows ping history with statistics
-- [ ] **META-10**: Screenshot 5 shows compact mode view
-- [ ] **META-11**: Promotional text created (170 chars updateable)
-- [ ] **META-12**: Support URL configured (GitHub repo or dedicated page)
-- [ ] **META-13**: Copyright notice added
-- [ ] **META-14**: Review notes written explaining dual sandbox modes
+- [ ] **XP-01**: Platform-specific code organized in macOS/ folder structure
+- [ ] **XP-02**: Shared models and services organized in Shared/ folder structure
+- [ ] **XP-03**: Widget extension code organized in WidgetExtension/ folder
+- [ ] **XP-04**: MenuBarViewModel remains macOS-specific (not shared)
+- [ ] **XP-05**: PingService, HostStore, and models accessible from all targets
+- [ ] **XP-06**: Compiler directives (#if os) minimized to <10 occurrences
+- [ ] **XP-07**: Platform abstractions use protocols rather than conditionals where possible
+- [ ] **XP-08**: All shared code builds without warnings on macOS target
 
-### Submission & Distribution
+## Future Requirements
 
-- [ ] **SUBM-01**: App built with Xcode 26+ using macOS 26 SDK
-- [ ] **SUBM-02**: App Store distribution certificate obtained
-- [ ] **SUBM-03**: App Store provisioning profile configured
-- [ ] **SUBM-04**: App bundle validated locally with xcrun altool --validate-app
-- [ ] **SUBM-05**: App uploaded to App Store Connect via Transporter
-- [ ] **SUBM-06**: TestFlight internal build tested (up to 100 users)
-- [ ] **SUBM-07**: First submission to App Review completed
-- [ ] **SUBM-08**: Manual submission workflow documented
-- [ ] **SUBM-09**: GitHub Actions workflow created for App Store builds (.github/workflows/appstore-release.yml)
-- [ ] **SUBM-10**: CI/CD workflow tested with manual trigger
+Deferred to v2.1+ based on user validation and demand.
 
-## v1.2+ Requirements
+### Widget Enhancements
 
-Deferred to future releases.
+- **WUI-E01**: Mini latency graph visualization in medium/large widgets
+- **WUI-E02**: Host-specific deep links with URL parameters
+- **WUI-E03**: Widget configuration intents for user customization
+- **WUI-E04**: Staleness indicators with gradual dimming
 
-### Post-Approval Optimization
+### iOS Support
 
-- **META-15**: App preview video created (20-30 seconds)
-- **META-16**: TestFlight external testing with public beta users
-- **META-17**: Keyword optimization using ASO tools (AppTweak, Asolytics)
-- **META-18**: Localization for top 5-10 languages
-- **META-19**: Custom product pages for A/B testing
-- **META-20**: Multiple screenshot sizes (all 4 resolutions)
+- **IOS-01**: iOS app with tab-based navigation
+- **IOS-02**: iOS widgets (Home Screen, Lock Screen)
+- **IOS-03**: iOS-specific ViewModel (AppViewModel)
+- **IOS-04**: iOS App Store listing and submission
+- **IOS-05**: Shared test suite for iOS and macOS
+
+### Advanced Features
+
+- **ADV-01**: Widget interaction zones for per-host actions
+- **ADV-02**: Widget animation and transitions
+- **ADV-03**: Accessibility enhancements for widgets
+- **ADV-04**: Widget size adaptation for different screen densities
 
 ## Out of Scope
 
+Explicitly excluded from v2.0. Documented to prevent scope creep.
+
 | Feature | Reason |
 |---------|--------|
-| Widget extension | Defer to v2.0 — focus on distribution first |
-| Data export features | Defer to v2.0 — focus on distribution first |
-| App preview video | Defer to v1.2 — manual submission first, optimize after approval |
-| External TestFlight | Defer to v1.2 — internal testing sufficient for first submission |
-| ASO tool optimization | Defer to v1.2 — manual keyword research for initial launch |
-| Multi-language support | Defer to v2.0+ — English-only for initial release |
-| Custom product pages | Defer to v2.0+ — requires App Store presence first |
+| iOS app shipping | v2.0 is architecture prep only; iOS ships in v3.0+ |
+| Real-time widget updates | System budget prevents continuous updates (40-70/day limit) |
+| Network operations in widgets | Runtime constraints prevent ping execution in widget process |
+| Widget configuration UI | Complexity vs unclear user demand; defer until core widgets validated |
+| watchOS support | Platform not prioritized; focus on macOS + iOS |
+| macOS 14+ @Observable migration | Keep macOS 13 compatibility; defer to v3.0 |
+| Custom widget refresh intervals | System-controlled; user configuration not supported by WidgetKit |
+| Interactive widget controls | Limited value for ping monitoring use case |
 
 ## Traceability
 
@@ -90,52 +88,13 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| INFRA-01 | Phase 13 | Pending |
-| INFRA-02 | Phase 13 | Pending |
-| INFRA-03 | Phase 13 | Pending |
-| INFRA-04 | Phase 13 | Pending |
-| INFRA-05 | Phase 13 | Pending |
-| INFRA-06 | Phase 13 | Pending |
-| INFRA-07 | Phase 13 | Pending |
-| INFRA-08 | Phase 13 | Pending |
-| PRIV-01 | Phase 14 | Pending |
-| PRIV-02 | Phase 14 | Pending |
-| PRIV-03 | Phase 14 | Pending |
-| PRIV-04 | Phase 14 | Pending |
-| PRIV-05 | Phase 14 | Pending |
-| PRIV-06 | Phase 14 | Pending |
-| PRIV-07 | Phase 14 | Pending |
-| PRIV-08 | Phase 14 | Pending |
-| META-01 | Phase 15 | Pending |
-| META-02 | Phase 15 | Pending |
-| META-03 | Phase 15 | Pending |
-| META-04 | Phase 15 | Pending |
-| META-05 | Phase 15 | Pending |
-| META-06 | Phase 15 | Pending |
-| META-07 | Phase 15 | Pending |
-| META-08 | Phase 15 | Pending |
-| META-09 | Phase 15 | Pending |
-| META-10 | Phase 15 | Pending |
-| META-11 | Phase 15 | Pending |
-| META-12 | Phase 15 | Pending |
-| META-13 | Phase 15 | Pending |
-| META-14 | Phase 15 | Pending |
-| SUBM-01 | Phase 16 | Pending |
-| SUBM-02 | Phase 16 | Pending |
-| SUBM-03 | Phase 16 | Pending |
-| SUBM-04 | Phase 16 | Pending |
-| SUBM-05 | Phase 16 | Pending |
-| SUBM-06 | Phase 16 | Pending |
-| SUBM-07 | Phase 16 | Pending |
-| SUBM-08 | Phase 16 | Pending |
-| SUBM-09 | Phase 16 | Pending |
-| SUBM-10 | Phase 16 | Pending |
+| (Empty — filled by roadmapper) | | |
 
 **Coverage:**
-- v1.1 requirements: 40 total
-- Mapped to phases: 40 (100% coverage)
-- Unmapped: 0
+- v2.0 requirements: 25 total
+- Mapped to phases: 0
+- Unmapped: 25 ⚠️
 
 ---
 *Requirements defined: 2026-02-17*
-*Last updated: 2026-02-17 after roadmap creation*
+*Last updated: 2026-02-17 after initial definition*
