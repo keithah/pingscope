@@ -7,6 +7,9 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		53D2B0B52F45A1A300E65EEE /* WidgetKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 53D2B0B42F45A1A300E65EEE /* WidgetKit.framework */; };
+		53D2B0B72F45A1A300E65EEE /* SwiftUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 53D2B0B62F45A1A300E65EEE /* SwiftUI.framework */; };
+		53D2B0C42F45A1A600E65EEE /* widgetExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 53D2B0B22F45A1A300E65EEE /* widgetExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -24,20 +27,49 @@
 			remoteGlobalIDString = 53AA6F362F441DAB009FEF3A;
 			remoteInfo = PingScope;
 		};
+		53D2B0C22F45A1A600E65EEE /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 53AA6F2F2F441DAB009FEF3A /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 53D2B0B12F45A1A300E65EEE;
+			remoteInfo = widgetExtension;
+		};
 /* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		53D2B0C52F45A1A600E65EEE /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				53D2B0C42F45A1A600E65EEE /* widgetExtension.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
 		53AA6F372F441DAB009FEF3A /* PingScope.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = PingScope.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		53AA6F442F441DAD009FEF3A /* PingScopeTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = PingScopeTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-		53AA6F4E2F441DAD009FEF3A /* PingScopeUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = PingScopeUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		53AA6F442F441DAD009FEF3A /* PingScopeTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; name = PingScopeTests.xctest; path = PingScope.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		53AA6F4E2F441DAD009FEF3A /* PingScopeUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; name = PingScopeUITests.xctest; path = PingScope.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		53D2B0B22F45A1A300E65EEE /* widgetExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = widgetExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		53D2B0B42F45A1A300E65EEE /* WidgetKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WidgetKit.framework; path = System/Library/Frameworks/WidgetKit.framework; sourceTree = SDKROOT; };
+		53D2B0B62F45A1A300E65EEE /* SwiftUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SwiftUI.framework; path = System/Library/Frameworks/SwiftUI.framework; sourceTree = SDKROOT; };
 /* End PBXFileReference section */
 
-/* Begin PBXFileSystemSynchronizedRootGroup section */
-		53AA6F652F441E20009FEF3A /* Sources */ = {
-			isa = PBXFileSystemSynchronizedRootGroup;
-			path = Sources;
-			sourceTree = "<group>";
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		53D2B0C82F45A1A600E65EEE /* Exceptions for "widget" folder in "widgetExtension" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 53D2B0B12F45A1A300E65EEE /* widgetExtension */;
 		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
+/* Begin PBXFileSystemSynchronizedRootGroup section */
 		53AA6F472F441DAD009FEF3A /* PingScopeTests */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = PingScopeTests;
@@ -46,6 +78,19 @@
 		53AA6F512F441DAD009FEF3A /* PingScopeUITests */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = PingScopeUITests;
+			sourceTree = "<group>";
+		};
+		53AA6F652F441E20009FEF3A /* Sources */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = Sources;
+			sourceTree = "<group>";
+		};
+		53D2B0B82F45A1A300E65EEE /* widget */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				53D2B0C82F45A1A600E65EEE /* Exceptions for "widget" folder in "widgetExtension" target */,
+			);
+			path = widget;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -72,6 +117,15 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		53D2B0AF2F45A1A300E65EEE /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				53D2B0B72F45A1A300E65EEE /* SwiftUI.framework in Frameworks */,
+				53D2B0B52F45A1A300E65EEE /* WidgetKit.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -81,6 +135,8 @@
 				53AA6F652F441E20009FEF3A /* Sources */,
 				53AA6F472F441DAD009FEF3A /* PingScopeTests */,
 				53AA6F512F441DAD009FEF3A /* PingScopeUITests */,
+				53D2B0B82F45A1A300E65EEE /* widget */,
+				53D2B0B32F45A1A300E65EEE /* Frameworks */,
 				53AA6F382F441DAB009FEF3A /* Products */,
 			);
 			sourceTree = "<group>";
@@ -91,24 +147,36 @@
 				53AA6F372F441DAB009FEF3A /* PingScope.app */,
 				53AA6F442F441DAD009FEF3A /* PingScopeTests.xctest */,
 				53AA6F4E2F441DAD009FEF3A /* PingScopeUITests.xctest */,
+				53D2B0B22F45A1A300E65EEE /* widgetExtension.appex */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		53D2B0B32F45A1A300E65EEE /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				53D2B0B42F45A1A300E65EEE /* WidgetKit.framework */,
+				53D2B0B62F45A1A300E65EEE /* SwiftUI.framework */,
+			);
+			name = Frameworks;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		53AA6F362F441DAB009FEF3A /* PingScope */ = {
+		53AA6F362F441DAB009FEF3A /* PingScopeApp */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = 53AA6F582F441DAD009FEF3A /* Build configuration list for PBXNativeTarget "PingScopeApp" */;
 			buildPhases = (
 				53AA6F332F441DAB009FEF3A /* Sources */,
 				53AA6F342F441DAB009FEF3A /* Frameworks */,
 				53AA6F352F441DAB009FEF3A /* Resources */,
+				53D2B0C52F45A1A600E65EEE /* Embed Foundation Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				53D2B0C32F45A1A600E65EEE /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				53AA6F652F441E20009FEF3A /* Sources */,
@@ -166,6 +234,28 @@
 			productReference = 53AA6F4E2F441DAD009FEF3A /* PingScopeUITests.xctest */;
 			productType = "com.apple.product-type.bundle.ui-testing";
 		};
+		53D2B0B12F45A1A300E65EEE /* widgetExtension */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 53D2B0C92F45A1A600E65EEE /* Build configuration list for PBXNativeTarget "widgetExtension" */;
+			buildPhases = (
+				53D2B0AE2F45A1A300E65EEE /* Sources */,
+				53D2B0AF2F45A1A300E65EEE /* Frameworks */,
+				53D2B0B02F45A1A300E65EEE /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				53D2B0B82F45A1A300E65EEE /* widget */,
+			);
+			name = widgetExtension;
+			packageProductDependencies = (
+			);
+			productName = widgetExtension;
+			productReference = 53D2B0B22F45A1A300E65EEE /* widgetExtension.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -187,6 +277,9 @@
 						CreatedOnToolsVersion = 26.0.1;
 						TestTargetID = 53AA6F362F441DAB009FEF3A;
 					};
+					53D2B0B12F45A1A300E65EEE = {
+						CreatedOnToolsVersion = 26.0.1;
+					};
 				};
 			};
 			buildConfigurationList = 53AA6F322F441DAB009FEF3A /* Build configuration list for PBXProject "PingScope" */;
@@ -205,9 +298,10 @@
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				53AA6F362F441DAB009FEF3A /* PingScope */,
+				53AA6F362F441DAB009FEF3A /* PingScopeApp */,
 				53AA6F432F441DAD009FEF3A /* PingScopeTests */,
 				53AA6F4D2F441DAD009FEF3A /* PingScopeUITests */,
+				53D2B0B12F45A1A300E65EEE /* widgetExtension */,
 			);
 		};
 /* End PBXProject section */
@@ -228,6 +322,13 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		53AA6F4C2F441DAD009FEF3A /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		53D2B0B02F45A1A300E65EEE /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -258,18 +359,30 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		53D2B0AE2F45A1A300E65EEE /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
 		53AA6F462F441DAD009FEF3A /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
-			target = 53AA6F362F441DAB009FEF3A /* PingScope */;
+			target = 53AA6F362F441DAB009FEF3A /* PingScopeApp */;
 			targetProxy = 53AA6F452F441DAD009FEF3A /* PBXContainerItemProxy */;
 		};
 		53AA6F502F441DAD009FEF3A /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
-			target = 53AA6F362F441DAB009FEF3A /* PingScope */;
+			target = 53AA6F362F441DAB009FEF3A /* PingScopeApp */;
 			targetProxy = 53AA6F4F2F441DAD009FEF3A /* PBXContainerItemProxy */;
+		};
+		53D2B0C32F45A1A600E65EEE /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 53D2B0B12F45A1A300E65EEE /* widgetExtension */;
+			targetProxy = 53D2B0C22F45A1A600E65EEE /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -397,14 +510,12 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = "Configuration/PingScope-AppStore.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 2;
 				DEVELOPMENT_TEAM = 6R7S5GA944;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
 				INFOPLIST_FILE = Configuration/Info.plist;
-				LD_RUNPATH_SEARCH_PATHS = (
-					"@executable_path/../Frameworks",
-				);
+				LD_RUNPATH_SEARCH_PATHS = "@executable_path/../Frameworks";
 				MACOSX_DEPLOYMENT_TARGET = 13.0;
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.hadm.PingScope;
@@ -428,19 +539,17 @@
 				CODE_SIGN_ENTITLEMENTS = "Configuration/PingScope-AppStore.entitlements";
 				CODE_SIGN_IDENTITY = "Apple Distribution";
 				CODE_SIGN_STYLE = Manual;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 2;
 				DEVELOPMENT_TEAM = 6R7S5GA944;
-				PROVISIONING_PROFILE_SPECIFIER = PingScope;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
 				INFOPLIST_FILE = Configuration/Info.plist;
-				LD_RUNPATH_SEARCH_PATHS = (
-					"@executable_path/../Frameworks",
-				);
+				LD_RUNPATH_SEARCH_PATHS = "@executable_path/../Frameworks";
 				MACOSX_DEPLOYMENT_TARGET = 13.0;
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.hadm.PingScope;
 				PRODUCT_NAME = PingScope;
+				PROVISIONING_PROFILE_SPECIFIER = PingScope;
 				SDKROOT = macosx;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SUPPORTED_PLATFORMS = macosx;
@@ -458,7 +567,7 @@
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_ENTITLEMENTS = "Configuration/PingScope-AppStore.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 2;
 				DEVELOPMENT_TEAM = 6R7S5GA944;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
@@ -485,7 +594,7 @@
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_ENTITLEMENTS = "Configuration/PingScope-AppStore.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 2;
 				DEVELOPMENT_TEAM = 6R7S5GA944;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
@@ -511,7 +620,7 @@
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = "Configuration/PingScope-AppStore.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 2;
 				DEVELOPMENT_TEAM = 6R7S5GA944;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
@@ -537,7 +646,7 @@
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = "Configuration/PingScope-AppStore.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 2;
 				DEVELOPMENT_TEAM = 6R7S5GA944;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
@@ -555,6 +664,73 @@
 				TARGETED_DEVICE_FAMILY = "1,2,7";
 				TEST_TARGET_NAME = PingScope;
 				XROS_DEPLOYMENT_TARGET = 26.0;
+			};
+			name = Release;
+		};
+		53D2B0C62F45A1A600E65EEE /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_WIDGET_BACKGROUND_COLOR_NAME = WidgetBackground;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 2;
+				DEVELOPMENT_TEAM = 6R7S5GA944;
+				ENABLE_APP_SANDBOX = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = widget/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = widget;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@executable_path/../../../../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.hadm.PingScope.widget;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		53D2B0C72F45A1A600E65EEE /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_WIDGET_BACKGROUND_COLOR_NAME = WidgetBackground;
+				CODE_SIGN_IDENTITY = "Apple Distribution";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 2;
+				DEVELOPMENT_TEAM = 6R7S5GA944;
+				ENABLE_APP_SANDBOX = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = widget/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = widget;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@executable_path/../../../../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.hadm.PingScope.widget;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
 			};
 			name = Release;
 		};
@@ -597,8 +773,16 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
+		53D2B0C92F45A1A600E65EEE /* Build configuration list for PBXNativeTarget "widgetExtension" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				53D2B0C62F45A1A600E65EEE /* Debug */,
+				53D2B0C72F45A1A600E65EEE /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 /* End XCConfigurationList section */
-
 	};
 	rootObject = 53AA6F2F2F441DAB009FEF3A /* Project object */;
 }
