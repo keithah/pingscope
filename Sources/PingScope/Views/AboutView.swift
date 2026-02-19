@@ -68,12 +68,14 @@ struct AboutView: View {
                 .font(.title3)
                 .foregroundStyle(.secondary)
 
+            #if !APPSTORE
             Button {
                 NSWorkspace.shared.open(Self.releasesURL)
             } label: {
                 Label("Check for Updates", systemImage: "arrow.down.circle")
             }
             .buttonStyle(.link)
+            #endif
         }
         .frame(maxWidth: .infinity)
         .padding(.top, 10)
