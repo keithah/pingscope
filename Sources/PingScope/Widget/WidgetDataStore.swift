@@ -1,5 +1,6 @@
 import Foundation
 import WidgetKit
+import os
 
 /// Actor service for writing ping results to widget shared container
 actor WidgetDataStore {
@@ -48,6 +49,10 @@ actor WidgetDataStore {
         shared.set(encoded, forKey: "widgetData")
 
         // Trigger widget timeline reload
-        WidgetCenter.shared.reloadTimelines(ofKind: "PingScopeWidget")
+        // Use reloadAllTimelines() instead of reloadTimelines(ofKind:) to avoid
+        // ChronoCoreErrorDomain Code=27 errors when widget isn't added to system yet.
+        // The specific kind approach fails silently with console errors if the widget
+        // hasn't been instantiated. reloadAllTimelines() is safer during development.
+        WidgetCenter.shared.reloadAllTimelines()
     }
 }
