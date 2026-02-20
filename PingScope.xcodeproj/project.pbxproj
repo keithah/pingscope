@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		53AA6F672F441E26009FEF3A /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 53AA6F662F441E25009FEF3A /* Assets.xcassets */; };
 		53D2B0B52F45A1A300E65EEE /* WidgetKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 53D2B0B42F45A1A300E65EEE /* WidgetKit.framework */; };
 		53D2B0B72F45A1A300E65EEE /* SwiftUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 53D2B0B62F45A1A300E65EEE /* SwiftUI.framework */; };
 		53D2B0C42F45A1A600E65EEE /* widgetExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 53D2B0B22F45A1A300E65EEE /* widgetExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
@@ -57,6 +58,7 @@
 		53D2B0B22F45A1A300E65EEE /* widgetExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = widgetExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		53D2B0B42F45A1A300E65EEE /* WidgetKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WidgetKit.framework; path = System/Library/Frameworks/WidgetKit.framework; sourceTree = SDKROOT; };
 		53D2B0B62F45A1A300E65EEE /* SwiftUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SwiftUI.framework; path = System/Library/Frameworks/SwiftUI.framework; sourceTree = SDKROOT; };
+		53AA6F662F441E25009FEF3A /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -83,11 +85,6 @@
 		53AA6F652F441E20009FEF3A /* Sources */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = Sources;
-			sourceTree = "<group>";
-		};
-		53AA6F662F441E25009FEF3A /* Assets.xcassets */ = {
-			isa = PBXFileSystemSynchronizedRootGroup;
-			path = Assets.xcassets;
 			sourceTree = "<group>";
 		};
 		53D2B0B82F45A1A300E65EEE /* widget */ = {
@@ -186,7 +183,6 @@
 			);
 			fileSystemSynchronizedGroups = (
 				53AA6F652F441E20009FEF3A /* Sources */,
-				53AA6F662F441E25009FEF3A /* Assets.xcassets */,
 			);
 			name = PingScopeApp;
 			packageProductDependencies = (
@@ -318,6 +314,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				53AA6F672F441E26009FEF3A /* Assets.xcassets in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
