@@ -50,6 +50,8 @@ Recent decisions affecting current work:
 - [Phase 17]: 10-minute timeline spacing (144 updates/day) well within 40-70 system budget
 - [Phase 17]: Status color thresholds: green (<50ms), yellow (50-100ms), red (>100ms or timeout)
 - [Phase 17]: Stale data (>15min) shows at 60% opacity with orange warning badge
+- [Phase quick-2]: Use reloadAllTimelines() instead of reloadTimelines(ofKind:) to prevent ChronoCoreErrorDomain Code=27 when widget not registered
+- [Phase quick-2]: Widget extension inherits AppIcon from main app asset catalog via CFBundleIconFile key
 
 ### Pending Todos
 
@@ -64,6 +66,7 @@ None — v2.0 roadmap created with clear phase structure based on research findi
 | # | Description | Date | Commit | Directory |
 |---|-------------|------|--------|-----------|
 | 1 | Remove check for update feature for App Store build and prepare release submission | 2026-02-19 | 7a27384 | [1-remove-check-for-update-feature-for-app-](./quick/1-remove-check-for-update-feature-for-app-/) |
+| 2 | Fix widget icon and timeline reload errors | 2026-02-20 | 998dc5b | [2-fix-widget-icon-and-timeline-reload-erro](./quick/2-fix-widget-icon-and-timeline-reload-erro/) |
 
 ### Roadmap Evolution
 
@@ -73,7 +76,7 @@ None — v2.0 roadmap created with clear phase structure based on research findi
 
 ## Session Continuity
 
-Last session: 2026-02-19
-Stopped at: Completed quick task 1: Remove check for update feature for App Store build and prepare release submission
+Last session: 2026-02-20
+Stopped at: Completed quick task 2: Fix widget icon and timeline reload errors
 Resume file: .planning/phases/17-widget-foundation/.continue-here.md (Phase 17 paused at checkpoint)
 Next action: Build App Store release or resume Phase 17 widget work with /gsd:resume-work
