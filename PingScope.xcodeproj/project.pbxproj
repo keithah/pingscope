@@ -85,6 +85,11 @@
 			path = Sources;
 			sourceTree = "<group>";
 		};
+		53AA6F662F441E25009FEF3A /* Assets.xcassets */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = Assets.xcassets;
+			sourceTree = "<group>";
+		};
 		53D2B0B82F45A1A300E65EEE /* widget */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
@@ -133,6 +138,7 @@
 			isa = PBXGroup;
 			children = (
 				53AA6F652F441E20009FEF3A /* Sources */,
+				53AA6F662F441E25009FEF3A /* Assets.xcassets */,
 				53AA6F472F441DAD009FEF3A /* PingScopeTests */,
 				53AA6F512F441DAD009FEF3A /* PingScopeUITests */,
 				53D2B0B82F45A1A300E65EEE /* widget */,
@@ -180,6 +186,7 @@
 			);
 			fileSystemSynchronizedGroups = (
 				53AA6F652F441E20009FEF3A /* Sources */,
+				53AA6F662F441E25009FEF3A /* Assets.xcassets */,
 			);
 			name = PingScopeApp;
 			packageProductDependencies = (
