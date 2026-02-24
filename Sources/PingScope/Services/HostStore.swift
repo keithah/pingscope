@@ -3,6 +3,13 @@ import Foundation
 actor HostStore {
     private let defaults: UserDefaults
     private let key: String = "pingmonitor.savedHosts"
+    private let gatewayOverrideKey: String = "pingmonitor.gatewayHostOverride"
+
+    private struct GatewayOverride: Codable {
+        let address: String
+        let pingMethod: PingMethod
+        let port: UInt16
+    }
 
     private(set) var hosts: [Host]
     private(set) var gatewayHost: Host?
@@ -104,6 +111,15 @@ actor HostStore {
             return
         }
 
+        if gatewayHost?.id == host.id {
+            gatewayHost = host
+            let override = GatewayOverride(address: host.address, pingMethod: host.pingMethod, port: host.port)
+            if let data = try? JSONEncoder().encode(override) {
+                defaults.set(data, forKey: gatewayOverrideKey)
+            }
+            return
+        }
+
         guard let index = hosts.firstIndex(where: { $0.id == host.id }) else {
             return
         }
@@ -171,10 +187,17 @@ actor HostStore {
             return
         }
 
+        // Apply persisted override if it matches this gateway's IP
+        let override = defaults.data(forKey: gatewayOverrideKey)
+            .flatMap { try? JSONDecoder().decode(GatewayOverride.self, from: $0) }
+        let pingMethod: PingMethod = (override?.address == info.ipAddress) ? override!.pingMethod : .tcp
+        let port: UInt16 = (override?.address == info.ipAddress) ? override!.port : 443
+
         gatewayHost = Host(
             name: info.displayName,
             address: info.ipAddress,
-            pingMethod: .tcp,
+            port: port,
+            pingMethod: pingMethod,
             isDefault: true
         )
     }

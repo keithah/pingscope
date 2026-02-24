@@ -29,7 +29,7 @@ struct NotificationPreferences: Codable, Sendable, Equatable {
     init(
         globalEnabled: Bool = true,
         cooldownSeconds: TimeInterval = 60,
-        enabledAlertTypes: Set<AlertType> = Set(AlertType.allCases),
+        enabledAlertTypes: Set<AlertType> = [.noResponse, .highLatency, .recovery, .networkChange, .internetLoss],
         highLatencyThresholdMS: Double = 200,
         degradationPercentage: Double = 50,
         intermittentFailureCount: Int = 3,
