@@ -33,6 +33,12 @@ pingmonitor_*
 .vscode/
 .idea/
 
+# Secrets
+.env
+.env.*
+fastlane/.env
+fastlane/.env.*
+
 # Build artifacts
 *.o
 *.dSYMdist/

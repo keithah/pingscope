@@ -28,6 +28,28 @@
       selectedLauncherIdentifier = "Xcode.DebuggerFoundation.Launcher.LLDB"
       shouldUseLaunchSchemeArgsEnv = "YES">
       <Testables>
+         <TestableReference
+            skipped = "NO"
+            parallelizable = "YES">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "53AA6F432F441DAD009FEF3A"
+               BuildableName = "PingScope.xctest"
+               BlueprintName = "PingScopeTests"
+               ReferencedContainer = "container:PingScope.xcodeproj">
+            </BuildableReference>
+         </TestableReference>
+         <TestableReference
+            skipped = "NO"
+            parallelizable = "YES">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "53AA6F4D2F441DAD009FEF3A"
+               BuildableName = "PingScope.xctest"
+               BlueprintName = "PingScopeUITests"
+               ReferencedContainer = "container:PingScope.xcodeproj">
+            </BuildableReference>
+         </TestableReference>
       </Testables>
    </TestAction>
    <LaunchAction
