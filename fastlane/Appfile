@@ -1,0 +1,6 @@
+# fastlane/Appfile
+# App identity — used by Fastlane actions that need app_identifier or team_id.
+# apple_id is intentionally omitted: all automation uses ASC API key auth (not password).
+
+app_identifier("com.hadm.PingScope")
+team_id("6R7S5GA944")
