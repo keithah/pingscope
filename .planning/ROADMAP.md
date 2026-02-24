@@ -73,6 +73,17 @@ Plans:
 - [ ] 17-02-PLAN.md — Widget UI (TimelineProvider, small/medium/large views)
 - [ ] 17-03-PLAN.md — Integration and verification (deep linking, app wiring, testing)
 
+### Phase 17.1: use xcode cloud with this and fastlane to automate builds and not require me to build it locally or use xcode locally (INSERTED)
+
+**Goal:** Pushing to main triggers a TestFlight build automatically; pushing a release/x.y.z tag triggers App Store submission — no manual Xcode or App Store Connect steps required
+**Depends on:** Phase 17
+**Requirements:** CI-01, CI-02, CI-03, CI-04, CI-05
+**Plans:** 2 plans
+
+Plans:
+- [ ] 17.1-01-PLAN.md — Fix ci_scripts and create Fastlane setup (Gemfile, Appfile, Fastfile)
+- [ ] 17.1-02-PLAN.md — Configure Xcode Cloud workflows and verify end-to-end pipeline
+
 ### Phase 18: Cross-Platform Architecture
 **Goal**: Codebase is organized for future iOS support with clean platform separation
 **Depends on**: Phase 17
