@@ -5,16 +5,16 @@
 See: `.planning/PROJECT.md` (updated 2026-02-17)
 
 **Core value:** Reliable, accurate ping monitoring that users can trust — no false timeouts, no stale connections, no crashes.
-**Current focus:** Phase 17 - Widget Foundation
+**Current focus:** Phase 17.1 - Xcode Cloud + Fastlane CI/CD Automation
 
 ## Current Position
 
-Phase: 17 of 18 (Widget Foundation)
-Plan: 2 of 3 in current phase
-Status: Executing Phase 17
-Last activity: 2026-02-18 — Plan 17-02 (Widget UI Implementation) complete
+Phase: 17.1 of 18 (Xcode Cloud + Fastlane CI/CD)
+Plan: 1 of 1 complete (Phase 17.1 complete)
+Status: Phase 17.1 complete — ready for Xcode Cloud workflow activation
+Last activity: 2026-02-24 — Plan 17.1-01 (CI scripts + Fastlane setup) complete
 
-Progress: [████████████████░░░░] 82% (v1.0 + v1.1 complete + 2 v2.0 plans: 65/68 total plans)
+Progress: [████████████████░░░░] 83% (v1.0 + v1.1 complete + 3 v2.0 plans: 66/68 total plans)
 
 ## Performance Metrics
 
@@ -25,13 +25,16 @@ Progress: [████████████████░░░░] 82% (v1
 
 **v2.0 (current):**
 - Total plans: 5 estimated
-- Plans completed: 2
-- Phases complete: 0/2 (Phase 17 in progress)
-- Status: Executing Phase 17
+- Plans completed: 3
+- Phases complete: 1/3 (Phase 17.1 complete, Phase 17 in progress)
+- Status: Phase 17.1 complete
 
 **Phase 17 metrics:**
 - Plan 17-01: 6min (3 tasks, 5 files modified)
 - Plan 17-02: 2.5min (3 tasks, 7 files created)
+
+**Phase 17.1 metrics:**
+- Plan 17.1-01: 3min (2 tasks, 5 files created/modified)
 
 ## Accumulated Context
 
@@ -54,6 +57,11 @@ Recent decisions affecting current work:
 - [Phase quick-2]: Widget extension inherits AppIcon from main app asset catalog via CFBundleIconFile key
 - [Phase quick-3]: widgetExtension target uses widget/Info.plist (not PingScopeWidget/Info.plist) per INFOPLIST_FILE build setting
 - [Phase quick-3]: Complete icon set (10 PNG files) required in widget's own asset catalog with filename references in Contents.json for proper ICNS compilation
+- [Phase 17.1]: ci_post_clone.sh: removed PlistBuddy/CFBundleVersion manipulation — Xcode Cloud manages build numbers natively via CI_BUILD_NUMBER and MARKETING_VERSION build setting
+- [Phase 17.1]: ci_post_xcodebuild.sh: removed ExportOptions.plist writing — Xcode Cloud handles export via workflow configuration, not external plist
+- [Phase 17.1]: Release tag pattern ^release/[0-9]+\.[0-9]+\.[0-9]+$ triggers Fastlane submit_review
+- [Phase 17.1]: submit_review lane uses deliver with skip_binary_upload:true — binary already uploaded by Xcode Cloud, Fastlane only triggers review submission
+- [Phase 17.1]: apple_id omitted from Appfile — all automation uses ASC API key auth via ASC_KEY_ID/ASC_ISSUER_ID/ASC_KEY_CONTENT env vars
 
 ### Pending Todos
 
@@ -81,7 +89,7 @@ None — v2.0 roadmap created with clear phase structure based on research findi
 
 ## Session Continuity
 
-Last session: 2026-02-23
-Stopped at: Phase 17.1 context gathered
-Resume file: .planning/phases/17.1-use-xcode-cloud-with-this-and-fastlane-to-automate-builds-and-not-require-me-to-build-it-locally-or-use-xcode-locally/17.1-CONTEXT.md
-Next action: /gsd:plan-phase 17.1
+Last session: 2026-02-24
+Stopped at: Completed Phase 17.1 Plan 01 — CI scripts + Fastlane setup
+Resume file: .planning/phases/17.1-use-xcode-cloud-with-this-and-fastlane-to-automate-builds-and-not-require-me-to-build-it-locally-or-use-xcode-locally/17.1-01-SUMMARY.md
+Next action: Configure Xcode Cloud workflow in App Store Connect UI (manual step — see User Setup Required in SUMMARY.md)

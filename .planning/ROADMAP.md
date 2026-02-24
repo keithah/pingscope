@@ -78,7 +78,7 @@ Plans:
 **Goal:** Pushing to main triggers a TestFlight build automatically; pushing a release/x.y.z tag triggers App Store submission — no manual Xcode or App Store Connect steps required
 **Depends on:** Phase 17
 **Requirements:** CI-01, CI-02, CI-03, CI-04, CI-05
-**Plans:** 2 plans
+**Plans:** 1/2 plans executed
 
 Plans:
 - [ ] 17.1-01-PLAN.md — Fix ci_scripts and create Fastlane setup (Gemfile, Appfile, Fastfile)
