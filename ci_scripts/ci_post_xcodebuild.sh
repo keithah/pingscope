@@ -26,7 +26,7 @@ if [ "$CI_XCODEBUILD_ACTION" = "archive" ]; then
 
   # Auto-submit for App Store review on release tag builds
   # Trigger: CI_TAG must match release/x.y.z pattern
-  if echo "$CI_TAG" | grep -qE '^release/[0-9]+\.[0-9]+\.[0-9]+$'; then
+  if echo "$CI_TAG" | grep -qE '^release/[0-9]+\.[0-9]+(\.[0-9]+)?$'; then
     echo "Release tag detected: $CI_TAG — triggering App Store submission via Fastlane"
 
     # Verify required ASC API env vars are present
