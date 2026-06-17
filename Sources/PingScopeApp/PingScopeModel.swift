@@ -568,7 +568,7 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
     private func startNetworkPathMonitoring() {
         pathMonitor.pathUpdateHandler = { [weak self] path in
             let status = Self.networkStatus(from: path)
-            Task { @MainActor in
+            DispatchQueue.main.async { [weak self] in
                 self?.handleNetworkStatus(status)
             }
         }

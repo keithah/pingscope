@@ -317,22 +317,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func installPowerObservers() {
         let center = NSWorkspace.shared.notificationCenter
+        let model = model
         wakeObserver = center.addObserver(
             forName: NSWorkspace.didWakeNotification,
             object: nil,
             queue: .main
-        ) { [weak self] _ in
-            Task { @MainActor in
-                self?.model.resumeMeasurementsAfterSystemChange()
+        ) { _ in
+            Task { @MainActor [model] in
+                model.resumeMeasurementsAfterSystemChange()
             }
         }
         sleepObserver = center.addObserver(
             forName: NSWorkspace.willSleepNotification,
             object: nil,
             queue: .main
-        ) { [weak self] _ in
-            Task { @MainActor in
-                self?.model.pauseMeasurementsForSleep()
+        ) { _ in
+            Task { @MainActor [model] in
+                model.pauseMeasurementsForSleep()
             }
         }
     }

@@ -11,9 +11,9 @@ struct PingScopeWidgetView: View {
             SmallWidgetView(entry: entry)
         case .systemMedium:
             MediumWidgetView(entry: entry)
-        case .systemLarge:
+        case .systemLarge, .systemExtraLarge:
             LargeWidgetView(entry: entry)
-        @unknown default:
+        default:
             EmptyView()
         }
     }
