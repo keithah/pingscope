@@ -23,7 +23,7 @@ Last full local validation before release:
 ## Current Follow-Ups
 
 - Manual install QA from the public GitHub DMG.
-- Optional rebuild/re-upload of `0.1.0` assets if exact binary-from-tag provenance matters after the AGPL license commit.
+- Rebuild/re-upload `0.1.0` assets from the cleaned repository state.
 - First Sparkle update validation on `0.1.1`.
 - iOS preparation after Mac release cleanup.
 

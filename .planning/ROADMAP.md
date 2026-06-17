@@ -26,7 +26,7 @@ Delivered:
 - [x] Remove old implementation files and tests from the prior app.
 - [x] Remove old App Store screenshots/metadata and duplicate widget target.
 - [x] Replace legacy planning history with this current roadmap.
-- [ ] Decide whether to rebuild and re-upload `0.1.0` assets after the license-only tag move, or leave binary assets unchanged until `0.1.1`.
+- [x] Rebuild and re-upload `0.1.0` assets after cleanup so the release source archive and binary artifacts line up.
 - [ ] Manually install the GitHub DMG on a clean account and verify first-run behavior.
 
 ## 0.1.1 - First Patch
