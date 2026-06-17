@@ -33,10 +33,10 @@ Purpose:
 
 - Improve diagnostics, automation, and widget/overlay polish based on first real usage.
 
-## 0.3.0 - iOS Preparation
+## 0.3.0 - iOS Companion
 
-Status: planned
+Status: in progress
 
 Purpose:
 
-- Audit and scaffold platform boundaries for a future iOS companion app.
+- Add a narrow iOS companion app with `30s` and `1m` monitor sessions, Live Activity presentation, host editing, local recent history, and clear finite-background-runtime behavior.

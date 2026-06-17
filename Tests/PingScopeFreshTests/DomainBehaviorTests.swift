@@ -29,6 +29,16 @@ final class DomainBehaviorTests: XCTestCase {
         ])
     }
 
+    func testHostConfigValidationRequiresPortsForConnectionBasedMethods() {
+        let tcp = HostConfig(displayName: "Example", address: "example.com", method: .tcp, port: nil)
+        let udp = HostConfig(displayName: "Example", address: "example.com", method: .udp, port: nil)
+        let icmp = HostConfig(displayName: "Example", address: "example.com", method: .icmp, port: nil)
+
+        XCTAssertEqual(tcp.validationErrors, [.invalidPort])
+        XCTAssertEqual(udp.validationErrors, [.invalidPort])
+        XCTAssertTrue(icmp.validationErrors.isEmpty)
+    }
+
     func testHostConfigApplyingMethodSetsMethodAwarePort() {
         var host = HostConfig(displayName: "Example", address: "example.com", method: .tcp, port: 443)
 
@@ -92,9 +102,11 @@ final class DomainBehaviorTests: XCTestCase {
     }
 
     func testMonitorSessionDurationValuesAreLimitedForIOSLiveActivity() {
+        XCTAssertNil(MonitorSessionDuration.continuous.duration)
         XCTAssertEqual(MonitorSessionDuration.thirtySeconds.duration, .seconds(30))
         XCTAssertEqual(MonitorSessionDuration.oneMinute.duration, .seconds(60))
-        XCTAssertEqual(MonitorSessionDuration.allCases, [.thirtySeconds, .oneMinute])
+        XCTAssertEqual(MonitorSessionDuration.allCases, [.continuous, .thirtySeconds, .oneMinute])
+        XCTAssertEqual(MonitorSessionDuration.continuous.displayName, "Live")
         XCTAssertEqual(MonitorSessionDuration.thirtySeconds.displayName, "30s")
         XCTAssertEqual(MonitorSessionDuration.oneMinute.displayName, "1m")
     }
@@ -151,6 +163,22 @@ final class DomainBehaviorTests: XCTestCase {
         XCTAssertEqual(session.phase(at: startedAt.addingTimeInterval(30)), .ended)
         XCTAssertTrue(session.isExpired(at: startedAt.addingTimeInterval(30)))
         XCTAssertEqual(session.remainingDuration(at: startedAt.addingTimeInterval(31)), .zero)
+    }
+
+    func testMonitorSessionContinuousDurationDoesNotExpireByTime() {
+        let hostID = UUID()
+        let startedAt = Date(timeIntervalSince1970: 2_000)
+        let session = MonitorSessionState(
+            hostID: hostID,
+            duration: .continuous,
+            startedAt: startedAt,
+            policy: MonitorSessionPolicy(staleAfter: .seconds(120))
+        )
+
+        XCTAssertNil(session.scheduledEndAt)
+        XCTAssertEqual(session.phase(at: startedAt.addingTimeInterval(60)), .live)
+        XCTAssertFalse(session.isExpired(at: startedAt.addingTimeInterval(60 * 60)))
+        XCTAssertEqual(session.remainingDuration(at: startedAt.addingTimeInterval(60)), .zero)
     }
 
     func testMonitorSessionCanEndEarlyOnIOSExpiration() {

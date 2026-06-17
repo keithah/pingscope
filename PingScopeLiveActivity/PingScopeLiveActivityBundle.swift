@@ -56,7 +56,7 @@ struct PingScopeLiveActivityWidget: Widget {
             Text(context.state.isStale ? "Stale" : context.state.status.rawValue.capitalized)
                 .font(.caption)
             Spacer()
-            Text("\(context.state.remainingSeconds)s")
+            Text(remainingText(context))
                 .font(.caption.monospacedDigit())
         }
     }
@@ -80,13 +80,17 @@ private struct PingScopeLiveActivityView: View {
             VStack(alignment: .trailing, spacing: 2) {
                 Text(latencyText(context.state))
                     .font(.title3.monospacedDigit())
-                Text("\(context.state.remainingSeconds)s")
+                Text(remainingText(context))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
         }
         .padding()
     }
+}
+
+private func remainingText(_ context: ActivityViewContext<PingScopeLiveActivityAttributes>) -> String {
+    context.attributes.duration == .continuous ? "Live" : "\(context.state.remainingSeconds)s"
 }
 
 private func latencyText(_ state: PingScopeLiveActivityAttributes.ContentState) -> String {

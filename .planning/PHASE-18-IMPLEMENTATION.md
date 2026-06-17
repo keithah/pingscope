@@ -18,11 +18,20 @@ Goal: make PingScope iOS-friendly without promising continuous iOS background mo
 - [x] Implement `LiveMonitorSessionController` for foreground probing and finite background expiration.
 - [x] Add shared `PingScope-iOS` scheme for local and Xcode Cloud builds.
 - [x] Add iOS app icon slots needed by Xcode validation.
+- [x] Add persisted iOS host selection with Cloudflare and Google defaults.
+- [x] Add iOS live session graph, latency, countdown, and stats UI.
+- [x] Add basic iOS host add/edit/delete sheet for TCP and UDP hosts.
+- [x] Add real iOS host interval, timeout, degraded threshold, down-after, and port validation controls.
+- [x] Add iOS local recent history for finite session samples.
+- [x] Wire iOS scene backgrounding to finite `UIApplication` background task expiration.
+- [x] Add iOS validation script and physical-device QA checklist.
+- [x] Add repeatable iOS simulator launch/screenshot smoke script.
+- [x] Add repeatable physical-device build/install/launch smoke script.
+- [x] Auto-start a `30s` monitor session on first iOS app appearance.
 
 ## Remaining Slices
 
-- [ ] Add device-only manual QA for Live Activity updates, stale state, and early background expiration.
-- [ ] Decide whether iOS durable history is in scope or whether the first iOS app remains live-session only.
+- [ ] Run device-only manual QA for Live Activity updates, stale state, local-network permission, and early background expiration.
 
 ## Verification Commands
 
@@ -32,3 +41,10 @@ Goal: make PingScope iOS-friendly without promising continuous iOS background mo
 - `xcodebuild -project PingScope.xcodeproj -scheme PingScope-AppStore -configuration Debug -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO build`
 - `xcodebuild -project PingScope.xcodeproj -scheme PingScope-iOS -destination 'generic/platform=iOS Simulator' build CODE_SIGNING_ALLOWED=NO`
 - `xcodebuild -project PingScope.xcodeproj -scheme PingScope-iOS -destination 'generic/platform=iOS' build CODE_SIGNING_ALLOWED=NO`
+- `scripts/validate-ios.sh`
+- `scripts/validate-ios-simulator-smoke.sh`
+- `scripts/validate-ios-device-smoke.sh`
+
+## Device QA Status
+
+Physical iPhone smoke passed on `pHADM` (`iPhone17,1`, iOS `26.5`, Developer Mode enabled, wired). The earlier developer disk image mount failure cleared after the phone was unlocked and plugged in. The app builds, installs, launches, and the PingScope app process is visible through `devicectl`.

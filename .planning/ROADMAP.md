@@ -49,19 +49,26 @@ Goal: improve confidence and daily usability without expanding platform scope.
 - [ ] Improve widget visual polish after real use.
 - [ ] Review menu bar and overlay behavior across Spaces/full-screen apps.
 
-## 0.3.0 - iOS Preparation
+## 0.3.0 - iOS Companion
 
-Goal: prepare the codebase for a future iOS companion app.
+Goal: ship a narrow iOS companion that supports short, user-started monitor sessions without implying always-on background pinging.
 
-- [ ] Audit `PingScopeCore` for platform-neutral APIs.
-- [ ] Keep macOS-only code isolated in `Sources/PingScopeApp`.
-- [ ] Add compile-only iOS shell target that depends on `PingScopeCore`.
-- [ ] Define iOS monitoring constraints around background execution, notifications, and widgets.
-- [ ] Add Phase 18 short Live Activity session model: `30s` default, `1m` optional, stale-aware, no always-on background claim.
+- [x] Audit `PingScopeCore` for platform-neutral APIs.
+- [x] Keep macOS-only code isolated in `Sources/PingScopeApp`.
+- [x] Add `PingScopeiOS` support target that depends on `PingScopeCore`.
+- [x] Add real `PingScope-iOS` app and Live Activity extension targets.
+- [x] Define iOS monitoring constraints around background execution, notifications, local-network permission, and Live Activities.
+- [x] Add Phase 18 short Live Activity session model: `30s` default, `1m` optional, stale-aware, no always-on background claim.
+- [x] Add iOS host selection, host editing, live graph/stats, and local recent history.
+- [x] Add finite iOS background task handling that ends the session if iOS expires runtime.
+- [x] Add `scripts/validate-ios.sh` for repeatable iOS build/test coverage.
+- [x] Add `scripts/validate-ios-simulator-smoke.sh` for launch/screenshot smoke coverage.
+- [x] Add `scripts/validate-ios-device-smoke.sh` for physical-device build/install/launch smoke coverage.
+- [x] Auto-start a `30s` monitor session when the iOS app opens.
+- [ ] Run device-only manual QA for Live Activity updates, Dynamic Island/Lock Screen presentation, local-network permission, stale state, and early background expiration.
 
 ## Later
 
-- iOS companion app.
 - App Store submission automation if App Store distribution becomes a priority.
 - Longer-term history views and pruning controls.
 - More advanced export/reporting only if users ask for it.

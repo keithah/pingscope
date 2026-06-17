@@ -1,11 +1,13 @@
 import Foundation
 
 public enum MonitorSessionDuration: String, CaseIterable, Codable, Equatable, Sendable {
+    case continuous
     case thirtySeconds
     case oneMinute
 
-    public var duration: Duration {
+    public var duration: Duration? {
         switch self {
+        case .continuous: nil
         case .thirtySeconds: .seconds(30)
         case .oneMinute: .seconds(60)
         }
@@ -13,6 +15,7 @@ public enum MonitorSessionDuration: String, CaseIterable, Codable, Equatable, Se
 
     public var displayName: String {
         switch self {
+        case .continuous: "Live"
         case .thirtySeconds: "30s"
         case .oneMinute: "1m"
         }
@@ -74,15 +77,16 @@ public struct MonitorSessionState: Codable, Equatable, Sendable {
         self.policy = policy
     }
 
-    public var scheduledEndAt: Date {
-        startedAt.addingTimeInterval(duration.duration.seconds)
+    public var scheduledEndAt: Date? {
+        guard let duration = duration.duration else { return nil }
+        return startedAt.addingTimeInterval(duration.seconds)
     }
 
     public func phase(at date: Date = Date()) -> MonitorSessionPhase {
         if let endedAt, date >= endedAt {
             return .ended
         }
-        if date >= scheduledEndAt {
+        if let scheduledEndAt, date >= scheduledEndAt {
             return .ended
         }
 
@@ -99,6 +103,7 @@ public struct MonitorSessionState: Codable, Equatable, Sendable {
 
     public func remainingDuration(at date: Date = Date()) -> Duration {
         guard phase(at: date) != .ended else { return .zero }
+        guard let scheduledEndAt else { return .zero }
         let deadline = min(scheduledEndAt, endedAt ?? scheduledEndAt)
         return .milliseconds(max(0, deadline.timeIntervalSince(date)) * 1_000)
     }

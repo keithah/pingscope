@@ -36,7 +36,7 @@ public struct PingScopeLiveActivityAttributes: ActivityAttributes, Sendable {
                 latencyMilliseconds: latestResult?.latency.map { Int($0.milliseconds.rounded()) },
                 status: health?.status ?? .noData,
                 lastUpdatedAt: latestResult?.timestamp,
-                remainingSeconds: Int(session.remainingDuration(at: date).seconds.rounded(.down)),
+                remainingSeconds: session.duration == .continuous ? 0 : Int(session.remainingDuration(at: date).seconds.rounded(.down)),
                 isStale: session.phase(at: date) != .live,
                 failureMessage: latestResult?.failureReason?.userMessage
             )

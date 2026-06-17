@@ -46,7 +46,9 @@ public struct HostConfig: Identifiable, Codable, Equatable, Sendable {
         if address.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             errors.append(.missingAddress)
         }
-        if let port, port == 0 {
+        if method != .icmp, port == nil {
+            errors.append(.invalidPort)
+        } else if let port, port == 0 {
             errors.append(.invalidPort)
         }
         if interval < .milliseconds(250) {

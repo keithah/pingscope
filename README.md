@@ -2,31 +2,11 @@
 
 PingScope is a native macOS menu bar latency monitor for people who want a quiet, always-available signal about their network. It shows an iStat-style menu bar readout, a focused live graph popover, and an optional floating overlay.
 
-PingScope is being built as a dual-distribution Mac app:
+PingScope is primarily a Mac app, with an iOS companion app in progress:
 
 - **Developer ID builds** support TCP, UDP, and ICMP probes where macOS permits them, plus Sparkle updates from GitHub Releases.
 - **App Store builds** stay sandbox-compliant and hide ICMP.
-
-## Screenshots
-
-Fresh screenshots can be captured with:
-
-```bash
-scripts/capture-readme-screenshots.sh
-```
-
-The script writes:
-
-- `images/overlay.png`
-- `images/settings-hosts.png`
-- `images/settings-notifications.png`
-- `images/settings-advanced.png`
-
-macOS Screen Recording permission is required for the terminal app running the script.
-
-![PingScope overlay](images/overlay.png)
-
-![PingScope host settings](images/settings-hosts.png)
+- **iOS builds** are finite-session monitors. They can measure while the app is active, publish short Live Activity updates, and keep local recent history, but they do not promise continuous background pinging.
 
 ## Features
 
@@ -41,6 +21,7 @@ macOS Screen Recording permission is required for the terminal app running the s
 - Widget data sharing as an opt-in setting, so shared-container permission is not requested on every launch.
 - Start at login support.
 - Non-App-Store Sparkle update integration.
+- iOS companion shell with 30-second and 1-minute live monitor sessions, Live Activity support, host editing, and local recent history.
 
 ## Probe Methods
 
@@ -51,6 +32,8 @@ PingScope measures latency with fresh work for every sample.
 - **ICMP** uses the system ping tool in Developer ID builds. ICMP is hidden in App Store builds.
 
 The UI labels the method so users know whether they are seeing TCP connection latency, UDP send latency, or ICMP round-trip behavior.
+
+On iOS, PingScope uses the App Store-safe probe set and finite monitor sessions. When a session is backgrounded, PingScope asks iOS for finite background runtime and ends the session if iOS expires that runtime. Live Activities show the latest known state and expire instead of representing an always-on monitor. Recent session samples are stored locally for quick review.
 
 ## Install
 
@@ -92,6 +75,10 @@ Common commands:
 ```bash
 swift build
 swift test
+scripts/validate-ios.sh
+scripts/validate-ios-simulator-smoke.sh
+scripts/validate-ios-device-smoke.sh
+xcodebuild -project PingScope.xcodeproj -scheme PingScope-iOS -destination 'generic/platform=iOS Simulator' build CODE_SIGNING_ALLOWED=NO
 scripts/validate-probes.sh
 scripts/build-xcode-app-bundle.sh debug /Applications developer-id
 scripts/validate-roadmap.sh
@@ -115,6 +102,7 @@ Validation coverage:
 
 - Domain tests for health, thresholds, stats, alerts, menu bar formatting, and graph scaling.
 - Runtime tests for scheduling, host updates, history persistence, widgets, and export.
+- iOS session tests for finite monitor sessions, history writes, user stop, stale state, and background expiration.
 - Probe validation for TCP, UDP send/readiness, and ICMP on the current network.
 - Xcode bundle validation for the Developer ID app and widget extension.
 - App Store sandbox verification.
@@ -147,17 +135,17 @@ PingScope is split into small layers:
 - **Domain core:** hosts, results, health, thresholds, stats, alerts, samples, history, and widget snapshots.
 - **Probe layer:** TCP, UDP, and ICMP probes behind protocols.
 - **Runtime layer:** scheduling, measurement, host storage, history, network status, notifications, and widget publishing.
-- **App shell:** AppKit status item, popover, overlay window, settings window, lifecycle, and single-instance behavior.
+- **App shell:** AppKit status item, popover, overlay window, settings window, lifecycle, single-instance behavior, and the iOS app entry point.
 - **UI layer:** SwiftUI views and view models that consume runtime state.
 
-The SwiftPM package remains buildable outside Xcode. The Xcode project adds the app bundle, WidgetKit extension, Sparkle, and distribution signing paths.
+The SwiftPM package remains buildable outside Xcode. The Xcode project adds the macOS app bundles, WidgetKit extensions, iOS app target, Live Activity extension, Sparkle, and distribution signing paths.
 
 ## Roadmap
 
 - 0.1.1: first patch release and Sparkle update validation.
 - 0.2.0: Mac polish, diagnostics, and widget/overlay refinements.
-- 0.3.0: iOS-ready architecture and compile-only iOS shell.
-- Later: iOS companion app after the Mac release is stable.
+- 0.3.0: iOS companion app with host selection, finite live sessions, local recent history, Live Activity polish, and physical-device QA.
+- Later: deeper iOS history views only if the finite-session workflow proves useful.
 
 ## License
 
@@ -165,4 +153,4 @@ GNU Affero General Public License v3.0. See `LICENSE`.
 
 ## Privacy
 
-PingScope stores settings, samples, history, exports, and optional widget snapshots locally on your Mac. It does not collect analytics, sell data, or require an account. See `PRIVACY.md`.
+PingScope stores settings, samples, history, exports, and optional widget snapshots locally on your device. It does not collect analytics, sell data, or require an account. See `PRIVACY.md`.
