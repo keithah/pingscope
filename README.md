@@ -162,3 +162,7 @@ The SwiftPM package remains buildable outside Xcode. The Xcode project adds the 
 ## License
 
 GNU Affero General Public License v3.0. See `LICENSE`.
+
+## Privacy
+
+PingScope stores settings, samples, history, exports, and optional widget snapshots locally on your Mac. It does not collect analytics, sell data, or require an account. See `PRIVACY.md`.
