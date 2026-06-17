@@ -7,6 +7,25 @@ DEVICE_ID="${PING_SCOPE_IOS_DEVICE_ID:-}"
 DERIVED_DATA_PATH="${PING_SCOPE_IOS_DEVICE_DERIVED_DATA:-.build/ios-device-smoke}"
 APP_BUNDLE_ID="${PING_SCOPE_IOS_BUNDLE_ID:-com.hadm.PingScope}"
 
+retry() {
+  local attempts="$1"
+  local delay_seconds="$2"
+  shift 2
+
+  local attempt=1
+  while true; do
+    if "$@"; then
+      return 0
+    fi
+    if [[ "${attempt}" -ge "${attempts}" ]]; then
+      return 1
+    fi
+    echo "Attempt ${attempt} failed; retrying in ${delay_seconds}s..." >&2
+    sleep "${delay_seconds}"
+    attempt=$((attempt + 1))
+  done
+}
+
 if [[ -z "${DEVICE_ID}" ]]; then
   DEVICE_ID="$(xcrun devicectl list devices | awk '/iPhone/ && /available/ {print $3; exit}')"
 fi
@@ -38,9 +57,9 @@ fi
 
 echo
 echo "== Install and launch on physical device =="
-xcrun devicectl device install app --device "${DEVICE_ID}" "${APP_PATH}" >/dev/null
+retry 3 3 xcrun devicectl device install app --device "${DEVICE_ID}" "${APP_PATH}" >/dev/null
 LAUNCH_LOG="${DERIVED_DATA_PATH}/launch.log"
-if ! xcrun devicectl device process launch --device "${DEVICE_ID}" --terminate-existing "${APP_BUNDLE_ID}" >"${LAUNCH_LOG}" 2>&1; then
+if ! retry 2 2 xcrun devicectl device process launch --device "${DEVICE_ID}" --terminate-existing "${APP_BUNDLE_ID}" >"${LAUNCH_LOG}" 2>&1; then
   if rg -q "Locked|could not be, unlocked|device was not" "${LAUNCH_LOG}"; then
     echo "Device launch was denied because the iPhone is locked. Unlock the device and rerun this script." >&2
   else

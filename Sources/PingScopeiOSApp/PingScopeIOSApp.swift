@@ -80,6 +80,7 @@ private final class PingScopeIOSAppModel: ObservableObject {
 
     func selectHost(_ hostID: UUID) {
         guard let host = hosts.first(where: { $0.id == hostID }) else { return }
+        let restartDuration = activeRestartDuration
         refreshTask?.cancel()
         refreshTask = nil
         hostStore.save(hosts: hosts, selectedHostID: hostID)
@@ -94,6 +95,12 @@ private final class PingScopeIOSAppModel: ObservableObject {
                 health: HostHealth(hostID: host.id, thresholds: host.thresholds)
             )
             await refreshHistory()
+            if let restartDuration {
+                await controller.start(duration: restartDuration)
+                await refreshSnapshot()
+                await startLiveActivity(duration: restartDuration)
+                startRefreshLoop()
+            }
         }
     }
 
@@ -182,6 +189,11 @@ private final class PingScopeIOSAppModel: ObservableObject {
                 try? await Task.sleep(for: .seconds(1))
             }
         }
+    }
+
+    private var activeRestartDuration: MonitorSessionDuration? {
+        guard let session = snapshot.session, session.phase() != .ended else { return nil }
+        return session.duration
     }
 
     private func refreshSnapshot() async {

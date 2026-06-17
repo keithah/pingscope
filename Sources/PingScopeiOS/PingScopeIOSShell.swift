@@ -263,7 +263,7 @@ public struct PingScopeIOSRootView: View {
             }
 
             if historySamples.isEmpty {
-                Text("Start a session to store local samples.")
+                Text("Samples appear here after monitoring starts.")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             } else {
