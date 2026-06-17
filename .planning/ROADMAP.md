@@ -4,7 +4,8 @@
 
 - ✅ **v1.0 MVP** - Phases 1-12 (shipped 2026-02-17)
 - ✅ **v1.1 App Store Release** - Phases 13-16 (shipped 2026-02-18)
-- 🚧 **v2.0 Widgets & Cross-Platform** - Phases 17-18 (in progress)
+- ✅ **v2.0 Widgets, History & Export** - Phase 17 plus durable history/export (validated 2026-06-16)
+- 🚧 **v3.0 iOS Preparation** - Phase 18+ (planned)
 
 ## Phases
 
@@ -45,12 +46,14 @@ See: [.planning/milestones/v1.1-ROADMAP.md](milestones/v1.1-ROADMAP.md)
 
 </details>
 
-### 🚧 v2.0 Widgets & Cross-Platform (In Progress)
+### ✅ v2.0 Widgets, History & Export (Validated 2026-06-16)
 
-**Milestone Goal:** Add WidgetKit support for macOS and refactor architecture for future cross-platform expansion.
+**Milestone Goal:** Add WidgetKit support for macOS, durable local history, export, and automated validation for those roadmap items.
 
-- [ ] **Phase 17: Widget Foundation** - Working widgets (small/medium/large) displaying live ping status
-- [ ] **Phase 18: Cross-Platform Architecture** - Platform-separated codebase ready for iOS
+- [x] **Phase 17: Widget Foundation** - Xcode widget extension builds, embeds, and reads shared app data
+- [x] **History** - SQLite history persists samples and prunes automatically
+- [x] **Export** - CSV/JSON/text export works through shared export code
+- [x] **Automation** - `scripts/validate-roadmap.sh` validates tests, widget bundle, shared data, export, app smoke, and App Store sandbox compliance
 
 ## Phase Details
 
@@ -69,9 +72,9 @@ See: [.planning/milestones/v1.1-ROADMAP.md](milestones/v1.1-ROADMAP.md)
 **Plans**: 3 plans
 
 Plans:
-- [ ] 17-01-PLAN.md — Widget infrastructure (App Groups, extension target, WidgetDataStore)
-- [ ] 17-02-PLAN.md — Widget UI (TimelineProvider, small/medium/large views)
-- [ ] 17-03-PLAN.md — Integration and verification (deep linking, app wiring, testing)
+- [x] 17-01-PLAN.md — Widget infrastructure (App Groups, extension target, WidgetDataStore)
+- [x] 17-02-PLAN.md — Widget UI (TimelineProvider, small/medium/large views)
+- [x] 17-03-PLAN.md — Integration and verification (deep linking, app wiring, automated bundle/data testing)
 
 ### Phase 17.1: use xcode cloud with this and fastlane to automate builds and not require me to build it locally or use xcode locally (INSERTED)
 
@@ -84,22 +87,31 @@ Plans:
 - [ ] 17.1-01-PLAN.md — Fix ci_scripts and create Fastlane setup (Gemfile, Appfile, Fastfile)
 - [ ] 17.1-02-PLAN.md — Configure Xcode Cloud workflows and verify end-to-end pipeline
 
-### Phase 18: Cross-Platform Architecture
-**Goal**: Codebase is organized for future iOS support with clean platform separation
+### Phase 18: iOS-Ready Architecture
+**Goal**: Codebase is organized for future iOS support with clean shared domain/runtime boundaries and platform-specific app shells.
 **Depends on**: Phase 17
 **Requirements**: XP-01, XP-02, XP-03, XP-04, XP-05, XP-06, XP-07, XP-08
 **Success Criteria** (what must be TRUE):
-  1. Platform-specific code (MenuBarViewModel, AppDelegate) organized in macOS/ folder
-  2. Shared models and services (PingService, HostStore, Host, PingResult) organized in Shared/ folder
-  3. Widget extension code organized in WidgetExtension/ folder
-  4. PingService, HostStore, and data models build without warnings on macOS target
-  5. Compiler directives (#if os) used in fewer than 10 locations across codebase
-  6. macOS app and widgets continue working after reorganization (validated via manual testing)
-**Plans**: TBD
+  1. `PingScopeCore` remains platform-neutral and builds without AppKit/UIKit dependencies
+  2. macOS-specific AppKit/menu bar code remains isolated in `Sources/PingScopeApp`
+  3. Widget extension code remains isolated in `PingScopeWidget`
+  4. A future `PingScopeiOS` shell can depend on `PingScopeCore` without importing macOS-only code
+  5. Compiler directives stay localized to platform shell targets
+  6. `scripts/validate-roadmap.sh` continues passing after any reorganization
+**Plans**: 3
 
 Plans:
-- [ ] 18-01: TBD
-- [ ] 18-02: TBD
+- [ ] 18-01 — Audit and enforce shared-core platform boundaries
+- [ ] 18-02 — Add iOS app target scaffold that compiles against `PingScopeCore`
+- [ ] 18-03 — Design iOS UX around host list, live detail, history, and notifications
+
+### Phase 19: iOS App
+**Goal**: Ship an iOS companion app when product usage justifies it.
+**Depends on**: Phase 18
+**Plans**:
+- [ ] 19-01 — iOS host monitoring UX and background-behavior constraints
+- [ ] 19-02 — iOS settings/history/export parity scope
+- [ ] 19-03 — TestFlight release pipeline
 
 ## Progress
 
@@ -113,5 +125,7 @@ Phases execute in numeric order: 17 → 18
 | 14. Privacy and Compliance | v1.1 | 3/3 | Complete | 2026-02-17 |
 | 15. App Store Metadata and Assets | v1.1 | 2/2 | Complete | 2026-02-17 |
 | 16. Submission and Distribution | v1.1 | 4/4 | Complete | 2026-02-18 |
-| 17. Widget Foundation | v2.0 | 0/3 | Not started | - |
-| 18. Cross-Platform Architecture | v2.0 | 0/2 | Not started | - |
+| 17. Widget Foundation | v2.0 | 3/3 | Complete | 2026-06-16 |
+| History and Export | v2.0 | 1/1 | Complete | 2026-06-16 |
+| 18. iOS-Ready Architecture | v3.0 | 0/3 | Planned | - |
+| 19. iOS App | v3.0 | 0/3 | Planned | - |

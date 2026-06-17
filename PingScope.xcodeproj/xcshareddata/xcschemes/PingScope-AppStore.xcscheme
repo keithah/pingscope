@@ -14,9 +14,9 @@
             buildForAnalyzing = "YES">
             <BuildableReference
                BuildableIdentifier = "primary"
-               BlueprintIdentifier = "53AA6F362F441DAB009FEF3A"
+               BlueprintIdentifier = "53E500000000000000000008"
                BuildableName = "PingScope.app"
-               BlueprintName = "PingScopeApp"
+               BlueprintName = "PingScopeAppStore"
                ReferencedContainer = "container:PingScope.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
@@ -66,9 +66,9 @@
          runnableDebuggingMode = "0">
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "53AA6F362F441DAB009FEF3A"
+            BlueprintIdentifier = "53E500000000000000000008"
             BuildableName = "PingScope.app"
-            BlueprintName = "PingScopeApp"
+            BlueprintName = "PingScopeAppStore"
             ReferencedContainer = "container:PingScope.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
@@ -83,9 +83,9 @@
          runnableDebuggingMode = "0">
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "53AA6F362F441DAB009FEF3A"
+            BlueprintIdentifier = "53E500000000000000000008"
             BuildableName = "PingScope.app"
-            BlueprintName = "PingScopeApp"
+            BlueprintName = "PingScopeAppStore"
             ReferencedContainer = "container:PingScope.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>

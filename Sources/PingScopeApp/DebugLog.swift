@@ -1,0 +1,24 @@
+import Foundation
+
+enum DebugLog {
+    private static let url = URL(fileURLWithPath: "/tmp/pingscope-debug.log")
+    private static let lock = NSLock()
+
+    static func write(_ message: String) {
+        lock.lock()
+        defer { lock.unlock() }
+
+        let timestamp = ISO8601DateFormatter().string(from: Date())
+        let line = "[\(timestamp)] \(message)\n"
+        guard let data = line.data(using: .utf8) else { return }
+
+        if FileManager.default.fileExists(atPath: url.path),
+           let handle = try? FileHandle(forWritingTo: url) {
+            defer { try? handle.close() }
+            _ = try? handle.seekToEnd()
+            try? handle.write(contentsOf: data)
+        } else {
+            try? data.write(to: url)
+        }
+    }
+}

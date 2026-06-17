@@ -6,14 +6,25 @@ set -euo pipefail
 # Why: macOS notification prompts and signing/notarization require a real bundle.
 #
 # Usage:
-#   scripts/build-app-bundle.sh [debug|release] [output_dir]
+#   scripts/build-app-bundle.sh [debug|release] [output_dir] [developer-id|app-store]
 #
 # Examples:
 #   scripts/build-app-bundle.sh debug
-#   scripts/build-app-bundle.sh release /private/tmp/artifacts
+#   scripts/build-app-bundle.sh release /private/tmp/artifacts developer-id
+#   scripts/build-app-bundle.sh release /private/tmp/artifacts app-store
+#
+# Optional environment:
+#   CODESIGN_IDENTITY="Developer ID Application: ..."
+#   APP_ENTITLEMENTS=/path/to/entitlements.plist
+#   MARKETING_VERSION=1.0
+#   CURRENT_PROJECT_VERSION=2
 
 CONFIGURATION="${1:-debug}"
 OUTPUT_DIR="${2:-}"
+FLAVOR="${3:-developer-id}"
+MARKETING_VERSION="${MARKETING_VERSION:-1.0}"
+CURRENT_PROJECT_VERSION="${CURRENT_PROJECT_VERSION:-2}"
+BUNDLE_IDENTIFIER="${BUNDLE_IDENTIFIER:-com.hadm.PingScope}"
 
 case "${CONFIGURATION}" in
   debug|release) ;;
@@ -23,8 +34,20 @@ case "${CONFIGURATION}" in
     ;;
 esac
 
-SWIFT_BUILD_ARGS=("-c" "${CONFIGURATION}")
+case "${FLAVOR}" in
+  developer-id|app-store) ;;
+  *)
+    echo "Unknown flavor: ${FLAVOR} (expected developer-id|app-store)" >&2
+    exit 2
+    ;;
+esac
 
+SWIFT_BUILD_ARGS=("-c" "${CONFIGURATION}")
+if [[ "${FLAVOR}" == "app-store" ]]; then
+  SWIFT_BUILD_ARGS+=("-Xswiftc" "-DAPPSTORE")
+fi
+
+swift build "${SWIFT_BUILD_ARGS[@]}" >/dev/null
 BIN_DIR="$(swift build --show-bin-path "${SWIFT_BUILD_ARGS[@]}")"
 APP_DIR="${BIN_DIR}/PingScope.app"
 if [[ -n "${OUTPUT_DIR}" ]]; then
@@ -40,7 +63,10 @@ rm -rf "${APP_DIR}"
 mkdir -p "${MACOS_DIR}" "${RESOURCES_DIR}"
 
 cp "${BIN_DIR}/PingScope" "${MACOS_DIR}/PingScope"
-cp "Info.plist" "${CONTENTS_DIR}/Info.plist"
+cp "Configuration/Info.plist" "${CONTENTS_DIR}/Info.plist"
+/usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier ${BUNDLE_IDENTIFIER}" "${CONTENTS_DIR}/Info.plist"
+/usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString ${MARKETING_VERSION}" "${CONTENTS_DIR}/Info.plist"
+/usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${CURRENT_PROJECT_VERSION}" "${CONTENTS_DIR}/Info.plist"
 
 # SwiftPM resources are built into this bundle when present.
 if [[ -d "${BIN_DIR}/PingScope_PingScope.bundle" ]]; then
@@ -58,5 +84,21 @@ if [[ -f "Sources/PingScope/Resources/AppIcon.icns" ]]; then
 fi
 
 chmod +x "${MACOS_DIR}/PingScope"
+
+SIGN_IDENTITY="${CODESIGN_IDENTITY:--}"
+SIGN_ARGS=("--force" "--sign" "${SIGN_IDENTITY}" "--identifier" "${BUNDLE_IDENTIFIER}")
+if [[ "${FLAVOR}" == "developer-id" && "${SIGN_IDENTITY}" != "-" ]]; then
+  SIGN_ARGS+=("--options" "runtime" "--timestamp")
+fi
+if [[ "${FLAVOR}" == "app-store" ]]; then
+  ENTITLEMENTS="${APP_ENTITLEMENTS:-Configuration/PingScope-AppStore.entitlements}"
+  SIGN_ARGS+=("--entitlements" "${ENTITLEMENTS}")
+elif [[ "${FLAVOR}" == "developer-id" ]]; then
+  ENTITLEMENTS="${APP_ENTITLEMENTS:-Configuration/PingScope-DeveloperID.entitlements}"
+  SIGN_ARGS+=("--entitlements" "${ENTITLEMENTS}")
+elif [[ -n "${APP_ENTITLEMENTS:-}" ]]; then
+  SIGN_ARGS+=("--entitlements" "${APP_ENTITLEMENTS}")
+fi
+codesign "${SIGN_ARGS[@]}" "${APP_DIR}" >/dev/null
 
 echo "${APP_DIR}"

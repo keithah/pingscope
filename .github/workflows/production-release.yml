@@ -14,7 +14,7 @@ on:
 env:
   PRODUCT_NAME: "PingScope"
   PRODUCT_DISPLAY_NAME: "PingScope"
-  BUNDLE_ID: "com.hadm.pingscope"
+  BUNDLE_ID: "com.hadm.PingScope"
 
 jobs:
   build-and-release:
@@ -81,10 +81,10 @@ jobs:
       run: |
         swift build -c release
 
-    - name: Build App Bundle
+    - name: Build App Bundle with Widget Extension
       id: bundle
       run: |
-        APP_PATH=$(scripts/build-app-bundle.sh release)
+        APP_PATH=$(CODESIGN_IDENTITY="$APP_SIGNING_IDENTITY" scripts/build-xcode-app-bundle.sh release /private/tmp/pingscope-github-release developer-id)
         echo "APP_PATH=$APP_PATH" >> $GITHUB_OUTPUT
 
     - name: Set up notarization credentials
@@ -129,7 +129,7 @@ jobs:
           - ✅ Hardened runtime enabled
 
           ### Requirements
-          - macOS 13.0 (Ventura) or later
+          - macOS 26.0 or later
         files: |
           /private/tmp/artifacts/PingScope-v${{ steps.version.outputs.VERSION }}/PingScope-v${{ steps.version.outputs.VERSION }}.dmg
           /private/tmp/artifacts/PingScope-v${{ steps.version.outputs.VERSION }}/PingScope-v${{ steps.version.outputs.VERSION }}.pkg

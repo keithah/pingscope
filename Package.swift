@@ -1,29 +1,58 @@
-// swift-tools-version: 5.9
+// swift-tools-version: 6.2
 import PackageDescription
 
 let package = Package(
     name: "PingScope",
     platforms: [
-        .macOS(.v13)
+        .macOS(.v26)
     ],
     products: [
+        .library(
+            name: "PingScopeCore",
+            targets: ["PingScopeCore"]
+        ),
         .executable(
             name: "PingScope",
             targets: ["PingScope"]
+        ),
+        .executable(
+            name: "PingScopeExportValidate",
+            targets: ["PingScopeExportValidate"]
+        ),
+        .executable(
+            name: "PingScopeProbeValidate",
+            targets: ["PingScopeProbeValidate"]
         )
     ],
     dependencies: [],
     targets: [
+        .target(
+            name: "PingScopeCore",
+            dependencies: [],
+            path: "Sources/PingScopeCore",
+            linkerSettings: [
+                .linkedLibrary("sqlite3")
+            ]
+        ),
         .executableTarget(
             name: "PingScope",
-            dependencies: [],
-            path: "Sources/PingScope",
-            resources: [.process("Resources")]
+            dependencies: ["PingScopeCore"],
+            path: "Sources/PingScopeApp"
+        ),
+        .executableTarget(
+            name: "PingScopeExportValidate",
+            dependencies: ["PingScopeCore"],
+            path: "Sources/PingScopeExportValidate"
+        ),
+        .executableTarget(
+            name: "PingScopeProbeValidate",
+            dependencies: ["PingScopeCore"],
+            path: "Sources/PingScopeProbeValidate"
         ),
         .testTarget(
             name: "PingScopeTests",
-            dependencies: ["PingScope"],
-            path: "Tests/PingScopeTests"
+            dependencies: ["PingScopeCore"],
+            path: "Tests/PingScopeFreshTests"
         )
     ]
 )

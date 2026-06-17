@@ -55,6 +55,7 @@ if [[ ! -d "${APP_PATH}" ]]; then
   exit 2
 fi
 
+PROJECT_ROOT="$(pwd)"
 ARTIFACT_DIR="/private/tmp/artifacts/PingScope-v${VERSION}"
 rm -rf "${ARTIFACT_DIR}"
 mkdir -p "${ARTIFACT_DIR}"
@@ -65,7 +66,40 @@ cp -R "${APP_PATH}" "${ARTIFACT_DIR}/PingScope.app"
 cd "${ARTIFACT_DIR}"
 
 echo "Signing app: ${SIGN_APP_IDENTITY}"
-codesign --force --deep --options runtime --timestamp --sign "${SIGN_APP_IDENTITY}" "PingScope.app"
+SIGN_COMMON=("--force" "--options" "runtime" "--timestamp" "--sign" "${SIGN_APP_IDENTITY}")
+
+sign_framework_tree() {
+  local framework="$1"
+  while IFS= read -r executable; do
+    codesign "${SIGN_COMMON[@]}" "${executable}"
+  done < <(find "${framework}" -type f -perm -111 2>/dev/null | sort)
+
+  while IFS= read -r bundle; do
+    codesign "${SIGN_COMMON[@]}" "${bundle}"
+  done < <(find "${framework}" \( -name '*.xpc' -o -name '*.app' \) -type d 2>/dev/null | sort -r)
+
+  codesign "${SIGN_COMMON[@]}" "${framework}"
+}
+
+while IFS= read -r framework; do
+  sign_framework_tree "${framework}"
+done < <(find "PingScope.app/Contents/Frameworks" -name '*.framework' -type d 2>/dev/null | sort)
+
+while IFS= read -r dylib; do
+  codesign "${SIGN_COMMON[@]}" "${dylib}"
+done < <(find "PingScope.app/Contents/MacOS" -name '*.dylib' -type f 2>/dev/null | sort)
+
+while IFS= read -r appex; do
+  while IFS= read -r framework; do
+    sign_framework_tree "${framework}"
+  done < <(find "${appex}/Contents/Frameworks" -name '*.framework' -type d 2>/dev/null | sort)
+  while IFS= read -r dylib; do
+    codesign "${SIGN_COMMON[@]}" "${dylib}"
+  done < <(find "${appex}/Contents/MacOS" -name '*.dylib' -type f 2>/dev/null | sort)
+  codesign "${SIGN_COMMON[@]}" --entitlements "${PROJECT_ROOT}/PingScopeWidget/PingScopeWidget.entitlements" "${appex}"
+done < <(find "PingScope.app/Contents/PlugIns" -name '*.appex' -type d 2>/dev/null | sort)
+
+codesign "${SIGN_COMMON[@]}" --identifier "com.hadm.PingScope" --entitlements "${PROJECT_ROOT}/Configuration/PingScope-DeveloperID.entitlements" "PingScope.app"
 
 echo "Verifying signature..."
 codesign --verify --deep --strict --verbose=2 "PingScope.app"
@@ -82,11 +116,14 @@ hdiutil create -volname "PingScope v${VERSION}" \
   -ov -format UDZO \
   "${DMG_NAME}"
 
+echo "Signing DMG: ${SIGN_APP_IDENTITY}"
+codesign "${SIGN_COMMON[@]}" "${DMG_NAME}"
+
 PKG_NAME=""
 if [[ -n "${SIGN_INSTALLER_IDENTITY}" ]]; then
   echo "Creating PKG..."
   pkgbuild --root "PingScope.app" \
-    --identifier "com.hadm.pingscope" \
+    --identifier "com.hadm.PingScope" \
     --version "${VERSION}" \
     --install-location "/Applications/PingScope.app" \
     "unsigned.pkg"
@@ -108,10 +145,11 @@ if [[ -n "${PKG_NAME}" ]]; then
 fi
 
 echo "Verifying with spctl..."
-spctl -a -t exec -vv "PingScope.app" || true
+spctl -a -t exec -vv "PingScope.app"
+spctl -a -t open --context context:primary-signature -vv "${DMG_NAME}"
 
 if [[ -n "${PKG_NAME}" ]]; then
-  spctl -a -t install -vv "${PKG_NAME}" || true
+  spctl -a -t install -vv "${PKG_NAME}"
 fi
 
 echo "Creating checksums..."

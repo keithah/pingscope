@@ -5,16 +5,16 @@
 See: `.planning/PROJECT.md` (updated 2026-02-17)
 
 **Core value:** Reliable, accurate ping monitoring that users can trust — no false timeouts, no stale connections, no crashes.
-**Current focus:** Phase 17.1 - Xcode Cloud + Fastlane CI/CD Automation
+**Current focus:** Phase 18 - iOS-ready architecture planning and eventual iOS app preparation
 
 ## Current Position
 
-Phase: 17.1 of 18 (Xcode Cloud + Fastlane CI/CD)
-Plan: 2 of 2 (in progress — awaiting human actions)
-Status: Phase 17.1 Plan 02 — blocked at Task 1 checkpoint (create ASC API key in App Store Connect)
-Last activity: 2026-02-24 — Plan 17.1-02 (Xcode Cloud workflow configuration) started, waiting on human actions
+Phase: 18 of 19 (iOS-ready architecture)
+Plan: not started
+Status: Phase 17 widget/history/export roadmap validated locally; Phase 17.1 still requires Apple-side Xcode Cloud/App Store Connect setup for full remote automation.
+Last activity: 2026-06-16 — Added automated roadmap validation, Xcode widget-bundle build/install script, widget bundle/shared-data validator, live history export validator, and release workflow wiring for widget-bearing builds.
 
-Progress: [████████████████░░░░] 83% (v1.0 + v1.1 complete + 3 v2.0 plans: 66/68 total plans)
+Progress: [██████████████████░░] 90% (v1.0 + v1.1 complete, v2.0 local roadmap items validated, iOS architecture not started)
 
 ## Performance Metrics
 
@@ -23,11 +23,11 @@ Progress: [████████████████░░░░] 83% (v1
 - v1.1: 13 plans across 4 phases (shipped 2026-02-18)
 - Combined: 63 plans, ~3.5 hours total execution
 
-**v2.0 (current):**
-- Total plans: 5 estimated
-- Plans completed: 3
-- Phases complete: 1/3 (Phase 17.1 complete, Phase 17 in progress)
-- Status: Phase 17.1 complete
+**v2.0/v3.0 (current):**
+- Phase 17 widget foundation: complete locally with automated validation
+- Durable history/export: complete locally with automated validation
+- Phase 17.1 Xcode Cloud/Fastlane: repo-side automation present; Apple-side workflow/API setup remains external
+- Phase 18 iOS-ready architecture: planned next
 
 **Phase 17 metrics:**
 - Plan 17-01: 6min (3 tasks, 5 files modified)
@@ -55,7 +55,7 @@ Recent decisions affecting current work:
 - [Phase 17]: Stale data (>15min) shows at 60% opacity with orange warning badge
 - [Phase quick-2]: Use reloadAllTimelines() instead of reloadTimelines(ofKind:) to prevent ChronoCoreErrorDomain Code=27 when widget not registered
 - [Phase quick-2]: Widget extension inherits AppIcon from main app asset catalog via CFBundleIconFile key
-- [Phase quick-3]: widgetExtension target uses widget/Info.plist (not PingScopeWidget/Info.plist) per INFOPLIST_FILE build setting
+- [Phase 17 completion]: widgetExtension now uses `PingScopeWidget/Info.plist` and the real `PingScopeWidget/` source folder
 - [Phase quick-3]: Complete icon set (10 PNG files) required in widget's own asset catalog with filename references in Contents.json for proper ICNS compilation
 - [Phase 17.1]: ci_post_clone.sh: removed PlistBuddy/CFBundleVersion manipulation — Xcode Cloud manages build numbers natively via CI_BUILD_NUMBER and MARKETING_VERSION build setting
 - [Phase 17.1]: ci_post_xcodebuild.sh: removed ExportOptions.plist writing — Xcode Cloud handles export via workflow configuration, not external plist
@@ -65,11 +65,12 @@ Recent decisions affecting current work:
 
 ### Pending Todos
 
-None.
+- Configure App Store Connect API key and Xcode Cloud workflows outside the repo if remote TestFlight/App Review automation is still desired.
+- Start Phase 18 by auditing `PingScopeCore` for iOS-safe APIs and adding a compile-only iOS shell target.
 
 ### Blockers/Concerns
 
-None — v2.0 roadmap created with clear phase structure based on research findings.
+- Apple does not expose reliable local script automation for adding widgets to the macOS Widget Gallery. Repo automation validates the widget bundle, entitlements, deep-link data contract, and shared defaults; visual Widget Gallery placement remains release QA.
 
 ### Quick Tasks Completed
 
@@ -89,7 +90,7 @@ None — v2.0 roadmap created with clear phase structure based on research findi
 
 ## Session Continuity
 
-Last session: 2026-02-24
-Stopped at: Plan 17.1-02 Task 1 — checkpoint:human-action (Create App Store Connect API key)
-Resume file: .planning/phases/17.1-use-xcode-cloud-with-this-and-fastlane-to-automate-builds-and-not-require-me-to-build-it-locally-or-use-xcode-locally/17.1-02-SUMMARY.md
-Next action: Human must create ASC API key (https://appstoreconnect.apple.com/access/api) and create two Xcode Cloud workflows in Xcode IDE. See SUMMARY.md for full instructions.
+Last session: 2026-06-16
+Stopped at: Phase 17 local automation complete and validated
+Resume file: `.planning/ROADMAP.md`
+Next action: Begin Phase 18 by keeping `PingScopeCore` platform-neutral and adding a compile-only iOS app target scaffold.

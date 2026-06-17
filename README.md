@@ -1,143 +1,164 @@
 # PingScope
 
-A professional macOS menu bar application for real-time network monitoring with beautiful graphs and detailed ping history.
+PingScope is a native macOS menu bar latency monitor for people who want a quiet, always-available signal about their network. It shows an iStat-style menu bar readout, a focused live graph popover, and an optional floating overlay.
+
+PingScope is being built as a dual-distribution Mac app:
+
+- **Developer ID builds** support TCP, UDP, and ICMP probes where macOS permits them, plus Sparkle updates from GitHub Releases.
+- **App Store builds** stay sandbox-compliant and hide ICMP.
 
 ## Screenshots
 
-### Full Mode
+Fresh screenshots can be captured with:
 
-![PingScope Full Mode](images/mainscreen.png)
+```bash
+scripts/capture-readme-screenshots.sh
+```
 
-### Compact Mode
+The script writes:
 
-![PingScope Compact Mode](images/compact.png)
+- `images/overlay.png`
+- `images/settings-hosts.png`
+- `images/settings-notifications.png`
+- `images/settings-advanced.png`
 
-### Settings
+macOS Screen Recording permission is required for the terminal app running the script.
 
-![PingScope Settings](images/settings.png)
+![PingScope overlay](images/overlay.png)
+
+![PingScope host settings](images/settings-hosts.png)
 
 ## Features
 
-### 🎯 Core Functionality
-- **Real-time ping monitoring** of multiple hosts simultaneously
-- **Beautiful menu bar status** with colored dot and ping time
-- **Professional dropdown interface** with tabs, graphs, and history
-- **Smart default gateway detection** - automatically finds your router IP
+- iStat-style menu bar status: colored dot with latency text underneath.
+- Live popover with host selector, time range picker, graph, recent samples, packet loss, and min/avg/max stats.
+- Floating overlay with resizable full mode, compact graph mode, right-click host selector, settings, popover, and close actions.
+- Host management for TCP, UDP, and Developer ID ICMP.
+- Default gateway detection.
+- Per-host settings for method, port, interval, timeout, degraded threshold, down-after failures, enabled state, and notification policy.
+- Notifications for host down, recovery, high latency, network changes, internet loss, and selected network status states.
+- Durable local history with export to CSV, JSON, or text.
+- Widget data sharing as an opt-in setting, so shared-container permission is not requested on every launch.
+- Start at login support.
+- Non-App-Store Sparkle update integration.
 
-### 📊 Visual Monitoring
-- **Interactive host tabs** - Switch between monitored servers
-- **Real-time line graphs** with smooth animations and data points
-- **Detailed history table** with time, host, ping times, and status
-- **Terminal-style ping statistics** panel with min/avg/max/stddev summary
-- **Copyable statistics text** for easy sharing/debugging
-- **Color-coded status indicators** (Green/Yellow/Red/Gray)
+## Probe Methods
 
-### ⚙️ Settings & Management
-- **Complete host management** - Add, edit, and remove custom hosts
-- **Professional Settings interface** with real-time status indicators
-- **Data export functionality** - CSV, JSON, and Text formats with filtering
-- **Enhanced click support** - Ctrl+Click and Cmd+Click for context menu
-- **Clean, native macOS design** following Apple's design guidelines
+PingScope measures latency with fresh work for every sample.
 
-### 🌐 Host Management
-- **Flexible host configuration** - Add any IP address or hostname
-- **Default hosts included** - Google DNS, Cloudflare, and Default Gateway
-- **Full editability** - All hosts can be customized or removed
-- **Duplicate prevention** - Smart validation prevents conflicts
-- **Ping method selection** - TCP/UDP everywhere, ICMP when runtime supports it
+- **TCP** opens a new TCP connection to the configured host and port. This is the default because it works in sandboxed builds and reflects application-level reachability.
+- **UDP** sends a fresh UDP datagram to the configured host and port. The current implementation validates the datagram send/readiness path; it does not require a remote UDP echo response.
+- **ICMP** uses the system ping tool in Developer ID builds. ICMP is hidden in App Store builds.
 
-## Installation
+The UI labels the method so users know whether they are seeing TCP connection latency, UDP send latency, or ICMP round-trip behavior.
 
-1. Download the latest release
-2. Move PingScope.app to your Applications folder
-3. Launch the app - it will appear in your menu bar
-4. Grant network permissions when prompted
+## Install
+
+For a public Developer ID release:
+
+1. Download the latest `PingScope-vX.Y.Z.dmg` from GitHub Releases.
+2. Drag `PingScope.app` into Applications.
+3. Launch PingScope. It appears in the macOS menu bar.
+4. Configure hosts and notification permissions from Settings.
+
+For App Store builds, install through the App Store once published.
 
 ## Usage
 
-### Basic Monitoring
-- The menu bar shows a colored status dot and current ping time
-- **Green**: Good connection (<50ms)
-- **Yellow**: Slow connection (50-150ms)
-- **Red**: Poor connection (>150ms)
-- **Gray**: Connection timeout/error
+- Left-click the menu bar item to open the live popover.
+- Right-click the menu bar item for overlay, update, settings, and quit actions.
+- In the overlay, click the graph to open the popover.
+- Right-click the overlay for compact mode, host selection, popover, settings, or close.
+- Use Settings to add/edit hosts, select the primary host, configure notifications, export history, and control display behavior.
 
-### Interface Navigation
-- **Left-click** the menu bar icon to open the full interface
-- **Right-click/Ctrl+Click/Cmd+Click** for quick host switching and settings
-- **Click host tabs** to switch between monitored servers
-- **Use the gear menu** for settings and export options
+Status colors:
 
-### Settings & Export
-- **Settings Interface**: Add, edit, and remove hosts with real-time status
-- **Export Data**: Generate reports in CSV, JSON, or Text formats
-- **Time Range Filtering**: Export last hour, 24 hours, week, or all data
-- **Host-specific Export**: Export data for all hosts or specific ones
-
-## Technical Details
-
-### Requirements
-- macOS 13.0 or later
-- Network permissions for ping operations
-
-### Architecture
-- **SwiftUI** for modern, native interface
-- **Real-time ping monitoring** using system ping command
-- **Multi-host concurrent monitoring** with separate timers
-- **Data persistence** with automatic history management
-- **Native menu bar integration** with proper click handling
-
-### Performance
-- **Lightweight**: Minimal CPU and memory usage
-- **Efficient**: Smart ping scheduling and data management
-- **Responsive**: Non-blocking UI with background ping operations
+- Gray: no data.
+- Green: healthy.
+- Yellow: degraded latency.
+- Red: down after the configured consecutive failure threshold.
 
 ## Development
 
-### Building from Source
+Requirements:
+
+- macOS 26 or later.
+- Xcode 26 or later.
+- Swift 6.2 toolchain.
+- Optional: Developer ID Application certificate for signed local distribution builds.
+
+Common commands:
+
 ```bash
-git clone https://github.com/keithah/pingscope.git
-cd pingscope
-swiftc PingScope.swift -o PingScope
-./PingScope
+swift build
+swift test
+scripts/validate-probes.sh
+scripts/build-xcode-app-bundle.sh debug /Applications developer-id
+scripts/validate-roadmap.sh
 ```
 
-### Project Structure
+Build flavors:
+
+```bash
+# Developer ID-style app bundle with widget extension
+CODESIGN_IDENTITY="Developer ID Application: Your Name (TEAMID)" \
+scripts/build-xcode-app-bundle.sh release /private/tmp/pingscope developer-id
+
+# App Store-style sandbox bundle
+scripts/build-xcode-app-bundle.sh release /private/tmp/pingscope-appstore app-store
+
+# SwiftPM-only app bundle, useful for quick local debugging without widget extension
+scripts/build-app-bundle.sh debug /private/tmp/pingscope-swiftpm developer-id
 ```
-PingScope/
-├── Sources/                   # App source code
-├── .github/workflows/          # GitHub Actions CI/CD
-├── README.md                   # Documentation
-├── LICENSE                     # MIT License
-└── images/                     # Screenshots
+
+Validation coverage:
+
+- Domain tests for health, thresholds, stats, alerts, menu bar formatting, and graph scaling.
+- Runtime tests for scheduling, host updates, history persistence, widgets, and export.
+- Probe validation for TCP, UDP send/readiness, and ICMP on the current network.
+- Xcode bundle validation for the Developer ID app and widget extension.
+- App Store sandbox verification.
+
+## Release
+
+Developer ID releases are signed, notarized, packaged as a DMG, signed into a Sparkle appcast, and uploaded to GitHub Releases.
+
+One-time local setup:
+
+```bash
+xcrun notarytool store-credentials "NotarytoolProfile" \
+  --apple-id "you@example.com" \
+  --team-id "YOUR_TEAM_ID" \
+  --password "APP_SPECIFIC_PASSWORD"
 ```
 
-## Issues & Roadmap
+Sparkle uses the Keychain account `pingscope-ed25519`. The public key is already in the app plist; keep the private key in Keychain.
 
-Have ideas for new features or found a bug? Check out our [GitHub Issues](https://github.com/keithah/pingscope/issues) to:
-- Report bugs and issues
-- Request new features
-- View planned enhancements
-- Contribute to development
+Release command:
 
-## Contributing
+```bash
+scripts/release-github.sh --version 1.2.3 --release-notes RELEASE_NOTES.md
+```
 
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
+## Architecture
+
+PingScope is split into small layers:
+
+- **Domain core:** hosts, results, health, thresholds, stats, alerts, samples, history, and widget snapshots.
+- **Probe layer:** TCP, UDP, and ICMP probes behind protocols.
+- **Runtime layer:** scheduling, measurement, host storage, history, network status, notifications, and widget publishing.
+- **App shell:** AppKit status item, popover, overlay window, settings window, lifecycle, and single-instance behavior.
+- **UI layer:** SwiftUI views and view models that consume runtime state.
+
+The SwiftPM package remains buildable outside Xcode. The Xcode project adds the app bundle, WidgetKit extension, Sparkle, and distribution signing paths.
+
+## Roadmap
+
+- v1.1: polish durable history and export UX.
+- v1.2: release automation hardening and App Store submission packaging.
+- v2: widget polish backed by the shared snapshot model.
+- Future: iOS companion app after the Mac release is stable.
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## Acknowledgments
-
-- Built with SwiftUI and AppKit
-- Inspired by professional network monitoring tools
-- Designed for macOS menu bar integration
-
----
-
-**PingScope** - Professional network monitoring for macOS
+MIT. See `LICENSE`.
