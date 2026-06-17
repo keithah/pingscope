@@ -74,13 +74,13 @@ if [[ -d "${BIN_DIR}/PingScope_PingScope.bundle" ]]; then
 fi
 
 # Privacy manifest.
-if [[ -f "Sources/PingScope/Resources/PrivacyInfo.xcprivacy" ]]; then
-  cp "Sources/PingScope/Resources/PrivacyInfo.xcprivacy" "${RESOURCES_DIR}/"
+if [[ -f "Configuration/PrivacyInfo.xcprivacy" ]]; then
+  cp "Configuration/PrivacyInfo.xcprivacy" "${RESOURCES_DIR}/"
 fi
 
 # App icon (CFBundleIconFile expects it in the main app Resources).
-if [[ -f "Sources/PingScope/Resources/AppIcon.icns" ]]; then
-  cp "Sources/PingScope/Resources/AppIcon.icns" "${RESOURCES_DIR}/AppIcon.icns"
+if [[ -f "Configuration/AppIcon.icns" ]]; then
+  cp "Configuration/AppIcon.icns" "${RESOURCES_DIR}/AppIcon.icns"
 fi
 
 chmod +x "${MACOS_DIR}/PingScope"

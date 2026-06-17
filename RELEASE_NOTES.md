@@ -19,3 +19,4 @@ Fresh native macOS rebuild focused on a quiet, iStat-style latency monitor.
 - Developer ID DMG is signed, notarized, stapled, and Gatekeeper-verified.
 - Sparkle appcast is signed with the PingScope EdDSA key.
 - App Store scheme builds from the same codebase without Sparkle or privileged ICMP UI.
+- Source is licensed under the GNU Affero General Public License v3.0.

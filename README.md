@@ -154,10 +154,10 @@ The SwiftPM package remains buildable outside Xcode. The Xcode project adds the 
 
 ## Roadmap
 
-- v1.1: polish durable history and export UX.
-- v1.2: release automation hardening and App Store submission packaging.
-- v2: widget polish backed by the shared snapshot model.
-- Future: iOS companion app after the Mac release is stable.
+- 0.1.1: first patch release and Sparkle update validation.
+- 0.2.0: Mac polish, diagnostics, and widget/overlay refinements.
+- 0.3.0: iOS-ready architecture and compile-only iOS shell.
+- Later: iOS companion app after the Mac release is stable.
 
 ## License
 
