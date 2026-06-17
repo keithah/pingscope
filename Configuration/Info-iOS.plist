@@ -26,8 +26,18 @@
 	<string>public.app-category.utilities</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>PingScope needs local network access only when you enable monitoring for local devices such as your default gateway.</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>PingScope can optionally use background location to keep active network monitoring alive when you leave the app. This is disabled by default and may reduce battery life.</string>
+	<key>NSLocationAlwaysUsageDescription</key>
+	<string>PingScope can optionally use background location to keep active network monitoring alive when you leave the app. This is disabled by default and may reduce battery life.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>PingScope uses location only if you enable Background Keep Alive for active network monitoring.</string>
 	<key>NSSupportsLiveActivities</key>
 	<true/>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>location</string>
+	</array>
 	<key>UILaunchScreen</key>
 	<dict/>
 	<key>UISupportedInterfaceOrientations</key>

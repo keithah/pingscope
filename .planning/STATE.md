@@ -8,7 +8,7 @@ PingScope `0.1.0` is the first public release of the fresh rebuild. Current deve
 - Release tag: `v0.1.0`
 - License: AGPLv3
 - GitHub release: published with DMG, appcast, checksums, and Sparkle release notes
-- Current task: iOS companion app with continuous foreground monitoring, optional finite sessions, and Live Activity support
+- Current task: iOS companion app with continuous foreground monitoring, optional finite sessions, Live Activity support, and opt-in Background Keep Alive
 
 ## Validation Baseline
 
@@ -25,7 +25,7 @@ Last full local validation before release:
 - Manual install QA from the public GitHub DMG.
 - Rebuild/re-upload `0.1.0` assets from the cleaned repository state.
 - First Sparkle update validation on `0.1.1`.
-- Physical-device iOS QA for continuous foreground monitoring, Live Activity updates, stale state, local-network permission, and background expiration.
+- Physical-device iOS QA for continuous foreground monitoring, Live Activity updates, stale state, local-network permission, Background Keep Alive permission, and background expiration.
 
 ## Repo Shape
 

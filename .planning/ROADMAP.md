@@ -51,7 +51,7 @@ Goal: improve confidence and daily usability without expanding platform scope.
 
 ## 0.3.0 - iOS Companion
 
-Goal: ship a narrow iOS companion that monitors continuously while open, supports short finite sessions when useful, and does not imply always-on background pinging.
+Goal: ship a narrow iOS companion that monitors continuously while open, supports short finite sessions when useful, and offers any longer background behavior only as an explicit advanced opt-in.
 
 - [x] Audit `PingScopeCore` for platform-neutral APIs.
 - [x] Keep macOS-only code isolated in `Sources/PingScopeApp`.
@@ -65,6 +65,7 @@ Goal: ship a narrow iOS companion that monitors continuously while open, support
 - [x] Add `scripts/validate-ios-simulator-smoke.sh` for launch/screenshot smoke coverage.
 - [x] Add `scripts/validate-ios-device-smoke.sh` for physical-device build/install/launch smoke coverage.
 - [x] Auto-start continuous monitoring when the iOS app opens.
+- [x] Add optional iOS Background Keep Alive using Always Location only while monitoring is active.
 - [ ] Run device-only manual QA for continuous foreground monitoring, Live Activity updates, Dynamic Island/Lock Screen presentation, local-network permission, stale state, and early background expiration.
 
 ## Later

@@ -6,7 +6,7 @@ PingScope is primarily a Mac app, with an iOS companion app in progress:
 
 - **Developer ID builds** support TCP, UDP, and ICMP probes where macOS permits them, plus Sparkle updates from GitHub Releases.
 - **App Store builds** stay sandbox-compliant and hide ICMP.
-- **iOS builds** monitor continuously while the app is open, offer explicit `30s` and `1m` sessions, publish Live Activity updates during finite background runtime, and keep local recent history. They do not promise continuous background pinging.
+- **iOS builds** monitor continuously while the app is open, offer explicit `30s` and `1m` sessions, publish Live Activity updates during finite background runtime, and keep local recent history. An advanced opt-in Background Keep Alive mode can use Always Location permission while monitoring is active; it is disabled by default.
 
 ## Features
 
@@ -21,7 +21,7 @@ PingScope is primarily a Mac app, with an iOS companion app in progress:
 - Widget data sharing as an opt-in setting, so shared-container permission is not requested on every launch.
 - Start at login support.
 - Non-App-Store Sparkle update integration.
-- iOS companion shell with continuous foreground monitoring, 30-second and 1-minute finite sessions, Live Activity support, host editing, and local recent history.
+- iOS companion shell with continuous foreground monitoring, 30-second and 1-minute finite sessions, Live Activity support, host editing, local recent history, and optional Background Keep Alive.
 
 ## Probe Methods
 
@@ -34,6 +34,8 @@ PingScope measures latency with fresh work for every sample.
 The UI labels the method so users know whether they are seeing TCP connection latency, UDP send latency, or ICMP round-trip behavior.
 
 On iOS, PingScope uses the App Store-safe probe set and monitors continuously while the app is open. When monitoring moves to the background, PingScope asks iOS for finite background runtime and ends or marks the Live Activity stale if iOS expires that runtime. Live Activities show the latest known state instead of representing an always-on background monitor. Recent session samples are stored locally for quick review.
+
+The iOS app also includes an advanced opt-in Background Keep Alive setting. When enabled, PingScope requests Always Location permission and starts background location updates only while monitoring is active. This may reduce battery life and remains subject to iOS background execution limits and App Store review.
 
 ## Install
 
@@ -144,7 +146,7 @@ The SwiftPM package remains buildable outside Xcode. The Xcode project adds the 
 
 - 0.1.1: first patch release and Sparkle update validation.
 - 0.2.0: Mac polish, diagnostics, and widget/overlay refinements.
-- 0.3.0: iOS companion app with host selection, continuous foreground monitoring, finite live sessions, local recent history, Live Activity polish, and physical-device QA.
+- 0.3.0: iOS companion app with host selection, continuous foreground monitoring, finite live sessions, local recent history, optional Background Keep Alive, Live Activity polish, and physical-device QA.
 - Later: deeper iOS history views only if the companion workflow proves useful.
 
 ## License

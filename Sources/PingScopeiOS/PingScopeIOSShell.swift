@@ -11,11 +11,20 @@ public struct PingScopeIOSRootView: View {
     public var session: MonitorSessionState?
     public var health: HostHealth
     public var samples: [PingResult]
+    public var graphSamples: [PingResult]
     public var historySamples: [PingResult]
+    public var selectedGraphRange: TimeRange
+    public var gatewayDetectionText: String?
+    public var backgroundKeepAliveEnabled: Bool
+    public var backgroundKeepAliveStatus: String
     public var selectedHostID: UUID
     public var onSelectHost: (UUID) -> Void
     public var onSaveHost: (HostConfig) -> Void
     public var onDeleteHost: (UUID) -> Void
+    public var onSelectGraphRange: (TimeRange) -> Void
+    public var onUseDefaultGateway: () -> Void
+    public var onSetBackgroundKeepAlive: (Bool) -> Void
+    public var onRequestBackgroundKeepAlivePermission: () -> Void
     public var onStart: (MonitorSessionDuration) -> Void
     public var onStop: () -> Void
 
@@ -25,11 +34,20 @@ public struct PingScopeIOSRootView: View {
         session: MonitorSessionState? = nil,
         health: HostHealth = HostHealth(hostID: HostConfig.defaultInternet.id, thresholds: HostConfig.defaultInternet.thresholds),
         samples: [PingResult] = [],
+        graphSamples: [PingResult] = [],
         historySamples: [PingResult] = [],
+        selectedGraphRange: TimeRange = .fiveMinutes,
+        gatewayDetectionText: String? = nil,
+        backgroundKeepAliveEnabled: Bool = false,
+        backgroundKeepAliveStatus: String = "Disabled",
         selectedHostID: UUID? = nil,
         onSelectHost: @escaping (UUID) -> Void = { _ in },
         onSaveHost: @escaping (HostConfig) -> Void = { _ in },
         onDeleteHost: @escaping (UUID) -> Void = { _ in },
+        onSelectGraphRange: @escaping (TimeRange) -> Void = { _ in },
+        onUseDefaultGateway: @escaping () -> Void = {},
+        onSetBackgroundKeepAlive: @escaping (Bool) -> Void = { _ in },
+        onRequestBackgroundKeepAlivePermission: @escaping () -> Void = {},
         onStart: @escaping (MonitorSessionDuration) -> Void = { _ in },
         onStop: @escaping () -> Void = {}
     ) {
@@ -38,11 +56,20 @@ public struct PingScopeIOSRootView: View {
         self.session = session
         self.health = health
         self.samples = samples
+        self.graphSamples = graphSamples.isEmpty ? samples : graphSamples
         self.historySamples = historySamples
+        self.selectedGraphRange = selectedGraphRange
+        self.gatewayDetectionText = gatewayDetectionText
+        self.backgroundKeepAliveEnabled = backgroundKeepAliveEnabled
+        self.backgroundKeepAliveStatus = backgroundKeepAliveStatus
         self.selectedHostID = selectedHostID ?? host.id
         self.onSelectHost = onSelectHost
         self.onSaveHost = onSaveHost
         self.onDeleteHost = onDeleteHost
+        self.onSelectGraphRange = onSelectGraphRange
+        self.onUseDefaultGateway = onUseDefaultGateway
+        self.onSetBackgroundKeepAlive = onSetBackgroundKeepAlive
+        self.onRequestBackgroundKeepAlivePermission = onRequestBackgroundKeepAlivePermission
         self.onStart = onStart
         self.onStop = onStop
     }
@@ -87,10 +114,14 @@ public struct PingScopeIOSRootView: View {
                 .fixedSize(horizontal: false, vertical: true)
             sessionSummary
                 .fixedSize(horizontal: false, vertical: true)
-            PingScopeIOSLatencyGraph(samples: samples)
+            graphRangePicker
+                .fixedSize(horizontal: false, vertical: true)
+            PingScopeIOSLatencyGraph(samples: graphSamples, range: selectedGraphRange)
                 .frame(height: 170)
                 .fixedSize(horizontal: false, vertical: true)
             controls
+                .fixedSize(horizontal: false, vertical: true)
+            backgroundKeepAlive
                 .fixedSize(horizontal: false, vertical: true)
             stats
                 .fixedSize(horizontal: false, vertical: true)
@@ -139,6 +170,23 @@ public struct PingScopeIOSRootView: View {
             Text("\(host.method.rawValue.uppercased()) \(host.address)")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
+
+            HStack(spacing: 10) {
+                Button {
+                    onUseDefaultGateway()
+                } label: {
+                    Label("Use Default Gateway", systemImage: "network")
+                }
+                .buttonStyle(.bordered)
+
+                if let gatewayDetectionText {
+                    Text(gatewayDetectionText)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
+            }
+            .padding(.top, 6)
         }
     }
 
@@ -167,16 +215,51 @@ public struct PingScopeIOSRootView: View {
     }
 
     private var controls: some View {
-        HStack {
-            durationButton("Live", duration: .continuous)
-            durationButton("30s", duration: .thirtySeconds)
-            durationButton("1m", duration: .oneMinute)
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Run")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
 
-            Button("Stop") {
-                onStop()
+            HStack {
+                durationButton("Live", duration: .continuous)
+                durationButton("30s", duration: .thirtySeconds)
+                durationButton("1m", duration: .oneMinute)
+
+                Button("Stop") {
+                    onStop()
+                }
+                .buttonStyle(.bordered)
+                .disabled(session == nil)
+            }
+        }
+    }
+
+    private var graphRangePicker: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Graph")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+
+            HStack {
+                graphRangeButton(.oneMinute)
+                graphRangeButton(.fiveMinutes)
+                graphRangeButton(.tenMinutes)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func graphRangeButton(_ range: TimeRange) -> some View {
+        if selectedGraphRange == range {
+            Button(range.rawValue) {
+                onSelectGraphRange(range)
+            }
+            .buttonStyle(.borderedProminent)
+        } else {
+            Button(range.rawValue) {
+                onSelectGraphRange(range)
             }
             .buttonStyle(.bordered)
-            .disabled(session == nil)
         }
     }
 
@@ -197,7 +280,7 @@ public struct PingScopeIOSRootView: View {
     }
 
     private var stats: some View {
-        let stats = SampleStats(samples: samples)
+        let stats = SampleStats(samples: graphSamples)
         return Grid(alignment: .leading, horizontalSpacing: 24, verticalSpacing: 8) {
             GridRow {
                 statCell("TX", "\(stats.transmitted)")
@@ -208,6 +291,36 @@ public struct PingScopeIOSRootView: View {
                 statCell("Min", latencyValue(stats.minimumMilliseconds))
                 statCell("Avg", latencyValue(stats.averageMilliseconds))
                 statCell("Max", latencyValue(stats.maximumMilliseconds))
+            }
+        }
+        .padding()
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    private var backgroundKeepAlive: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Toggle(isOn: Binding(
+                get: { backgroundKeepAliveEnabled },
+                set: { onSetBackgroundKeepAlive($0) }
+            )) {
+                Label("Background Keep Alive", systemImage: "location.fill")
+                    .font(.headline)
+            }
+
+            Text("Optional. Uses Always Location permission only while monitoring is active so iOS can keep PingScope running after you leave the app. This may reduce battery life.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            HStack {
+                Text(backgroundKeepAliveStatus)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button("Request Always") {
+                    onRequestBackgroundKeepAlivePermission()
+                }
+                .buttonStyle(.bordered)
             }
         }
         .padding()
@@ -402,18 +515,48 @@ private struct PingScopeIOSHostEditor: View {
 
 private struct PingScopeIOSLatencyGraph: View {
     let samples: [PingResult]
+    let range: TimeRange
+
+    private let yAxisWidth: CGFloat = 48
+    private let xAxisHeight: CGFloat = 22
 
     var body: some View {
-        Canvas { context, size in
-            drawGrid(context: &context, size: size)
-            drawLine(context: &context, size: size)
+        VStack(spacing: 4) {
+            HStack(spacing: 8) {
+                yAxisLabels
+                    .frame(width: yAxisWidth)
+
+                Canvas { context, size in
+                    drawGrid(context: &context, size: size)
+                    drawLine(context: &context, size: size)
+                }
+            }
+
+            HStack {
+                Color.clear
+                    .frame(width: yAxisWidth + 8)
+                Text(startDate, style: .time)
+                Spacer()
+                Text(endDate, style: .time)
+            }
+            .font(.caption2.monospacedDigit())
+            .foregroundStyle(.secondary)
+            .frame(height: xAxisHeight)
         }
+        .padding(.horizontal, 8)
+        .padding(.top, 8)
+        .padding(.bottom, 4)
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 8))
-        .overlay(alignment: .topLeading) {
-            Text(axisLabel)
-                .font(.caption2.monospacedDigit())
-                .foregroundStyle(.secondary)
-                .padding(8)
+    }
+
+    private var yAxisLabels: some View {
+        VStack(alignment: .trailing) {
+            ForEach(scale.tickMilliseconds, id: \.self) { tick in
+                Text(scale.label(for: tick))
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .frame(maxHeight: .infinity, alignment: tick == scale.tickMilliseconds.first ? .top : tick == 0 ? .bottom : .center)
+            }
         }
     }
 
@@ -425,8 +568,12 @@ private struct PingScopeIOSLatencyGraph: View {
         LatencyGraphScale(latencies: latencies)
     }
 
-    private var axisLabel: String {
-        latencies.isEmpty ? "--" : scale.label(for: scale.axisMaximumMilliseconds)
+    private var endDate: Date {
+        Date()
+    }
+
+    private var startDate: Date {
+        endDate.addingTimeInterval(-range.duration)
     }
 
     private func drawGrid(context: inout GraphicsContext, size: CGSize) {
@@ -440,12 +587,19 @@ private struct PingScopeIOSLatencyGraph: View {
     }
 
     private func drawLine(context: inout GraphicsContext, size: CGSize) {
-        guard latencies.count > 1 else { return }
+        let visibleSamples = samples.filter { $0.timestamp >= startDate && $0.timestamp <= endDate }
+        let points = visibleSamples.compactMap { sample -> (Date, Double)? in
+            guard let latency = sample.latency?.milliseconds else { return nil }
+            return (sample.timestamp, latency)
+        }
+        guard points.count > 1 else { return }
         var path = Path()
         let axisMax = max(scale.axisMaximumMilliseconds, 1)
 
-        for (index, latency) in latencies.enumerated() {
-            let x = size.width * CGFloat(index) / CGFloat(max(latencies.count - 1, 1))
+        for (index, pointValue) in points.enumerated() {
+            let elapsed = pointValue.0.timeIntervalSince(startDate)
+            let x = size.width * CGFloat(min(max(elapsed / range.duration, 0), 1))
+            let latency = pointValue.1
             let y = size.height - (size.height * CGFloat(min(latency / axisMax, 1)))
             let point = CGPoint(x: x, y: y)
             if index == 0 {

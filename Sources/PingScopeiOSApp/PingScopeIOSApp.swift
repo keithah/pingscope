@@ -1,5 +1,6 @@
 import ActivityKit
 import Combine
+import CoreLocation
 import PingScopeCore
 import PingScopeiOS
 import SwiftUI
@@ -18,7 +19,12 @@ struct PingScopeIOSApp: App {
                 session: model.snapshot.session,
                 health: model.snapshot.health,
                 samples: model.snapshot.series.samples,
+                graphSamples: model.graphSamples,
                 historySamples: model.historySamples,
+                selectedGraphRange: model.selectedGraphRange,
+                gatewayDetectionText: model.gatewayDetectionText,
+                backgroundKeepAliveEnabled: model.backgroundKeepAliveEnabled,
+                backgroundKeepAliveStatus: model.backgroundKeepAliveStatus,
                 selectedHostID: model.snapshot.host.id,
                 onSelectHost: { hostID in
                     model.selectHost(hostID)
@@ -28,6 +34,18 @@ struct PingScopeIOSApp: App {
                 },
                 onDeleteHost: { hostID in
                     model.deleteHost(hostID)
+                },
+                onSelectGraphRange: { range in
+                    model.selectedGraphRange = range
+                },
+                onUseDefaultGateway: {
+                    model.addDefaultGatewayHost()
+                },
+                onSetBackgroundKeepAlive: { isEnabled in
+                    model.setBackgroundKeepAliveEnabled(isEnabled)
+                },
+                onRequestBackgroundKeepAlivePermission: {
+                    model.requestBackgroundKeepAlivePermission()
                 },
                 onStart: { duration in
                     model.start(duration: duration)
@@ -51,10 +69,17 @@ private final class PingScopeIOSAppModel: ObservableObject {
     @Published var hosts: [HostConfig]
     @Published var snapshot: LiveMonitorSessionSnapshot
     @Published var historySamples: [PingResult] = []
+    @Published var selectedGraphRange: TimeRange = .fiveMinutes
+    @Published var gatewayDetectionText: String?
+    @Published var backgroundKeepAliveEnabled: Bool
+    @Published var backgroundKeepAliveStatus: String = "Disabled"
 
     private let hostStore: PingScopeIOSHostStore
     private let historyStore: (any PingHistoryStore)?
+    private let gatewayDetector = PingScopeIOSGatewayDetector()
+    private let presenter = DisplayStatePresenter()
     private let backgroundRuntime: LiveMonitorBackgroundRuntime
+    private let locationKeepAlive = BackgroundLocationKeepAliveController()
     private var controller: LiveMonitorSessionController
     private var refreshTask: Task<Void, Never>?
     private var liveActivity: Activity<PingScopeLiveActivityAttributes>?
@@ -64,6 +89,7 @@ private final class PingScopeIOSAppModel: ObservableObject {
         self.hostStore = PingScopeIOSHostStore()
         self.historyStore = try? SQLiteHistoryStore(url: SQLiteHistoryStore.defaultURL(appName: "PingScope-iOS"))
         self.backgroundRuntime = LiveMonitorBackgroundRuntime(client: UIApplicationBackgroundTaskClient())
+        self.backgroundKeepAliveEnabled = UserDefaults.standard.bool(forKey: Self.backgroundKeepAliveEnabledKey)
         let state = hostStore.load()
         let host = state.selectedHost
         self.hosts = state.hosts
@@ -76,6 +102,22 @@ private final class PingScopeIOSAppModel: ObservableObject {
         Task {
             await refreshHistory()
         }
+        locationKeepAlive.onStatusChange = { [weak self] status in
+            guard let self else { return }
+            self.backgroundKeepAliveStatus = status
+            if self.backgroundKeepAliveEnabled, self.isMonitoringActive {
+                self.applyBackgroundKeepAlive()
+            }
+        }
+        backgroundKeepAliveStatus = locationKeepAlive.statusText(isEnabled: backgroundKeepAliveEnabled, isMonitoring: false)
+    }
+
+    var graphSamples: [PingResult] {
+        presenter.mergedSamples(
+            history: historySamples,
+            live: snapshot.series.samples,
+            range: selectedGraphRange
+        )
     }
 
     func selectHost(_ hostID: UUID) {
@@ -99,7 +141,10 @@ private final class PingScopeIOSAppModel: ObservableObject {
                 await controller.start(duration: restartDuration)
                 await refreshSnapshot()
                 await startLiveActivity(duration: restartDuration)
+                applyBackgroundKeepAlive()
                 startRefreshLoop()
+            } else {
+                applyBackgroundKeepAlive()
             }
         }
     }
@@ -123,6 +168,38 @@ private final class PingScopeIOSAppModel: ObservableObject {
         selectHost(replacementID)
     }
 
+    func addDefaultGatewayHost() {
+        gatewayDetectionText = "Detecting..."
+        Task {
+            guard var host = await gatewayDetector.detect() else {
+                gatewayDetectionText = "No default gateway exposed by iOS"
+                return
+            }
+            if let existing = hosts.first(where: { $0.displayName == host.displayName }) {
+                host.id = existing.id
+            }
+            saveHost(host)
+            gatewayDetectionText = "\(host.address) selected"
+        }
+    }
+
+    func setBackgroundKeepAliveEnabled(_ isEnabled: Bool) {
+        backgroundKeepAliveEnabled = isEnabled
+        UserDefaults.standard.set(isEnabled, forKey: Self.backgroundKeepAliveEnabledKey)
+        if isEnabled {
+            locationKeepAlive.requestAlwaysAuthorization()
+        }
+        applyBackgroundKeepAlive()
+    }
+
+    func requestBackgroundKeepAlivePermission() {
+        locationKeepAlive.requestAlwaysAuthorization()
+        backgroundKeepAliveStatus = locationKeepAlive.statusText(
+            isEnabled: backgroundKeepAliveEnabled,
+            isMonitoring: isMonitoringActive
+        )
+    }
+
     func start(duration: MonitorSessionDuration) {
         refreshTask?.cancel()
         Task {
@@ -131,6 +208,7 @@ private final class PingScopeIOSAppModel: ObservableObject {
             await controller.start(duration: duration)
             await refreshSnapshot()
             await startLiveActivity(duration: duration)
+            applyBackgroundKeepAlive()
             startRefreshLoop()
         }
     }
@@ -150,6 +228,7 @@ private final class PingScopeIOSAppModel: ObservableObject {
             await refreshSnapshot()
             await refreshHistory()
             await endLiveActivity()
+            applyBackgroundKeepAlive()
         }
     }
 
@@ -159,8 +238,10 @@ private final class PingScopeIOSAppModel: ObservableObject {
             Task {
                 await backgroundRuntime.end()
                 await restartContinuousSessionAfterBackgroundExpirationIfNeeded()
+                applyBackgroundKeepAlive()
             }
         case .background:
+            applyBackgroundKeepAlive()
             beginBackgroundRuntimeIfNeeded()
             Task {
                 await ensureLiveActivityForCurrentSession()
@@ -182,6 +263,7 @@ private final class PingScopeIOSAppModel: ObservableObject {
                     await refreshHistory()
                     await backgroundRuntime.end()
                     await endLiveActivity()
+                    applyBackgroundKeepAlive()
                     break
                 }
                 await updateLiveActivity()
@@ -194,6 +276,24 @@ private final class PingScopeIOSAppModel: ObservableObject {
     private var activeRestartDuration: MonitorSessionDuration? {
         guard let session = snapshot.session, session.phase() != .ended else { return nil }
         return session.duration
+    }
+
+    private var isMonitoringActive: Bool {
+        activeRestartDuration != nil
+    }
+
+    private static let backgroundKeepAliveEnabledKey = "PingScope.iOS.backgroundKeepAliveEnabled"
+
+    private func applyBackgroundKeepAlive() {
+        if backgroundKeepAliveEnabled, isMonitoringActive {
+            locationKeepAlive.start()
+        } else {
+            locationKeepAlive.stop()
+        }
+        backgroundKeepAliveStatus = locationKeepAlive.statusText(
+            isEnabled: backgroundKeepAliveEnabled,
+            isMonitoring: isMonitoringActive
+        )
     }
 
     private func refreshSnapshot() async {
@@ -226,6 +326,7 @@ private final class PingScopeIOSAppModel: ObservableObject {
         await refreshSnapshot()
         await refreshHistory()
         await endLiveActivity()
+        applyBackgroundKeepAlive()
     }
 
     private func startLiveActivity(duration: MonitorSessionDuration) async {
@@ -284,6 +385,7 @@ private final class PingScopeIOSAppModel: ObservableObject {
         await controller.start(duration: .continuous)
         await refreshSnapshot()
         await startLiveActivity(duration: .continuous)
+        applyBackgroundKeepAlive()
         startRefreshLoop()
     }
 
@@ -318,5 +420,101 @@ private struct UIApplicationBackgroundTaskClient: LiveMonitorBackgroundTaskClien
         await MainActor.run {
             UIApplication.shared.endBackgroundTask(UIBackgroundTaskIdentifier(rawValue: id.rawValue))
         }
+    }
+}
+
+@MainActor
+private final class BackgroundLocationKeepAliveController: NSObject, CLLocationManagerDelegate {
+    var onStatusChange: ((String) -> Void)?
+
+    private let manager = CLLocationManager()
+    private var isRunning = false
+
+    override init() {
+        super.init()
+        manager.delegate = self
+        manager.desiredAccuracy = kCLLocationAccuracyThreeKilometers
+        manager.distanceFilter = 1_000
+        manager.activityType = .other
+        manager.pausesLocationUpdatesAutomatically = false
+        manager.allowsBackgroundLocationUpdates = true
+        manager.showsBackgroundLocationIndicator = true
+    }
+
+    func requestAlwaysAuthorization() {
+        switch manager.authorizationStatus {
+        case .notDetermined, .authorizedWhenInUse:
+            manager.requestAlwaysAuthorization()
+        case .restricted, .denied, .authorizedAlways:
+            notify()
+        @unknown default:
+            notify()
+        }
+    }
+
+    func start() {
+        guard isAlwaysAuthorized else {
+            notify()
+            return
+        }
+        guard !isRunning else {
+            return
+        }
+        isRunning = true
+        manager.startUpdatingLocation()
+        notify()
+    }
+
+    func stop() {
+        guard isRunning else {
+            notify()
+            return
+        }
+        isRunning = false
+        manager.stopUpdatingLocation()
+        notify()
+    }
+
+    func statusText(isEnabled: Bool, isMonitoring: Bool) -> String {
+        guard isEnabled else { return "Disabled" }
+        guard isAlwaysAuthorized else { return authorizationStatusText }
+        return isMonitoring && isRunning ? "Running while monitoring" : "Allowed; starts while monitoring"
+    }
+
+    nonisolated func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
+        Task { @MainActor in
+            notify()
+        }
+    }
+
+    nonisolated func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
+        Task { @MainActor in
+            onStatusChange?("Location keep alive error: \(error.localizedDescription)")
+        }
+    }
+
+    private var isAlwaysAuthorized: Bool {
+        manager.authorizationStatus == .authorizedAlways
+    }
+
+    private var authorizationStatusText: String {
+        switch manager.authorizationStatus {
+        case .notDetermined:
+            "Location permission not requested"
+        case .restricted:
+            "Location permission restricted"
+        case .denied:
+            "Location permission denied"
+        case .authorizedWhenInUse:
+            "Allow Always Location in Settings"
+        case .authorizedAlways:
+            isRunning ? "Running while monitoring" : "Allowed; starts while monitoring"
+        @unknown default:
+            "Location permission unknown"
+        }
+    }
+
+    private func notify() {
+        onStatusChange?(authorizationStatusText)
     }
 }

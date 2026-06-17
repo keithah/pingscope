@@ -1,6 +1,6 @@
 # Phase 18 Implementation Plan
 
-Goal: make PingScope iOS-friendly: continuous while the app is foregrounded, finite when backgrounded, and never presented as an always-on background ping loop.
+Goal: make PingScope iOS-friendly: continuous while the app is foregrounded, finite by default when backgrounded, and explicit about any advanced opt-in background behavior.
 
 ## Completed Slices
 
@@ -29,6 +29,7 @@ Goal: make PingScope iOS-friendly: continuous while the app is foregrounded, fin
 - [x] Add repeatable physical-device build/install/launch smoke script.
 - [x] Auto-start continuous monitoring while the iOS app is foregrounded.
 - [x] Keep `30s` and `1m` finite session controls for explicit short checks and Live Activity handoff.
+- [x] Add optional Background Keep Alive using Always Location permission only while monitoring is active.
 
 ## Remaining Slices
 

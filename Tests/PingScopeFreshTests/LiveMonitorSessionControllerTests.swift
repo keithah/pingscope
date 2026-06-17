@@ -266,6 +266,19 @@ final class LiveMonitorSessionControllerTests: XCTestCase {
         XCTAssertFalse(draft.canSave)
     }
 
+    func testIOSGatewayDetectorDerivesLikelyPrivateGatewayAddresses() {
+        XCTAssertEqual(PingScopeIOSGatewayDetector.likelyGatewayAddress(fromIPv4Address: "192.168.101.34"), "192.168.101.1")
+        XCTAssertEqual(PingScopeIOSGatewayDetector.likelyGatewayAddress(fromIPv4Address: "10.20.30.40"), "10.20.30.1")
+        XCTAssertEqual(PingScopeIOSGatewayDetector.likelyGatewayAddress(fromIPv4Address: "172.20.4.3"), "172.20.4.1")
+        XCTAssertEqual(PingScopeIOSGatewayDetector.likelyGatewayAddress(fromIPv4Address: "169.254.44.9"), "169.254.44.1")
+    }
+
+    func testIOSGatewayDetectorDoesNotInventGatewayForPublicOrInvalidAddresses() {
+        XCTAssertNil(PingScopeIOSGatewayDetector.likelyGatewayAddress(fromIPv4Address: "8.8.8.8"))
+        XCTAssertNil(PingScopeIOSGatewayDetector.likelyGatewayAddress(fromIPv4Address: "192.168.1.1"))
+        XCTAssertNil(PingScopeIOSGatewayDetector.likelyGatewayAddress(fromIPv4Address: "not-an-ip"))
+    }
+
     func testBackgroundRuntimeEndsPreviousTaskWhenBeginningAgain() async {
         let client = RecordingBackgroundTaskClient()
         let runtime = LiveMonitorBackgroundRuntime(client: client)
