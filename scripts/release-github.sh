@@ -119,6 +119,7 @@ git push origin "${TAG}"
 gh release create "${TAG}" \
   "${DMG}" \
   "${UPDATE_DIR}/appcast.xml" \
+  "${UPDATE_DIR}/PingScope-v${VERSION}.md" \
   "${CHECKSUMS}" \
   --title "PingScope ${VERSION}" \
   --notes-file "${RELEASE_NOTES:-/dev/stdin}" <<EOF
