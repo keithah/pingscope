@@ -161,4 +161,4 @@ The SwiftPM package remains buildable outside Xcode. The Xcode project adds the 
 
 ## License
 
-MIT. See `LICENSE`.
+GNU Affero General Public License v3.0. See `LICENSE`.
