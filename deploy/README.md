@@ -40,7 +40,7 @@ This prints the path to the resulting `.app`.
 
 ```bash
 deploy/sign-notarize.sh \
-  --version 1.2.3 \
+  --version 0.1.0 \
   --app "/private/tmp/artifacts/PingScope.app" \
   --sign-app "Developer ID Application: <Your Name> (<TEAMID>)" \
   --notary-profile "NotarytoolProfile"
@@ -55,15 +55,15 @@ Artifacts land in `/private/tmp/artifacts/PingScope-v<version>/`:
 
 ```bash
 scripts/appcast.sh \
-  --release-dir "/private/tmp/artifacts/PingScope-v1.2.3/updates" \
-  --dmg "/private/tmp/artifacts/PingScope-v1.2.3/PingScope-v1.2.3.dmg" \
-  --download-url-prefix "https://github.com/keithah/pingscope/releases/download/v1.2.3"
+  --release-dir "/private/tmp/artifacts/PingScope-v0.1.0/updates" \
+  --dmg "/private/tmp/artifacts/PingScope-v0.1.0/PingScope-v0.1.0.dmg" \
+  --download-url-prefix "https://github.com/keithah/pingscope/releases/download/v0.1.0"
 ```
 
 ## Publish GitHub release
 
 ```bash
-scripts/release-github.sh --version 1.2.3 --release-notes RELEASE_NOTES.md
+scripts/release-github.sh --version 0.1.0 --release-notes RELEASE_NOTES.md
 ```
 
 The release driver checks GitHub auth, the notary profile, the Developer ID Application certificate, and the Sparkle private key before publishing.
