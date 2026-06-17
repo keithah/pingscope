@@ -12,6 +12,10 @@ DerivedData/
 *.xcodeproj/*
 !*.xcodeproj/project.pbxproj
 !*.xcodeproj/xcshareddata/
+!*.xcodeproj/project.xcworkspace/
+!*.xcodeproj/project.xcworkspace/xcshareddata/
+!*.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/
+!*.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved
 .xcschemes-ready/
 
 # Swift Package Manager
@@ -19,6 +23,7 @@ DerivedData/
 Packages/
 Package.pins
 Package.resolved
+!PingScope.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved
 
 # Binary files (but not source .swift files)
 pingmonitor_*
