@@ -23,11 +23,12 @@ The iOS App Group entitlement was removed from the iOS app and Live Activity tar
 
 ## Checks
 
-- Start a `30s` session while the app is foregrounded.
+- Launch the app and confirm continuous foreground monitoring starts without pressing a duration button.
+- Start explicit `30s` and `1m` sessions while the app is foregrounded.
 - Confirm the app graph, latency, stats, countdown, and recent history update during the session.
 - Confirm a Live Activity appears on the Lock Screen or Dynamic Island where supported.
-- Background the app during a `30s` session and confirm updates continue only while iOS grants finite runtime.
-- Confirm the Live Activity ends or becomes stale when the selected duration completes or iOS expires background runtime.
+- Background the app and confirm updates continue only while iOS grants finite runtime.
+- Confirm the Live Activity ends or becomes stale when a selected finite duration completes or iOS expires background runtime.
 - Start a `1m` session and confirm it completes in foreground.
 - Background a `1m` session and confirm early expiration is handled without presenting stale latency as current.
 - Select a local host and confirm iOS asks for local-network access only when needed.
@@ -37,7 +38,7 @@ The iOS App Group entitlement was removed from the iOS app and Live Activity tar
 
 ## Acceptance
 
-- No copy or behavior implies continuous always-on iOS pinging.
-- The app stops probing when a session ends, when the user stops it, or when iOS expires background runtime.
+- No copy or behavior implies continuous always-on background iOS pinging.
+- The app monitors continuously only while foregrounded, and stops probing when a finite session ends, when the user stops it, or when iOS expires background runtime.
 - Live Activity state never makes old measurements look current.
 - Mac schemes and SwiftPM builds remain green after iOS changes.

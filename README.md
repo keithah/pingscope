@@ -6,7 +6,7 @@ PingScope is primarily a Mac app, with an iOS companion app in progress:
 
 - **Developer ID builds** support TCP, UDP, and ICMP probes where macOS permits them, plus Sparkle updates from GitHub Releases.
 - **App Store builds** stay sandbox-compliant and hide ICMP.
-- **iOS builds** are finite-session monitors. They can measure while the app is active, publish short Live Activity updates, and keep local recent history, but they do not promise continuous background pinging.
+- **iOS builds** monitor continuously while the app is open, offer explicit `30s` and `1m` sessions, publish Live Activity updates during finite background runtime, and keep local recent history. They do not promise continuous background pinging.
 
 ## Features
 
@@ -21,7 +21,7 @@ PingScope is primarily a Mac app, with an iOS companion app in progress:
 - Widget data sharing as an opt-in setting, so shared-container permission is not requested on every launch.
 - Start at login support.
 - Non-App-Store Sparkle update integration.
-- iOS companion shell with 30-second and 1-minute live monitor sessions, Live Activity support, host editing, and local recent history.
+- iOS companion shell with continuous foreground monitoring, 30-second and 1-minute finite sessions, Live Activity support, host editing, and local recent history.
 
 ## Probe Methods
 
@@ -33,7 +33,7 @@ PingScope measures latency with fresh work for every sample.
 
 The UI labels the method so users know whether they are seeing TCP connection latency, UDP send latency, or ICMP round-trip behavior.
 
-On iOS, PingScope uses the App Store-safe probe set and finite monitor sessions. When a session is backgrounded, PingScope asks iOS for finite background runtime and ends the session if iOS expires that runtime. Live Activities show the latest known state and expire instead of representing an always-on monitor. Recent session samples are stored locally for quick review.
+On iOS, PingScope uses the App Store-safe probe set and monitors continuously while the app is open. When monitoring moves to the background, PingScope asks iOS for finite background runtime and ends or marks the Live Activity stale if iOS expires that runtime. Live Activities show the latest known state instead of representing an always-on background monitor. Recent session samples are stored locally for quick review.
 
 ## Install
 
@@ -102,7 +102,7 @@ Validation coverage:
 
 - Domain tests for health, thresholds, stats, alerts, menu bar formatting, and graph scaling.
 - Runtime tests for scheduling, host updates, history persistence, widgets, and export.
-- iOS session tests for finite monitor sessions, history writes, user stop, stale state, and background expiration.
+- iOS session tests for continuous and finite monitor sessions, history writes, user stop, stale state, and background expiration.
 - Probe validation for TCP, UDP send/readiness, and ICMP on the current network.
 - Xcode bundle validation for the Developer ID app and widget extension.
 - App Store sandbox verification.
@@ -144,8 +144,8 @@ The SwiftPM package remains buildable outside Xcode. The Xcode project adds the 
 
 - 0.1.1: first patch release and Sparkle update validation.
 - 0.2.0: Mac polish, diagnostics, and widget/overlay refinements.
-- 0.3.0: iOS companion app with host selection, finite live sessions, local recent history, Live Activity polish, and physical-device QA.
-- Later: deeper iOS history views only if the finite-session workflow proves useful.
+- 0.3.0: iOS companion app with host selection, continuous foreground monitoring, finite live sessions, local recent history, Live Activity polish, and physical-device QA.
+- Later: deeper iOS history views only if the companion workflow proves useful.
 
 ## License
 

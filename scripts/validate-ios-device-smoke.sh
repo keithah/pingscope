@@ -39,7 +39,16 @@ fi
 echo
 echo "== Install and launch on physical device =="
 xcrun devicectl device install app --device "${DEVICE_ID}" "${APP_PATH}" >/dev/null
-xcrun devicectl device process launch --device "${DEVICE_ID}" --terminate-existing "${APP_BUNDLE_ID}" >/dev/null
+LAUNCH_LOG="${DERIVED_DATA_PATH}/launch.log"
+if ! xcrun devicectl device process launch --device "${DEVICE_ID}" --terminate-existing "${APP_BUNDLE_ID}" >"${LAUNCH_LOG}" 2>&1; then
+  if rg -q "Locked|could not be, unlocked|device was not" "${LAUNCH_LOG}"; then
+    echo "Device launch was denied because the iPhone is locked. Unlock the device and rerun this script." >&2
+  else
+    echo "Device launch failed. Full launch log: ${LAUNCH_LOG}" >&2
+  fi
+  cat "${LAUNCH_LOG}" >&2
+  exit 1
+fi
 
 echo
 echo "== Verify process is running =="

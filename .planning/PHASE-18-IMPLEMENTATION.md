@@ -1,14 +1,14 @@
 # Phase 18 Implementation Plan
 
-Goal: make PingScope iOS-friendly without promising continuous iOS background monitoring.
+Goal: make PingScope iOS-friendly: continuous while the app is foregrounded, finite when backgrounded, and never presented as an always-on background ping loop.
 
 ## Completed Slices
 
 - [x] Add platform-neutral monitor session model in `PingScopeCore`.
-- [x] Limit initial session durations to `30s` default and `1m` optional.
+- [x] Add session durations for continuous foreground monitoring plus `30s` and `1m` finite sessions.
 - [x] Add core tests for duration, remaining time, stale transition, normal completion, and early iOS background expiration.
 - [x] Add compile-only `PingScopeiOS` SwiftPM product and target.
-- [x] Add iOS SwiftUI shell with `30s`, `1m`, and stop controls.
+- [x] Add iOS SwiftUI shell with `Live`, `30s`, `1m`, and stop controls.
 - [x] Add gated ActivityKit attributes/content state for Live Activity data.
 - [x] Make default gateway detection compile on iOS by returning `nil` outside macOS.
 - [x] Make ICMP process probing compile on iOS by returning `icmpUnavailable` outside macOS.
@@ -19,7 +19,7 @@ Goal: make PingScope iOS-friendly without promising continuous iOS background mo
 - [x] Add shared `PingScope-iOS` scheme for local and Xcode Cloud builds.
 - [x] Add iOS app icon slots needed by Xcode validation.
 - [x] Add persisted iOS host selection with Cloudflare and Google defaults.
-- [x] Add iOS live session graph, latency, countdown, and stats UI.
+- [x] Add iOS live session graph, latency, remaining-time/status, and stats UI.
 - [x] Add basic iOS host add/edit/delete sheet for TCP and UDP hosts.
 - [x] Add real iOS host interval, timeout, degraded threshold, down-after, and port validation controls.
 - [x] Add iOS local recent history for finite session samples.
@@ -27,11 +27,12 @@ Goal: make PingScope iOS-friendly without promising continuous iOS background mo
 - [x] Add iOS validation script and physical-device QA checklist.
 - [x] Add repeatable iOS simulator launch/screenshot smoke script.
 - [x] Add repeatable physical-device build/install/launch smoke script.
-- [x] Auto-start a `30s` monitor session on first iOS app appearance.
+- [x] Auto-start continuous monitoring while the iOS app is foregrounded.
+- [x] Keep `30s` and `1m` finite session controls for explicit short checks and Live Activity handoff.
 
 ## Remaining Slices
 
-- [ ] Run device-only manual QA for Live Activity updates, stale state, local-network permission, and early background expiration.
+- [ ] Run device-only manual QA for continuous foreground monitoring, Live Activity updates, stale state, local-network permission, and early background expiration.
 
 ## Verification Commands
 
