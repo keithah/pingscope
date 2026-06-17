@@ -39,3 +39,6 @@
 - `PingScopeCore` stays independent of AppKit/UIKit.
 - macOS UI and lifecycle remain isolated in `Sources/PingScopeApp`.
 - Future iOS shell can depend on the core without importing macOS-only code.
+- iOS Live Activity monitoring is a short user-started session, not an always-on background ping loop.
+- Initial iOS Live Activity durations are `30s` default and `1m` optional.
+- iOS Live Activity UI must mark stale data instead of presenting old latency as current.

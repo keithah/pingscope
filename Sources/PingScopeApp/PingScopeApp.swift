@@ -265,7 +265,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         popover.behavior = .transient
         popover.contentSize = NSSize(width: 430, height: 540)
         popover.contentViewController = NSHostingController(
-            rootView: StatusPopoverView(model: model)
+            rootView: StatusPopoverView(
+                model: model,
+                onSettings: { [weak self] in
+                    self?.popover?.performClose(nil)
+                    self?.openSettings()
+                }
+            )
                 .environmentObject(softwareUpdateController)
         )
         popover.show(relativeTo: anchorView.bounds, of: anchorView, preferredEdge: .minY)
@@ -275,9 +281,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func showContextMenu(from view: NSView) {
         let menu = NSMenu()
         menu.addItem(NSMenuItem(title: "Show Overlay", action: #selector(openOverlayFromMenu), keyEquivalent: ""))
-        if softwareUpdateController.isAvailable {
-            menu.addItem(NSMenuItem(title: "Check for Updates...", action: #selector(checkForUpdatesFromMenu), keyEquivalent: ""))
-        }
+        #if !APPSTORE
+            if softwareUpdateController.isAvailable {
+                menu.addItem(NSMenuItem(title: "Check for Updates...", action: #selector(checkForUpdatesFromMenu), keyEquivalent: ""))
+            }
+        #endif
         menu.addItem(NSMenuItem(title: "Settings...", action: #selector(openSettingsFromMenu), keyEquivalent: ","))
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "Quit PingScope", action: #selector(quit), keyEquivalent: "q"))
@@ -293,9 +301,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         openSettings()
     }
 
-    @objc private func checkForUpdatesFromMenu() {
-        softwareUpdateController.checkForUpdates()
-    }
+    #if !APPSTORE
+        @objc private func checkForUpdatesFromMenu() {
+            softwareUpdateController.checkForUpdates()
+        }
+    #endif
 
     @objc private func quit() {
         NSApp.terminate(nil)

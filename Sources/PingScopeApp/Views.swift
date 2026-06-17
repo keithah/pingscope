@@ -3,6 +3,7 @@ import SwiftUI
 
 struct StatusPopoverView: View {
     @ObservedObject var model: PingScopeModel
+    var onSettings: () -> Void = {}
     @EnvironmentObject private var softwareUpdateController: SoftwareUpdateController
 
     var body: some View {
@@ -20,7 +21,7 @@ struct StatusPopoverView: View {
 
             stats
 
-            RecentSamplesView(samples: Array(model.visibleSamples.suffix(8)).reversed())
+            RecentSamplesView(samples: Array(model.visibleSamples.suffix(8)).reversed(), range: model.selectedRange)
         }
         .padding(16)
         .frame(width: 430, height: 540, alignment: .top)
@@ -53,14 +54,14 @@ struct StatusPopoverView: View {
             Spacer()
             HStack(alignment: .top, spacing: 14) {
                 VStack(alignment: .trailing, spacing: 4) {
-                    Text(model.menuBarState.text)
+                    Text(model.selectedRangeState.text)
                         .font(.system(.title2, design: .monospaced).weight(.semibold))
-                    Label(model.primaryHealth.status.rawValue.capitalized, systemImage: "circle.fill")
+                    Label(model.selectedRangeStatusLabel, systemImage: "circle.fill")
                         .font(.caption)
-                        .foregroundStyle(Color(statusColor: model.menuBarState.color))
+                        .foregroundStyle(Color(statusColor: model.selectedRangeState.color))
                 }
                 Button {
-                    (NSApp.delegate as? AppDelegate)?.openSettings()
+                    onSettings()
                 } label: {
                     Image(systemName: "gearshape")
                 }
@@ -530,16 +531,20 @@ struct SettingsRootView: View {
                     Text(BuildFlavor.current == .appStore ? "App Store" : "Developer ID")
                         .foregroundStyle(.secondary)
                 }
-                SettingsRow(systemImage: "arrow.triangle.2.circlepath", tint: .blue, title: "Software updates") {
-                    HStack(spacing: 10) {
-                        Text(softwareUpdateController.statusMessage)
-                            .foregroundStyle(.secondary)
-                        Button("Check Now") {
-                            softwareUpdateController.checkForUpdates()
+                #if !APPSTORE
+                    if BuildFlavor.current != .appStore {
+                        SettingsRow(systemImage: "arrow.triangle.2.circlepath", tint: .blue, title: "Software updates") {
+                            HStack(spacing: 10) {
+                                Text(softwareUpdateController.statusMessage)
+                                    .foregroundStyle(.secondary)
+                                Button("Check Now") {
+                                    softwareUpdateController.checkForUpdates()
+                                }
+                                .disabled(!softwareUpdateController.canCheckForUpdates)
+                            }
                         }
-                        .disabled(!softwareUpdateController.canCheckForUpdates)
                     }
-                }
+                #endif
                 SettingsRow(systemImage: "waveform.path.ecg", tint: .green, title: "ICMP") {
                     Text(model.methodsForCurrentBuild.contains(.icmp) ? "Available" : "Hidden")
                         .foregroundStyle(.secondary)
@@ -863,25 +868,43 @@ struct NetworkStatusToggleRow: View {
 
 struct RecentSamplesView<Samples: Sequence<PingResult>>: View {
     let samples: Samples
+    var range: TimeRange? = nil
 
     var body: some View {
-        Table(Array(samples)) {
-            TableColumn("Time") { result in
-                Text(result.timestamp, style: .time)
-            }
-            TableColumn("Result") { result in
-                if let latency = result.latency {
-                    Text("\(Int(latency.milliseconds.rounded()))ms")
-                } else {
-                    Text(result.failureReason?.userMessage ?? "Failed")
-                        .foregroundStyle(.red)
+        let sampleArray = Array(samples)
+
+        ZStack {
+            Table(sampleArray) {
+                TableColumn("Time") { result in
+                    Text(result.timestamp, style: .time)
+                }
+                TableColumn("Result") { result in
+                    if let latency = result.latency {
+                        Text("\(Int(latency.milliseconds.rounded()))ms")
+                    } else {
+                        Text(result.failureReason?.userMessage ?? "Failed")
+                            .foregroundStyle(.red)
+                    }
+                }
+                TableColumn("Status") { result in
+                    Text(result.isSuccess ? "OK" : "Failed")
                 }
             }
-            TableColumn("Status") { result in
-                Text(result.isSuccess ? "OK" : "Failed")
+
+            if sampleArray.isEmpty {
+                Text(emptyMessage)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
             }
         }
         .frame(height: 140)
+    }
+
+    private var emptyMessage: String {
+        if let range {
+            return "No samples in the last \(range.rawValue)."
+        }
+        return "No samples yet."
     }
 }
 
@@ -898,7 +921,15 @@ struct LatencyGraph: View {
                 axisLabels(scale: scale, hasData: !latencies.isEmpty)
             }
 
-            graphCanvas(scale: scale)
+            ZStack {
+                graphCanvas(scale: scale)
+
+                if latencies.isEmpty {
+                    Text("No samples in range")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
+            }
 
             if showsAxes {
                 rightTicks(scale: scale)

@@ -91,6 +91,86 @@ final class DomainBehaviorTests: XCTestCase {
         XCTAssertEqual(try XCTUnwrap(series.stats.maximumMilliseconds), 50, accuracy: 0.01)
     }
 
+    func testMonitorSessionDurationValuesAreLimitedForIOSLiveActivity() {
+        XCTAssertEqual(MonitorSessionDuration.thirtySeconds.duration, .seconds(30))
+        XCTAssertEqual(MonitorSessionDuration.oneMinute.duration, .seconds(60))
+        XCTAssertEqual(MonitorSessionDuration.allCases, [.thirtySeconds, .oneMinute])
+        XCTAssertEqual(MonitorSessionDuration.thirtySeconds.displayName, "30s")
+        XCTAssertEqual(MonitorSessionDuration.oneMinute.displayName, "1m")
+    }
+
+    func testMonitorSessionStartsLiveAndComputesRemainingTime() {
+        let hostID = UUID()
+        let startedAt = Date(timeIntervalSince1970: 2_000)
+        let policy = MonitorSessionPolicy()
+
+        let session = MonitorSessionState(
+            hostID: hostID,
+            duration: .thirtySeconds,
+            startedAt: startedAt,
+            policy: policy
+        )
+
+        XCTAssertEqual(session.phase(at: startedAt.addingTimeInterval(1)), .live)
+        XCTAssertEqual(session.remainingDuration(at: startedAt.addingTimeInterval(12)), .seconds(18))
+        XCTAssertFalse(session.isExpired(at: startedAt.addingTimeInterval(29.9)))
+    }
+
+    func testMonitorSessionMarksStaleWhenLatestSampleAgesOut() {
+        let hostID = UUID()
+        let startedAt = Date(timeIntervalSince1970: 2_000)
+        let policy = MonitorSessionPolicy(liveFreshness: .seconds(10), staleAfter: .seconds(15), probeInterval: .seconds(2))
+        let result = PingResult.success(
+            hostID: hostID,
+            latency: .milliseconds(12),
+            timestamp: startedAt.addingTimeInterval(4)
+        )
+
+        let session = MonitorSessionState(
+            hostID: hostID,
+            duration: .oneMinute,
+            startedAt: startedAt,
+            latestResult: result,
+            policy: policy
+        )
+
+        XCTAssertEqual(session.phase(at: startedAt.addingTimeInterval(13)), .live)
+        XCTAssertEqual(session.phase(at: startedAt.addingTimeInterval(20)), .stale)
+    }
+
+    func testMonitorSessionEndsAtSelectedDuration() {
+        let hostID = UUID()
+        let startedAt = Date(timeIntervalSince1970: 2_000)
+        let session = MonitorSessionState(
+            hostID: hostID,
+            duration: .thirtySeconds,
+            startedAt: startedAt,
+            policy: MonitorSessionPolicy()
+        )
+
+        XCTAssertEqual(session.phase(at: startedAt.addingTimeInterval(30)), .ended)
+        XCTAssertTrue(session.isExpired(at: startedAt.addingTimeInterval(30)))
+        XCTAssertEqual(session.remainingDuration(at: startedAt.addingTimeInterval(31)), .zero)
+    }
+
+    func testMonitorSessionCanEndEarlyOnIOSExpiration() {
+        let hostID = UUID()
+        let startedAt = Date(timeIntervalSince1970: 2_000)
+        let expiredAt = startedAt.addingTimeInterval(8)
+        let session = MonitorSessionState(
+            hostID: hostID,
+            duration: .oneMinute,
+            startedAt: startedAt,
+            endedAt: expiredAt,
+            endReason: .backgroundRuntimeExpired,
+            policy: MonitorSessionPolicy()
+        )
+
+        XCTAssertEqual(session.phase(at: startedAt.addingTimeInterval(9)), .ended)
+        XCTAssertEqual(session.endReason, .backgroundRuntimeExpired)
+        XCTAssertEqual(session.remainingDuration(at: startedAt.addingTimeInterval(9)), .zero)
+    }
+
     func testNotificationRulesCooldownAndRecovery() {
         let hostID = UUID()
         let rules = NotificationRuleSet(

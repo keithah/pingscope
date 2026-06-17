@@ -179,6 +179,34 @@ final class RuntimeBehaviorTests: XCTestCase {
         XCTAssertEqual(presenter.menuBarState(for: host, health: health).color, .green)
     }
 
+    func testRangeStatusAgesOutStaleLatestResult() {
+        let now = Date(timeIntervalSince1970: 30_000)
+        let host = HostConfig(displayName: "Default Gateway", address: "192.168.101.1")
+        var health = HostHealth(hostID: host.id, thresholds: host.thresholds)
+        health.ingest(.success(hostID: host.id, latency: .milliseconds(6), timestamp: now.addingTimeInterval(-90)))
+
+        let presenter = DisplayStatePresenter()
+        let state = presenter.rangeStatusState(for: host, health: health, range: .oneMinute, now: now)
+
+        XCTAssertEqual(state.text, "--ms")
+        XCTAssertEqual(state.color, .gray)
+        XCTAssertEqual(presenter.rangeStatusLabel(for: health, range: .oneMinute, now: now), "No Recent Data")
+    }
+
+    func testRangeStatusUsesRecentLatestResult() {
+        let now = Date(timeIntervalSince1970: 30_000)
+        let host = HostConfig(displayName: "Default Gateway", address: "192.168.101.1")
+        var health = HostHealth(hostID: host.id, thresholds: host.thresholds)
+        health.ingest(.success(hostID: host.id, latency: .milliseconds(6), timestamp: now.addingTimeInterval(-20)))
+
+        let presenter = DisplayStatePresenter()
+        let state = presenter.rangeStatusState(for: host, health: health, range: .oneMinute, now: now)
+
+        XCTAssertEqual(state.text, "6ms")
+        XCTAssertEqual(state.color, .green)
+        XCTAssertEqual(presenter.rangeStatusLabel(for: health, range: .oneMinute, now: now), "Healthy")
+    }
+
     func testLatencyGraphScaleUsesReadableMaximumFromVisibleSamples() {
         let scale = LatencyGraphScale(latencies: [14, 78, 107])
 

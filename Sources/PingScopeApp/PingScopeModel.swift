@@ -74,6 +74,7 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
     }
     @Published var widgetsEnabled: Bool {
         didSet {
+            UserDefaults.standard.widgetSharingOptedIn = widgetsEnabled
             UserDefaults.standard.widgetsEnabled = widgetsEnabled
             if widgetsEnabled {
                 publishWidgetSnapshot(snapshot)
@@ -132,7 +133,11 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
         self.overlayCompactMode = UserDefaults.standard.overlayCompactMode
         self.allowsLocalNetworkProbes = allowsLocalNetworkProbes
         self.startsAtLogin = UserDefaults.standard.startsAtLogin ?? (SMAppService.mainApp.status == .enabled)
-        self.widgetsEnabled = UserDefaults.standard.widgetsEnabled
+        let widgetsEnabled = UserDefaults.standard.widgetSharingOptedIn == true && UserDefaults.standard.widgetsEnabled
+        if !widgetsEnabled, UserDefaults.standard.widgetsEnabled {
+            UserDefaults.standard.widgetsEnabled = false
+        }
+        self.widgetsEnabled = widgetsEnabled
         self.overlayFrame = UserDefaults.standard.overlayFrame ?? NSRect(x: 80, y: 620, width: 240, height: 96)
         super.init()
     }
@@ -156,6 +161,14 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
         presenter.menuBarState(for: primaryHost, health: snapshot.primaryHealth)
     }
 
+    var selectedRangeState: MenuBarState {
+        presenter.rangeStatusState(for: primaryHost, health: snapshot.primaryHealth, range: selectedRange)
+    }
+
+    var selectedRangeStatusLabel: String {
+        presenter.rangeStatusLabel(for: snapshot.primaryHealth, range: selectedRange)
+    }
+
     var menuBarGlyphContent: MenuBarGlyphContent {
         presenter.menuBarGlyphContent(for: primaryHost, health: snapshot.primaryHealth)
     }
@@ -169,7 +182,7 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
     }
 
     var primaryStats: SampleStats {
-        primarySeries?.stats ?? SampleStats(samples: [])
+        SampleStats(samples: visibleSamples)
     }
 
     var historyExportHost: HostConfig? {
@@ -774,6 +787,20 @@ private extension UserDefaults {
         }
         set {
             set(newValue, forKey: "widgetsEnabled")
+        }
+    }
+
+    var widgetSharingOptedIn: Bool? {
+        get {
+            guard object(forKey: "widgetSharingOptedIn") != nil else { return nil }
+            return bool(forKey: "widgetSharingOptedIn")
+        }
+        set {
+            if let newValue {
+                set(newValue, forKey: "widgetSharingOptedIn")
+            } else {
+                removeObject(forKey: "widgetSharingOptedIn")
+            }
         }
     }
 

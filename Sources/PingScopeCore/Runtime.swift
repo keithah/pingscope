@@ -33,6 +33,7 @@ public struct DefaultGatewayDetector: Sendable {
     public init() {}
 
     public func detect() async -> HostConfig? {
+        #if os(macOS)
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/sbin/route")
         process.arguments = ["-n", "get", "default"]
@@ -53,6 +54,9 @@ public struct DefaultGatewayDetector: Sendable {
         } catch {
             return nil
         }
+        #else
+        return nil
+        #endif
     }
 
     public static func parse(routeOutput: String) -> String? {

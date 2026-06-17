@@ -4,12 +4,17 @@ import PackageDescription
 let package = Package(
     name: "PingScope",
     platforms: [
-        .macOS(.v26)
+        .macOS(.v26),
+        .iOS(.v18)
     ],
     products: [
         .library(
             name: "PingScopeCore",
             targets: ["PingScopeCore"]
+        ),
+        .library(
+            name: "PingScopeiOS",
+            targets: ["PingScopeiOS"]
         ),
         .executable(
             name: "PingScope",
@@ -34,6 +39,11 @@ let package = Package(
                 .linkedLibrary("sqlite3")
             ]
         ),
+        .target(
+            name: "PingScopeiOS",
+            dependencies: ["PingScopeCore"],
+            path: "Sources/PingScopeiOS"
+        ),
         .executableTarget(
             name: "PingScope",
             dependencies: ["PingScopeCore"],
@@ -51,7 +61,7 @@ let package = Package(
         ),
         .testTarget(
             name: "PingScopeTests",
-            dependencies: ["PingScopeCore"],
+            dependencies: ["PingScopeCore", "PingScopeiOS"],
             path: "Tests/PingScopeFreshTests"
         )
     ]

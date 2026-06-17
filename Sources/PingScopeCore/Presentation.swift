@@ -125,6 +125,31 @@ public struct DisplayStatePresenter: Sendable {
         )
     }
 
+    public func rangeStatusState(for host: HostConfig?, health: HostHealth?, range: TimeRange, now: Date = Date()) -> MenuBarState {
+        guard let host else {
+            return MenuBarState(text: "--ms", color: .gray, accessibilityLabel: "PingScope has no host configured")
+        }
+
+        guard let latestResult = health?.latestResult,
+              latestResult.timestamp >= now.addingTimeInterval(-range.duration) else {
+            return MenuBarState(
+                text: "--ms",
+                color: .gray,
+                accessibilityLabel: "\(host.displayName) has no samples in the selected range"
+            )
+        }
+
+        return menuBarState(for: host, health: health)
+    }
+
+    public func rangeStatusLabel(for health: HostHealth?, range: TimeRange, now: Date = Date()) -> String {
+        guard let latestResult = health?.latestResult,
+              latestResult.timestamp >= now.addingTimeInterval(-range.duration) else {
+            return "No Recent Data"
+        }
+        return health?.status.rawValue.capitalized ?? "No Data"
+    }
+
     public func menuBarGlyphContent(for host: HostConfig?, health: HostHealth?) -> MenuBarGlyphContent {
         let state = menuBarState(for: host, health: health)
         return MenuBarGlyphContent(

@@ -30,10 +30,10 @@ final class SoftwareUpdateController: ObservableObject {
             updaterController = nil
             statusMessage = "Set SUFeedURL and SUPublicEDKey before publishing Developer ID updates."
         }
+        #elseif APPSTORE
+        statusMessage = ""
         #else
-        statusMessage = BuildFlavor.current == .appStore
-            ? "App Store builds use App Store updates."
-            : "Sparkle is not linked in this build."
+        statusMessage = "Update checks are unavailable in this build."
         #endif
     }
 
@@ -60,10 +60,10 @@ final class SoftwareUpdateController: ObservableObject {
             return
         }
         updaterController.checkForUpdates(nil)
+        #elseif APPSTORE
+        return
         #else
-        statusMessage = BuildFlavor.current == .appStore
-            ? "Use the App Store to update this build."
-            : "Sparkle is not linked in this build."
+        statusMessage = "Update checks are unavailable in this build."
         #endif
     }
 

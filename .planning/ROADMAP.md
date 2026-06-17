@@ -38,6 +38,7 @@ Goal: validate the public update path and close first-release polish items.
 - [ ] Refresh release screenshots if UI changes.
 - [ ] Run manual widget gallery placement QA.
 - [ ] Validate default gateway behavior on Wi-Fi, Ethernet, and hotspot.
+- [ ] Fix and verify the popover settings gear opens Settings reliably.
 
 ## 0.2.0 - Mac Polish
 
@@ -56,6 +57,7 @@ Goal: prepare the codebase for a future iOS companion app.
 - [ ] Keep macOS-only code isolated in `Sources/PingScopeApp`.
 - [ ] Add compile-only iOS shell target that depends on `PingScopeCore`.
 - [ ] Define iOS monitoring constraints around background execution, notifications, and widgets.
+- [ ] Add Phase 18 short Live Activity session model: `30s` default, `1m` optional, stale-aware, no always-on background claim.
 
 ## Later
 

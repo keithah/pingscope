@@ -68,7 +68,17 @@ DEST_APP="${OUTPUT_DIR}/PingScope.app"
 rm -rf "${DEST_APP}"
 cp -R "${PRODUCT_APP}" "${DEST_APP}"
 
-SIGN_IDENTITY="${CODESIGN_IDENTITY:--}"
+default_developer_id_identity() {
+  security find-identity -v -p codesigning 2>/dev/null \
+    | sed -n 's/.*"\(Developer ID Application: .* (.*)\)".*/\1/p' \
+    | head -n 1
+}
+
+SIGN_IDENTITY="${CODESIGN_IDENTITY:-}"
+if [[ -z "${SIGN_IDENTITY}" && "${FLAVOR}" == "developer-id" ]]; then
+  SIGN_IDENTITY="$(default_developer_id_identity)"
+fi
+SIGN_IDENTITY="${SIGN_IDENTITY:--}"
 SIGN_COMMON=("--force" "--sign" "${SIGN_IDENTITY}")
 if [[ "${FLAVOR}" == "developer-id" && "${SIGN_IDENTITY}" != "-" ]]; then
   SIGN_COMMON+=("--options" "runtime" "--timestamp")

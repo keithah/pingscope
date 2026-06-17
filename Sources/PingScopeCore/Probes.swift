@@ -186,7 +186,7 @@ public struct ProcessICMPProbe: PingProbe {
     public init() {}
 
     public func measure(_ host: HostConfig) async -> PingResult {
-        #if APPSTORE
+        #if APPSTORE || !os(macOS)
         return .failure(hostID: host.id, reason: .icmpUnavailable).withHostMetadata(from: host)
         #else
         let start = ContinuousClock.now
