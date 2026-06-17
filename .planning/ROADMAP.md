@@ -45,7 +45,7 @@ Goal: validate the public update path and close first-release polish items.
 Goal: improve confidence and daily usability without expanding platform scope.
 
 - [ ] Add richer release smoke automation around overlay/context-menu interactions.
-- [ ] Add explicit diagnostics view or log export for probe failures.
+- [x] Add explicit diagnostics view or log export for probe failures.
 - [ ] Improve widget visual polish after real use.
 - [ ] Review menu bar and overlay behavior across Spaces/full-screen apps.
 

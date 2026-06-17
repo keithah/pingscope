@@ -1,7 +1,7 @@
 import Foundation
 
 enum DebugLog {
-    private static let url = URL(fileURLWithPath: "/tmp/pingscope-debug.log")
+    static let fileURL = URL(fileURLWithPath: "/tmp/pingscope-debug.log")
     private static let lock = NSLock()
 
     static func write(_ message: String) {
@@ -12,13 +12,20 @@ enum DebugLog {
         let line = "[\(timestamp)] \(message)\n"
         guard let data = line.data(using: .utf8) else { return }
 
-        if FileManager.default.fileExists(atPath: url.path),
-           let handle = try? FileHandle(forWritingTo: url) {
+        if FileManager.default.fileExists(atPath: fileURL.path),
+           let handle = try? FileHandle(forWritingTo: fileURL) {
             defer { try? handle.close() }
             _ = try? handle.seekToEnd()
             try? handle.write(contentsOf: data)
         } else {
-            try? data.write(to: url)
+            try? data.write(to: fileURL)
         }
+    }
+
+    static func clear() {
+        lock.lock()
+        defer { lock.unlock() }
+
+        try? Data().write(to: fileURL)
     }
 }

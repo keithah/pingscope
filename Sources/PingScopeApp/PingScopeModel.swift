@@ -91,6 +91,7 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
     @Published var historyExportRange: TimeRange = .oneHour
     @Published private(set) var historyExportMessage: String?
     @Published private(set) var isExportingHistory = false
+    @Published private(set) var diagnosticsMessage: String?
     @Published var overlayFrame: NSRect
 
     private let presenter = DisplayStatePresenter()
@@ -188,6 +189,18 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
     var historyExportHost: HostConfig? {
         let selectedID = historyExportHostID ?? primaryHost?.id
         return snapshot.hosts.first { $0.id == selectedID } ?? primaryHost ?? snapshot.hosts.first
+    }
+
+    var diagnosticsLogURL: URL {
+        DebugLog.fileURL
+    }
+
+    var recentDiagnosticFailures: [PingResult] {
+        visibleSamples
+            .filter { $0.failureReason != nil }
+            .sorted { $0.timestamp > $1.timestamp }
+            .prefix(8)
+            .map { $0 }
     }
 
     var methodsForCurrentBuild: [PingMethod] {
@@ -390,6 +403,26 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
     func openNotificationSettings() {
         guard let url = URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension?id=com.hadm.pingscope") else { return }
         NSWorkspace.shared.open(url)
+    }
+
+    func revealDiagnosticsLog() {
+        if !FileManager.default.fileExists(atPath: diagnosticsLogURL.path) {
+            DebugLog.write("diagnostics log created from settings")
+        }
+        NSWorkspace.shared.activateFileViewerSelecting([diagnosticsLogURL])
+        diagnosticsMessage = "Opened log in Finder"
+    }
+
+    func copyDiagnosticsSummary() {
+        let summary = diagnosticsSummary()
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(summary, forType: .string)
+        diagnosticsMessage = "Copied diagnostics summary"
+    }
+
+    func clearDiagnosticsLog() {
+        DebugLog.clear()
+        diagnosticsMessage = "Cleared debug log"
     }
 
     func exportHistory(format: HistoryExportFormat) {
@@ -675,6 +708,34 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
         let invalid = CharacterSet(charactersIn: "/\\?%*|\"<>:")
         let cleaned = value.components(separatedBy: invalid).joined(separator: "-")
         return cleaned.isEmpty ? "PingScope-History" : cleaned
+    }
+
+    private func diagnosticsSummary() -> String {
+        let host = primaryHost
+        let latest = primaryHealth.latestResult
+        let failures = recentDiagnosticFailures
+            .map { result in
+                let time = ISO8601DateFormatter().string(from: result.timestamp)
+                let reason = result.failureReason?.rawValue ?? "unknown"
+                let note = result.metadata.note.map { " note=\($0)" } ?? ""
+                return "- \(time) \(result.method.rawValue.uppercased()) \(result.address)\(result.port.map { ":\($0)" } ?? "") \(reason)\(note)"
+            }
+            .joined(separator: "\n")
+
+        return """
+        PingScope Diagnostics
+        Build flavor: \(BuildFlavor.current == .appStore ? "App Store" : "Developer ID")
+        Primary host: \(host?.displayName ?? "None")
+        Address: \(host?.address ?? "None")
+        Method: \(host?.method.rawValue.uppercased() ?? "None")
+        Network status: \(currentNetworkStatus.displayName)
+        Local network probes: \(allowsLocalNetworkProbes ? "enabled" : "disabled")
+        Latest result: \(latest?.latency.map { "\(Int($0.milliseconds.rounded()))ms" } ?? latest?.failureReason?.rawValue ?? "none")
+        Log path: \(diagnosticsLogURL.path)
+
+        Recent failures:
+        \(failures.isEmpty ? "None in the selected range." : failures)
+        """
     }
 
     private func loadDraft(from host: HostConfig) {

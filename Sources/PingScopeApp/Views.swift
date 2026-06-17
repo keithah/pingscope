@@ -197,6 +197,8 @@ struct SettingsRootView: View {
                     .tabItem { Label("Notifications", systemImage: "bell.badge") }
                 ScrollView { history.padding(.top, 8) }
                     .tabItem { Label("History", systemImage: "clock.arrow.circlepath") }
+                ScrollView { diagnostics.padding(.top, 8) }
+                    .tabItem { Label("Diagnostics", systemImage: "stethoscope") }
                 ScrollView { advanced.padding(.top, 8) }
                     .tabItem { Label("Advanced", systemImage: "slider.horizontal.3") }
             }
@@ -618,6 +620,103 @@ struct SettingsRootView: View {
                     .padding(.leading, 30)
             }
         }
+    }
+
+    private var diagnostics: some View {
+        SettingsPane {
+            SettingsSection("Current State") {
+                SettingsRow(systemImage: "server.rack", tint: .blue, title: "Primary host") {
+                    Text(model.primaryHost?.displayName ?? "None")
+                        .foregroundStyle(.secondary)
+                }
+                SettingsRow(systemImage: "wifi", tint: .blue, title: "Network status") {
+                    NetworkStatusBadge(status: model.currentNetworkStatus)
+                }
+                SettingsRow(systemImage: "waveform.path.ecg", tint: Color(statusColor: model.primaryHealth.status.statusColor), title: "Latest result") {
+                    Text(diagnosticsLatestResult)
+                        .foregroundStyle(model.primaryHealth.latestResult?.failureReason == nil ? Color.secondary : Color.red)
+                }
+            }
+
+            SettingsSection("Debug Log") {
+                SettingsRow(systemImage: "doc.text", tint: .gray, title: "Path") {
+                    Text(model.diagnosticsLogURL.path)
+                        .font(.caption.monospaced())
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+                SettingsRow(systemImage: "wrench.and.screwdriver", tint: .orange, title: "Actions") {
+                    HStack(spacing: 10) {
+                        Button("Reveal Log") {
+                            model.revealDiagnosticsLog()
+                        }
+                        Button("Copy Summary") {
+                            model.copyDiagnosticsSummary()
+                        }
+                        Button("Clear Log", role: .destructive) {
+                            model.clearDiagnosticsLog()
+                        }
+                    }
+                }
+                if let message = model.diagnosticsMessage {
+                    Text(message)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .padding(.leading, 30)
+                }
+            }
+
+            SettingsSection("Recent Failures") {
+                if model.recentDiagnosticFailures.isEmpty {
+                    Text("No failures in the selected graph range.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                } else {
+                    VStack(spacing: 8) {
+                        ForEach(model.recentDiagnosticFailures) { result in
+                            DiagnosticFailureRow(result: result)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private var diagnosticsLatestResult: String {
+        guard let result = model.primaryHealth.latestResult else { return "No samples yet" }
+        if let latency = result.latency {
+            return "\(Int(latency.milliseconds.rounded()))ms"
+        }
+        return result.failureReason?.userMessage ?? "Failed"
+    }
+}
+
+struct DiagnosticFailureRow: View {
+    let result: PingResult
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            Text(result.timestamp, style: .time)
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.secondary)
+                .frame(width: 70, alignment: .leading)
+            Text(result.failureReason?.userMessage ?? "Failed")
+                .foregroundStyle(.red)
+                .frame(width: 150, alignment: .leading)
+            Text("\(result.method.rawValue.uppercased()) \(result.address)\(result.port.map { ":\($0)" } ?? "")")
+                .foregroundStyle(.secondary)
+            if let note = result.metadata.note {
+                Text(note)
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
     }
 }
 
