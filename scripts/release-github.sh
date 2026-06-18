@@ -10,6 +10,7 @@ DRY_RUN=0
 PAGES_BRANCH="${PING_SCOPE_PAGES_BRANCH:-gh-pages}"
 PAGES_APPCAST_PATH="${PING_SCOPE_PAGES_APPCAST_PATH:-appcast.xml}"
 PAGES_BASE_URL="${PING_SCOPE_PAGES_BASE_URL:-https://keithah.github.io/pingscope}"
+PAGES_SITE_DIR="${PING_SCOPE_PAGES_SITE_DIR:-deploy/site}"
 
 usage() {
   cat <<'USAGE'
@@ -53,12 +54,9 @@ publish_pages_updates() {
   mkdir -p "${pages_dir}/$(dirname "${PAGES_APPCAST_PATH}")"
   ditto "${update_dir}/appcast.xml" "${pages_dir}/${PAGES_APPCAST_PATH}"
   find "${update_dir}" -maxdepth 1 -type f ! -name appcast.xml -exec ditto {} "${pages_dir}/" \;
-  cat >"${pages_dir}/index.html" <<'HTML'
-<!doctype html>
-<meta charset="utf-8">
-<title>PingScope Updates</title>
-<p>PingScope Sparkle appcast: <a href="appcast.xml">appcast.xml</a></p>
-HTML
+  if [[ -d "${PAGES_SITE_DIR}" ]]; then
+    ditto "${PAGES_SITE_DIR}" "${pages_dir}"
+  fi
 
   git -C "${pages_dir}" add .
   if git -C "${pages_dir}" diff --cached --quiet; then
