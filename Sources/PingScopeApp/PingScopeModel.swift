@@ -51,13 +51,22 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
     }
     @Published var overlayOpacity: Double {
         didSet {
-            overlayOpacity = min(max(overlayOpacity, 0.55), 1)
             UserDefaults.standard.overlayOpacity = overlayOpacity
         }
     }
     @Published var overlayCompactMode: Bool {
         didSet {
             UserDefaults.standard.overlayCompactMode = overlayCompactMode
+        }
+    }
+    @Published var overlayShowsAllHosts: Bool {
+        didSet {
+            UserDefaults.standard.overlayShowsAllHosts = overlayShowsAllHosts
+        }
+    }
+    @Published var overlayShowsLegend: Bool {
+        didSet {
+            UserDefaults.standard.overlayShowsLegend = overlayShowsLegend
         }
     }
     @Published var allowsLocalNetworkProbes: Bool {
@@ -95,6 +104,7 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
     @Published var overlayFrame: NSRect
 
     private let presenter = DisplayStatePresenter()
+    private let networkDiagnoser = NetworkPerspectiveDiagnoser()
     private let runtime: PingRuntime
     private let hostTester: HostTester
     private let gatewayDetector = DefaultGatewayDetector()
@@ -135,6 +145,8 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
         self.overlayAlwaysOnTop = UserDefaults.standard.overlayAlwaysOnTop
         self.overlayOpacity = UserDefaults.standard.overlayOpacity
         self.overlayCompactMode = UserDefaults.standard.overlayCompactMode
+        self.overlayShowsAllHosts = UserDefaults.standard.overlayShowsAllHosts
+        self.overlayShowsLegend = UserDefaults.standard.overlayShowsLegend
         self.allowsLocalNetworkProbes = allowsLocalNetworkProbes
         self.startsAtLogin = UserDefaults.standard.startsAtLogin ?? (SMAppService.mainApp.status == .enabled)
         let widgetsEnabled = UserDefaults.standard.widgetSharingOptedIn == true && UserDefaults.standard.widgetsEnabled
@@ -187,6 +199,10 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
 
     var primaryStats: SampleStats {
         SampleStats(samples: visibleSamples)
+    }
+
+    var networkDiagnosis: NetworkPerspectiveDiagnosis {
+        networkDiagnoser.diagnose(hosts: snapshot.hosts, healthByHost: snapshot.healthByHost)
     }
 
     var historyExportHost: HostConfig? {
@@ -247,7 +263,7 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
                 isComplete: overlayVisible,
                 actionTitle: "Show",
                 action: {
-                    (NSApp.delegate as? AppDelegate)?.showOverlay()
+                    AppDelegate.shared?.showOverlay()
                 }
             ),
             SetupChecklistItem(
@@ -302,7 +318,7 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
     }
 
     var draftActionTitle: String {
-        editingHostID == nil ? "Add" : "Save"
+        editingHostID == nil ? "Add Host" : "Save Changes"
     }
 
     func start() {
@@ -952,10 +968,10 @@ private extension UserDefaults {
     var overlayOpacity: Double {
         get {
             guard object(forKey: "overlayOpacity") != nil else { return 1 }
-            return double(forKey: "overlayOpacity")
+            return min(max(double(forKey: "overlayOpacity"), 0.55), 1)
         }
         set {
-            set(newValue, forKey: "overlayOpacity")
+            set(min(max(newValue, 0.55), 1), forKey: "overlayOpacity")
         }
     }
 
@@ -965,6 +981,24 @@ private extension UserDefaults {
         }
         set {
             set(newValue, forKey: "overlayCompactMode")
+        }
+    }
+
+    var overlayShowsAllHosts: Bool {
+        get {
+            bool(forKey: "overlayShowsAllHosts")
+        }
+        set {
+            set(newValue, forKey: "overlayShowsAllHosts")
+        }
+    }
+
+    var overlayShowsLegend: Bool {
+        get {
+            bool(forKey: "overlayShowsLegend")
+        }
+        set {
+            set(newValue, forKey: "overlayShowsLegend")
         }
     }
 

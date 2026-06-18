@@ -1,3 +1,4 @@
+import AppKit
 import PingScopeCore
 import SwiftUI
 
@@ -5,21 +6,25 @@ struct StatusPopoverView: View {
     @ObservedObject var model: PingScopeModel
     var onSettings: () -> Void = {}
     @EnvironmentObject private var softwareUpdateController: SoftwareUpdateController
+    @State private var graphMode: PopoverGraphMode = .primary
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             header
-            Picker("Range", selection: $model.selectedRange) {
-                ForEach(TimeRange.allCases) { range in
-                    Text(range.rawValue).tag(range)
+            HStack(spacing: 12) {
+                Picker("Range", selection: $model.selectedRange) {
+                    ForEach(TimeRange.allCases) { range in
+                        Text(range.rawValue).tag(range)
+                    }
                 }
+                .pickerStyle(.segmented)
             }
-            .pickerStyle(.segmented)
 
-            LatencyGraph(samples: model.visibleSamples, showsAxes: true)
+            graph
                 .frame(height: 150)
 
             stats
+            NetworkDiagnosisRow(diagnosis: model.networkDiagnosis)
 
             RecentSamplesView(samples: Array(model.visibleSamples.suffix(8)).reversed(), range: model.selectedRange)
         }
@@ -32,11 +37,20 @@ struct StatusPopoverView: View {
             VStack(alignment: .leading, spacing: 4) {
                 if model.snapshot.hosts.count > 1 {
                     Picker("Host", selection: Binding(
-                        get: { model.primaryHost?.id ?? model.snapshot.hosts.first?.id ?? UUID() },
-                        set: { model.selectHost($0) }
+                        get: { graphMode == .all ? Self.allHostsSelectionID : (model.primaryHost?.id.uuidString ?? model.snapshot.hosts.first?.id.uuidString ?? "") },
+                        set: { selection in
+                            if selection == Self.allHostsSelectionID {
+                                graphMode = .all
+                            } else if let id = UUID(uuidString: selection) {
+                                graphMode = .primary
+                                model.selectHost(id)
+                            }
+                        }
                     )) {
+                        Text("All Hosts").tag(Self.allHostsSelectionID)
+                        Divider()
                         ForEach(model.snapshot.hosts) { host in
-                            Text(host.displayName).tag(host.id)
+                            Text(host.displayName).tag(host.id.uuidString)
                         }
                     }
                     .labelsHidden()
@@ -47,7 +61,7 @@ struct StatusPopoverView: View {
                     Text(model.primaryHost?.displayName ?? "No Host")
                         .font(.headline)
                 }
-                Text("\(model.primaryHost?.method.rawValue.uppercased() ?? "TCP") \(model.primaryHost?.address ?? "")")
+                Text(hostSubtitle)
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -69,6 +83,39 @@ struct StatusPopoverView: View {
                 .help("Open settings")
                 .accessibilityLabel("Open settings")
             }
+        }
+    }
+
+    private static let allHostsSelectionID = "__all_hosts__"
+
+    private var hostSubtitle: String {
+        if graphMode == .all {
+            return "\(model.snapshot.hosts.filter(\.isEnabled).count) enabled hosts"
+        }
+        return "\(model.primaryHost?.method.rawValue.uppercased() ?? "TCP") \(model.primaryHost?.address ?? "")"
+    }
+
+    @ViewBuilder
+    private var graph: some View {
+        switch graphMode {
+        case .primary:
+            LatencyGraph(samples: model.visibleSamples, showsAxes: true)
+        case .all:
+            MultiHostLatencyGraph(series: multiHostGraphSeries, showsAxes: true)
+        }
+    }
+
+    private var multiHostGraphSeries: [HostLatencyGraphSeries] {
+        let cutoff = Date().addingTimeInterval(-model.selectedRange.duration)
+        return model.snapshot.hosts.enumerated().compactMap { index, host in
+            guard host.isEnabled else { return nil }
+            let samples = model.snapshot.samplesByHost[host.id]?.samples(since: cutoff) ?? []
+            return HostLatencyGraphSeries(
+                host: host,
+                samples: samples,
+                color: HostLatencyGraphSeries.palette[index % HostLatencyGraphSeries.palette.count],
+                isPrimary: host.id == model.primaryHost?.id
+            )
         }
     }
 
@@ -102,6 +149,74 @@ struct StatusPopoverView: View {
     }
 }
 
+private enum PopoverGraphMode: String, CaseIterable, Identifiable {
+    case primary
+    case all
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .primary: "Primary"
+        case .all: "All"
+        }
+    }
+}
+
+struct NetworkDiagnosisRow: View {
+    let diagnosis: NetworkPerspectiveDiagnosis
+
+    var body: some View {
+        HStack(spacing: 9) {
+            Image(systemName: iconName)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(tint)
+                .frame(width: 16)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(diagnosis.title)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.primary)
+                Text(diagnosis.detail)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .background(tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 7))
+        .overlay(
+            RoundedRectangle(cornerRadius: 7)
+                .stroke(tint.opacity(0.22), lineWidth: 1)
+        )
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(diagnosis.title). \(diagnosis.detail)")
+    }
+
+    private var iconName: String {
+        switch diagnosis.scope {
+        case .noData: "circle"
+        case .allReachable: "checkmark.circle.fill"
+        case .localNetwork: "network.slash"
+        case .upstream: "wifi.exclamationmark"
+        case .remoteService: "exclamationmark.triangle.fill"
+        case .partialDegradation: "speedometer"
+        }
+    }
+
+    private var tint: Color {
+        switch diagnosis.scope {
+        case .noData: .secondary
+        case .allReachable: .green
+        case .localNetwork: .red
+        case .upstream: .orange
+        case .remoteService: .yellow
+        case .partialDegradation: .yellow
+        }
+    }
+}
+
 struct OverlayView: View {
     @ObservedObject var model: PingScopeModel
     @Environment(\.dismiss) private var dismiss
@@ -121,7 +236,7 @@ struct OverlayView: View {
                 .frame(height: 20, alignment: .center)
                 .padding(.trailing, 68)
             }
-            LatencyGraph(samples: model.visibleSamples)
+            overlayGraph
                 .contentShape(Rectangle())
                 .onTapGesture {
                     model.openOverlayDetails()
@@ -132,18 +247,50 @@ struct OverlayView: View {
         .frame(minWidth: model.overlayCompactMode ? 150 : 190, minHeight: model.overlayCompactMode ? 48 : 78)
         .contextMenu {
             Button(model.overlayCompactMode ? "Exit Compact Graph" : "Compact Graph") {
-                (NSApp.delegate as? AppDelegate)?.toggleOverlayCompactMode()
+                AppDelegate.shared?.toggleOverlayCompactMode()
+            }
+            if model.snapshot.hosts.count > 1 {
+                Button(model.overlayShowsAllHosts ? "Show Primary Host" : "Show All Hosts") {
+                    model.overlayShowsAllHosts.toggle()
+                }
+                Button(model.overlayShowsLegend ? "Hide Legend" : "Show Legend") {
+                    model.overlayShowsLegend.toggle()
+                }
+                .disabled(!model.overlayShowsAllHosts)
             }
             Button("Open Popover") {
                 model.openOverlayDetails()
             }
             Button("Settings...") {
-                (NSApp.delegate as? AppDelegate)?.openSettings()
+                AppDelegate.shared?.openSettings()
             }
             Divider()
             Button("Close Overlay") {
-                (NSApp.delegate as? AppDelegate)?.hideOverlay()
+                AppDelegate.shared?.hideOverlay()
             }
+        }
+    }
+
+    @ViewBuilder
+    private var overlayGraph: some View {
+        if model.overlayShowsAllHosts {
+            MultiHostLatencyGraph(series: overlayGraphSeries, showsLegend: model.overlayShowsLegend)
+        } else {
+            LatencyGraph(samples: model.visibleSamples)
+        }
+    }
+
+    private var overlayGraphSeries: [HostLatencyGraphSeries] {
+        let cutoff = Date().addingTimeInterval(-model.selectedRange.duration)
+        return model.snapshot.hosts.enumerated().compactMap { index, host in
+            guard host.isEnabled else { return nil }
+            let samples = model.snapshot.samplesByHost[host.id]?.samples(since: cutoff) ?? []
+            return HostLatencyGraphSeries(
+                host: host,
+                samples: samples,
+                color: HostLatencyGraphSeries.palette[index % HostLatencyGraphSeries.palette.count],
+                isPrimary: host.id == model.primaryHost?.id
+            )
         }
     }
 
@@ -151,14 +298,19 @@ struct OverlayView: View {
     private var overlayHostSelector: some View {
         if model.snapshot.hosts.count > 1 {
             Menu {
+                Button("All Hosts") {
+                    model.overlayShowsAllHosts = true
+                }
+                Divider()
                 ForEach(model.snapshot.hosts) { host in
                     Button(host.displayName) {
+                        model.overlayShowsAllHosts = false
                         model.selectHost(host.id)
                     }
                 }
             } label: {
                 HStack(spacing: 3) {
-                    Text(model.primaryHost?.displayName ?? "No Host")
+                    Text(model.overlayShowsAllHosts ? "All Hosts" : (model.primaryHost?.displayName ?? "No Host"))
                         .lineLimit(1)
                         .truncationMode(.tail)
                     Image(systemName: "chevron.down")
@@ -191,49 +343,130 @@ struct SettingsRootView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            settingsHeader
+        VStack(spacing: 0) {
+            HStack(spacing: 0) {
+                settingsSidebar
+                    .frame(width: 158)
+                    .padding(.horizontal, 10)
+                    .padding(.top, 24)
+                    .padding(.bottom, 14)
 
-            TabView(selection: $selectedSettingsTab) {
-                ScrollView { hosts.padding(.top, 8) }
-                    .tabItem { Label("Hosts", systemImage: "server.rack") }
-                    .tag("hosts")
-                ScrollView { display.padding(.top, 8) }
-                    .tabItem { Label("Display", systemImage: "display") }
-                    .tag("display")
-                ScrollView { notifications.padding(.top, 8) }
-                    .tabItem { Label("Notifications", systemImage: "bell.badge") }
-                    .tag("notifications")
-                ScrollView { history.padding(.top, 8) }
-                    .tabItem { Label("History", systemImage: "clock.arrow.circlepath") }
-                    .tag("history")
-                ScrollView { diagnostics.padding(.top, 8) }
-                    .tabItem { Label("Diagnostics", systemImage: "stethoscope") }
-                    .tag("diagnostics")
-                ScrollView { advanced.padding(.top, 8) }
-                    .tabItem { Label("Advanced", systemImage: "slider.horizontal.3") }
-                    .tag("advanced")
-                ScrollView { about.padding(.top, 8) }
-                    .tabItem { Label("About", systemImage: "info.circle") }
-                    .tag("about")
+                Divider()
+
+                VStack(alignment: .leading, spacing: 20) {
+                    selectedSettingsHeader
+
+                    if selectedTab == .display {
+                        selectedSettingsContent
+                            .padding(.bottom, 20)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    } else {
+                        ScrollView {
+                            selectedSettingsContent
+                                .padding(.bottom, 20)
+                        }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    }
+                }
+                .padding(.horizontal, 22)
+                .padding(.top, 24)
             }
-            .onChange(of: selectedSettingsTab) { _, tab in
-                UserDefaults.standard.set(tab, forKey: "selectedSettingsTab")
-            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
 
             settingsFooter
+                .padding(.horizontal, 18)
+                .padding(.vertical, 11)
+                .background(Color.black.opacity(0.08))
         }
-        .padding(16)
-        .frame(minWidth: 720, minHeight: 620)
+        .frame(minWidth: 680, minHeight: 500)
+        .onChange(of: selectedSettingsTab) { _, tab in
+            UserDefaults.standard.set(tab, forKey: "selectedSettingsTab")
+        }
     }
 
-    private var settingsHeader: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            Text("PingScope Settings")
-                .font(.system(size: 22, weight: .semibold))
-            Text("Manage hosts, display behavior, notifications, and network probing.")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
+    private var selectedTab: SettingsTab {
+        SettingsTab(rawValue: selectedSettingsTab) ?? .hosts
+    }
+
+    private var settingsSidebar: some View {
+        VStack(alignment: .leading, spacing: 22) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("PingScope")
+                    .font(.system(size: 22, weight: .bold))
+                Text("Settings")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 6)
+
+            VStack(spacing: 8) {
+                ForEach(SettingsTab.allCases) { tab in
+                    settingsSidebarButton(tab)
+                }
+            }
+
+            Spacer(minLength: 0)
+        }
+        .frame(maxHeight: .infinity, alignment: .top)
+    }
+
+    private func settingsSidebarButton(_ tab: SettingsTab) -> some View {
+        Button {
+            selectedSettingsTab = tab.id
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: tab.systemImage)
+                    .font(.system(size: 14, weight: .medium))
+                    .frame(width: 19)
+                Text(tab.title)
+                    .font(.system(size: 13, weight: selectedSettingsTab == tab.id ? .semibold : .medium))
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 9)
+            .frame(height: 36)
+            .contentShape(RoundedRectangle(cornerRadius: 8))
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(selectedSettingsTab == tab.id ? Color.white : Color.secondary)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(selectedSettingsTab == tab.id ? Color.accentColor : Color.clear)
+        )
+    }
+
+    private var selectedSettingsHeader: some View {
+        HStack(alignment: .center, spacing: 14) {
+            Image(systemName: selectedTab.systemImage)
+                .font(.system(size: 23, weight: .semibold))
+                .frame(width: 30)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(selectedTab.title)
+                    .font(.system(size: 24, weight: .bold))
+                Text(selectedTab.subtitle)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var selectedSettingsContent: some View {
+        switch selectedSettingsTab {
+        case SettingsTab.display.id:
+            display
+        case SettingsTab.notifications.id:
+            notifications
+        case SettingsTab.history.id:
+            history
+        case SettingsTab.diagnostics.id:
+            diagnostics
+        case SettingsTab.advanced.id:
+            advanced
+        case SettingsTab.about.id:
+            about
+        default:
+            hosts
         }
     }
 
@@ -258,12 +491,6 @@ struct SettingsRootView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     Spacer()
-                    Button {
-                        model.clearDraftHost()
-                    } label: {
-                        Label("New Host", systemImage: "plus")
-                    }
-                    .buttonStyle(.bordered)
                 }
 
                 VStack(spacing: 8) {
@@ -286,7 +513,7 @@ struct SettingsRootView: View {
                 }
             }
 
-            SettingsSection(model.editingHostID == nil ? "New Host" : "Host Details") {
+            SettingsSection(model.editingHostID == nil ? "Add Host" : "Edit Host") {
                 hostEditor
             }
         }
@@ -294,20 +521,19 @@ struct SettingsRootView: View {
 
     private var hostEditor: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Grid(alignment: .leading, horizontalSpacing: 18, verticalSpacing: 10) {
-                GridRow {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(alignment: .top, spacing: 14) {
                     SettingsField("Name") {
                         TextField("Name", text: $model.draftHostName)
-                            .frame(width: 220)
+                            .frame(maxWidth: .infinity)
                     }
                     SettingsField("Address") {
                         TextField("Address", text: $model.draftHostAddress)
-                            .frame(width: 220)
+                            .frame(maxWidth: .infinity)
                     }
-                    Toggle("Enabled", isOn: $model.draftIsEnabled)
-                        .toggleStyle(.checkbox)
                 }
-                GridRow {
+
+                HStack(alignment: .top, spacing: 14) {
                     SettingsField("Method") {
                         Picker("Method", selection: Binding(
                             get: { model.draftMethod },
@@ -318,39 +544,45 @@ struct SettingsRootView: View {
                             }
                         }
                         .labelsHidden()
-                        .frame(width: 110)
+                        .frame(width: 100)
                     }
                     SettingsField("Port") {
                         TextField("Port", value: $model.draftPort, format: .number)
-                            .frame(width: 90)
+                            .frame(width: 84)
                             .disabled(model.draftMethod == .icmp)
                     }
-                    SettingsField("Notifications") {
-                        Picker("Notifications", selection: $model.draftNotificationPolicy) {
-                            ForEach(HostNotificationPolicy.allCases, id: \.self) { policy in
-                                Text(policy.displayName).tag(policy)
-                            }
-                        }
-                        .labelsHidden()
-                        .frame(width: 190)
-                    }
+                    Toggle("Enabled", isOn: $model.draftIsEnabled)
+                        .toggleStyle(.checkbox)
+                        .padding(.top, 18)
+                    Spacer(minLength: 0)
                 }
-                GridRow {
+
+                SettingsField("Notifications") {
+                    Picker("Notifications", selection: $model.draftNotificationPolicy) {
+                        ForEach(HostNotificationPolicy.allCases, id: \.self) { policy in
+                            Text(policy.displayName).tag(policy)
+                        }
+                    }
+                    .labelsHidden()
+                    .frame(maxWidth: 220)
+                }
+
+                HStack(alignment: .top, spacing: 14) {
                     SettingsField("Interval") {
-                        UnitNumberField(value: $model.draftIntervalMilliseconds, unit: "ms", width: 90)
+                        UnitNumberField(value: $model.draftIntervalMilliseconds, unit: "ms", width: 78)
                     }
                     SettingsField("Timeout") {
-                        UnitNumberField(value: $model.draftTimeoutMilliseconds, unit: "ms", width: 90)
+                        UnitNumberField(value: $model.draftTimeoutMilliseconds, unit: "ms", width: 78)
                     }
                     SettingsField("Degraded at") {
-                        UnitNumberField(value: $model.draftDegradedThresholdMilliseconds, unit: "ms", width: 90)
+                        UnitNumberField(value: $model.draftDegradedThresholdMilliseconds, unit: "ms", width: 78)
                     }
                 }
             }
 
-            HStack(spacing: 12) {
+            HStack(spacing: 10) {
                 Stepper("Down after \(model.draftDownAfterFailures) failures", value: $model.draftDownAfterFailures, in: 1...10)
-                    .frame(width: 205, alignment: .leading)
+                    .frame(width: 190, alignment: .leading)
                 Spacer()
                 if let result = model.draftTestResultText {
                     Text(result)
@@ -372,10 +604,11 @@ struct SettingsRootView: View {
                 Button {
                     model.clearDraftHost()
                 } label: {
-                    Label("New", systemImage: "square.and.pencil")
+                    Label(model.editingHostID == nil ? "Clear" : "New Host", systemImage: model.editingHostID == nil ? "xmark" : "square.and.pencil")
                 }
                 .disabled(model.editingHostID == nil && model.draftHostName.isEmpty && model.draftHostAddress.isEmpty)
             }
+            .controlSize(.small)
 
             HStack(spacing: 12) {
                 Button {
@@ -389,6 +622,7 @@ struct SettingsRootView: View {
                         .foregroundStyle(.secondary)
                 }
             }
+            .controlSize(.small)
         }
     }
 
@@ -409,24 +643,27 @@ struct SettingsRootView: View {
                 SettingsToggleRow(systemImage: "rectangle.on.rectangle", tint: .blue, title: "Show overlay", isOn: Binding(
                     get: { model.overlayVisible },
                     set: { isVisible in
+                        DebugLog.write("settings overlay show changed visible=\(isVisible)")
                         if isVisible {
-                            (NSApp.delegate as? AppDelegate)?.showOverlay()
+                            AppDelegate.shared?.showOverlay()
                         } else {
-                            (NSApp.delegate as? AppDelegate)?.hideOverlay()
+                            AppDelegate.shared?.hideOverlay()
                         }
                     }
                 ))
                 SettingsToggleRow(systemImage: "pin.fill", tint: .orange, title: "Always on top", isOn: Binding(
                     get: { model.overlayAlwaysOnTop },
                     set: {
+                        DebugLog.write("settings overlay alwaysOnTop changed value=\($0)")
                         model.overlayAlwaysOnTop = $0
-                        (NSApp.delegate as? AppDelegate)?.applyOverlayBehavior()
+                        AppDelegate.shared?.applyOverlayBehavior()
                     }
                 ))
                 SettingsToggleRow(systemImage: "arrow.up.left.and.arrow.down.right", tint: .purple, title: "Compact graph mode", isOn: Binding(
                     get: { model.overlayCompactMode },
                     set: {
-                        (NSApp.delegate as? AppDelegate)?.setOverlayCompactMode($0)
+                        DebugLog.write("settings overlay compact changed value=\($0)")
+                        AppDelegate.shared?.setOverlayCompactMode($0)
                     }
                 ))
                 SettingsRow(systemImage: "slider.horizontal.3", tint: .teal, title: "Opacity") {
@@ -434,8 +671,9 @@ struct SettingsRootView: View {
                         Slider(value: Binding(
                             get: { model.overlayOpacity },
                             set: {
+                                DebugLog.write("settings overlay opacity changed value=\($0)")
                                 model.overlayOpacity = $0
-                                (NSApp.delegate as? AppDelegate)?.applyOverlayBehavior()
+                                AppDelegate.shared?.applyOverlayBehavior()
                             }
                         ), in: 0.55...1)
                         .frame(width: 160)
@@ -452,7 +690,7 @@ struct SettingsRootView: View {
                 SettingsRow(systemImage: "scope", tint: .gray, title: "Position") {
                     Button("Reset Overlay Position") {
                         model.resetOverlayFrame()
-                        (NSApp.delegate as? AppDelegate)?.resetOverlayFrame()
+                        AppDelegate.shared?.resetOverlayFrame()
                     }
                 }
             }
@@ -788,6 +1026,54 @@ struct SettingsRootView: View {
     }
 }
 
+private enum SettingsTab: String, CaseIterable, Identifiable {
+    case hosts
+    case display
+    case notifications
+    case history
+    case diagnostics
+    case advanced
+    case about
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .hosts: "Hosts"
+        case .display: "Display"
+        case .notifications: "Notifications"
+        case .history: "History"
+        case .diagnostics: "Diagnostics"
+        case .advanced: "Advanced"
+        case .about: "About"
+        }
+    }
+
+    var subtitle: String {
+        switch self {
+        case .hosts: "Manage monitored endpoints, methods, thresholds, and primary selection."
+        case .display: "Tune the menu bar indicator, overlay behavior, and graph range."
+        case .notifications: "Control alert types, network status colors, and notification permission."
+        case .history: "Export retained samples and review local storage behavior."
+        case .diagnostics: "Inspect current state, failures, and debug log actions."
+        case .advanced: "Configure local network probing, widgets, login, and update status."
+        case .about: "Version, licensing, setup checklist, and project links."
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .hosts: "server.rack"
+        case .display: "display"
+        case .notifications: "bell.badge"
+        case .history: "clock.arrow.circlepath"
+        case .diagnostics: "stethoscope"
+        case .advanced: "slider.horizontal.3"
+        case .about: "info.circle"
+        }
+    }
+}
+
 struct DiagnosticFailureRow: View {
     let result: PingResult
 
@@ -865,9 +1151,9 @@ struct OverlayVisibilityToggle: View {
             get: { model.overlayVisible },
             set: { isVisible in
                 if isVisible {
-                    (NSApp.delegate as? AppDelegate)?.showOverlay()
+                    AppDelegate.shared?.showOverlay()
                 } else {
-                    (NSApp.delegate as? AppDelegate)?.hideOverlay()
+                    AppDelegate.shared?.hideOverlay()
                 }
             }
         ))
@@ -882,8 +1168,8 @@ struct SettingsPane<Content: View>: View {
         VStack(alignment: .leading, spacing: 18) {
             content
         }
-        .frame(maxWidth: 660, alignment: .topLeading)
-        .frame(maxWidth: .infinity, alignment: .top)
+        .frame(maxWidth: 760, alignment: .topLeading)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
     }
 }
 
@@ -897,14 +1183,14 @@ struct SettingsSection<Content: View>: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 8) {
             Text(title)
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(.secondary)
-            VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 8) {
                 content
             }
-            .padding(12)
+            .padding(10)
             .background(.quaternary.opacity(0.45), in: RoundedRectangle(cornerRadius: 8))
         }
     }
@@ -973,14 +1259,15 @@ struct HostSettingsRow: View {
     let onDelete: () -> Void
 
     var body: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 10) {
             Circle()
                 .fill(statusColor)
-                .frame(width: 10, height: 10)
+                .frame(width: 9, height: 9)
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 8) {
                     Text(host.displayName)
-                        .font(.system(size: 14, weight: .semibold))
+                        .font(.system(size: 13, weight: .semibold))
+                        .lineLimit(1)
                     if isPrimary {
                         Text("PRIMARY")
                             .font(.system(size: 9, weight: .bold))
@@ -1001,17 +1288,19 @@ struct HostSettingsRow: View {
                 Text("\(host.method.rawValue.uppercased()) \(host.address)\(host.port.map { ":\($0)" } ?? "")")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .lineLimit(1)
             }
-            Spacer()
+            Spacer(minLength: 8)
             Button("Edit") {
                 onSelect()
             }
             .buttonStyle(.bordered)
-            Button("Primary") {
-                onMakePrimary()
+            if !isPrimary {
+                Button("Primary") {
+                    onMakePrimary()
+                }
+                .buttonStyle(.bordered)
             }
-            .buttonStyle(.bordered)
-            .disabled(isPrimary)
             Button(role: .destructive) {
                 onDelete()
             } label: {
@@ -1019,8 +1308,9 @@ struct HostSettingsRow: View {
             }
             .buttonStyle(.borderless)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 9)
+        .controlSize(.small)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
         .background(rowBackground, in: RoundedRectangle(cornerRadius: 8))
         .overlay(
             RoundedRectangle(cornerRadius: 8)
@@ -1208,6 +1498,190 @@ struct LatencyGraph: View {
             }
             .frame(width: proxy.size.width, height: proxy.size.height)
         }
+    }
+
+    private func axisLabels(scale: LatencyGraphScale, hasData: Bool) -> some View {
+        VStack(alignment: .trailing) {
+            ForEach(Array(scale.tickMilliseconds.enumerated()), id: \.offset) { _, value in
+                Text(hasData ? scale.label(for: value) : (value == 0 ? "0ms" : "--"))
+                    .frame(height: 12, alignment: .center)
+                if value != scale.tickMilliseconds.last {
+                    Spacer(minLength: 0)
+                }
+            }
+        }
+        .font(.system(size: 9, weight: .regular, design: .monospaced))
+        .monospacedDigit()
+        .foregroundStyle(.secondary)
+        .frame(width: 34)
+    }
+
+    private func rightTicks(scale: LatencyGraphScale) -> some View {
+        VStack(alignment: .leading) {
+            ForEach(Array(scale.tickMilliseconds.enumerated()), id: \.offset) { _, value in
+                Rectangle()
+                    .fill(.secondary.opacity(0.45))
+                    .frame(width: 6, height: 1)
+                if value != scale.tickMilliseconds.last {
+                    Spacer(minLength: 0)
+                }
+            }
+        }
+        .frame(width: 6)
+        .padding(.vertical, 6)
+    }
+
+    private func drawGrid(in size: CGSize, context: GraphicsContext, scale: LatencyGraphScale) {
+        let plotTop: CGFloat = 6
+        let plotHeight = max(size.height - 12, 1)
+        for tick in scale.tickMilliseconds {
+            let normalized = min(max(tick / scale.axisMaximumMilliseconds, 0), 1)
+            let y = plotTop + plotHeight - (plotHeight * CGFloat(normalized))
+            var line = Path()
+            line.move(to: CGPoint(x: 0, y: y))
+            line.addLine(to: CGPoint(x: size.width, y: y))
+            context.stroke(line, with: .color(.secondary.opacity(tick == 0 ? 0.24 : 0.14)), lineWidth: 1)
+        }
+    }
+}
+
+struct HostLatencyGraphSeries: Identifiable {
+    let host: HostConfig
+    let samples: [PingResult]
+    let color: Color
+    let isPrimary: Bool
+
+    var id: UUID { host.id }
+
+    static let palette: [Color] = [
+        .blue,
+        .green,
+        .orange,
+        .purple,
+        .pink,
+        .cyan
+    ]
+}
+
+struct MultiHostLatencyGraph: View {
+    let series: [HostLatencyGraphSeries]
+    var showsAxes = false
+    var showsLegend = true
+
+    var body: some View {
+        let latencies = series.flatMap { hostSeries in
+            hostSeries.samples.compactMap { $0.latency?.milliseconds }
+        }
+        let scale = LatencyGraphScale(latencies: latencies)
+
+        HStack(spacing: showsAxes ? 6 : 0) {
+            if showsAxes {
+                axisLabels(scale: scale, hasData: !latencies.isEmpty)
+            }
+
+            ZStack(alignment: .bottomLeading) {
+                graphCanvas(scale: scale)
+
+                if latencies.isEmpty {
+                    Text("No samples in range")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+
+                if showsLegend {
+                    legend
+                        .padding(8)
+                }
+            }
+
+            if showsAxes {
+                rightTicks(scale: scale)
+            }
+        }
+        .accessibilityLabel("All hosts latency graph")
+    }
+
+    private var legend: some View {
+        let visibleSeries = series.filter { !$0.samples.isEmpty }.prefix(4)
+
+        return HStack(spacing: 8) {
+            ForEach(Array(visibleSeries)) { hostSeries in
+                HStack(spacing: 4) {
+                    Circle()
+                        .fill(hostSeries.color)
+                        .frame(width: 6, height: 6)
+                    Text(hostSeries.host.displayName)
+                        .lineLimit(1)
+                }
+                .font(.system(size: 9, weight: hostSeries.isPrimary ? .semibold : .regular))
+                .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.horizontal, 7)
+        .padding(.vertical, 4)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 6))
+    }
+
+    private func graphCanvas(scale: LatencyGraphScale) -> some View {
+        GeometryReader { proxy in
+            Canvas { context, size in
+                guard series.contains(where: { $0.samples.count > 1 }) else {
+                    let rect = CGRect(origin: .zero, size: size)
+                    context.stroke(Path(roundedRect: rect, cornerRadius: 6), with: .color(.secondary.opacity(0.25)))
+                    return
+                }
+
+                if showsAxes {
+                    drawGrid(in: size, context: context, scale: scale)
+                }
+
+                for hostSeries in series where hostSeries.samples.count > 1 {
+                    draw(hostSeries, in: size, context: context, scale: scale)
+                }
+            }
+            .frame(width: proxy.size.width, height: proxy.size.height)
+        }
+    }
+
+    private func draw(_ hostSeries: HostLatencyGraphSeries, in size: CGSize, context: GraphicsContext, scale: LatencyGraphScale) {
+        let maxValue = scale.axisMaximumMilliseconds
+        let plotTop: CGFloat = showsAxes ? 6 : 0
+        let plotBottom: CGFloat = showsAxes ? 6 : 0
+        let plotHeight = max(size.height - plotTop - plotBottom, 1)
+        var path = Path()
+        var isDrawingSegment = false
+
+        for (index, sample) in hostSeries.samples.enumerated() {
+            let x = size.width * CGFloat(index) / CGFloat(max(hostSeries.samples.count - 1, 1))
+            guard let value = sample.latency?.milliseconds else {
+                if hostSeries.isPrimary {
+                    let failureMark = Path { mark in
+                        mark.move(to: CGPoint(x: x, y: plotTop + plotHeight * 0.2))
+                        mark.addLine(to: CGPoint(x: x, y: plotTop + plotHeight))
+                    }
+                    context.stroke(failureMark, with: .color(.red.opacity(0.55)), lineWidth: 1.2)
+                }
+                isDrawingSegment = false
+                continue
+            }
+
+            let normalized = min(value / maxValue, 1)
+            let y = plotTop + plotHeight - (plotHeight * CGFloat(normalized))
+            let point = CGPoint(x: x, y: y)
+            if !isDrawingSegment {
+                path.move(to: point)
+                isDrawingSegment = true
+            } else {
+                path.addLine(to: point)
+            }
+        }
+
+        context.stroke(
+            path,
+            with: .color(hostSeries.color.opacity(hostSeries.isPrimary ? 1 : 0.72)),
+            lineWidth: hostSeries.isPrimary ? 2.2 : 1.5
+        )
     }
 
     private func axisLabels(scale: LatencyGraphScale, hasData: Bool) -> some View {

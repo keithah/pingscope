@@ -1,6 +1,6 @@
-# PingScope 0.1.1
+# PingScope 0.1.2
 
-First patch release for the fresh native rebuild, focused on reconnect reliability, release packaging, and the iOS companion preview.
+Second patch release for the fresh native rebuild, focused on overlay settings reliability, Sparkle feed hosting, widget version consistency, and release validation.
 
 ## Highlights
 
@@ -16,6 +16,9 @@ First patch release for the fresh native rebuild, focused on reconnect reliabili
 
 ## Fixes
 
+- Fixed Display > Overlay settings so Show Overlay, Always on Top, Compact Graph Mode, and Opacity consistently apply to the live overlay window.
+- Fixed the overlay window's initial level so the saved Always on Top setting is respected when the overlay is first created.
+- Fixed the About checklist overlay action to use the same app delegate bridge as the main settings controls.
 - Fixed a macOS reconnect race where a stale scheduler stream could cancel the new scheduler generation after Wi-Fi, hotspot, or VPN changes.
 - Default Gateway monitoring now refreshes and resumes probes after network path changes instead of getting stuck at `--ms`.
 - Default Gateway endpoint changes clear stale graph and health samples so the popover reflects the active route.
@@ -26,6 +29,7 @@ First patch release for the fresh native rebuild, focused on reconnect reliabili
 ## Distribution
 
 - Developer ID DMG is signed, notarized, stapled, and Gatekeeper-verified.
-- Sparkle appcast is signed with the PingScope EdDSA key.
+- Sparkle appcast is signed with the PingScope EdDSA key and is now hosted from GitHub Pages.
+- Widget extension versions now follow the app's shared marketing version and build number.
 - App Store scheme builds from the same codebase without Sparkle or privileged ICMP UI.
 - Source is licensed under the GNU Affero General Public License v3.0.

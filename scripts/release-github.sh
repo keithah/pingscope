@@ -7,6 +7,9 @@ SIGN_APP_IDENTITY="${CODESIGN_IDENTITY:-Developer ID Application: Keith Herringt
 SPARKLE_KEY_ACCOUNT="${SPARKLE_KEY_ACCOUNT:-pingscope-ed25519}"
 RELEASE_NOTES=""
 DRY_RUN=0
+PAGES_BRANCH="${PING_SCOPE_PAGES_BRANCH:-gh-pages}"
+PAGES_APPCAST_PATH="${PING_SCOPE_PAGES_APPCAST_PATH:-appcast.xml}"
+PAGES_BASE_URL="${PING_SCOPE_PAGES_BASE_URL:-https://keithah.github.io/pingscope}"
 
 usage() {
   cat <<'USAGE'
@@ -20,7 +23,61 @@ Required local credentials:
   - Developer ID Application certificate in login keychain.
   - notarytool keychain profile, default: NotarytoolProfile.
   - Sparkle EdDSA private key in Keychain, default account: pingscope-ed25519.
+
+The generated appcast is also published to GitHub Pages at:
+  https://keithah.github.io/pingscope/appcast.xml
 USAGE
+}
+
+publish_pages_updates() {
+  local update_dir="$1"
+  local version="$2"
+  local remote_url
+  local pages_dir
+
+  remote_url=$(git config --get remote.origin.url)
+  if [[ -z "${remote_url}" ]]; then
+    echo "Cannot publish appcast: origin remote is not configured." >&2
+    return 1
+  fi
+
+  pages_dir=$(mktemp -d "${TMPDIR:-/tmp}/pingscope-pages.XXXXXX")
+  if git ls-remote --exit-code --heads origin "${PAGES_BRANCH}" >/dev/null 2>&1; then
+    git clone --depth 1 --branch "${PAGES_BRANCH}" "${remote_url}" "${pages_dir}" >/dev/null
+  else
+    git init "${pages_dir}" >/dev/null
+    git -C "${pages_dir}" remote add origin "${remote_url}"
+    git -C "${pages_dir}" checkout --orphan "${PAGES_BRANCH}" >/dev/null
+  fi
+
+  mkdir -p "${pages_dir}/$(dirname "${PAGES_APPCAST_PATH}")"
+  ditto "${update_dir}/appcast.xml" "${pages_dir}/${PAGES_APPCAST_PATH}"
+  find "${update_dir}" -maxdepth 1 -type f ! -name appcast.xml -exec ditto {} "${pages_dir}/" \;
+  cat >"${pages_dir}/index.html" <<'HTML'
+<!doctype html>
+<meta charset="utf-8">
+<title>PingScope Updates</title>
+<p>PingScope Sparkle appcast: <a href="appcast.xml">appcast.xml</a></p>
+HTML
+
+  git -C "${pages_dir}" add .
+  if git -C "${pages_dir}" diff --cached --quiet; then
+    echo "GitHub Pages updates are already current."
+  else
+    git -C "${pages_dir}" commit -m "Publish PingScope ${version} appcast" >/dev/null
+    git -C "${pages_dir}" push origin "${PAGES_BRANCH}" >/dev/null
+    echo "Published GitHub Pages updates to ${PAGES_BRANCH}."
+  fi
+
+  if ! gh api repos/keithah/pingscope/pages >/dev/null 2>&1; then
+    gh api repos/keithah/pingscope/pages \
+      --method POST \
+      -f 'source[branch]='"${PAGES_BRANCH}" \
+      -f 'source[path]=/' >/dev/null || {
+        echo "GitHub Pages update branch was pushed, but automatic Pages enablement failed." >&2
+        echo "Enable Pages manually from ${PAGES_BRANCH}/ if needed." >&2
+      }
+  fi
 }
 
 while [[ $# -gt 0 ]]; do
@@ -72,7 +129,7 @@ BUILD_DIR=".build/release-github/v${VERSION}"
 rm -rf "${BUILD_DIR}"
 mkdir -p "${BUILD_DIR}"
 
-MARKETING_VERSION="${VERSION}" CURRENT_PROJECT_VERSION="${CURRENT_PROJECT_VERSION:-24}" \
+MARKETING_VERSION="${VERSION}" CURRENT_PROJECT_VERSION="${CURRENT_PROJECT_VERSION:-25}" \
 CODESIGN_IDENTITY="${SIGN_APP_IDENTITY}" \
   scripts/build-xcode-app-bundle.sh release "${BUILD_DIR}" developer-id >/dev/null
 
@@ -86,7 +143,7 @@ ARTIFACT_DIR="/private/tmp/artifacts/PingScope-v${VERSION}"
 DMG="${ARTIFACT_DIR}/PingScope-v${VERSION}.dmg"
 CHECKSUMS="${ARTIFACT_DIR}/checksums-v${VERSION}.txt"
 UPDATE_DIR="${ARTIFACT_DIR}/updates"
-DOWNLOAD_PREFIX="https://github.com/keithah/pingscope/releases/download/v${VERSION}"
+DOWNLOAD_PREFIX="${PAGES_BASE_URL}"
 
 APPCAST_ARGS=(
   --release-dir "${UPDATE_DIR}"
@@ -125,5 +182,7 @@ gh release create "${TAG}" \
   --notes-file "${RELEASE_NOTES:-/dev/stdin}" <<EOF
 PingScope ${VERSION}
 EOF
+
+publish_pages_updates "${UPDATE_DIR}" "${VERSION}"
 
 echo "Published GitHub release ${TAG}."

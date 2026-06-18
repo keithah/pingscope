@@ -97,6 +97,22 @@ public struct WidgetHost: Codable, Equatable, Sendable {
     public var method: PingMethod
     public var port: UInt16?
     public var isPrimary: Bool
+
+    public init(
+        id: UUID,
+        displayName: String,
+        address: String,
+        method: PingMethod,
+        port: UInt16?,
+        isPrimary: Bool
+    ) {
+        self.id = id
+        self.displayName = displayName
+        self.address = address
+        self.method = method
+        self.port = port
+        self.isPrimary = isPrimary
+    }
 }
 
 public struct WidgetHostHealth: Codable, Equatable, Sendable {
@@ -106,6 +122,22 @@ public struct WidgetHostHealth: Codable, Equatable, Sendable {
     public var consecutiveFailureCount: Int
     public var failureReason: FailureReason?
     public var latestResultAt: Date?
+
+    public init(
+        hostID: UUID,
+        status: HealthStatus,
+        latencyMilliseconds: Double?,
+        consecutiveFailureCount: Int,
+        failureReason: FailureReason?,
+        latestResultAt: Date?
+    ) {
+        self.hostID = hostID
+        self.status = status
+        self.latencyMilliseconds = latencyMilliseconds
+        self.consecutiveFailureCount = consecutiveFailureCount
+        self.failureReason = failureReason
+        self.latestResultAt = latestResultAt
+    }
 }
 
 public struct WidgetSample: Codable, Equatable, Sendable {

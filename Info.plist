@@ -39,7 +39,7 @@
     <key>SUEnableDownloaderSystemProfiling</key>
     <false/>
     <key>SUFeedURL</key>
-    <string>https://github.com/keithah/pingscope/releases/latest/download/appcast.xml</string>
+    <string>https://keithah.github.io/pingscope/appcast.xml</string>
     <key>SUPublicEDKey</key>
     <string>CbaSZPtMeR++QDlRlLXLRk8sFsKmP6QwgsiSQCnw6EM=</string>
 

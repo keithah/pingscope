@@ -285,6 +285,65 @@ final class DomainBehaviorTests: XCTestCase {
         XCTAssertEqual(HostNotificationPolicy.muted.displayName, "Muted")
     }
 
+    func testNetworkPerspectiveDiagnosesEverythingReachable() {
+        let host = HostConfig(id: UUID(), displayName: "Cloudflare", address: "1.1.1.1")
+        let diagnosis = NetworkPerspectiveDiagnoser().diagnose(
+            hosts: [host],
+            healthByHost: [host.id: health(for: host, statusAfter: [.success(hostID: host.id, latency: .milliseconds(12))])]
+        )
+
+        XCTAssertEqual(diagnosis.scope, .allReachable)
+        XCTAssertEqual(diagnosis.title, "Everything reachable")
+    }
+
+    func testNetworkPerspectivePrioritizesDefaultGatewayFailure() {
+        let gateway = HostConfig(id: UUID(), displayName: "Default Gateway", address: "192.168.1.1", thresholds: LatencyThresholds(downAfterFailures: 1))
+        let remote = HostConfig(id: UUID(), displayName: "Cloudflare", address: "1.1.1.1", thresholds: LatencyThresholds(downAfterFailures: 1))
+        let diagnosis = NetworkPerspectiveDiagnoser().diagnose(
+            hosts: [gateway, remote],
+            healthByHost: [
+                gateway.id: health(for: gateway, statusAfter: [.failure(hostID: gateway.id, reason: .timeout)]),
+                remote.id: health(for: remote, statusAfter: [.failure(hostID: remote.id, reason: .timeout)])
+            ]
+        )
+
+        XCTAssertEqual(diagnosis.scope, .localNetwork)
+        XCTAssertEqual(diagnosis.title, "Default gateway down")
+        XCTAssertEqual(diagnosis.affectedHostIDs, [gateway.id])
+    }
+
+    func testNetworkPerspectiveDiagnosesUpstreamWhenLocalWorksAndAllRemoteFail() {
+        let gateway = HostConfig(id: UUID(), displayName: "Default Gateway", address: "192.168.1.1", thresholds: LatencyThresholds(downAfterFailures: 1))
+        let remote = HostConfig(id: UUID(), displayName: "Cloudflare", address: "1.1.1.1", thresholds: LatencyThresholds(downAfterFailures: 1))
+        let diagnosis = NetworkPerspectiveDiagnoser().diagnose(
+            hosts: [gateway, remote],
+            healthByHost: [
+                gateway.id: health(for: gateway, statusAfter: [.success(hostID: gateway.id, latency: .milliseconds(3))]),
+                remote.id: health(for: remote, statusAfter: [.failure(hostID: remote.id, reason: .timeout)])
+            ]
+        )
+
+        XCTAssertEqual(diagnosis.scope, .upstream)
+        XCTAssertEqual(diagnosis.title, "Upstream or ISP path down")
+        XCTAssertEqual(diagnosis.affectedHostIDs, [remote.id])
+    }
+
+    func testNetworkPerspectiveDiagnosesIsolatedRemoteFailure() {
+        let cloudflare = HostConfig(id: UUID(), displayName: "Cloudflare", address: "1.1.1.1", thresholds: LatencyThresholds(downAfterFailures: 1))
+        let google = HostConfig(id: UUID(), displayName: "Google", address: "8.8.8.8", thresholds: LatencyThresholds(downAfterFailures: 1))
+        let diagnosis = NetworkPerspectiveDiagnoser().diagnose(
+            hosts: [cloudflare, google],
+            healthByHost: [
+                cloudflare.id: health(for: cloudflare, statusAfter: [.failure(hostID: cloudflare.id, reason: .timeout)]),
+                google.id: health(for: google, statusAfter: [.success(hostID: google.id, latency: .milliseconds(18))])
+            ]
+        )
+
+        XCTAssertEqual(diagnosis.scope, .remoteService)
+        XCTAssertEqual(diagnosis.title, "Remote host down")
+        XCTAssertEqual(diagnosis.affectedHostIDs, [cloudflare.id])
+    }
+
     func testAppStoreFlavorNormalizesUnsupportedICMPHosts() {
         let host = HostConfig(
             displayName: "Router ICMP",
@@ -311,5 +370,13 @@ final class DomainBehaviorTests: XCTestCase {
         )
 
         XCTAssertEqual(BuildFlavor.developerID.normalizedHost(host), host)
+    }
+
+    private func health(for host: HostConfig, statusAfter results: [PingResult]) -> HostHealth {
+        var health = HostHealth(hostID: host.id, thresholds: host.thresholds)
+        for result in results {
+            health.ingest(result.withHostMetadata(from: host))
+        }
+        return health
     }
 }

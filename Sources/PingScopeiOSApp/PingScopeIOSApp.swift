@@ -6,6 +6,7 @@ import PingScopeCore
 import PingScopeiOS
 import SwiftUI
 import UIKit
+import WidgetKit
 
 @main
 struct PingScopeIOSApp: App {
@@ -77,6 +78,7 @@ private final class PingScopeIOSAppModel: ObservableObject {
 
     private let hostStore: PingScopeIOSHostStore
     private let historyStore: (any PingHistoryStore)?
+    private let widgetSnapshotStore = WidgetSnapshotStore()
     private let gatewayDetector = PingScopeIOSGatewayDetector()
     private let presenter = DisplayStatePresenter()
     private let backgroundRuntime: LiveMonitorBackgroundRuntime
@@ -378,16 +380,64 @@ private final class PingScopeIOSAppModel: ObservableObject {
 
     private func refreshSnapshot() async {
         snapshot = await controller.snapshot()
+        await publishWidgetSnapshot()
     }
 
     private func refreshHistory() async {
         guard let historyStore else {
             historySamples = []
+            await publishWidgetSnapshot()
             return
         }
         let cutoff = Date().addingTimeInterval(-24 * 60 * 60)
         let samples = await historyStore.samples(hostID: snapshot.host.id, since: cutoff, limit: 100)
         historySamples = samples.sorted { $0.timestamp > $1.timestamp }
+        await publishWidgetSnapshot()
+    }
+
+    private func publishWidgetSnapshot() async {
+        let host = snapshot.host
+        let recentResults = presenter.mergedSamples(
+            history: historySamples,
+            live: snapshot.series.samples,
+            range: .tenMinutes
+        )
+        .sorted { lhs, rhs in
+            if lhs.timestamp == rhs.timestamp {
+                return lhs.id.uuidString < rhs.id.uuidString
+            }
+            return lhs.timestamp < rhs.timestamp
+        }
+        .suffix(60)
+
+        let widgetSnapshot = WidgetSnapshot(
+            primaryHostID: host.id,
+            hosts: [
+                WidgetHost(
+                    id: host.id,
+                    displayName: host.displayName,
+                    address: host.address,
+                    method: host.method,
+                    port: host.port,
+                    isPrimary: true
+                )
+            ],
+            health: [
+                WidgetHostHealth(
+                    hostID: host.id,
+                    status: snapshot.health.status,
+                    latencyMilliseconds: snapshot.health.latestResult?.latency?.milliseconds,
+                    consecutiveFailureCount: snapshot.health.consecutiveFailureCount,
+                    failureReason: snapshot.health.latestResult?.failureReason,
+                    latestResultAt: snapshot.health.latestResult?.timestamp
+                )
+            ],
+            recentSamples: recentResults.map(WidgetSample.init(result:)),
+            networkStatus: .connected,
+            generatedAt: Date()
+        )
+        await widgetSnapshotStore.save(widgetSnapshot)
+        WidgetCenter.shared.reloadAllTimelines()
     }
 
     private func beginBackgroundRuntimeIfNeeded() {

@@ -1,6 +1,6 @@
 # Release Builds (Signed + Notarized)
 
-This repo builds a menu-bar macOS app from SwiftPM and an Xcode app bundle with the WidgetKit extension. Public non-App-Store releases are Developer ID signed, notarized, stapled, and published on GitHub with a Sparkle appcast.
+This repo builds a menu-bar macOS app from SwiftPM and an Xcode app bundle with the WidgetKit extension. Public non-App-Store releases are Developer ID signed, notarized, stapled, published on GitHub, and advertised through a Sparkle appcast hosted on GitHub Pages.
 
 ## Prerequisites
 
@@ -63,10 +63,10 @@ scripts/appcast.sh \
 ## Publish GitHub release
 
 ```bash
-scripts/release-github.sh --version 0.1.0 --release-notes RELEASE_NOTES.md
+scripts/release-github.sh --version 0.1.2 --release-notes RELEASE_NOTES.md
 ```
 
-The release driver checks GitHub auth, the notary profile, the Developer ID Application certificate, and the Sparkle private key before publishing.
+The release driver checks GitHub auth, the notary profile, the Developer ID Application certificate, and the Sparkle private key before publishing. It uploads the DMG and checksums to GitHub Releases, then publishes the Sparkle appcast, DMG, and release notes to GitHub Pages so non-App-Store updates stay reachable if the source repo is later made private.
 
 ## Notes
 

@@ -8,67 +8,58 @@ struct SmallWidgetView: View {
         VStack(alignment: .leading, spacing: 8) {
             if let snapshot = entry.snapshot,
                let host = snapshot.primaryHost {
-                HStack {
+                HStack(spacing: 7) {
                     Circle()
-                        .fill(statusColor(for: snapshot.primaryHealth))
-                        .frame(width: 12, height: 12)
+                        .fill(WidgetStatusStyle.color(for: snapshot.primaryHealth))
+                        .frame(width: 10, height: 10)
 
                     Text(host.displayName)
-                        .font(.headline)
+                        .font(.headline.weight(.semibold))
                         .lineLimit(1)
                 }
 
                 if let latency = snapshot.primaryHealth?.latencyMilliseconds {
-                    Text("\(Int(latency.rounded())) ms")
+                    Text("\(Int(latency.rounded()))ms")
                         .font(.system(.title2, design: .rounded))
                         .fontWeight(.semibold)
+                        .monospacedDigit()
                 } else {
                     Text(snapshot.primaryHealth?.failureReason ?? "No sample")
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
 
-                Text(snapshot.statusLabel)
-                    .font(.caption2.weight(.semibold))
-                    .foregroundColor(snapshot.isStale ? .orange : .secondary)
+                Spacer(minLength: 0)
+
+                WidgetStaleBadge(isStale: snapshot.isStale, label: snapshot.statusLabel)
             } else if let data = entry.data,
                let host = data.hosts.first,
                let result = data.results.first {
 
-                HStack {
+                HStack(spacing: 7) {
                     Circle()
-                        .fill(statusColor(for: result))
-                        .frame(width: 12, height: 12)
+                        .fill(WidgetStatusStyle.color(for: result))
+                        .frame(width: 10, height: 10)
 
                     Text(host.name)
-                        .font(.headline)
+                        .font(.headline.weight(.semibold))
                         .lineLimit(1)
                 }
 
                 if let latency = result.latencyMS {
-                    Text(String(format: "%.1f ms", latency))
+                    Text("\(Int(latency.rounded()))ms")
                         .font(.system(.title2, design: .rounded))
-                        .fontWeight(.bold)
+                        .fontWeight(.semibold)
+                        .monospacedDigit()
                 } else {
                     Text("Timeout")
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
 
-                Text(entry.date, style: .relative)
-                    .font(.caption2)
-                    .foregroundColor(.secondary)
+                Spacer(minLength: 0)
 
-                if data.isStale {
-                    HStack(spacing: 4) {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .font(.caption2)
-                            .foregroundColor(.orange)
-                        Text("Stale")
-                            .font(.caption2)
-                            .foregroundColor(.orange)
-                    }
-                }
+                WidgetStaleBadge(isStale: data.isStale, label: data.isStale ? "Stale" : "Live")
             } else {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("PingScope")
@@ -81,29 +72,12 @@ struct SmallWidgetView: View {
         }
         .opacity(isStale ? 0.6 : 1.0)
         .containerBackground(for: .widget) {
-            Color(nsColor: .controlBackgroundColor)
+            WidgetStatusStyle.backgroundColor
         }
         .widgetURL(URL(string: "pingscope://open"))
     }
 
-    private func statusColor(for result: WidgetData.SimplifiedPingResult) -> Color {
-        guard result.isSuccess, let latency = result.latencyMS else { return .red }
-        if latency < 50 { return .green }
-        if latency < 100 { return .yellow }
-        return .red
-    }
-
     private var isStale: Bool {
         entry.snapshot?.isStale ?? entry.data?.isStale ?? false
-    }
-
-    private func statusColor(for health: WidgetSnapshotData.HostHealth?) -> Color {
-        guard let health else { return .gray }
-        switch health.status {
-        case "healthy": return .green
-        case "degraded": return .yellow
-        case "down": return .red
-        default: return .gray
-        }
     }
 }

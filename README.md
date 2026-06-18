@@ -4,7 +4,7 @@ PingScope is a native macOS menu bar latency monitor for people who want a quiet
 
 PingScope is primarily a Mac app, with an iOS companion app in progress:
 
-- **Developer ID builds** support TCP, UDP, and ICMP probes where macOS permits them, plus Sparkle updates from GitHub Releases.
+- **Developer ID builds** support TCP, UDP, and ICMP probes where macOS permits them, plus Sparkle updates from a GitHub Pages appcast.
 - **App Store builds** stay sandbox-compliant and hide ICMP.
 - **iOS builds** monitor continuously while the app is open, offer explicit `30s` and `1m` sessions, publish Live Activity updates during finite background runtime, and keep local recent history. An advanced opt-in Background Keep Alive mode can use Always Location permission while monitoring is active; it is disabled by default.
 
@@ -82,7 +82,7 @@ scripts/validate-ios-simulator-smoke.sh
 scripts/validate-ios-device-smoke.sh
 xcodebuild -project PingScope.xcodeproj -scheme PingScope-iOS -destination 'generic/platform=iOS Simulator' build CODE_SIGNING_ALLOWED=NO
 scripts/validate-probes.sh
-PING_SCOPE_DMG_SHA256=3f81bec9e6fb1114c3c111e460da410075c2b6a9a3b451fe34b0485c408010ce scripts/validate-sparkle-feed.sh 0.1.1
+PING_SCOPE_DMG_SHA256=<release-dmg-sha256> scripts/validate-sparkle-feed.sh 0.1.2
 scripts/validate-network-transitions.sh
 scripts/build-xcode-app-bundle.sh debug /Applications developer-id
 scripts/validate-roadmap.sh
@@ -119,7 +119,7 @@ Validation coverage:
 
 ## Release
 
-Developer ID releases are signed, notarized, packaged as a DMG, signed into a Sparkle appcast, and uploaded to GitHub Releases.
+Developer ID releases are signed, notarized, packaged as a DMG, signed into a Sparkle appcast, attached to GitHub Releases, and published to GitHub Pages for Sparkle updates.
 
 One-time local setup:
 
@@ -135,13 +135,13 @@ Sparkle uses the Keychain account `pingscope-ed25519`. The public key is already
 Release command:
 
 ```bash
-scripts/release-github.sh --version 0.1.1 --release-notes RELEASE_NOTES.md
+scripts/release-github.sh --version 0.1.2 --release-notes RELEASE_NOTES.md
 ```
 
 Validate the published Sparkle feed and Developer ID DMG:
 
 ```bash
-PING_SCOPE_DMG_SHA256=<release-dmg-sha256> scripts/validate-sparkle-feed.sh 0.1.1
+PING_SCOPE_DMG_SHA256=<release-dmg-sha256> scripts/validate-sparkle-feed.sh 0.1.2
 ```
 
 ## Architecture
@@ -158,7 +158,7 @@ The SwiftPM package remains buildable outside Xcode. The Xcode project adds the 
 
 ## Roadmap
 
-- 0.1.1: first patch release and Sparkle update validation.
+- 0.1.x: patch releases and Sparkle update validation.
 - 0.2.0: Mac polish, diagnostics, and widget/overlay refinements.
 - 0.3.0: iOS companion app with host selection, continuous foreground monitoring, finite live sessions, local recent history, optional Background Keep Alive, Live Activity polish, and physical-device QA.
 - Later: iOS TestFlight/App Store distribution, stale-aware iOS widgets, shared host configuration, deeper history views, pruning controls, and trend summaries if real usage justifies them.

@@ -11,7 +11,7 @@ struct PingScopeApp: App {
         Settings {
             SettingsRootView(model: appDelegate.model)
                 .environmentObject(appDelegate.softwareUpdateController)
-                .frame(width: 720, height: 660)
+                .frame(width: 700, height: 680)
         }
         .commands {
             CommandGroup(replacing: .appSettings) {
@@ -26,6 +26,8 @@ struct PingScopeApp: App {
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    static weak var shared: AppDelegate?
+
     let model = PingScopeModel()
     let softwareUpdateController = SoftwareUpdateController()
     private var statusItem: NSStatusItem?
@@ -39,6 +41,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var sleepObserver: NSObjectProtocol?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        Self.shared = self
         guard acquireSingleInstanceLock() else {
             NSApp.terminate(nil)
             return
@@ -74,7 +77,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let view = SettingsRootView(model: model)
                 .environmentObject(softwareUpdateController)
             let window = NSWindow(
-                contentRect: NSRect(x: 0, y: 0, width: 720, height: 660),
+                contentRect: NSRect(x: 0, y: 0, width: 700, height: 680),
                 styleMask: [.titled, .closable, .miniaturizable, .resizable],
                 backing: .buffered,
                 defer: false
@@ -104,7 +107,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 onDetails: { [weak self] in self?.openPopoverFromOverlay() },
                 onSettings: { [weak self] in self?.openSettings() },
                 onClose: { [weak self] in self?.hideOverlay() },
-                onSelectHost: { [weak self] id in self?.model.selectHost(id) }
+                onSelectHost: { [weak self] id in
+                    self?.model.overlayShowsAllHosts = false
+                    self?.model.selectHost(id)
+                },
+                onSelectAllHosts: { [weak self] in self?.model.overlayShowsAllHosts = true },
+                showsAllHosts: { [weak self] in self?.model.overlayShowsAllHosts ?? false },
+                showsLegend: { [weak self] in self?.model.overlayShowsLegend ?? false },
+                onToggleLegend: { [weak self] in
+                    guard let self else { return }
+                    self.model.overlayShowsLegend.toggle()
+                }
             )
             window.delegate = model
             overlayController = NSWindowController(window: window)
@@ -130,8 +143,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applyOverlayBehavior() {
         guard let window = overlayController?.window else { return }
         window.alphaValue = CGFloat(model.overlayOpacity)
-        window.level = model.overlayAlwaysOnTop ? .floating : .normal
-        window.collectionBehavior = model.overlayAlwaysOnTop ? [.canJoinAllSpaces, .fullScreenAuxiliary] : [.fullScreenAuxiliary]
+        if model.overlayAlwaysOnTop {
+            window.level = .floating
+            window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+            window.orderFrontRegardless()
+        } else {
+            window.level = .normal
+            window.collectionBehavior = [.fullScreenAuxiliary]
+            window.orderBack(nil)
+        }
+        DebugLog.write("overlay behavior applied opacity=\(model.overlayOpacity) alwaysOnTop=\(model.overlayAlwaysOnTop) level=\(window.level.rawValue)")
     }
 
     func openPopoverFromOverlay() {
@@ -153,6 +174,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         model.overlayCompactMode = isCompact
+        applyOverlayCompactLayout(isCompact)
+    }
+
+    func applyOverlayCompactLayout(_ isCompact: Bool) {
         resizeOverlayForCompactMode(isCompact)
         refreshOverlayContent()
     }
@@ -194,7 +219,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             onDetails: { [weak self] in self?.openPopoverFromOverlay() },
             onSettings: { [weak self] in self?.openSettings() },
             onClose: { [weak self] in self?.hideOverlay() },
-            onSelectHost: { [weak self] id in self?.model.selectHost(id) }
+            onSelectHost: { [weak self] id in
+                self?.model.overlayShowsAllHosts = false
+                self?.model.selectHost(id)
+            },
+            onSelectAllHosts: { [weak self] in self?.model.overlayShowsAllHosts = true },
+            showsAllHosts: { [weak self] in self?.model.overlayShowsAllHosts ?? false },
+            showsLegend: { [weak self] in self?.model.overlayShowsLegend ?? false },
+            onToggleLegend: { [weak self] in
+                guard let self else { return }
+                self.model.overlayShowsLegend.toggle()
+            }
         )
         applyOverlayBehavior()
     }
@@ -202,7 +237,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func overlayHostOptions() -> [(UUID, String, Bool)] {
         let primaryID = model.primaryHost?.id
         return model.snapshot.hosts.map { host in
-            (host.id, host.displayName, host.id == primaryID)
+            (host.id, host.displayName, !model.overlayShowsAllHosts && host.id == primaryID)
         }
     }
 
@@ -445,8 +480,8 @@ final class OverlayWindow: NSWindow {
         )
         isOpaque = false
         backgroundColor = .clear
-        level = .floating
-        collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        level = .normal
+        collectionBehavior = [.fullScreenAuxiliary]
         isMovableByWindowBackground = true
         ignoresMouseEvents = false
         hasShadow = true
@@ -481,6 +516,10 @@ final class OverlayContainerView<Content: View>: NSView {
     private let onSettings: () -> Void
     private let onClose: () -> Void
     private let onSelectHost: (UUID) -> Void
+    private let onSelectAllHosts: () -> Void
+    private let showsAllHosts: () -> Bool
+    private let showsLegend: () -> Bool
+    private let onToggleLegend: () -> Void
     private let graphClickView: OverlayGraphClickView
     private var compactButton: NSButton?
     private var settingsButton: NSButton?
@@ -494,7 +533,11 @@ final class OverlayContainerView<Content: View>: NSView {
         onDetails: @escaping () -> Void,
         onSettings: @escaping () -> Void,
         onClose: @escaping () -> Void,
-        onSelectHost: @escaping (UUID) -> Void
+        onSelectHost: @escaping (UUID) -> Void,
+        onSelectAllHosts: @escaping () -> Void,
+        showsAllHosts: @escaping () -> Bool,
+        showsLegend: @escaping () -> Bool,
+        onToggleLegend: @escaping () -> Void
     ) {
         self.hostingView = NSHostingView(rootView: rootView)
         self.isCompact = isCompact
@@ -504,6 +547,10 @@ final class OverlayContainerView<Content: View>: NSView {
         self.onSettings = onSettings
         self.onClose = onClose
         self.onSelectHost = onSelectHost
+        self.onSelectAllHosts = onSelectAllHosts
+        self.showsAllHosts = showsAllHosts
+        self.showsLegend = showsLegend
+        self.onToggleLegend = onToggleLegend
         self.graphClickView = OverlayGraphClickView(onClick: onDetails)
         super.init(frame: .zero)
 
@@ -580,13 +627,29 @@ final class OverlayContainerView<Content: View>: NSView {
         menu.addItem(NSMenuItem(title: compactTitle, action: #selector(toggleCompact), keyEquivalent: ""))
         let hosts = hostOptions()
         if hosts.count > 1 {
+            let legendItem = NSMenuItem(title: showsLegend() ? "Hide Legend" : "Show Legend", action: #selector(toggleLegend), keyEquivalent: "")
+            legendItem.target = self
+            legendItem.isEnabled = showsAllHosts()
+            menu.addItem(legendItem)
+
             let hostItem = NSMenuItem(title: "Host", action: nil, keyEquivalent: "")
             let hostMenu = NSMenu()
-            for host in hosts {
+            let allItem = NSMenuItem(title: "All Hosts", action: #selector(selectAllHosts), keyEquivalent: "")
+            allItem.target = self
+            allItem.state = showsAllHosts() ? .on : .off
+            hostMenu.addItem(allItem)
+            hostMenu.addItem(.separator())
+            for (index, host) in hosts.enumerated() {
                 let item = NSMenuItem(title: host.1, action: #selector(selectHost(_:)), keyEquivalent: "")
                 item.target = self
                 item.representedObject = host.0
                 item.state = host.2 ? .on : .off
+                if showsAllHosts() {
+                    item.attributedTitle = NSAttributedString(
+                        string: host.1,
+                        attributes: [.foregroundColor: NSColor.graphPaletteColor(index: index)]
+                    )
+                }
                 hostMenu.addItem(item)
             }
             hostItem.submenu = hostMenu
@@ -632,6 +695,16 @@ final class OverlayContainerView<Content: View>: NSView {
         guard let id = sender.representedObject as? UUID else { return }
         DebugLog.write("overlay context host selected id=\(id.uuidString)")
         onSelectHost(id)
+    }
+
+    @objc private func selectAllHosts() {
+        DebugLog.write("overlay context all hosts selected")
+        onSelectAllHosts()
+    }
+
+    @objc private func toggleLegend() {
+        DebugLog.write("overlay context legend toggled")
+        onToggleLegend()
     }
 
     @objc private func openSettings() {
@@ -696,6 +769,18 @@ final class OverlayGraphClickView: NSView {
 }
 
 private extension NSColor {
+    static func graphPaletteColor(index: Int) -> NSColor {
+        let palette: [NSColor] = [
+            .systemBlue,
+            .systemGreen,
+            .systemOrange,
+            .systemPurple,
+            .systemPink,
+            .systemCyan
+        ]
+        return palette[index % palette.count]
+    }
+
     convenience init(statusColor: StatusColor) {
         switch statusColor {
         case .gray: self.init(cgColor: NSColor.systemGray.cgColor)!

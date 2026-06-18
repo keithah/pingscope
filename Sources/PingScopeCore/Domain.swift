@@ -348,6 +348,137 @@ public struct SampleStats: Equatable, Sendable {
     }
 }
 
+public struct NetworkPerspectiveDiagnosis: Equatable, Sendable {
+    public enum Scope: String, Codable, Equatable, Sendable {
+        case noData
+        case allReachable
+        case localNetwork
+        case upstream
+        case remoteService
+        case partialDegradation
+    }
+
+    public var scope: Scope
+    public var title: String
+    public var detail: String
+    public var affectedHostIDs: [UUID]
+
+    public init(scope: Scope, title: String, detail: String, affectedHostIDs: [UUID] = []) {
+        self.scope = scope
+        self.title = title
+        self.detail = detail
+        self.affectedHostIDs = affectedHostIDs
+    }
+}
+
+public struct NetworkPerspectiveDiagnoser: Sendable {
+    public init() {}
+
+    public func diagnose(hosts: [HostConfig], healthByHost: [UUID: HostHealth]) -> NetworkPerspectiveDiagnosis {
+        let enabledHosts = hosts.filter(\.isEnabled)
+        guard !enabledHosts.isEmpty else {
+            return NetworkPerspectiveDiagnosis(
+                scope: .noData,
+                title: "No hosts enabled",
+                detail: "Enable at least one host to diagnose network scope."
+            )
+        }
+
+        let observed = enabledHosts.compactMap { host -> (host: HostConfig, health: HostHealth)? in
+            guard let health = healthByHost[host.id], health.latestResult != nil else { return nil }
+            return (host, health)
+        }
+        guard !observed.isEmpty else {
+            return NetworkPerspectiveDiagnosis(
+                scope: .noData,
+                title: "No recent measurements",
+                detail: "PingScope needs samples before it can infer what is down."
+            )
+        }
+
+        let down = observed.filter { $0.health.status == .down }
+        let degraded = observed.filter { $0.health.status == .degraded }
+        let healthy = observed.filter { $0.health.status == .healthy }
+        let local = observed.filter { $0.host.isLocalNetworkAnchor }
+        let remote = observed.filter { !$0.host.isLocalNetworkAnchor }
+        let localDown = local.filter { $0.health.status == .down }
+        let remoteDown = remote.filter { $0.health.status == .down }
+        let remoteHealthy = remote.filter { $0.health.status == .healthy }
+
+        if down.isEmpty {
+            if degraded.isEmpty {
+                return NetworkPerspectiveDiagnosis(
+                    scope: .allReachable,
+                    title: "Everything reachable",
+                    detail: "\(healthy.count) monitored host\(healthy.count == 1 ? "" : "s") responding."
+                )
+            }
+            return NetworkPerspectiveDiagnosis(
+                scope: .partialDegradation,
+                title: "Latency degraded",
+                detail: names(degraded) + " above threshold.",
+                affectedHostIDs: degraded.map(\.host.id)
+            )
+        }
+
+        if let firstLocalDown = localDown.first {
+            let title = firstLocalDown.host.displayName.localizedCaseInsensitiveContains("gateway") ? "Default gateway down" : "Local network down"
+            return NetworkPerspectiveDiagnosis(
+                scope: .localNetwork,
+                title: title,
+                detail: "\(firstLocalDown.host.displayName) is not responding; failures beyond it may be local.",
+                affectedHostIDs: localDown.map(\.host.id)
+            )
+        }
+
+        if !remoteDown.isEmpty, !local.isEmpty, local.allSatisfy({ $0.health.status == .healthy || $0.health.status == .degraded }) {
+            if remoteHealthy.isEmpty, remote.count == remoteDown.count {
+                return NetworkPerspectiveDiagnosis(
+                    scope: .upstream,
+                    title: "Upstream or ISP path down",
+                    detail: "Local hosts respond, but all monitored remote hosts are down.",
+                    affectedHostIDs: remoteDown.map(\.host.id)
+                )
+            }
+
+            return NetworkPerspectiveDiagnosis(
+                scope: .remoteService,
+                title: "Remote host down",
+                detail: names(remoteDown) + " not responding while local path is reachable.",
+                affectedHostIDs: remoteDown.map(\.host.id)
+            )
+        }
+
+        if !remoteDown.isEmpty, !remoteHealthy.isEmpty {
+            return NetworkPerspectiveDiagnosis(
+                scope: .remoteService,
+                title: "Remote host down",
+                detail: names(remoteDown) + " not responding; other remote hosts are reachable.",
+                affectedHostIDs: remoteDown.map(\.host.id)
+            )
+        }
+
+        return NetworkPerspectiveDiagnosis(
+            scope: .partialDegradation,
+            title: "Multiple failures",
+            detail: names(down) + " not responding.",
+            affectedHostIDs: down.map(\.host.id)
+        )
+    }
+
+    private func names(_ hostHealth: [(host: HostConfig, health: HostHealth)]) -> String {
+        let names = hostHealth.prefix(3).map(\.host.displayName).joined(separator: ", ")
+        let extraCount = hostHealth.count - 3
+        return extraCount > 0 ? "\(names), +\(extraCount) more" : names
+    }
+}
+
+private extension HostConfig {
+    var isLocalNetworkAnchor: Bool {
+        requiresLocalNetworkPermission || displayName.localizedCaseInsensitiveContains("gateway")
+    }
+}
+
 public struct NotificationRuleSet: Codable, Equatable, Sendable {
     public var isEnabled: Bool
     public var cooldown: Duration

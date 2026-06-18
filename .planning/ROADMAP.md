@@ -38,17 +38,20 @@ Goal: validate the public update path and close first-release polish items.
 - [ ] Verify a real Sparkle GUI update from `0.1.0` to `0.1.1` on a clean user account.
 - [x] Refresh release screenshots if UI changes.
 - [ ] Run manual widget gallery placement QA.
-- [x] Validate default gateway behavior on Wi-Fi and hotspot; Ethernet still needs a real wired-network pass.
+- [x] Validate default gateway behavior on Wi-Fi and hotspot.
+- [ ] Validate default gateway behavior on Ethernet using `scripts/validate-ethernet-gateway.sh` once a wired route is active.
 - [x] Fix and verify the popover settings gear opens Settings reliably.
 
 ## 0.2.0 - Mac Polish
 
 Goal: improve confidence and daily usability without expanding platform scope.
 
-- [ ] Add richer release smoke automation around overlay/context-menu interactions.
+- [x] Add richer release smoke automation around overlay/context-menu interactions.
 - [x] Add explicit diagnostics view or log export for probe failures.
-- [ ] Improve widget visual polish after real use.
-- [ ] Review menu bar and overlay behavior across Spaces/full-screen apps.
+- [x] Improve widget visual polish after real use.
+- [x] Add a unified multi-host sparkline mode in the popover that overlays configured hosts with distinct colors.
+- [x] Design a network-perspective diagnosis model that can explain likely failure scope, such as gateway, firewall, ISP/upstream, or remote service down.
+- [x] Review menu bar and overlay behavior across full-screen apps with osascript-driven QA.
 - [x] Add an in-app update status view that shows current version, feed URL, last check request, and feed/key configuration.
 - [x] Add a first-run checklist for notification permission, local network access, overlay, widgets, and start-at-login.
 - [x] Add a conservative network transition validation script with optional Wi-Fi cycling and DNS failure coverage.
@@ -73,7 +76,7 @@ Goal: ship a narrow iOS companion that monitors continuously while open, support
 - [x] Add optional iOS Background Keep Alive using Always Location only while monitoring is active.
 - [ ] Run device-only manual QA for continuous foreground monitoring, Live Activity updates, Dynamic Island/Lock Screen presentation, local-network permission, stale state, and early background expiration.
 - [ ] Add iOS App Store/TestFlight distribution workflow once the iOS platform record is ready.
-- [ ] Add an iOS widget that displays the last known sample and clearly labels stale data.
+- [x] Add an iOS widget that displays the last known sample and clearly labels stale data.
 - [x] Add iOS graph range controls for `1m`, `5m`, and `10m`, with persisted local history across launches.
 
 ## Later

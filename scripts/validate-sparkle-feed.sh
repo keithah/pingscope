@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-VERSION="${1:-0.1.1}"
+VERSION="${1:-0.1.2}"
 BUILD_VERSION="${PING_SCOPE_BUILD_VERSION:-24}"
-FEED_URL="${PING_SCOPE_SPARKLE_FEED_URL:-https://github.com/keithah/pingscope/releases/latest/download/appcast.xml}"
+FEED_URL="${PING_SCOPE_SPARKLE_FEED_URL:-https://keithah.github.io/pingscope/appcast.xml}"
 EXPECTED_SHA256="${PING_SCOPE_DMG_SHA256:-}"
 WORK_DIR="${PING_SCOPE_SPARKLE_VALIDATE_DIR:-/tmp/pingscope-sparkle-feed}"
 KEY_ACCOUNT="${SPARKLE_KEY_ACCOUNT:-pingscope-ed25519}"
