@@ -1,0 +1,15 @@
+<?xml version="1.0" standalone="yes"?>
+<rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0">
+    <channel>
+        <title>PingScope</title>
+        <item>
+            <title>0.1.2</title>
+            <pubDate>Thu, 18 Jun 2026 14:00:22 -0700</pubDate>
+            <sparkle:version>25</sparkle:version>
+            <sparkle:shortVersionString>0.1.2</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>
+            <sparkle:releaseNotesLink>https://keithah.github.io/pingscope/PingScope-v0.1.2.md</sparkle:releaseNotesLink>
+            <enclosure url="https://keithah.github.io/pingscope/PingScope-v0.1.2.dmg" length="3990118" type="application/octet-stream" sparkle:edSignature="lXUd7QfCWGnDG5ckMUHwjAeNr4BKJ7DiM8Co2oefJkpMn1wGZzcK8a9XJi4hXuhim4KJDsds5xCDTG4/hjkIAw=="/>
+        </item>
+    </channel>
+</rss>
