@@ -72,7 +72,7 @@ BUILD_DIR=".build/release-github/v${VERSION}"
 rm -rf "${BUILD_DIR}"
 mkdir -p "${BUILD_DIR}"
 
-MARKETING_VERSION="${VERSION}" CURRENT_PROJECT_VERSION="${CURRENT_PROJECT_VERSION:-1}" \
+MARKETING_VERSION="${VERSION}" CURRENT_PROJECT_VERSION="${CURRENT_PROJECT_VERSION:-24}" \
 CODESIGN_IDENTITY="${SIGN_APP_IDENTITY}" \
   scripts/build-xcode-app-bundle.sh release "${BUILD_DIR}" developer-id >/dev/null
 
