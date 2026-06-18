@@ -5,6 +5,7 @@ import SwiftUI
 #if os(iOS)
 public struct PingScopeIOSRootView: View {
     @State private var editingHost: HostConfig?
+    private static let defaultGatewayMenuID = UUID(uuidString: "00000000-0000-0000-0000-000000000001")!
 
     public var hosts: [HostConfig]
     public var host: HostConfig
@@ -159,11 +160,20 @@ public struct PingScopeIOSRootView: View {
         VStack(alignment: .leading, spacing: 4) {
             Picker("Host", selection: Binding(
                 get: { selectedHostID },
-                set: { onSelectHost($0) }
+                set: { selection in
+                    if selection == Self.defaultGatewayMenuID {
+                        onUseDefaultGateway()
+                    } else {
+                        onSelectHost(selection)
+                    }
+                }
             )) {
                 ForEach(hosts) { host in
                     Text(host.displayName).tag(host.id)
                 }
+                Divider()
+                Label("Default Gateway", systemImage: "network")
+                    .tag(Self.defaultGatewayMenuID)
             }
             .pickerStyle(.menu)
 
@@ -171,22 +181,13 @@ public struct PingScopeIOSRootView: View {
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
 
-            HStack(spacing: 10) {
-                Button {
-                    onUseDefaultGateway()
-                } label: {
-                    Label("Use Default Gateway", systemImage: "network")
-                }
-                .buttonStyle(.bordered)
-
-                if let gatewayDetectionText {
-                    Text(gatewayDetectionText)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(2)
-                }
+            if let gatewayDetectionText {
+                Text(gatewayDetectionText)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                    .padding(.top, 2)
             }
-            .padding(.top, 6)
         }
     }
 

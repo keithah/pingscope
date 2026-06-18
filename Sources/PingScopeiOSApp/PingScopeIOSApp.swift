@@ -437,13 +437,13 @@ private final class BackgroundLocationKeepAliveController: NSObject, CLLocationM
         manager.distanceFilter = 1_000
         manager.activityType = .other
         manager.pausesLocationUpdatesAutomatically = false
-        manager.allowsBackgroundLocationUpdates = true
-        manager.showsBackgroundLocationIndicator = true
     }
 
     func requestAlwaysAuthorization() {
         switch manager.authorizationStatus {
-        case .notDetermined, .authorizedWhenInUse:
+        case .notDetermined:
+            manager.requestWhenInUseAuthorization()
+        case .authorizedWhenInUse:
             manager.requestAlwaysAuthorization()
         case .restricted, .denied, .authorizedAlways:
             notify()
@@ -461,6 +461,8 @@ private final class BackgroundLocationKeepAliveController: NSObject, CLLocationM
             return
         }
         isRunning = true
+        manager.allowsBackgroundLocationUpdates = true
+        manager.showsBackgroundLocationIndicator = true
         manager.startUpdatingLocation()
         notify()
     }
@@ -472,6 +474,8 @@ private final class BackgroundLocationKeepAliveController: NSObject, CLLocationM
         }
         isRunning = false
         manager.stopUpdatingLocation()
+        manager.allowsBackgroundLocationUpdates = false
+        manager.showsBackgroundLocationIndicator = false
         notify()
     }
 
@@ -483,6 +487,9 @@ private final class BackgroundLocationKeepAliveController: NSObject, CLLocationM
 
     nonisolated func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
         Task { @MainActor in
+            if manager.authorizationStatus == .authorizedWhenInUse {
+                manager.requestAlwaysAuthorization()
+            }
             notify()
         }
     }

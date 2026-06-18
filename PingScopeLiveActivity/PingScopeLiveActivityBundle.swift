@@ -31,7 +31,7 @@ struct PingScopeLiveActivityWidget: Widget {
             } compactLeading: {
                 latencyLabel(context)
             } compactTrailing: {
-                statusDot(context.state.status)
+                compactSessionLabel(context)
             } minimal: {
                 statusDot(context.state.status)
             }
@@ -58,6 +58,17 @@ struct PingScopeLiveActivityWidget: Widget {
             Spacer()
             Text(remainingText(context))
                 .font(.caption.monospacedDigit())
+        }
+    }
+
+    private func compactSessionLabel(_ context: ActivityViewContext<PingScopeLiveActivityAttributes>) -> some View {
+        HStack(spacing: 3) {
+            statusDot(context.state.status)
+                .frame(width: 7, height: 7)
+            Text(remainingText(context))
+                .font(.caption2.monospacedDigit())
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
         }
     }
 }
@@ -90,7 +101,13 @@ private struct PingScopeLiveActivityView: View {
 }
 
 private func remainingText(_ context: ActivityViewContext<PingScopeLiveActivityAttributes>) -> String {
-    context.attributes.duration == .continuous ? "Live" : "\(context.state.remainingSeconds)s"
+    if context.attributes.duration == .continuous {
+        return context.state.isStale ? "Stale" : "Live"
+    }
+    if context.state.isStale && context.state.remainingSeconds == 0 {
+        return "Ended"
+    }
+    return "\(context.state.remainingSeconds)s"
 }
 
 private func latencyText(_ state: PingScopeLiveActivityAttributes.ContentState) -> String {
