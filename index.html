@@ -1,4 +1,451 @@
 <!doctype html>
-<meta charset="utf-8">
-<title>PingScope Updates</title>
-<p>PingScope Sparkle appcast: <a href="appcast.xml">appcast.xml</a></p>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>PingScope</title>
+    <meta name="description" content="PingScope is a native macOS menu-bar latency monitor.">
+    <link rel="icon" href="assets/app-icon.png">
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #101315;
+        --panel: #1f2528;
+        --panel-strong: #2b3338;
+        --text: #f4f6f7;
+        --muted: #a9b4bb;
+        --line: #3b464d;
+        --blue: #4f85ff;
+        --green: #6fd679;
+        --yellow: #ffd95a;
+        --orange: #ee9147;
+        --red: #e25f63;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", sans-serif;
+        color: var(--text);
+        background:
+          radial-gradient(circle at 18% 18%, rgba(79, 133, 255, 0.18), transparent 28rem),
+          radial-gradient(circle at 78% 8%, rgba(111, 214, 121, 0.18), transparent 24rem),
+          var(--bg);
+      }
+
+      main {
+        width: min(1080px, calc(100% - 40px));
+        margin: 0 auto;
+        padding: 56px 0;
+      }
+
+      .hero {
+        display: grid;
+        grid-template-columns: 1.05fr 0.95fr;
+        gap: 42px;
+        align-items: center;
+      }
+
+      .eyebrow {
+        color: var(--green);
+        font-size: 14px;
+        font-weight: 700;
+        letter-spacing: 0;
+        margin: 0 0 12px;
+      }
+
+      h1 {
+        margin: 0;
+        font-size: clamp(44px, 7vw, 82px);
+        line-height: 0.92;
+        letter-spacing: 0;
+      }
+
+      .lede {
+        color: var(--muted);
+        margin: 22px 0 0;
+        font-size: 20px;
+        line-height: 1.45;
+        max-width: 620px;
+      }
+
+      .actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        margin-top: 30px;
+      }
+
+      a.button {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 44px;
+        padding: 0 18px;
+        border-radius: 8px;
+        color: var(--text);
+        background: var(--blue);
+        font-weight: 700;
+        text-decoration: none;
+      }
+
+      a.button.secondary {
+        background: var(--panel-strong);
+        color: var(--text);
+        border: 1px solid var(--line);
+      }
+
+      .preview {
+        border: 1px solid var(--line);
+        border-radius: 20px;
+        background: rgba(31, 37, 40, 0.86);
+        box-shadow: 0 24px 80px rgba(0, 0, 0, 0.42);
+        overflow: hidden;
+      }
+
+      .menu {
+        height: 48px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        padding: 0 18px;
+        background: #3f7fb2;
+      }
+
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        min-width: 0;
+        font-weight: 800;
+      }
+
+      .brand img {
+        width: 30px;
+        height: 30px;
+        border-radius: 7px;
+      }
+
+      .menubar-signal {
+        display: grid;
+        justify-items: center;
+        gap: 2px;
+        width: 42px;
+        color: #ffffff;
+        font-weight: 700;
+        font-size: 13px;
+        line-height: 1;
+        white-space: nowrap;
+      }
+
+      .dot {
+        width: 13px;
+        height: 13px;
+        border-radius: 50%;
+        background: var(--green);
+      }
+
+      .popover {
+        padding: 24px;
+      }
+
+      .topline {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 18px;
+        margin-bottom: 20px;
+      }
+
+      .host {
+        font-size: 24px;
+        line-height: 1.1;
+        font-weight: 800;
+      }
+
+      .endpoint {
+        color: var(--muted);
+        margin-top: 6px;
+        font-size: 15px;
+        font-weight: 700;
+      }
+
+      .status {
+        display: grid;
+        justify-items: end;
+        gap: 6px;
+        white-space: nowrap;
+      }
+
+      .latency {
+        font-size: 30px;
+        line-height: 1;
+        font-weight: 800;
+      }
+
+      .healthy {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        color: var(--green);
+        font-weight: 800;
+      }
+
+      .range {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin: 0 0 18px;
+        font-size: 16px;
+        font-weight: 800;
+      }
+
+      .segmented {
+        display: inline-flex;
+        overflow: hidden;
+        border-radius: 9px;
+        background: #282d30;
+      }
+
+      .segmented span {
+        padding: 8px 15px;
+        color: #d9dee1;
+      }
+
+      .segmented .selected {
+        background: var(--blue);
+        color: #fff;
+      }
+
+      .chart {
+        height: 220px;
+        border-bottom: 1px solid var(--line);
+        position: relative;
+        margin-bottom: 18px;
+        background:
+          linear-gradient(to bottom, transparent 32%, rgba(255, 255, 255, 0.08) 32%, rgba(255, 255, 255, 0.08) calc(32% + 1px), transparent calc(32% + 1px)),
+          linear-gradient(to bottom, transparent 66%, rgba(255, 255, 255, 0.08) 66%, rgba(255, 255, 255, 0.08) calc(66% + 1px), transparent calc(66% + 1px));
+      }
+
+      .axis {
+        position: absolute;
+        left: 0;
+        color: var(--muted);
+        font-size: 13px;
+        font-weight: 800;
+      }
+
+      .axis.top {
+        top: 4px;
+      }
+
+      .axis.mid {
+        top: 48%;
+      }
+
+      .axis.bottom {
+        bottom: 6px;
+      }
+
+      .line {
+        position: absolute;
+        inset: 18px 0 10px 62px;
+      }
+
+      .line::before {
+        content: "";
+        display: block;
+        width: 100%;
+        height: 100%;
+        background: var(--blue);
+        clip-path: polygon(0% 82%, 4% 74%, 6% 88%, 9% 33%, 10% 83%, 16% 80%, 18% 84%, 20% 36%, 21% 78%, 27% 80%, 29% 76%, 32% 84%, 34% 45%, 35% 80%, 46% 81%, 48% 74%, 51% 76%, 53% 20%, 54% 82%, 64% 78%, 66% 70%, 68% 76%, 73% 79%, 76% 30%, 77% 80%, 82% 78%, 85% 84%, 89% 26%, 90% 83%, 94% 80%, 97% 36%, 98% 78%, 100% 76%, 100% 100%, 0% 100%);
+        filter: drop-shadow(0 0 8px rgba(79, 133, 255, 0.34));
+      }
+
+      .stats {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 14px;
+        max-width: 340px;
+      }
+
+      .stat label {
+        display: block;
+        color: var(--muted);
+        font-size: 13px;
+        font-weight: 800;
+        margin-bottom: 4px;
+      }
+
+      .stat strong {
+        display: block;
+        font-size: 22px;
+      }
+
+      .sections {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 14px;
+        margin-top: 34px;
+      }
+
+      .section {
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        padding: 18px;
+        background: rgba(31, 37, 40, 0.74);
+      }
+
+      h2 {
+        margin: 0 0 8px;
+        font-size: 18px;
+        letter-spacing: 0;
+      }
+
+      .section p {
+        margin: 0;
+        color: var(--muted);
+        line-height: 1.4;
+      }
+
+      footer {
+        color: var(--muted);
+        margin-top: 36px;
+        font-size: 14px;
+      }
+
+      footer a {
+        color: var(--text);
+      }
+
+      @media (max-width: 860px) {
+        main {
+          width: min(100% - 28px, 620px);
+          padding: 32px 0;
+        }
+
+        .hero,
+        .sections {
+          grid-template-columns: 1fr;
+        }
+
+        .lede {
+          font-size: 18px;
+        }
+
+        .chart {
+          height: 180px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <section class="hero" aria-labelledby="title">
+        <div>
+          <p class="eyebrow">macOS menu-bar latency monitor</p>
+          <h1 id="title">PingScope</h1>
+          <p class="lede">A native network monitor that keeps a quiet latency signal in your menu bar, opens a live graph on click, and adds a compact always-on-top overlay when you need to watch a connection closely.</p>
+          <div class="actions">
+            <a class="button" href="PingScope-v0.1.2.dmg">Download 0.1.2</a>
+            <a class="button secondary" href="appcast.xml">Sparkle feed</a>
+            <a class="button secondary" href="https://github.com/keithah/pingscope">GitHub</a>
+          </div>
+        </div>
+
+        <div class="preview" aria-label="PingScope menu-bar preview">
+          <div class="menu">
+            <div class="brand">
+              <img src="assets/app-icon.png" alt="">
+              <span>PingScope</span>
+            </div>
+            <div class="menubar-signal" aria-label="16 milliseconds healthy">
+              <span class="dot"></span>
+              <span>16ms</span>
+            </div>
+          </div>
+          <div class="popover">
+            <div class="topline">
+              <div>
+                <div class="host">Cloudflare DNS</div>
+                <div class="endpoint">TCP 1.1.1.1:443</div>
+              </div>
+              <div class="status">
+                <div class="latency">16ms</div>
+                <div class="healthy"><span class="dot"></span>Healthy</div>
+              </div>
+            </div>
+
+            <div class="range">
+              <span>Range</span>
+              <div class="segmented" aria-hidden="true">
+                <span>1m</span>
+                <span class="selected">5m</span>
+                <span>10m</span>
+                <span>1h</span>
+              </div>
+            </div>
+
+            <div class="chart" aria-label="Latency graph preview">
+              <span class="axis top">80ms</span>
+              <span class="axis mid">40ms</span>
+              <span class="axis bottom">0ms</span>
+              <div class="line"></div>
+            </div>
+
+            <div class="stats" aria-label="Ping statistics preview">
+              <div class="stat">
+                <label>TX</label>
+                <strong>144</strong>
+              </div>
+              <div class="stat">
+                <label>RX</label>
+                <strong>144</strong>
+              </div>
+              <div class="stat">
+                <label>Loss</label>
+                <strong>0%</strong>
+              </div>
+              <div class="stat">
+                <label>Min</label>
+                <strong>4ms</strong>
+              </div>
+              <div class="stat">
+                <label>Avg</label>
+                <strong>13ms</strong>
+              </div>
+              <div class="stat">
+                <label>Max</label>
+                <strong>71ms</strong>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="sections" aria-label="Features">
+        <div class="section">
+          <h2>Menu-bar first</h2>
+          <p>Watch a stable iStat-style dot and latency readout without keeping a full network dashboard open.</p>
+        </div>
+        <div class="section">
+          <h2>Know what failed</h2>
+          <p>Monitor your gateway, upstream route, and remote hosts together to quickly separate local, ISP, and destination failures.</p>
+        </div>
+        <div class="section">
+          <h2>Native updates</h2>
+          <p>Developer ID builds support Sparkle updates, TCP and UDP probes, and ICMP where macOS permits it.</p>
+        </div>
+      </section>
+
+      <footer>
+        Sparkle appcast: <a href="appcast.xml">appcast.xml</a>
+      </footer>
+    </main>
+  </body>
+</html>
