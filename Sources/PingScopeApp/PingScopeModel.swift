@@ -107,6 +107,7 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
     private var historyTask: Task<Void, Never>?
     private var lastHistoryKey: String?
     private var lastObservedGateway: String?
+    private var lastNetworkPathSignature: String?
     var onMenuStateChanged: ((MenuBarState) -> Void)?
     var onOverlayGraphClicked: (() -> Void)?
 
@@ -247,6 +248,7 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
                     }
                     self?.deliverAlerts(snapshot.alerts, hosts: snapshot.hosts)
                     self?.evaluateInternetLoss(from: snapshot)
+                    self?.ensureLocalNetworkProbesForSelectedLocalHost(snapshot)
                     self?.refreshVisibleHistoryIfNeeded()
                     if self?.widgetsEnabled == true {
                         self?.publishWidgetSnapshot(snapshot)
@@ -614,11 +616,26 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
     private func startNetworkPathMonitoring() {
         pathMonitor.pathUpdateHandler = { [weak self] path in
             let status = Self.networkStatus(from: path)
+            let signature = Self.networkPathSignature(from: path)
             DispatchQueue.main.async { [weak self] in
-                self?.handleNetworkStatus(status)
+                self?.handleNetworkPathUpdate(status: status, signature: signature)
             }
         }
         pathMonitor.start(queue: pathMonitorQueue)
+    }
+
+    private func handleNetworkPathUpdate(status: NetworkConnectivityStatus, signature: String) {
+        let changedPath = signature != lastNetworkPathSignature
+        lastNetworkPathSignature = signature
+        handleNetworkStatus(status, forceRestart: changedPath)
+
+        guard status == .connected, changedPath else { return }
+        Task { [gatewayDetector] in
+            let host = await gatewayDetector.detect()
+            await MainActor.run {
+                self.handleGatewayObservation(host?.address)
+            }
+        }
     }
 
     private func handleGatewayObservation(_ gateway: String?) {
@@ -639,16 +656,20 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
         }
     }
 
-    private func handleNetworkStatus(_ status: NetworkConnectivityStatus) {
-        guard status != currentNetworkStatus else { return }
-        currentNetworkStatus = status
-        if widgetsEnabled {
-            publishWidgetSnapshot(snapshot)
+    private func handleNetworkStatus(_ status: NetworkConnectivityStatus, forceRestart: Bool = false) {
+        let changedStatus = status != currentNetworkStatus
+        guard changedStatus || forceRestart else { return }
+        if changedStatus {
+            currentNetworkStatus = status
+            if widgetsEnabled {
+                publishWidgetSnapshot(snapshot)
+            }
         }
         if status == .connected {
             startNetworkMonitoring()
         }
         Task { await runtime.restartScheduler() }
+        guard changedStatus else { return }
         guard notificationRules.isEnabled, enabledNetworkStatusAlerts.contains(status) else { return }
         Task {
             await notificationDispatcher.deliver(.networkStatus(status), hosts: snapshot.hosts)
@@ -668,8 +689,13 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
     }
 
     private func syncDefaultGatewayHost(address gateway: String) {
-        guard let existing = snapshot.hosts.first(where: { $0.displayName == "Default Gateway" }),
-              existing.address != gateway else {
+        guard let existing = snapshot.hosts.first(where: { $0.displayName == "Default Gateway" }) else {
+            return
+        }
+        if !allowsLocalNetworkProbes {
+            allowsLocalNetworkProbes = true
+        }
+        guard existing.address != gateway else {
             return
         }
 
@@ -691,6 +717,15 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
         }
     }
 
+    private func ensureLocalNetworkProbesForSelectedLocalHost(_ snapshot: RuntimeSnapshot) {
+        guard let primaryHost = snapshot.primaryHost,
+              primaryHost.requiresLocalNetworkPermission,
+              !allowsLocalNetworkProbes else {
+            return
+        }
+        allowsLocalNetworkProbes = true
+    }
+
     nonisolated private static func networkStatus(from path: NWPath) -> NetworkConnectivityStatus {
         switch path.status {
         case .satisfied:
@@ -702,6 +737,14 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
         @unknown default:
             .notConnected
         }
+    }
+
+    nonisolated private static func networkPathSignature(from path: NWPath) -> String {
+        let interfaces = path.availableInterfaces
+            .map { "\($0.type)-\($0.name)" }
+            .sorted()
+            .joined(separator: ",")
+        return "\(path.status)|\(path.isExpensive)|\(path.isConstrained)|\(interfaces)"
     }
 
     private static func safeFilename(_ value: String) -> String {

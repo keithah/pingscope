@@ -132,6 +132,28 @@ final class RuntimeBehaviorTests: XCTestCase {
         await runtime.stop()
     }
 
+    func testRuntimeClearsSamplesWhenHostEndpointChanges() async throws {
+        let host = HostConfig(displayName: "Default Gateway", address: "192.168.1.1", method: .tcp, port: 80)
+        let runtime = PingRuntime(
+            hostStore: HostStore(defaultHosts: [host]),
+            scheduler: MeasurementScheduler(probeFactory: CountingProbeFactory(result: .success(hostID: host.id, latency: .milliseconds(9))))
+        )
+        await runtime.ingest(.success(hostID: host.id, latency: .milliseconds(7)).withHostMetadata(from: host))
+
+        var updated = host
+        updated.address = "192.168.4.1"
+        await runtime.upsertHost(updated)
+        let stream = await runtime.snapshots()
+        var iterator = stream.makeAsyncIterator()
+        let nextSnapshot = await iterator.next()
+        let snapshot = try XCTUnwrap(nextSnapshot)
+
+        XCTAssertEqual(snapshot.primaryHost?.address, "192.168.4.1")
+        XCTAssertNil(snapshot.primaryHealth?.latestResult)
+        XCTAssertEqual(snapshot.primarySeries?.samples, [])
+        await runtime.stop()
+    }
+
     func testDisplayPresenterFiltersSamplesToSelectedRange() {
         let hostID = UUID()
         let now = Date(timeIntervalSince1970: 10_000)

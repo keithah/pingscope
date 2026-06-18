@@ -290,8 +290,14 @@ public actor PingRuntime {
     }
 
     public func upsertHost(_ host: HostConfig) async {
+        let previous = await hostStore.hosts().first { $0.id == host.id }
         await hostStore.upsert(host)
-        healthByHost[host.id, default: HostHealth(hostID: host.id, thresholds: host.thresholds)].thresholds = host.thresholds
+        if let previous, previous.measurementEndpoint != host.measurementEndpoint {
+            healthByHost[host.id] = HostHealth(hostID: host.id, thresholds: host.thresholds)
+            samplesByHost[host.id] = SampleSeries(hostID: host.id)
+        } else {
+            healthByHost[host.id, default: HostHealth(hostID: host.id, thresholds: host.thresholds)].thresholds = host.thresholds
+        }
         await restartScheduler()
     }
 
@@ -349,6 +355,12 @@ public actor PingRuntime {
                 alerts: alerts
             ))
         }
+    }
+}
+
+private extension HostConfig {
+    var measurementEndpoint: String {
+        "\(method.rawValue)|\(address)|\(port.map(String.init) ?? "")"
     }
 }
 
