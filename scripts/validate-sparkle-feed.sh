@@ -2,7 +2,7 @@
 set -euo pipefail
 
 VERSION="${1:-0.1.2}"
-BUILD_VERSION="${PING_SCOPE_BUILD_VERSION:-24}"
+BUILD_VERSION="${PING_SCOPE_BUILD_VERSION:-25}"
 FEED_URL="${PING_SCOPE_SPARKLE_FEED_URL:-https://keithah.github.io/pingscope/appcast.xml}"
 EXPECTED_SHA256="${PING_SCOPE_DMG_SHA256:-}"
 WORK_DIR="${PING_SCOPE_SPARKLE_VALIDATE_DIR:-/tmp/pingscope-sparkle-feed}"
