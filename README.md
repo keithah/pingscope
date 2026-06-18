@@ -127,7 +127,7 @@ Sparkle uses the Keychain account `pingscope-ed25519`. The public key is already
 Release command:
 
 ```bash
-scripts/release-github.sh --version 0.1.0 --release-notes RELEASE_NOTES.md
+scripts/release-github.sh --version 0.1.1 --release-notes RELEASE_NOTES.md
 ```
 
 ## Architecture

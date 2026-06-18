@@ -1,4 +1,4 @@
-# PingScope 0.1.0
+# PingScope 0.1.1
 
 Fresh native macOS rebuild focused on a quiet, iStat-style latency monitor.
 
