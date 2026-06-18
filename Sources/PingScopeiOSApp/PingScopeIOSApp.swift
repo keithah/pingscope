@@ -1,6 +1,7 @@
 import ActivityKit
 import Combine
 import CoreLocation
+import Network
 import PingScopeCore
 import PingScopeiOS
 import SwiftUI
@@ -80,10 +81,13 @@ private final class PingScopeIOSAppModel: ObservableObject {
     private let presenter = DisplayStatePresenter()
     private let backgroundRuntime: LiveMonitorBackgroundRuntime
     private let locationKeepAlive = BackgroundLocationKeepAliveController()
+    private let pathMonitor = NWPathMonitor()
+    private let pathMonitorQueue = DispatchQueue(label: "PingScope.iOS.NetworkPath")
     private var controller: LiveMonitorSessionController
     private var refreshTask: Task<Void, Never>?
     private var liveActivity: Activity<PingScopeLiveActivityAttributes>?
     private var hasStartedInitialSession = false
+    private var lastGatewayAddress: String?
 
     init() {
         self.hostStore = PingScopeIOSHostStore()
@@ -110,6 +114,11 @@ private final class PingScopeIOSAppModel: ObservableObject {
             }
         }
         backgroundKeepAliveStatus = locationKeepAlive.statusText(isEnabled: backgroundKeepAliveEnabled, isMonitoring: false)
+        startNetworkPathMonitoring()
+    }
+
+    deinit {
+        pathMonitor.cancel()
     }
 
     var graphSamples: [PingResult] {
@@ -122,31 +131,7 @@ private final class PingScopeIOSAppModel: ObservableObject {
 
     func selectHost(_ hostID: UUID) {
         guard let host = hosts.first(where: { $0.id == hostID }) else { return }
-        let restartDuration = activeRestartDuration
-        refreshTask?.cancel()
-        refreshTask = nil
-        hostStore.save(hosts: hosts, selectedHostID: hostID)
-        Task {
-            await backgroundRuntime.end()
-            await controller.stop(reason: .userStopped)
-            await endLiveActivity()
-            controller = LiveMonitorSessionController(host: host, historyStore: historyStore)
-            snapshot = LiveMonitorSessionSnapshot(
-                host: host,
-                session: nil,
-                health: HostHealth(hostID: host.id, thresholds: host.thresholds)
-            )
-            await refreshHistory()
-            if let restartDuration {
-                await controller.start(duration: restartDuration)
-                await refreshSnapshot()
-                await startLiveActivity(duration: restartDuration)
-                applyBackgroundKeepAlive()
-                startRefreshLoop()
-            } else {
-                applyBackgroundKeepAlive()
-            }
-        }
+        switchToHost(host, restartDuration: activeRestartDuration, saveSelection: true)
     }
 
     func saveHost(_ host: HostConfig) {
@@ -171,15 +156,7 @@ private final class PingScopeIOSAppModel: ObservableObject {
     func addDefaultGatewayHost() {
         gatewayDetectionText = "Detecting..."
         Task {
-            guard var host = await gatewayDetector.detect() else {
-                gatewayDetectionText = "No default gateway exposed by iOS"
-                return
-            }
-            if let existing = hosts.first(where: { $0.displayName == host.displayName }) {
-                host.id = existing.id
-            }
-            saveHost(host)
-            gatewayDetectionText = "\(host.address) selected"
+            await refreshDefaultGatewayHost(shouldCreateIfMissing: true, shouldSelect: true, statusVerb: "selected")
         }
     }
 
@@ -216,7 +193,10 @@ private final class PingScopeIOSAppModel: ObservableObject {
     func startInitialSessionIfNeeded() {
         guard !hasStartedInitialSession else { return }
         hasStartedInitialSession = true
-        start(duration: .continuous)
+        Task {
+            await refreshDefaultGatewayHost(shouldCreateIfMissing: false, shouldSelect: false, statusVerb: "updated")
+            start(duration: .continuous)
+        }
     }
 
     func stop() {
@@ -237,6 +217,7 @@ private final class PingScopeIOSAppModel: ObservableObject {
         case .active:
             Task {
                 await backgroundRuntime.end()
+                await refreshDefaultGatewayHost(shouldCreateIfMissing: false, shouldSelect: false, statusVerb: "updated")
                 await restartContinuousSessionAfterBackgroundExpirationIfNeeded()
                 applyBackgroundKeepAlive()
             }
@@ -283,6 +264,105 @@ private final class PingScopeIOSAppModel: ObservableObject {
     }
 
     private static let backgroundKeepAliveEnabledKey = "PingScope.iOS.backgroundKeepAliveEnabled"
+
+    private func startNetworkPathMonitoring() {
+        pathMonitor.pathUpdateHandler = { [weak self] path in
+            guard path.status == .satisfied else { return }
+            Task { @MainActor [weak self] in
+                await self?.refreshDefaultGatewayHost(
+                    shouldCreateIfMissing: false,
+                    shouldSelect: false,
+                    statusVerb: "updated"
+                )
+            }
+        }
+        pathMonitor.start(queue: pathMonitorQueue)
+    }
+
+    private func refreshDefaultGatewayHost(
+        shouldCreateIfMissing: Bool,
+        shouldSelect: Bool,
+        statusVerb: String
+    ) async {
+        guard var detectedHost = await gatewayDetector.detect() else {
+            if shouldCreateIfMissing || hasDefaultGatewayHost {
+                gatewayDetectionText = "No default gateway exposed by iOS"
+            }
+            return
+        }
+
+        guard detectedHost.address != lastGatewayAddress || shouldCreateIfMissing else {
+            return
+        }
+        lastGatewayAddress = detectedHost.address
+
+        if let index = defaultGatewayHostIndex {
+            var updatedHost = hosts[index]
+            guard updatedHost.address != detectedHost.address || shouldSelect else {
+                return
+            }
+            let previousAddress = updatedHost.address
+            updatedHost.address = detectedHost.address
+            hosts[index] = updatedHost
+            hostStore.save(hosts: hosts, selectedHostID: snapshot.host.id)
+
+            if snapshot.host.id == updatedHost.id || shouldSelect {
+                await switchToHostAsync(updatedHost, restartDuration: activeRestartDuration, saveSelection: true)
+            }
+
+            gatewayDetectionText = "Default gateway \(statusVerb): \(previousAddress) -> \(updatedHost.address)"
+            return
+        }
+
+        guard shouldCreateIfMissing else { return }
+        detectedHost = BuildFlavor.appStore.normalizedHost(detectedHost)
+        hosts.append(detectedHost)
+        hostStore.save(hosts: hosts, selectedHostID: detectedHost.id)
+        await switchToHostAsync(detectedHost, restartDuration: activeRestartDuration, saveSelection: true)
+        gatewayDetectionText = "\(detectedHost.address) \(statusVerb)"
+    }
+
+    private var defaultGatewayHostIndex: Array<HostConfig>.Index? {
+        hosts.firstIndex { $0.displayName == "Default Gateway" }
+    }
+
+    private var hasDefaultGatewayHost: Bool {
+        defaultGatewayHostIndex != nil
+    }
+
+    private func switchToHost(_ host: HostConfig, restartDuration: MonitorSessionDuration?, saveSelection: Bool) {
+        Task {
+            await switchToHostAsync(host, restartDuration: restartDuration, saveSelection: saveSelection)
+        }
+    }
+
+    private func switchToHostAsync(_ host: HostConfig, restartDuration: MonitorSessionDuration?, saveSelection: Bool) async {
+        refreshTask?.cancel()
+        refreshTask = nil
+        if saveSelection {
+            hostStore.save(hosts: hosts, selectedHostID: host.id)
+        }
+
+        await backgroundRuntime.end()
+        await controller.stop(reason: .userStopped)
+        await endLiveActivity()
+        controller = LiveMonitorSessionController(host: host, historyStore: historyStore)
+        snapshot = LiveMonitorSessionSnapshot(
+            host: host,
+            session: nil,
+            health: HostHealth(hostID: host.id, thresholds: host.thresholds)
+        )
+        await refreshHistory()
+        if let restartDuration {
+            await controller.start(duration: restartDuration)
+            await refreshSnapshot()
+            await startLiveActivity(duration: restartDuration)
+            applyBackgroundKeepAlive()
+            startRefreshLoop()
+        } else {
+            applyBackgroundKeepAlive()
+        }
+    }
 
     private func applyBackgroundKeepAlive() {
         if backgroundKeepAliveEnabled, isMonitoringActive {
