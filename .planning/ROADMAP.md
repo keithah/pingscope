@@ -27,18 +27,19 @@ Delivered:
 - [x] Remove old App Store screenshots/metadata and duplicate widget target.
 - [x] Replace legacy planning history with this current roadmap.
 - [x] Rebuild and re-upload `0.1.0` assets after cleanup so the release source archive and binary artifacts line up.
-- [ ] Manually install the GitHub DMG on a clean account and verify first-run behavior.
+- [x] Manually install the GitHub DMG and verify first-run behavior during 0.1.x QA.
 
 ## 0.1.1 - First Patch
 
 Goal: validate the public update path and close first-release polish items.
 
-- [ ] Publish a signed/notarized `0.1.1` DMG through the same release script.
-- [ ] Verify Sparkle update from `0.1.0` to `0.1.1`.
-- [ ] Refresh release screenshots if UI changes.
+- [x] Publish a signed/notarized `0.1.1` DMG through the same release script.
+- [x] Validate the published Sparkle feed, enclosure URL, EdDSA signature, DMG size, checksum, and notarized Developer ID assessment.
+- [ ] Verify a real Sparkle GUI update from `0.1.0` to `0.1.1` on a clean user account.
+- [x] Refresh release screenshots if UI changes.
 - [ ] Run manual widget gallery placement QA.
-- [ ] Validate default gateway behavior on Wi-Fi, Ethernet, and hotspot.
-- [ ] Fix and verify the popover settings gear opens Settings reliably.
+- [x] Validate default gateway behavior on Wi-Fi and hotspot; Ethernet still needs a real wired-network pass.
+- [x] Fix and verify the popover settings gear opens Settings reliably.
 
 ## 0.2.0 - Mac Polish
 
@@ -48,6 +49,10 @@ Goal: improve confidence and daily usability without expanding platform scope.
 - [x] Add explicit diagnostics view or log export for probe failures.
 - [ ] Improve widget visual polish after real use.
 - [ ] Review menu bar and overlay behavior across Spaces/full-screen apps.
+- [x] Add an in-app update status view that shows current version, feed URL, last check request, and feed/key configuration.
+- [x] Add a first-run checklist for notification permission, local network access, overlay, widgets, and start-at-login.
+- [x] Add a conservative network transition validation script with optional Wi-Fi cycling and DNS failure coverage.
+- [x] Add automated UI assertions for the first-run checklist and About page.
 
 ## 0.3.0 - iOS Companion
 
@@ -67,9 +72,13 @@ Goal: ship a narrow iOS companion that monitors continuously while open, support
 - [x] Auto-start continuous monitoring when the iOS app opens.
 - [x] Add optional iOS Background Keep Alive using Always Location only while monitoring is active.
 - [ ] Run device-only manual QA for continuous foreground monitoring, Live Activity updates, Dynamic Island/Lock Screen presentation, local-network permission, stale state, and early background expiration.
+- [ ] Add iOS App Store/TestFlight distribution workflow once the iOS platform record is ready.
+- [ ] Add an iOS widget that displays the last known sample and clearly labels stale data.
+- [x] Add iOS graph range controls for `1m`, `5m`, and `10m`, with persisted local history across launches.
 
 ## Later
 
-- App Store submission automation if App Store distribution becomes a priority.
-- Longer-term history views and pruning controls.
+- Cross-device shared host configuration if both Mac and iOS usage becomes common.
+- Longer-term history views, pruning controls, and trend comparisons.
+- Optional notification summaries for daily/weekly network quality.
 - More advanced export/reporting only if users ask for it.

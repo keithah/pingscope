@@ -198,6 +198,75 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
         DebugLog.fileURL
     }
 
+    var appVersionText: String {
+        let shortVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "Unknown"
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "Unknown"
+        return "\(shortVersion) (\(build))"
+    }
+
+    var bundleIdentifierText: String {
+        Bundle.main.bundleIdentifier ?? "Unknown"
+    }
+
+    var widgetsStatusText: String {
+        widgetsEnabled ? "Shared data enabled" : "Disabled"
+    }
+
+    var setupChecklistItems: [SetupChecklistItem] {
+        [
+            SetupChecklistItem(
+                title: "Primary host",
+                detail: primaryHost?.displayName ?? "No primary host selected",
+                isComplete: primaryHost != nil,
+                actionTitle: nil,
+                action: nil
+            ),
+            SetupChecklistItem(
+                title: "Notifications",
+                detail: notificationPermissionState.displayName,
+                isComplete: [.authorized, .provisional].contains(notificationPermissionState),
+                actionTitle: notificationPermissionState == .notDetermined ? "Request" : "Open Settings",
+                action: { [weak self] in
+                    if self?.notificationPermissionState == .notDetermined {
+                        self?.requestNotificationPermission()
+                    } else {
+                        self?.openNotificationSettings()
+                    }
+                }
+            ),
+            SetupChecklistItem(
+                title: "Local network",
+                detail: allowsLocalNetworkProbes ? "Allowed for local hosts" : "Only public hosts",
+                isComplete: allowsLocalNetworkProbes || !(primaryHost?.requiresLocalNetworkPermission ?? false),
+                actionTitle: "Enable",
+                action: { [weak self] in self?.allowsLocalNetworkProbes = true }
+            ),
+            SetupChecklistItem(
+                title: "Overlay",
+                detail: overlayVisible ? "Visible" : "Hidden",
+                isComplete: overlayVisible,
+                actionTitle: "Show",
+                action: {
+                    (NSApp.delegate as? AppDelegate)?.showOverlay()
+                }
+            ),
+            SetupChecklistItem(
+                title: "Widgets",
+                detail: widgetsStatusText,
+                isComplete: widgetsEnabled,
+                actionTitle: "Enable",
+                action: { [weak self] in self?.widgetsEnabled = true }
+            ),
+            SetupChecklistItem(
+                title: "Start at login",
+                detail: startsAtLogin ? "Enabled" : "Disabled",
+                isComplete: startsAtLogin,
+                actionTitle: "Enable",
+                action: { [weak self] in self?.startsAtLogin = true }
+            )
+        ]
+    }
+
     var recentDiagnosticFailures: [PingResult] {
         visibleSamples
             .filter { $0.failureReason != nil }
@@ -800,6 +869,15 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
         draftNotificationPolicy = host.notifications
         draftTestResultText = nil
     }
+}
+
+struct SetupChecklistItem: Identifiable {
+    var id: String { title }
+    let title: String
+    let detail: String
+    let isComplete: Bool
+    let actionTitle: String?
+    let action: (() -> Void)?
 }
 
 private extension UserDefaults {

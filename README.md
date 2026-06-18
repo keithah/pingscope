@@ -82,8 +82,16 @@ scripts/validate-ios-simulator-smoke.sh
 scripts/validate-ios-device-smoke.sh
 xcodebuild -project PingScope.xcodeproj -scheme PingScope-iOS -destination 'generic/platform=iOS Simulator' build CODE_SIGNING_ALLOWED=NO
 scripts/validate-probes.sh
+PING_SCOPE_DMG_SHA256=3f81bec9e6fb1114c3c111e460da410075c2b6a9a3b451fe34b0485c408010ce scripts/validate-sparkle-feed.sh 0.1.1
+scripts/validate-network-transitions.sh
 scripts/build-xcode-app-bundle.sh debug /Applications developer-id
 scripts/validate-roadmap.sh
+```
+
+`scripts/validate-network-transitions.sh` avoids disruptive network changes by default. To include a Wi-Fi off/on cycle, run:
+
+```bash
+PING_SCOPE_WIFI_CYCLE=1 PING_SCOPE_WIFI_SERVICE="Wi-Fi" scripts/validate-network-transitions.sh
 ```
 
 Build flavors:
@@ -130,6 +138,12 @@ Release command:
 scripts/release-github.sh --version 0.1.1 --release-notes RELEASE_NOTES.md
 ```
 
+Validate the published Sparkle feed and Developer ID DMG:
+
+```bash
+PING_SCOPE_DMG_SHA256=<release-dmg-sha256> scripts/validate-sparkle-feed.sh 0.1.1
+```
+
 ## Architecture
 
 PingScope is split into small layers:
@@ -147,7 +161,7 @@ The SwiftPM package remains buildable outside Xcode. The Xcode project adds the 
 - 0.1.1: first patch release and Sparkle update validation.
 - 0.2.0: Mac polish, diagnostics, and widget/overlay refinements.
 - 0.3.0: iOS companion app with host selection, continuous foreground monitoring, finite live sessions, local recent history, optional Background Keep Alive, Live Activity polish, and physical-device QA.
-- Later: deeper iOS history views only if the companion workflow proves useful.
+- Later: iOS TestFlight/App Store distribution, stale-aware iOS widgets, shared host configuration, deeper history views, pruning controls, and trend summaries if real usage justifies them.
 
 ## License
 

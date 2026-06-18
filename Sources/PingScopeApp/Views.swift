@@ -183,24 +183,42 @@ struct OverlayView: View {
 struct SettingsRootView: View {
     @ObservedObject var model: PingScopeModel
     @EnvironmentObject private var softwareUpdateController: SoftwareUpdateController
+    @State private var selectedSettingsTab: String
+
+    init(model: PingScopeModel) {
+        self.model = model
+        _selectedSettingsTab = State(initialValue: UserDefaults.standard.string(forKey: "selectedSettingsTab") ?? "hosts")
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             settingsHeader
 
-            TabView {
+            TabView(selection: $selectedSettingsTab) {
                 ScrollView { hosts.padding(.top, 8) }
                     .tabItem { Label("Hosts", systemImage: "server.rack") }
+                    .tag("hosts")
                 ScrollView { display.padding(.top, 8) }
                     .tabItem { Label("Display", systemImage: "display") }
+                    .tag("display")
                 ScrollView { notifications.padding(.top, 8) }
                     .tabItem { Label("Notifications", systemImage: "bell.badge") }
+                    .tag("notifications")
                 ScrollView { history.padding(.top, 8) }
                     .tabItem { Label("History", systemImage: "clock.arrow.circlepath") }
+                    .tag("history")
                 ScrollView { diagnostics.padding(.top, 8) }
                     .tabItem { Label("Diagnostics", systemImage: "stethoscope") }
+                    .tag("diagnostics")
                 ScrollView { advanced.padding(.top, 8) }
                     .tabItem { Label("Advanced", systemImage: "slider.horizontal.3") }
+                    .tag("advanced")
+                ScrollView { about.padding(.top, 8) }
+                    .tabItem { Label("About", systemImage: "info.circle") }
+                    .tag("about")
+            }
+            .onChange(of: selectedSettingsTab) { _, tab in
+                UserDefaults.standard.set(tab, forKey: "selectedSettingsTab")
             }
 
             settingsFooter
@@ -545,6 +563,26 @@ struct SettingsRootView: View {
                                 .disabled(!softwareUpdateController.canCheckForUpdates)
                             }
                         }
+                        SettingsRow(systemImage: "link", tint: .teal, title: "Update feed") {
+                            Text(softwareUpdateController.feedURL ?? "Not configured")
+                                .font(.caption.monospaced())
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                        }
+                        SettingsRow(systemImage: "key.fill", tint: .orange, title: "Sparkle key") {
+                            Text(softwareUpdateController.publicKeyConfigured ? "Configured" : "Missing")
+                                .foregroundStyle(softwareUpdateController.publicKeyConfigured ? Color.secondary : Color.red)
+                        }
+                        SettingsRow(systemImage: "clock.arrow.circlepath", tint: .purple, title: "Last check") {
+                            if let date = softwareUpdateController.lastCheckRequestedAt {
+                                Text(date, style: .time)
+                                    .foregroundStyle(.secondary)
+                            } else {
+                                Text("Not requested this session")
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
                     }
                 #endif
                 SettingsRow(systemImage: "waveform.path.ecg", tint: .green, title: "ICMP") {
@@ -560,6 +598,64 @@ struct SettingsRootView: View {
                     NetworkStatusBadge(status: model.currentNetworkStatus)
                 }
                 SettingsToggleRow(systemImage: "network", tint: .purple, title: "Monitor local network hosts", isOn: $model.allowsLocalNetworkProbes)
+            }
+        }
+    }
+
+    private var about: some View {
+        SettingsPane {
+            SettingsSection("PingScope") {
+                HStack(alignment: .center, spacing: 14) {
+                    Image(nsImage: NSApp.applicationIconImage)
+                        .resizable()
+                        .frame(width: 56, height: 56)
+                        .cornerRadius(10)
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("PingScope")
+                            .font(.title2.weight(.semibold))
+                        Text("Native latency monitoring for macOS.")
+                            .foregroundStyle(.secondary)
+                        Text("Version \(model.appVersionText)")
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                }
+
+                SettingsRow(systemImage: "shippingbox", tint: .blue, title: "Build") {
+                    Text(BuildFlavor.current == .appStore ? "App Store" : "Developer ID")
+                        .foregroundStyle(.secondary)
+                }
+                SettingsRow(systemImage: "number", tint: .gray, title: "Bundle ID") {
+                    Text(model.bundleIdentifierText)
+                        .font(.caption.monospaced())
+                        .foregroundStyle(.secondary)
+                }
+                SettingsRow(systemImage: "doc.text", tint: .purple, title: "License") {
+                    Text("AGPLv3")
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            SettingsSection("First Run Checklist") {
+                VStack(spacing: 8) {
+                    ForEach(model.setupChecklistItems) { item in
+                        SetupChecklistRow(item: item)
+                    }
+                }
+            }
+
+            SettingsSection("Links") {
+                SettingsRow(systemImage: "globe", tint: .blue, title: "GitHub") {
+                    Button("Open Repository") {
+                        NSWorkspace.shared.open(URL(string: "https://github.com/keithah/pingscope")!)
+                    }
+                }
+                SettingsRow(systemImage: "lock.shield", tint: .green, title: "Privacy") {
+                    Text("Settings, history, exports, and widget snapshots stay local.")
+                        .foregroundStyle(.secondary)
+                }
             }
         }
     }
@@ -716,6 +812,33 @@ struct DiagnosticFailureRow: View {
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 7)
+        .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
+    }
+}
+
+struct SetupChecklistRow: View {
+    let item: SetupChecklistItem
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: item.isComplete ? "checkmark.circle.fill" : "circle")
+                .foregroundStyle(item.isComplete ? .green : .secondary)
+                .frame(width: 18)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(item.title)
+                    .font(.callout.weight(.medium))
+                Text(item.detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            if let actionTitle = item.actionTitle, let action = item.action, !item.isComplete {
+                Button(actionTitle, action: action)
+                    .buttonStyle(.bordered)
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
         .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
     }
 }

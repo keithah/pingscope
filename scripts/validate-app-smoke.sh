@@ -18,6 +18,46 @@ require_log() {
   fi
 }
 
+require_settings_text() {
+  local pattern="$1"
+  local dump
+  dump="$(osascript <<'APPLESCRIPT'
+on dumpElement(e, depth)
+  if depth > 7 then return ""
+  set lineText to ""
+  tell application "System Events"
+    try
+      set n to name of e
+      if n is not missing value then set lineText to lineText & (n as text) & linefeed
+    end try
+    try
+      set v to value of e
+      if v is not missing value then set lineText to lineText & (v as text) & linefeed
+    end try
+    set out to lineText
+    try
+      repeat with c in UI elements of e
+        set out to out & my dumpElement(c, depth + 1)
+      end repeat
+    end try
+    return out
+  end tell
+end dumpElement
+
+tell application "System Events"
+  tell process "PingScope"
+    return my dumpElement(window "PingScope Settings", 0)
+  end tell
+end tell
+APPLESCRIPT
+)"
+  if ! grep -q "$pattern" <<<"$dump"; then
+    echo "---- PingScope Settings accessibility text ----" >&2
+    echo "$dump" >&2
+    fail "settings window missing text: ${pattern}"
+  fi
+}
+
 post_click() {
   local x="$1"
   local y="$2"
@@ -44,6 +84,7 @@ rm -f "$LOG_PATH"
 defaults write com.hadm.PingScope overlayVisible -bool true
 defaults write com.hadm.PingScope overlayCompactMode -bool false
 defaults write com.hadm.PingScope widgetsEnabled -bool false
+defaults write com.hadm.PingScope selectedSettingsTab about
 pkill -x PingScope 2>/dev/null || true
 sleep 0.5
 open "$APP_PATH"
@@ -80,5 +121,18 @@ osascript \
 sleep 1
 settings_count="$(osascript -e 'tell application "System Events" to tell process "PingScope" to count windows whose title contains "Settings"')"
 [[ "$settings_count" -ge 1 ]] || fail "settings window did not open from Command-,"
+require_settings_text "PingScope"
+require_settings_text "Native latency monitoring for macOS."
+require_settings_text "Version"
+require_settings_text "License"
+require_settings_text "AGPLv3"
+require_settings_text "First Run Checklist"
+require_settings_text "Primary host"
+require_settings_text "Notifications"
+require_settings_text "Local network"
+require_settings_text "Overlay"
+require_settings_text "Widgets"
+require_settings_text "Start at login"
+require_settings_text "Settings, history, exports, and widget snapshots stay local."
 
 echo "PASS: PingScope app smoke validation passed (${w}x${h} overlay at ${x},${y})"

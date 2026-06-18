@@ -9,16 +9,25 @@ import Sparkle
 @MainActor
 final class SoftwareUpdateController: ObservableObject {
     @Published private(set) var statusMessage: String
+    @Published private(set) var lastCheckRequestedAt: Date?
+
+    let feedURL: String?
+    let publicKeyConfigured: Bool
+    let bundleShortVersion: String
+    let bundleVersion: String
 
     #if canImport(Sparkle) && !APPSTORE
     private let updaterController: SPUStandardUpdaterController?
     #endif
 
     init(bundle: Bundle = .main) {
-        #if canImport(Sparkle) && !APPSTORE
-        let feedURL = bundle.object(forInfoDictionaryKey: "SUFeedURL") as? String
+        feedURL = bundle.object(forInfoDictionaryKey: "SUFeedURL") as? String
         let publicKey = bundle.object(forInfoDictionaryKey: "SUPublicEDKey") as? String
+        publicKeyConfigured = Self.publicKeyIsConfigured(publicKey)
+        bundleShortVersion = bundle.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "Unknown"
+        bundleVersion = bundle.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "Unknown"
 
+        #if canImport(Sparkle) && !APPSTORE
         if Self.isConfigured(feedURL: feedURL, publicKey: publicKey) {
             updaterController = SPUStandardUpdaterController(
                 startingUpdater: true,
@@ -54,11 +63,13 @@ final class SoftwareUpdateController: ObservableObject {
     }
 
     func checkForUpdates() {
+        lastCheckRequestedAt = Date()
         #if canImport(Sparkle) && !APPSTORE
         guard let updaterController else {
             statusMessage = "Software update feed is not configured for this build."
             return
         }
+        statusMessage = "Update check requested."
         updaterController.checkForUpdates(nil)
         #elseif APPSTORE
         return
@@ -70,14 +81,17 @@ final class SoftwareUpdateController: ObservableObject {
     private static func isConfigured(feedURL: String?, publicKey: String?) -> Bool {
         guard
             let feedURL,
-            let publicKey,
             feedURL.hasPrefix("https://"),
             !feedURL.contains("example.com"),
-            !publicKey.isEmpty,
-            !publicKey.contains("REPLACE_WITH")
+            publicKeyIsConfigured(publicKey)
         else {
             return false
         }
         return true
+    }
+
+    private static func publicKeyIsConfigured(_ publicKey: String?) -> Bool {
+        guard let publicKey else { return false }
+        return !publicKey.isEmpty && !publicKey.contains("REPLACE_WITH")
     }
 }

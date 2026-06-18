@@ -12,7 +12,11 @@ struct LargeWidgetView: View {
 
                 Spacer()
 
-                if let data = entry.data {
+                if let snapshot = entry.snapshot {
+                    Text(snapshot.statusLabel)
+                        .font(.caption2.weight(.semibold))
+                        .foregroundColor(snapshot.isStale ? .orange : .secondary)
+                } else if let data = entry.data {
                     Text(data.lastUpdate, style: .relative)
                         .font(.caption2)
                         .foregroundColor(.secondary)
@@ -27,7 +31,32 @@ struct LargeWidgetView: View {
 
             Divider()
 
-            if let data = entry.data {
+            if let snapshot = entry.snapshot {
+                ForEach(snapshot.hosts, id: \.id) { host in
+                    let health = snapshot.health.first { $0.hostID == host.id }
+                    HStack {
+                        Circle()
+                            .fill(statusColor(for: health))
+                            .frame(width: 10, height: 10)
+
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(host.displayName)
+                                .font(.subheadline)
+                                .lineLimit(1)
+                            Text("\(host.method.uppercased()) \(host.address)")
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                                .lineLimit(1)
+                        }
+
+                        Spacer()
+
+                        Text(latencyText(for: health))
+                            .font(.caption.monospacedDigit())
+                            .foregroundColor(.secondary)
+                    }
+                }
+            } else if let data = entry.data {
                 ForEach(Array(zip(data.hosts, data.results)), id: \.0.id) { host, result in
                     HStack {
                         Circle()
@@ -55,7 +84,7 @@ struct LargeWidgetView: View {
 
             Spacer()
         }
-        .opacity(entry.data?.isStale == true ? 0.6 : 1.0)
+        .opacity(isStale ? 0.6 : 1.0)
         .containerBackground(for: .widget) {
             Color(nsColor: .controlBackgroundColor)
         }
@@ -67,5 +96,26 @@ struct LargeWidgetView: View {
         if latency < 50 { return .green }
         if latency < 100 { return .yellow }
         return .red
+    }
+
+    private var isStale: Bool {
+        entry.snapshot?.isStale ?? entry.data?.isStale ?? false
+    }
+
+    private func statusColor(for health: WidgetSnapshotData.HostHealth?) -> Color {
+        guard let health else { return .gray }
+        switch health.status {
+        case "healthy": return .green
+        case "degraded": return .yellow
+        case "down": return .red
+        default: return .gray
+        }
+    }
+
+    private func latencyText(for health: WidgetSnapshotData.HostHealth?) -> String {
+        if let latency = health?.latencyMilliseconds {
+            return "\(Int(latency.rounded())) ms"
+        }
+        return health?.failureReason ?? "No sample"
     }
 }

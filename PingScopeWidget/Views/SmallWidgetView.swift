@@ -6,7 +6,32 @@ struct SmallWidgetView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            if let data = entry.data,
+            if let snapshot = entry.snapshot,
+               let host = snapshot.primaryHost {
+                HStack {
+                    Circle()
+                        .fill(statusColor(for: snapshot.primaryHealth))
+                        .frame(width: 12, height: 12)
+
+                    Text(host.displayName)
+                        .font(.headline)
+                        .lineLimit(1)
+                }
+
+                if let latency = snapshot.primaryHealth?.latencyMilliseconds {
+                    Text("\(Int(latency.rounded())) ms")
+                        .font(.system(.title2, design: .rounded))
+                        .fontWeight(.semibold)
+                } else {
+                    Text(snapshot.primaryHealth?.failureReason ?? "No sample")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+
+                Text(snapshot.statusLabel)
+                    .font(.caption2.weight(.semibold))
+                    .foregroundColor(snapshot.isStale ? .orange : .secondary)
+            } else if let data = entry.data,
                let host = data.hosts.first,
                let result = data.results.first {
 
@@ -45,11 +70,16 @@ struct SmallWidgetView: View {
                     }
                 }
             } else {
-                Text("No Data")
-                    .foregroundColor(.secondary)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("PingScope")
+                        .font(.headline)
+                    Text("No shared data")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
             }
         }
-        .opacity(entry.data?.isStale == true ? 0.6 : 1.0)
+        .opacity(isStale ? 0.6 : 1.0)
         .containerBackground(for: .widget) {
             Color(nsColor: .controlBackgroundColor)
         }
@@ -61,5 +91,19 @@ struct SmallWidgetView: View {
         if latency < 50 { return .green }
         if latency < 100 { return .yellow }
         return .red
+    }
+
+    private var isStale: Bool {
+        entry.snapshot?.isStale ?? entry.data?.isStale ?? false
+    }
+
+    private func statusColor(for health: WidgetSnapshotData.HostHealth?) -> Color {
+        guard let health else { return .gray }
+        switch health.status {
+        case "healthy": return .green
+        case "degraded": return .yellow
+        case "down": return .red
+        default: return .gray
+        }
     }
 }
