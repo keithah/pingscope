@@ -75,6 +75,24 @@ final class RuntimeBehaviorTests: XCTestCase {
         await scheduler.stop()
     }
 
+    func testMeasurementSchedulerOldStreamTerminationDoesNotCancelNewRun() async throws {
+        let oldHost = HostConfig(displayName: "Old", address: "old.example", interval: .milliseconds(20))
+        let newHost = HostConfig(displayName: "New", address: "new.example", interval: .milliseconds(20))
+        let scheduler = MeasurementScheduler(probeFactory: DelayedProbeFactory(delay: .milliseconds(20)))
+        let oldStream = await scheduler.start(hosts: [oldHost])
+        let oldConsumer = Task {
+            var iterator = oldStream.makeAsyncIterator()
+            _ = await iterator.next()
+        }
+
+        let newStream = await scheduler.start(hosts: [newHost])
+        oldConsumer.cancel()
+        let firstResult = try await firstResult(from: newStream, timeout: .milliseconds(300))
+
+        XCTAssertEqual(firstResult?.hostID, newHost.id)
+        await scheduler.stop()
+    }
+
     func testRuntimePublishesOneShotAlertEvents() async throws {
         let host = HostConfig(
             displayName: "Example",

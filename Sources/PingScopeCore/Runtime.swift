@@ -141,12 +141,14 @@ public actor HostStore {
 
 public actor MeasurementScheduler {
     private let probeFactory: any ProbeFactory
+    private let logger: (@Sendable (String) -> Void)?
     private var tasks: [Task<Void, Never>] = []
     private var continuation: AsyncStream<PingResult>.Continuation?
     private var generation = 0
 
-    public init(probeFactory: any ProbeFactory) {
+    public init(probeFactory: any ProbeFactory, logger: (@Sendable (String) -> Void)? = nil) {
         self.probeFactory = probeFactory
+        self.logger = logger
     }
 
     public func start(hosts: [HostConfig], allowsLocalNetworkProbes: Bool = true) -> AsyncStream<PingResult> {
@@ -159,13 +161,14 @@ public actor MeasurementScheduler {
         let stream = AsyncStream<PingResult> { streamContinuation in
             self.continuation = streamContinuation
             streamContinuation.onTermination = { [weak self] _ in
-                Task { await self?.stop() }
+                Task { await self?.stop(generation: runGeneration) }
             }
         }
 
         let measurableHosts = hosts.filter { host in
             host.isEnabled && (allowsLocalNetworkProbes || !host.requiresLocalNetworkPermission)
         }
+        logger?("scheduler start generation=\(runGeneration) hosts=\(hosts.map(\.diagnosticDescription).joined(separator: "; ")) allowsLocal=\(allowsLocalNetworkProbes) measurable=\(measurableHosts.map(\.diagnosticDescription).joined(separator: "; "))")
 
         for (offset, host) in measurableHosts.enumerated() {
             let task = Task { [weak self] in
@@ -186,6 +189,11 @@ public actor MeasurementScheduler {
         continuation = nil
     }
 
+    private func stop(generation stoppedGeneration: Int) {
+        guard stoppedGeneration == generation else { return }
+        stop()
+    }
+
     private func stopTasks() {
         for task in tasks {
             task.cancel()
@@ -194,13 +202,24 @@ public actor MeasurementScheduler {
     }
 
     private func runLoop(for host: HostConfig, generation: Int) async {
+        logger?("scheduler runLoop begin generation=\(generation) host=\(host.diagnosticDescription)")
         while !Task.isCancelled {
             let probe = await probeFactory.makeProbe(for: host.method)
             let result = await probe.measure(host)
             guard !Task.isCancelled, generation == self.generation else { return }
+            if result.failureReason != nil {
+                logger?("scheduler result host=\(host.displayName) failure=\(String(describing: result.failureReason))")
+            }
             continuation?.yield(result)
             try? await Task.sleep(for: host.interval)
         }
+        logger?("scheduler runLoop end generation=\(generation) host=\(host.diagnosticDescription)")
+    }
+}
+
+private extension HostConfig {
+    var diagnosticDescription: String {
+        "\(displayName)|\(address)|\(method.rawValue)|\(port.map(String.init) ?? "-")|enabled=\(isEnabled)|local=\(requiresLocalNetworkPermission)"
     }
 }
 

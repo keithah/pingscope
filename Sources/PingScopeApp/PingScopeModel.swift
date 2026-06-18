@@ -121,7 +121,9 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
         let notificationRules = UserDefaults.standard.notificationRules ?? NotificationRuleSet()
         self.runtime = PingRuntime(
             hostStore: hostStore,
-            scheduler: MeasurementScheduler(probeFactory: probeFactory),
+            scheduler: MeasurementScheduler(probeFactory: probeFactory, logger: { message in
+                DebugLog.write(message)
+            }),
             historyStore: historyStore,
             allowsLocalNetworkProbes: allowsLocalNetworkProbes,
             notificationRules: notificationRules
@@ -626,6 +628,7 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
 
     private func handleNetworkPathUpdate(status: NetworkConnectivityStatus, signature: String) {
         let changedPath = signature != lastNetworkPathSignature
+        DebugLog.write("network path update status=\(status.rawValue) changedPath=\(changedPath) signature=\(signature)")
         lastNetworkPathSignature = signature
         handleNetworkStatus(status, forceRestart: changedPath)
 
@@ -639,6 +642,7 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
     }
 
     private func handleGatewayObservation(_ gateway: String?) {
+        DebugLog.write("gateway observation gateway=\(gateway ?? "nil") currentStatus=\(currentNetworkStatus.rawValue)")
         if gateway == nil, currentNetworkStatus == .connected {
             handleNetworkStatus(.noInternet)
         }
@@ -659,6 +663,7 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
     private func handleNetworkStatus(_ status: NetworkConnectivityStatus, forceRestart: Bool = false) {
         let changedStatus = status != currentNetworkStatus
         guard changedStatus || forceRestart else { return }
+        DebugLog.write("network status handled status=\(status.rawValue) changedStatus=\(changedStatus) forceRestart=\(forceRestart)")
         if changedStatus {
             currentNetworkStatus = status
             if widgetsEnabled {
