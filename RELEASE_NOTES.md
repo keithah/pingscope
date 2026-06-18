@@ -1,6 +1,6 @@
 # PingScope 0.1.1
 
-Fresh native macOS rebuild focused on a quiet, iStat-style latency monitor.
+First patch release for the fresh native rebuild, focused on reconnect reliability, release packaging, and the iOS companion preview.
 
 ## Highlights
 
@@ -13,6 +13,15 @@ Fresh native macOS rebuild focused on a quiet, iStat-style latency monitor.
 - Durable local history with CSV, JSON, and text export.
 - Optional widget data sharing, disabled by default to avoid repeated shared-container prompts.
 - Sparkle updater support for non-App-Store builds.
+
+## Fixes
+
+- Fixed a macOS reconnect race where a stale scheduler stream could cancel the new scheduler generation after Wi-Fi, hotspot, or VPN changes.
+- Default Gateway monitoring now refreshes and resumes probes after network path changes instead of getting stuck at `--ms`.
+- Default Gateway endpoint changes clear stale graph and health samples so the popover reflects the active route.
+- iOS refreshes the detected Wi-Fi gateway on app launch and path changes.
+- iOS Live Activity state now distinguishes continuous monitoring from finite 30-second and 1-minute sessions.
+- Added targeted diagnostics for scheduler lifecycle, network status, gateway observations, and probe failures.
 
 ## Distribution
 
