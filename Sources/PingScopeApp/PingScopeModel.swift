@@ -712,11 +712,20 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
 
     private func startNetworkMonitoring() {
         networkTask?.cancel()
-        networkTask = Task { [gatewayDetector] in
+        networkTask = Task { [weak self, gatewayDetector, starlinkDetector] in
             while !Task.isCancelled {
                 let host = await gatewayDetector.detect()
                 await MainActor.run {
-                    self.handleGatewayObservation(host?.address)
+                    self?.handleGatewayObservation(host?.address)
+                }
+
+                DebugLog.write("starlink discovery pass started")
+                if let starlinkHost = await starlinkDetector.detect(timeout: .seconds(5)) {
+                    await MainActor.run {
+                        self?.syncStarlinkHost(starlinkHost)
+                    }
+                } else {
+                    DebugLog.write("starlink discovery pass missed")
                 }
                 try? await Task.sleep(for: .seconds(15))
             }
@@ -805,7 +814,8 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
     private func detectStarlinkDishSilently() {
         starlinkDetectionTask?.cancel()
         starlinkDetectionTask = Task { [weak self, starlinkDetector] in
-            guard let host = await starlinkDetector.detect() else {
+            DebugLog.write("starlink startup detection started")
+            guard let host = await starlinkDetector.detect(timeout: .seconds(5)) else {
                 DebugLog.write("starlink detection missed")
                 return
             }
@@ -817,6 +827,7 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
 
     private func syncStarlinkHost(_ host: HostConfig) {
         var starlinkHost = host
+        let preferredPrimaryID = preferredPrimaryAfterStarlinkSync(starlinkHost)
         if let existing = snapshot.hosts.first(where: {
             $0.method == .starlink || $0.displayName == host.displayName || ($0.address == host.address && $0.port == host.port)
         }) {
@@ -835,7 +846,22 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
         }
         Task {
             await runtime.upsertHost(starlinkHost)
+            if let preferredPrimaryID {
+                await runtime.selectPrimaryHost(preferredPrimaryID)
+            }
+            DebugLog.write("starlink host upsert requested address=\(starlinkHost.address)")
         }
+    }
+
+    private func preferredPrimaryAfterStarlinkSync(_ starlinkHost: HostConfig) -> UUID? {
+        let gatewayHost = snapshot.hosts.first { $0.displayName == "Default Gateway" }
+        if gatewayHost?.address == starlinkHost.address {
+            return nil
+        }
+        if let primary = snapshot.primaryHost, primary.method != .starlink {
+            return primary.id
+        }
+        return gatewayHost?.id ?? snapshot.hosts.first(where: { $0.method != .starlink })?.id
     }
 
     private func syncDefaultGatewayHost(address gateway: String) {

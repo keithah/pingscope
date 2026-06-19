@@ -4,7 +4,7 @@ enum DebugLog {
     static let fileURL = URL(fileURLWithPath: "/tmp/pingscope-debug.log")
     private static let lock = NSLock()
 
-    static func write(_ message: String) {
+    nonisolated static func write(_ message: String) {
         lock.lock()
         defer { lock.unlock() }
 
@@ -22,7 +22,7 @@ enum DebugLog {
         }
     }
 
-    static func clear() {
+    nonisolated static func clear() {
         lock.lock()
         defer { lock.unlock() }
 

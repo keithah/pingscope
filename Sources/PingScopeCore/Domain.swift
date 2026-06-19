@@ -86,7 +86,7 @@ public struct HostConfig: Identifiable, Codable, Equatable, Sendable {
     public static let defaultStarlinkDish = HostConfig(
         displayName: "Starlink",
         address: "192.168.100.1",
-        tier: .ispEdge,
+        tier: .localGateway,
         method: .starlink,
         port: PingMethod.starlink.defaultPort,
         interval: .seconds(5),
@@ -98,7 +98,7 @@ public struct HostConfig: Identifiable, Codable, Equatable, Sendable {
         HostConfig(
             displayName: "Starlink",
             address: "192.168.1.1",
-            tier: .ispEdge,
+            tier: .localGateway,
             method: .starlink,
             port: 9000,
             interval: .seconds(5),
@@ -108,7 +108,7 @@ public struct HostConfig: Identifiable, Codable, Equatable, Sendable {
         HostConfig(
             displayName: "Starlink",
             address: "192.168.1.1",
-            tier: .ispEdge,
+            tier: .localGateway,
             method: .starlink,
             port: PingMethod.starlink.defaultPort,
             interval: .seconds(5),

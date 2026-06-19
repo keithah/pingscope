@@ -438,7 +438,7 @@ final class DomainBehaviorTests: XCTestCase {
         XCTAssertEqual(classifier.tier(for: HostConfig(displayName: "Google", address: "8.8.8.8")), .upstream)
         XCTAssertEqual(classifier.tier(for: HostConfig(displayName: "Example", address: "example.com")), .remoteService)
         XCTAssertEqual(classifier.tier(for: HostConfig(displayName: "ISP Resolver", address: "1.1.1.1", tier: .ispEdge)), .ispEdge)
-        XCTAssertEqual(classifier.tier(for: .defaultStarlinkDish), .ispEdge)
+        XCTAssertEqual(classifier.tier(for: .defaultStarlinkDish), .localGateway)
     }
 
     func testNetworkPerspectivePrioritizesDefaultGatewayFailure() {

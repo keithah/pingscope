@@ -27,7 +27,6 @@ struct StatusPopoverView: View {
             if let telemetry = latestStarlinkTelemetry {
                 StarlinkTelemetrySummary(telemetry: telemetry)
             }
-            NetworkDiagnosisRow(diagnosis: model.networkDiagnosis)
 
             RecentSamplesView(samples: Array(model.visibleSamples.suffix(8)).reversed(), range: model.selectedRange)
         }

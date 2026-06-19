@@ -519,8 +519,8 @@ private protocol OverlayContextMenuPresenting: AnyObject {
     func presentOverlayContextMenu(with event: NSEvent)
 }
 
-final class OverlayContainerView<Content: View>: NSView {
-    private let hostingView: NSHostingView<Content>
+final class OverlayContainerView: NSView {
+    private let hostingView: NSHostingView<AnyView>
     private let isCompact: () -> Bool
     private let hostOptions: () -> [(UUID, String, Bool)]
     private let onToggleCompact: () -> Void
@@ -538,7 +538,7 @@ final class OverlayContainerView<Content: View>: NSView {
     private var closeButton: NSButton?
 
     init(
-        rootView: Content,
+        rootView: some View,
         isCompact: @escaping () -> Bool,
         hostOptions: @escaping () -> [(UUID, String, Bool)],
         onToggleCompact: @escaping () -> Void,
@@ -551,7 +551,7 @@ final class OverlayContainerView<Content: View>: NSView {
         showsLegend: @escaping () -> Bool,
         onToggleLegend: @escaping () -> Void
     ) {
-        self.hostingView = NSHostingView(rootView: rootView)
+        self.hostingView = NSHostingView(rootView: AnyView(rootView))
         self.isCompact = isCompact
         self.hostOptions = hostOptions
         self.onToggleCompact = onToggleCompact
