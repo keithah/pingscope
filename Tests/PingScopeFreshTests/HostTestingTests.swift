@@ -40,6 +40,33 @@ final class HostTestingTests: XCTestCase {
         XCTAssertEqual(host.port, 80)
         XCTAssertTrue(host.requiresLocalNetworkPermission)
     }
+
+    func testStarlinkDishDetectorReturnsDefaultDishWhenStatusSucceeds() async {
+        let detector = StarlinkDishDetector(statusClient: FakeStarlinkStatusClient(status: StarlinkStatus(
+            popPingLatencyMilliseconds: 42,
+            telemetry: StarlinkTelemetry(state: "CONNECTED")
+        )))
+
+        let host = await detector.detect(timeout: .milliseconds(100))
+
+        XCTAssertEqual(host, .defaultStarlinkDish)
+    }
+
+    func testStarlinkDishDetectorReturnsNilWhenStatusFails() async {
+        let detector = StarlinkDishDetector(statusClient: FailingStarlinkStatusClient())
+
+        let host = await detector.detect(timeout: .milliseconds(100))
+
+        XCTAssertNil(host)
+    }
+
+    func testStarlinkDishDetectorTimesOut() async {
+        let detector = StarlinkDishDetector(statusClient: SlowStarlinkStatusClient())
+
+        let host = await detector.detect(timeout: .milliseconds(10))
+
+        XCTAssertNil(host)
+    }
 }
 
 private actor SingleProbeFactory: ProbeFactory {
@@ -59,5 +86,26 @@ private struct SingleProbe: PingProbe {
 
     func measure(_ host: HostConfig) async -> PingResult {
         result.withHostMetadata(from: host)
+    }
+}
+
+private struct FakeStarlinkStatusClient: StarlinkStatusFetching {
+    let status: StarlinkStatus
+
+    func fetchStatus(host: HostConfig) async throws -> StarlinkStatus {
+        status
+    }
+}
+
+private struct FailingStarlinkStatusClient: StarlinkStatusFetching {
+    func fetchStatus(host: HostConfig) async throws -> StarlinkStatus {
+        throw StarlinkStatusFetchError.unavailable
+    }
+}
+
+private struct SlowStarlinkStatusClient: StarlinkStatusFetching {
+    func fetchStatus(host: HostConfig) async throws -> StarlinkStatus {
+        try await Task.sleep(for: .seconds(60))
+        return StarlinkStatus(popPingLatencyMilliseconds: 42, telemetry: StarlinkTelemetry(state: "CONNECTED"))
     }
 }

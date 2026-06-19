@@ -85,6 +85,42 @@ public struct DefaultGatewayDetector: Sendable {
     }
 }
 
+public struct StarlinkDishDetector: Sendable {
+    private let statusClient: any StarlinkStatusFetching
+    private let host: HostConfig
+
+    public init(
+        statusClient: any StarlinkStatusFetching = StarlinkStatusGRPCClient(transport: StarlinkHTTP2Transport()),
+        host: HostConfig = .defaultStarlinkDish
+    ) {
+        self.statusClient = statusClient
+        self.host = host
+    }
+
+    public func detect(timeout: Duration = .seconds(2)) async -> HostConfig? {
+        await withTaskGroup(of: HostConfig?.self, returning: HostConfig?.self) { group in
+            let statusClient = statusClient
+            let host = host
+            group.addTask {
+                do {
+                    _ = try await statusClient.fetchStatus(host: host)
+                    return host
+                } catch {
+                    return nil
+                }
+            }
+            group.addTask {
+                try? await Task.sleep(for: timeout)
+                return nil
+            }
+
+            let detected = await group.next() ?? nil
+            group.cancelAll()
+            return detected
+        }
+    }
+}
+
 public actor HostStore {
     private var orderedHosts: [HostConfig]
     private var primaryID: UUID?

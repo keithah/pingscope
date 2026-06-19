@@ -111,12 +111,14 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
     private let runtime: PingRuntime
     private let hostTester: HostTester
     private let gatewayDetector = DefaultGatewayDetector()
+    private let starlinkDetector = StarlinkDishDetector()
     private let notificationDispatcher = MacNotificationDispatcher()
     private let pathMonitor = NWPathMonitor()
     private let pathMonitorQueue = DispatchQueue(label: "com.pingscope.network-path")
     private var widgetSnapshotStore: WidgetSnapshotStore?
     private var snapshotTask: Task<Void, Never>?
     private var networkTask: Task<Void, Never>?
+    private var starlinkDetectionTask: Task<Void, Never>?
     private var historyTask: Task<Void, Never>?
     private var lastHistoryKey: String?
     private var lastObservedGateway: String?
@@ -350,12 +352,14 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
         Task { await runtime.start() }
         startNetworkMonitoring()
         startNetworkPathMonitoring()
+        detectStarlinkDishSilently()
         refreshNotificationPermission()
     }
 
     func stop() {
         snapshotTask?.cancel()
         networkTask?.cancel()
+        starlinkDetectionTask?.cancel()
         historyTask?.cancel()
         pathMonitor.cancel()
         Task { await runtime.stop() }
@@ -737,6 +741,7 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
         handleNetworkStatus(status, forceRestart: changedPath)
 
         guard status == .connected, changedPath else { return }
+        detectStarlinkDishSilently()
         Task { [gatewayDetector] in
             let host = await gatewayDetector.detect()
             await MainActor.run {
@@ -794,6 +799,42 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
         let widgetSnapshot = WidgetSnapshot.make(from: snapshot, networkStatus: currentNetworkStatus)
         Task { [widgetSnapshotStore] in
             await widgetSnapshotStore.save(widgetSnapshot)
+        }
+    }
+
+    private func detectStarlinkDishSilently() {
+        starlinkDetectionTask?.cancel()
+        starlinkDetectionTask = Task { [weak self, starlinkDetector] in
+            guard let host = await starlinkDetector.detect() else {
+                DebugLog.write("starlink detection missed")
+                return
+            }
+            await MainActor.run {
+                self?.syncStarlinkHost(host)
+            }
+        }
+    }
+
+    private func syncStarlinkHost(_ host: HostConfig) {
+        var starlinkHost = host
+        if let existing = snapshot.hosts.first(where: {
+            $0.method == .starlink || $0.displayName == host.displayName || ($0.address == host.address && $0.port == host.port)
+        }) {
+            starlinkHost.id = existing.id
+            starlinkHost.isEnabled = existing.isEnabled
+            starlinkHost.notifications = existing.notifications
+        }
+
+        if !allowsLocalNetworkProbes {
+            allowsLocalNetworkProbes = true
+        }
+
+        DebugLog.write("starlink dish detected address=\(starlinkHost.address) existing=\(snapshot.hosts.contains { $0.id == starlinkHost.id })")
+        if editingHostID == starlinkHost.id {
+            loadDraft(from: starlinkHost)
+        }
+        Task {
+            await runtime.upsertHost(starlinkHost)
         }
     }
 
