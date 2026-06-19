@@ -1,9 +1,53 @@
 import Foundation
 
+public enum NetworkTier: String, CaseIterable, Codable, Equatable, Sendable {
+    case localGateway
+    case ispEdge
+    case upstream
+    case remoteService
+
+    public var depth: Int {
+        switch self {
+        case .localGateway: 0
+        case .ispEdge: 1
+        case .upstream: 2
+        case .remoteService: 3
+        }
+    }
+
+    public var displayName: String {
+        switch self {
+        case .localGateway: "Local gateway"
+        case .ispEdge: "ISP edge"
+        case .upstream: "Upstream internet"
+        case .remoteService: "Remote service"
+        }
+    }
+
+    public var settingsName: String {
+        switch self {
+        case .localGateway: "Router / gateway"
+        case .ispEdge: "ISP / modem path"
+        case .upstream: "Internet check"
+        case .remoteService: "Website or service"
+        }
+    }
+
+    public var shortName: String {
+        switch self {
+        case .localGateway: "Router"
+        case .ispEdge: "ISP"
+        case .upstream: "Internet"
+        case .remoteService: "Service"
+        }
+    }
+}
+
 public struct HostConfig: Identifiable, Codable, Equatable, Sendable {
     public var id: UUID
     public var displayName: String
     public var address: String
+    public var tier: NetworkTier?
     public var method: PingMethod
     public var port: UInt16?
     public var interval: Duration
@@ -16,6 +60,7 @@ public struct HostConfig: Identifiable, Codable, Equatable, Sendable {
         id: UUID = UUID(),
         displayName: String,
         address: String,
+        tier: NetworkTier? = nil,
         method: PingMethod = .tcp,
         port: UInt16? = 443,
         interval: Duration = .seconds(2),
@@ -27,6 +72,7 @@ public struct HostConfig: Identifiable, Codable, Equatable, Sendable {
         self.id = id
         self.displayName = displayName
         self.address = address
+        self.tier = tier
         self.method = method
         self.port = port
         self.interval = interval
@@ -79,6 +125,41 @@ public struct HostConfig: Identifiable, Codable, Equatable, Sendable {
         if parts[0] == 127 { return true }
         return false
     }
+
+    public var effectiveNetworkTier: NetworkTier {
+        NetworkTierClassifier().tier(for: self)
+    }
+}
+
+public struct NetworkTierClassifier: Sendable {
+    public init() {}
+
+    public func tier(for host: HostConfig) -> NetworkTier {
+        if let tier = host.tier {
+            return tier
+        }
+        if host.displayName.localizedCaseInsensitiveContains("gateway") {
+            return .localGateway
+        }
+        if host.requiresLocalNetworkPermission {
+            return .localGateway
+        }
+        if Self.knownUpstreamAddresses.contains(host.address.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()) {
+            return .upstream
+        }
+        return .remoteService
+    }
+
+    private static let knownUpstreamAddresses: Set<String> = [
+        "1.1.1.1",
+        "1.0.0.1",
+        "8.8.8.8",
+        "8.8.4.4",
+        "9.9.9.9",
+        "149.112.112.112",
+        "208.67.222.222",
+        "208.67.220.220"
+    ]
 }
 
 public enum HostValidationError: String, Codable, Equatable, Sendable {
@@ -358,115 +439,345 @@ public struct NetworkPerspectiveDiagnosis: Equatable, Sendable {
         case partialDegradation
     }
 
+    public enum Confidence: String, Codable, Equatable, Sendable {
+        case high
+        case tentative
+
+        public var displayName: String {
+            switch self {
+            case .high: "High confidence"
+            case .tentative: "Tentative"
+            }
+        }
+    }
+
+    public enum Verdict: Equatable, Sendable {
+        case noData
+        case allReachable
+        case localNetworkDown
+        case ispPathDown
+        case upstreamDown
+        case remoteServiceDown(hostIDs: [UUID])
+        case partialDegradation(tier: NetworkTier)
+        case multipleFailures(hostIDs: [UUID])
+    }
+
+    public struct TierEvidence: Equatable, Sendable {
+        public var tier: NetworkTier
+        public var totalCount: Int
+        public var healthyCount: Int
+        public var degradedCount: Int
+        public var downCount: Int
+
+        public init(
+            tier: NetworkTier,
+            totalCount: Int,
+            healthyCount: Int,
+            degradedCount: Int,
+            downCount: Int
+        ) {
+            self.tier = tier
+            self.totalCount = totalCount
+            self.healthyCount = healthyCount
+            self.degradedCount = degradedCount
+            self.downCount = downCount
+        }
+
+        public var status: HealthStatus {
+            if downCount > 0 { return .down }
+            if degradedCount > 0 { return .degraded }
+            if healthyCount > 0 { return .healthy }
+            return .noData
+        }
+
+        public var summary: String {
+            "\(healthyCount) ok, \(degradedCount) slow, \(downCount) down"
+        }
+    }
+
     public var scope: Scope
     public var title: String
     public var detail: String
     public var affectedHostIDs: [UUID]
+    public var verdict: Verdict
+    public var confidence: Confidence
+    public var faultTier: NetworkTier?
+    public var evidenceNote: String?
+    public var tierEvidence: [TierEvidence]
 
-    public init(scope: Scope, title: String, detail: String, affectedHostIDs: [UUID] = []) {
+    public init(
+        scope: Scope,
+        title: String,
+        detail: String,
+        affectedHostIDs: [UUID] = [],
+        verdict: Verdict? = nil,
+        confidence: Confidence = .high,
+        faultTier: NetworkTier? = nil,
+        evidenceNote: String? = nil,
+        tierEvidence: [TierEvidence] = []
+    ) {
         self.scope = scope
         self.title = title
         self.detail = detail
         self.affectedHostIDs = affectedHostIDs
+        self.verdict = verdict ?? Self.defaultVerdict(scope: scope, affectedHostIDs: affectedHostIDs)
+        self.confidence = confidence
+        self.faultTier = faultTier
+        self.evidenceNote = evidenceNote
+        self.tierEvidence = tierEvidence
+    }
+
+    private static func defaultVerdict(scope: Scope, affectedHostIDs: [UUID]) -> Verdict {
+        switch scope {
+        case .noData: .noData
+        case .allReachable: .allReachable
+        case .localNetwork: .localNetworkDown
+        case .upstream: .upstreamDown
+        case .remoteService: .remoteServiceDown(hostIDs: affectedHostIDs)
+        case .partialDegradation: .multipleFailures(hostIDs: affectedHostIDs)
+        }
     }
 }
 
 public struct NetworkPerspectiveDiagnoser: Sendable {
-    public init() {}
+    private struct ObservedHost {
+        var host: HostConfig
+        var health: HostHealth
+        var tier: NetworkTier
+    }
 
-    public func diagnose(hosts: [HostConfig], healthByHost: [UUID: HostHealth]) -> NetworkPerspectiveDiagnosis {
+    private struct TierSummary {
+        var tier: NetworkTier
+        var observed: [ObservedHost]
+
+        var down: [ObservedHost] {
+            observed.filter { $0.health.status == .down }
+        }
+
+        var degraded: [ObservedHost] {
+            observed.filter { $0.health.status == .degraded }
+        }
+
+        var healthy: [ObservedHost] {
+            observed.filter { $0.health.status == .healthy }
+        }
+
+        var downRatio: Double {
+            observed.isEmpty ? 0 : Double(down.count) / Double(observed.count)
+        }
+
+        var degradedRatio: Double {
+            observed.isEmpty ? 0 : Double(degraded.count) / Double(observed.count)
+        }
+
+        var hasDown: Bool {
+            !down.isEmpty
+        }
+
+        var hasDegraded: Bool {
+            !degraded.isEmpty
+        }
+    }
+
+    private let classifier: NetworkTierClassifier
+
+    public init(classifier: NetworkTierClassifier = NetworkTierClassifier()) {
+        self.classifier = classifier
+    }
+
+    public func diagnose(
+        hosts: [HostConfig],
+        healthByHost: [UUID: HostHealth],
+        networkStatus: NetworkConnectivityStatus = .connected
+    ) -> NetworkPerspectiveDiagnosis {
         let enabledHosts = hosts.filter(\.isEnabled)
         guard !enabledHosts.isEmpty else {
             return NetworkPerspectiveDiagnosis(
                 scope: .noData,
                 title: "No hosts enabled",
-                detail: "Enable at least one host to diagnose network scope."
+                detail: "Enable at least one host to diagnose network scope.",
+                confidence: .tentative
             )
         }
 
-        let observed = enabledHosts.compactMap { host -> (host: HostConfig, health: HostHealth)? in
+        if let gatedDiagnosis = linkStateDiagnosis(for: networkStatus) {
+            return gatedDiagnosis
+        }
+
+        let observed = enabledHosts.compactMap { host -> ObservedHost? in
             guard let health = healthByHost[host.id], health.latestResult != nil else { return nil }
-            return (host, health)
+            return ObservedHost(host: host, health: health, tier: classifier.tier(for: host))
         }
         guard !observed.isEmpty else {
             return NetworkPerspectiveDiagnosis(
                 scope: .noData,
                 title: "No recent measurements",
-                detail: "PingScope needs samples before it can infer what is down."
+                detail: "PingScope needs samples before it can infer what is down.",
+                confidence: .tentative
             )
         }
 
-        let down = observed.filter { $0.health.status == .down }
-        let degraded = observed.filter { $0.health.status == .degraded }
-        let healthy = observed.filter { $0.health.status == .healthy }
-        let local = observed.filter { $0.host.isLocalNetworkAnchor }
-        let remote = observed.filter { !$0.host.isLocalNetworkAnchor }
-        let localDown = local.filter { $0.health.status == .down }
-        let remoteDown = remote.filter { $0.health.status == .down }
-        let remoteHealthy = remote.filter { $0.health.status == .healthy }
+        let summaries = NetworkTier.allCases
+            .map { tier in TierSummary(tier: tier, observed: observed.filter { $0.tier == tier }) }
+            .filter { !$0.observed.isEmpty }
+            .sorted { $0.tier.depth < $1.tier.depth }
+        let tierEvidence = evidenceChain(from: summaries)
 
-        if down.isEmpty {
-            if degraded.isEmpty {
+        let downSummaries = summaries.filter(\.hasDown)
+        if downSummaries.isEmpty {
+            let degradedSummaries = summaries.filter(\.hasDegraded)
+            if degradedSummaries.isEmpty {
+                let healthyCount = observed.filter { $0.health.status == .healthy }.count
                 return NetworkPerspectiveDiagnosis(
                     scope: .allReachable,
                     title: "Everything reachable",
-                    detail: "\(healthy.count) monitored host\(healthy.count == 1 ? "" : "s") responding."
+                    detail: "\(healthyCount) monitored host\(healthyCount == 1 ? "" : "s") responding.",
+                    verdict: .allReachable,
+                    confidence: .high,
+                    evidenceNote: "\(healthyCount)/\(observed.count) monitored hosts healthy",
+                    tierEvidence: tierEvidence
                 )
             }
+            let summary = degradedSummaries.sorted { $0.tier.depth < $1.tier.depth }.first!
             return NetworkPerspectiveDiagnosis(
                 scope: .partialDegradation,
-                title: "Latency degraded",
-                detail: names(degraded) + " above threshold.",
-                affectedHostIDs: degraded.map(\.host.id)
+                title: "\(summary.tier.displayName) degraded",
+                detail: names(summary.degraded) + " above threshold.",
+                affectedHostIDs: summary.degraded.map(\.host.id),
+                verdict: .partialDegradation(tier: summary.tier),
+                confidence: confidence(for: summary, innerSummaries: innerSummaries(before: summary.tier, in: summaries)),
+                faultTier: summary.tier,
+                evidenceNote: evidence(for: summary, status: "degraded"),
+                tierEvidence: tierEvidence
             )
         }
 
-        if let firstLocalDown = localDown.first {
-            let title = firstLocalDown.host.displayName.localizedCaseInsensitiveContains("gateway") ? "Default gateway down" : "Local network down"
+        let fault = downSummaries.sorted { $0.tier.depth < $1.tier.depth }.first!
+        let affected = fault.down.map(\.host.id)
+        let confidence = confidence(for: fault, innerSummaries: innerSummaries(before: fault.tier, in: summaries))
+        let evidence = evidence(for: fault, status: "down")
+
+        switch fault.tier {
+        case .localGateway:
+            let title = fault.down.contains { $0.host.displayName.localizedCaseInsensitiveContains("gateway") } ? "Default gateway down" : "Local network down"
             return NetworkPerspectiveDiagnosis(
                 scope: .localNetwork,
                 title: title,
-                detail: "\(firstLocalDown.host.displayName) is not responding; failures beyond it may be local.",
-                affectedHostIDs: localDown.map(\.host.id)
+                detail: "\(names(fault.down)) not responding; failures beyond the local gateway are unknown.",
+                affectedHostIDs: affected,
+                verdict: .localNetworkDown,
+                confidence: confidence,
+                faultTier: fault.tier,
+                evidenceNote: evidence,
+                tierEvidence: tierEvidence
             )
-        }
-
-        if !remoteDown.isEmpty, !local.isEmpty, local.allSatisfy({ $0.health.status == .healthy || $0.health.status == .degraded }) {
-            if remoteHealthy.isEmpty, remote.count == remoteDown.count {
-                return NetworkPerspectiveDiagnosis(
-                    scope: .upstream,
-                    title: "Upstream or ISP path down",
-                    detail: "Local hosts respond, but all monitored remote hosts are down.",
-                    affectedHostIDs: remoteDown.map(\.host.id)
-                )
-            }
-
+        case .ispEdge:
+            return NetworkPerspectiveDiagnosis(
+                scope: .upstream,
+                title: "ISP path down",
+                detail: "Local gateway responds, but the ISP edge is not reachable.",
+                affectedHostIDs: affected,
+                verdict: .ispPathDown,
+                confidence: confidence,
+                faultTier: fault.tier,
+                evidenceNote: evidence,
+                tierEvidence: tierEvidence
+            )
+        case .upstream:
+            return NetworkPerspectiveDiagnosis(
+                scope: .upstream,
+                title: "Upstream path down",
+                detail: "Inner tiers respond, but upstream internet hosts are not reachable.",
+                affectedHostIDs: affected,
+                verdict: .upstreamDown,
+                confidence: confidence,
+                faultTier: fault.tier,
+                evidenceNote: evidence,
+                tierEvidence: tierEvidence
+            )
+        case .remoteService:
             return NetworkPerspectiveDiagnosis(
                 scope: .remoteService,
-                title: "Remote host down",
-                detail: names(remoteDown) + " not responding while local path is reachable.",
-                affectedHostIDs: remoteDown.map(\.host.id)
+                title: affected.count == 1 ? "Remote host down" : "Remote services down",
+                detail: names(fault.down) + " not responding while inner tiers are reachable.",
+                affectedHostIDs: affected,
+                verdict: .remoteServiceDown(hostIDs: affected),
+                confidence: confidence,
+                faultTier: fault.tier,
+                evidenceNote: evidence,
+                tierEvidence: tierEvidence
             )
         }
-
-        if !remoteDown.isEmpty, !remoteHealthy.isEmpty {
-            return NetworkPerspectiveDiagnosis(
-                scope: .remoteService,
-                title: "Remote host down",
-                detail: names(remoteDown) + " not responding; other remote hosts are reachable.",
-                affectedHostIDs: remoteDown.map(\.host.id)
-            )
-        }
-
-        return NetworkPerspectiveDiagnosis(
-            scope: .partialDegradation,
-            title: "Multiple failures",
-            detail: names(down) + " not responding.",
-            affectedHostIDs: down.map(\.host.id)
-        )
     }
 
-    private func names(_ hostHealth: [(host: HostConfig, health: HostHealth)]) -> String {
+    private func innerSummaries(before tier: NetworkTier, in summaries: [TierSummary]) -> [TierSummary] {
+        summaries.filter { $0.tier.depth < tier.depth }
+    }
+
+    private func linkStateDiagnosis(for status: NetworkConnectivityStatus) -> NetworkPerspectiveDiagnosis? {
+        switch status {
+        case .connected:
+            return nil
+        case .notConnected:
+            return NetworkPerspectiveDiagnosis(
+                scope: .localNetwork,
+                title: "Network disconnected",
+                detail: "macOS reports no active network link, so PingScope is not blaming ISP or remote hosts.",
+                verdict: .localNetworkDown,
+                confidence: .high,
+                faultTier: .localGateway,
+                evidenceNote: status.displayName
+            )
+        case .noIPAddress:
+            return NetworkPerspectiveDiagnosis(
+                scope: .localNetwork,
+                title: "No IP address",
+                detail: "The local interface has no usable IP address; upstream diagnosis is suppressed.",
+                verdict: .localNetworkDown,
+                confidence: .high,
+                faultTier: .localGateway,
+                evidenceNote: status.displayName
+            )
+        case .noInternet:
+            return NetworkPerspectiveDiagnosis(
+                scope: .upstream,
+                title: "No internet connection",
+                detail: "macOS reports no internet route; PingScope will wait for connectivity before naming a host-specific failure.",
+                verdict: .upstreamDown,
+                confidence: .tentative,
+                faultTier: .upstream,
+                evidenceNote: status.displayName
+            )
+        }
+    }
+
+    private func confidence(for summary: TierSummary, innerSummaries: [TierSummary]) -> NetworkPerspectiveDiagnosis.Confidence {
+        let boundaryIsClean = innerSummaries.allSatisfy { !$0.hasDown }
+        guard boundaryIsClean else { return .tentative }
+        if summary.observed.count == 1 {
+            return summary.down.first?.health.consecutiveFailureCount ?? 0 > 1 || summary.downRatio >= 1 ? .high : .tentative
+        }
+        return summary.downRatio >= 0.75 || summary.degradedRatio >= 0.75 ? .high : .tentative
+    }
+
+    private func evidence(for summary: TierSummary, status: String) -> String {
+        let matchingCount = status == "degraded" ? summary.degraded.count : summary.down.count
+        return "\(matchingCount)/\(summary.observed.count) \(summary.tier.displayName.lowercased()) host\(summary.observed.count == 1 ? "" : "s") \(status)"
+    }
+
+    private func evidenceChain(from summaries: [TierSummary]) -> [NetworkPerspectiveDiagnosis.TierEvidence] {
+        summaries.map { summary in
+            NetworkPerspectiveDiagnosis.TierEvidence(
+                tier: summary.tier,
+                totalCount: summary.observed.count,
+                healthyCount: summary.healthy.count,
+                degradedCount: summary.degraded.count,
+                downCount: summary.down.count
+            )
+        }
+    }
+
+    private func names(_ hostHealth: [ObservedHost]) -> String {
         let names = hostHealth.prefix(3).map(\.host.displayName).joined(separator: ", ")
         let extraCount = hostHealth.count - 3
         return extraCount > 0 ? "\(names), +\(extraCount) more" : names

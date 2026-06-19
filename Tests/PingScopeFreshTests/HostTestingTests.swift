@@ -35,6 +35,7 @@ final class HostTestingTests: XCTestCase {
 
         XCTAssertEqual(host.displayName, "Default Gateway")
         XCTAssertEqual(host.address, "192.168.1.1")
+        XCTAssertEqual(host.tier, .localGateway)
         XCTAssertEqual(host.method, .tcp)
         XCTAssertEqual(host.port, 80)
         XCTAssertTrue(host.requiresLocalNetworkPermission)

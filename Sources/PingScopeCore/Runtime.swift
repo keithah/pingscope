@@ -75,6 +75,7 @@ public struct DefaultGatewayDetector: Sendable {
         HostConfig(
             displayName: "Default Gateway",
             address: address,
+            tier: .localGateway,
             method: .tcp,
             port: 80,
             interval: .seconds(2),

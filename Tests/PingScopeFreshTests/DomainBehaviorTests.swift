@@ -294,6 +294,27 @@ final class DomainBehaviorTests: XCTestCase {
 
         XCTAssertEqual(diagnosis.scope, .allReachable)
         XCTAssertEqual(diagnosis.title, "Everything reachable")
+        XCTAssertEqual(diagnosis.verdict, .allReachable)
+        XCTAssertEqual(diagnosis.confidence, .high)
+        XCTAssertNil(diagnosis.faultTier)
+        XCTAssertEqual(diagnosis.evidenceNote, "1/1 monitored hosts healthy")
+        assertEvidence(
+            diagnosis.tierEvidence,
+            equals: [
+                (.upstream, total: 1, healthy: 1, degraded: 0, down: 0)
+            ]
+        )
+    }
+
+    func testNetworkTierClassifierInfersAndAllowsExplicitOverride() {
+        let classifier = NetworkTierClassifier()
+
+        XCTAssertEqual(classifier.tier(for: HostConfig(displayName: "Default Gateway", address: "203.0.113.1")), .localGateway)
+        XCTAssertEqual(classifier.tier(for: HostConfig(displayName: "Router", address: "192.168.1.1")), .localGateway)
+        XCTAssertEqual(classifier.tier(for: HostConfig(displayName: "Cloudflare", address: "1.1.1.1")), .upstream)
+        XCTAssertEqual(classifier.tier(for: HostConfig(displayName: "Google", address: "8.8.8.8")), .upstream)
+        XCTAssertEqual(classifier.tier(for: HostConfig(displayName: "Example", address: "example.com")), .remoteService)
+        XCTAssertEqual(classifier.tier(for: HostConfig(displayName: "ISP Resolver", address: "1.1.1.1", tier: .ispEdge)), .ispEdge)
     }
 
     func testNetworkPerspectivePrioritizesDefaultGatewayFailure() {
@@ -310,6 +331,17 @@ final class DomainBehaviorTests: XCTestCase {
         XCTAssertEqual(diagnosis.scope, .localNetwork)
         XCTAssertEqual(diagnosis.title, "Default gateway down")
         XCTAssertEqual(diagnosis.affectedHostIDs, [gateway.id])
+        XCTAssertEqual(diagnosis.verdict, .localNetworkDown)
+        XCTAssertEqual(diagnosis.confidence, .high)
+        XCTAssertEqual(diagnosis.faultTier, .localGateway)
+        XCTAssertEqual(diagnosis.evidenceNote, "1/1 local gateway host down")
+        assertEvidence(
+            diagnosis.tierEvidence,
+            equals: [
+                (.localGateway, total: 1, healthy: 0, degraded: 0, down: 1),
+                (.upstream, total: 1, healthy: 0, degraded: 0, down: 1)
+            ]
+        )
     }
 
     func testNetworkPerspectiveDiagnosesUpstreamWhenLocalWorksAndAllRemoteFail() {
@@ -324,12 +356,52 @@ final class DomainBehaviorTests: XCTestCase {
         )
 
         XCTAssertEqual(diagnosis.scope, .upstream)
-        XCTAssertEqual(diagnosis.title, "Upstream or ISP path down")
+        XCTAssertEqual(diagnosis.title, "Upstream path down")
         XCTAssertEqual(diagnosis.affectedHostIDs, [remote.id])
+        XCTAssertEqual(diagnosis.verdict, .upstreamDown)
+        XCTAssertEqual(diagnosis.confidence, .high)
+        XCTAssertEqual(diagnosis.faultTier, .upstream)
+        XCTAssertEqual(diagnosis.evidenceNote, "1/1 upstream internet host down")
+        assertEvidence(
+            diagnosis.tierEvidence,
+            equals: [
+                (.localGateway, total: 1, healthy: 1, degraded: 0, down: 0),
+                (.upstream, total: 1, healthy: 0, degraded: 0, down: 1)
+            ]
+        )
+    }
+
+    func testNetworkPerspectiveDiagnosesISPEdgeWhenExplicitTierFails() {
+        let gateway = HostConfig(id: UUID(), displayName: "Default Gateway", address: "192.168.1.1", thresholds: LatencyThresholds(downAfterFailures: 1))
+        let isp = HostConfig(id: UUID(), displayName: "ISP Resolver", address: "203.0.113.1", tier: .ispEdge, thresholds: LatencyThresholds(downAfterFailures: 1))
+        let upstream = HostConfig(id: UUID(), displayName: "Cloudflare", address: "1.1.1.1", thresholds: LatencyThresholds(downAfterFailures: 1))
+        let diagnosis = NetworkPerspectiveDiagnoser().diagnose(
+            hosts: [gateway, isp, upstream],
+            healthByHost: [
+                gateway.id: health(for: gateway, statusAfter: [.success(hostID: gateway.id, latency: .milliseconds(3))]),
+                isp.id: health(for: isp, statusAfter: [.failure(hostID: isp.id, reason: .timeout)]),
+                upstream.id: health(for: upstream, statusAfter: [.failure(hostID: upstream.id, reason: .timeout)])
+            ]
+        )
+
+        XCTAssertEqual(diagnosis.scope, .upstream)
+        XCTAssertEqual(diagnosis.title, "ISP path down")
+        XCTAssertEqual(diagnosis.verdict, .ispPathDown)
+        XCTAssertEqual(diagnosis.affectedHostIDs, [isp.id])
+        XCTAssertEqual(diagnosis.confidence, .high)
+        XCTAssertEqual(diagnosis.faultTier, .ispEdge)
+        assertEvidence(
+            diagnosis.tierEvidence,
+            equals: [
+                (.localGateway, total: 1, healthy: 1, degraded: 0, down: 0),
+                (.ispEdge, total: 1, healthy: 0, degraded: 0, down: 1),
+                (.upstream, total: 1, healthy: 0, degraded: 0, down: 1)
+            ]
+        )
     }
 
     func testNetworkPerspectiveDiagnosesIsolatedRemoteFailure() {
-        let cloudflare = HostConfig(id: UUID(), displayName: "Cloudflare", address: "1.1.1.1", thresholds: LatencyThresholds(downAfterFailures: 1))
+        let cloudflare = HostConfig(id: UUID(), displayName: "Cloudflare", address: "cloudflare.example", thresholds: LatencyThresholds(downAfterFailures: 1))
         let google = HostConfig(id: UUID(), displayName: "Google", address: "8.8.8.8", thresholds: LatencyThresholds(downAfterFailures: 1))
         let diagnosis = NetworkPerspectiveDiagnoser().diagnose(
             hosts: [cloudflare, google],
@@ -342,6 +414,105 @@ final class DomainBehaviorTests: XCTestCase {
         XCTAssertEqual(diagnosis.scope, .remoteService)
         XCTAssertEqual(diagnosis.title, "Remote host down")
         XCTAssertEqual(diagnosis.affectedHostIDs, [cloudflare.id])
+        XCTAssertEqual(diagnosis.verdict, .remoteServiceDown(hostIDs: [cloudflare.id]))
+        XCTAssertEqual(diagnosis.confidence, .high)
+        XCTAssertEqual(diagnosis.faultTier, .remoteService)
+        assertEvidence(
+            diagnosis.tierEvidence,
+            equals: [
+                (.upstream, total: 1, healthy: 1, degraded: 0, down: 0),
+                (.remoteService, total: 1, healthy: 0, degraded: 0, down: 1)
+            ]
+        )
+    }
+
+    func testNetworkPerspectiveUsesTentativeConfidenceForMixedTierEvidence() {
+        let gateway = HostConfig(id: UUID(), displayName: "Default Gateway", address: "192.168.1.1", thresholds: LatencyThresholds(downAfterFailures: 1))
+        let cloudflare = HostConfig(id: UUID(), displayName: "Cloudflare", address: "1.1.1.1", thresholds: LatencyThresholds(downAfterFailures: 1))
+        let google = HostConfig(id: UUID(), displayName: "Google", address: "8.8.8.8", thresholds: LatencyThresholds(downAfterFailures: 1))
+        let diagnosis = NetworkPerspectiveDiagnoser().diagnose(
+            hosts: [gateway, cloudflare, google],
+            healthByHost: [
+                gateway.id: health(for: gateway, statusAfter: [.success(hostID: gateway.id, latency: .milliseconds(3))]),
+                cloudflare.id: health(for: cloudflare, statusAfter: [.failure(hostID: cloudflare.id, reason: .timeout)]),
+                google.id: health(for: google, statusAfter: [.success(hostID: google.id, latency: .milliseconds(18))])
+            ]
+        )
+
+        XCTAssertEqual(diagnosis.scope, .upstream)
+        XCTAssertEqual(diagnosis.title, "Upstream path down")
+        XCTAssertEqual(diagnosis.confidence, .tentative)
+        XCTAssertEqual(diagnosis.evidenceNote, "1/2 upstream internet hosts down")
+        assertEvidence(
+            diagnosis.tierEvidence,
+            equals: [
+                (.localGateway, total: 1, healthy: 1, degraded: 0, down: 0),
+                (.upstream, total: 2, healthy: 1, degraded: 0, down: 1)
+            ]
+        )
+    }
+
+    func testNetworkPerspectiveDoesNotTreatSingleTransientFailureAsDown() {
+        let gateway = HostConfig(id: UUID(), displayName: "Default Gateway", address: "192.168.1.1")
+        let cloudflare = HostConfig(id: UUID(), displayName: "Cloudflare", address: "1.1.1.1")
+        let diagnosis = NetworkPerspectiveDiagnoser().diagnose(
+            hosts: [gateway, cloudflare],
+            healthByHost: [
+                gateway.id: health(for: gateway, statusAfter: [.success(hostID: gateway.id, latency: .milliseconds(3))]),
+                cloudflare.id: health(for: cloudflare, statusAfter: [.failure(hostID: cloudflare.id, reason: .timeout)])
+            ]
+        )
+
+        XCTAssertEqual(diagnosis.scope, .partialDegradation)
+        XCTAssertEqual(diagnosis.title, "Upstream internet degraded")
+        XCTAssertEqual(diagnosis.verdict, .partialDegradation(tier: .upstream))
+        XCTAssertEqual(diagnosis.confidence, .tentative)
+        assertEvidence(
+            diagnosis.tierEvidence,
+            equals: [
+                (.localGateway, total: 1, healthy: 1, degraded: 0, down: 0),
+                (.upstream, total: 1, healthy: 0, degraded: 1, down: 0)
+            ]
+        )
+    }
+
+    func testNetworkPerspectiveSuppressesPathBlameWhenLocalLinkIsDown() {
+        let gateway = HostConfig(id: UUID(), displayName: "Default Gateway", address: "192.168.1.1", thresholds: LatencyThresholds(downAfterFailures: 1))
+        let cloudflare = HostConfig(id: UUID(), displayName: "Cloudflare", address: "1.1.1.1", thresholds: LatencyThresholds(downAfterFailures: 1))
+        let diagnosis = NetworkPerspectiveDiagnoser().diagnose(
+            hosts: [gateway, cloudflare],
+            healthByHost: [
+                gateway.id: health(for: gateway, statusAfter: [.failure(hostID: gateway.id, reason: .timeout)]),
+                cloudflare.id: health(for: cloudflare, statusAfter: [.failure(hostID: cloudflare.id, reason: .timeout)])
+            ],
+            networkStatus: .notConnected
+        )
+
+        XCTAssertEqual(diagnosis.scope, .localNetwork)
+        XCTAssertEqual(diagnosis.title, "Network disconnected")
+        XCTAssertEqual(diagnosis.verdict, .localNetworkDown)
+        XCTAssertEqual(diagnosis.confidence, .high)
+        XCTAssertEqual(diagnosis.faultTier, .localGateway)
+        XCTAssertEqual(diagnosis.evidenceNote, "Not Connected")
+        XCTAssertTrue(diagnosis.tierEvidence.isEmpty)
+    }
+
+    func testNetworkPerspectiveUsesSystemNoInternetAsTentativeGate() {
+        let cloudflare = HostConfig(id: UUID(), displayName: "Cloudflare", address: "1.1.1.1", thresholds: LatencyThresholds(downAfterFailures: 1))
+        let diagnosis = NetworkPerspectiveDiagnoser().diagnose(
+            hosts: [cloudflare],
+            healthByHost: [
+                cloudflare.id: health(for: cloudflare, statusAfter: [.failure(hostID: cloudflare.id, reason: .timeout)])
+            ],
+            networkStatus: .noInternet
+        )
+
+        XCTAssertEqual(diagnosis.scope, .upstream)
+        XCTAssertEqual(diagnosis.title, "No internet connection")
+        XCTAssertEqual(diagnosis.verdict, .upstreamDown)
+        XCTAssertEqual(diagnosis.confidence, .tentative)
+        XCTAssertEqual(diagnosis.faultTier, .upstream)
+        XCTAssertEqual(diagnosis.evidenceNote, "No Internet")
     }
 
     func testAppStoreFlavorNormalizesUnsupportedICMPHosts() {
@@ -378,5 +549,18 @@ final class DomainBehaviorTests: XCTestCase {
             health.ingest(result.withHostMetadata(from: host))
         }
         return health
+    }
+
+    private func assertEvidence(
+        _ evidence: [NetworkPerspectiveDiagnosis.TierEvidence],
+        equals expected: [(tier: NetworkTier, total: Int, healthy: Int, degraded: Int, down: Int)],
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        XCTAssertEqual(evidence.map(\.tier), expected.map(\.tier), file: file, line: line)
+        XCTAssertEqual(evidence.map(\.totalCount), expected.map(\.total), file: file, line: line)
+        XCTAssertEqual(evidence.map(\.healthyCount), expected.map(\.healthy), file: file, line: line)
+        XCTAssertEqual(evidence.map(\.degradedCount), expected.map(\.degraded), file: file, line: line)
+        XCTAssertEqual(evidence.map(\.downCount), expected.map(\.down), file: file, line: line)
     }
 }

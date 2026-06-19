@@ -16,6 +16,7 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
     }
     @Published var draftHostName = ""
     @Published var draftHostAddress = ""
+    @Published var draftNetworkTier: NetworkTier?
     @Published var draftMethod: PingMethod = .tcp
     @Published var draftPort: Int = Int(PingMethod.tcp.defaultPort ?? 0)
     @Published var draftIntervalMilliseconds: Double = 2_000
@@ -27,6 +28,8 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
     @Published private(set) var draftTestResultText: String?
     @Published private(set) var isTestingDraftHost = false
     @Published var editingHostID: UUID?
+    @Published var isCreatingHost = false
+    @Published var showsAdvancedHostFields = false
     @Published private(set) var gatewayDetectionText: String?
     @Published var notificationRules: NotificationRuleSet {
         didSet {
@@ -202,7 +205,7 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
     }
 
     var networkDiagnosis: NetworkPerspectiveDiagnosis {
-        networkDiagnoser.diagnose(hosts: snapshot.hosts, healthByHost: snapshot.healthByHost)
+        networkDiagnoser.diagnose(hosts: snapshot.hosts, healthByHost: snapshot.healthByHost, networkStatus: currentNetworkStatus)
     }
 
     var historyExportHost: HostConfig? {
@@ -300,6 +303,7 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
             id: editingHostID ?? UUID(),
             displayName: draftHostName,
             address: draftHostAddress,
+            tier: draftNetworkTier,
             method: draftMethod,
             port: draftMethod == .icmp ? nil : UInt16(clamping: draftPort),
             interval: .milliseconds(draftIntervalMilliseconds),
@@ -376,6 +380,11 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
         loadDraft(from: host)
     }
 
+    func beginAddingHost() {
+        clearDraftHost()
+        isCreatingHost = true
+    }
+
     func addDraftHost() {
         var host = draftHost
         guard host.validationErrors.isEmpty else { return }
@@ -387,8 +396,11 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
 
     func clearDraftHost() {
         editingHostID = nil
+        isCreatingHost = false
+        showsAdvancedHostFields = false
         draftHostName = ""
         draftHostAddress = ""
+        draftNetworkTier = nil
         draftMethod = .tcp
         draftPort = Int(PingMethod.tcp.defaultPort ?? 0)
         draftIntervalMilliseconds = 2_000
@@ -873,8 +885,11 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
 
     private func loadDraft(from host: HostConfig) {
         editingHostID = host.id
+        isCreatingHost = false
+        showsAdvancedHostFields = false
         draftHostName = host.displayName
         draftHostAddress = host.address
+        draftNetworkTier = host.tier
         draftMethod = host.method
         draftPort = Int(host.port ?? host.method.defaultPort ?? 0)
         draftIntervalMilliseconds = host.interval.milliseconds

@@ -173,13 +173,39 @@ struct NetworkDiagnosisRow: View {
                 .foregroundStyle(tint)
                 .frame(width: 16)
             VStack(alignment: .leading, spacing: 2) {
-                Text(diagnosis.title)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.primary)
+                HStack(spacing: 6) {
+                    Text(diagnosis.title)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.primary)
+                    if diagnosis.confidence == .tentative {
+                        Text("Tentative")
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle(tint)
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 2)
+                            .background(tint.opacity(0.14), in: RoundedRectangle(cornerRadius: 4))
+                    }
+                }
                 Text(diagnosis.detail)
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
+                if let evidenceNote = diagnosis.evidenceNote {
+                    Text(evidenceNote)
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(.secondary.opacity(0.82))
+                        .lineLimit(1)
+                }
+                if !diagnosis.tierEvidence.isEmpty {
+                    HStack(spacing: 6) {
+                        ForEach(diagnosis.tierEvidence, id: \.tier) { evidence in
+                            NetworkTierEvidenceChip(evidence: evidence, isFault: diagnosis.faultTier == evidence.tier)
+                        }
+                    }
+                    .padding(.top, 2)
+                    .accessibilityElement(children: .combine)
+                    .accessibilityLabel(chainAccessibilityText)
+                }
             }
             Spacer(minLength: 0)
         }
@@ -191,7 +217,7 @@ struct NetworkDiagnosisRow: View {
                 .stroke(tint.opacity(0.22), lineWidth: 1)
         )
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(diagnosis.title). \(diagnosis.detail)")
+        .accessibilityLabel(accessibilityText)
     }
 
     private var iconName: String {
@@ -214,6 +240,57 @@ struct NetworkDiagnosisRow: View {
         case .remoteService: .yellow
         case .partialDegradation: .yellow
         }
+    }
+
+    private var accessibilityText: String {
+        var parts = [diagnosis.title, diagnosis.detail]
+        if diagnosis.confidence == .tentative {
+            parts.append(diagnosis.confidence.displayName)
+        }
+        if let evidenceNote = diagnosis.evidenceNote {
+            parts.append(evidenceNote)
+        }
+        if !diagnosis.tierEvidence.isEmpty {
+            parts.append(chainAccessibilityText)
+        }
+        return parts.joined(separator: ". ")
+    }
+
+    private var chainAccessibilityText: String {
+        diagnosis.tierEvidence
+            .map { "\($0.tier.shortName): \($0.summary)" }
+            .joined(separator: ", ")
+    }
+}
+
+private struct NetworkTierEvidenceChip: View {
+    let evidence: NetworkPerspectiveDiagnosis.TierEvidence
+    let isFault: Bool
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Circle()
+                .fill(Color(statusColor: evidence.status.statusColor))
+                .frame(width: 6, height: 6)
+            Text(evidence.tier.shortName)
+                .lineLimit(1)
+            Text("\(evidence.healthyCount)/\(evidence.totalCount)")
+                .foregroundStyle(.secondary)
+                .monospacedDigit()
+        }
+        .font(.caption2.weight(isFault ? .bold : .semibold))
+        .foregroundStyle(isFault ? .primary : .secondary)
+        .padding(.horizontal, 5)
+        .padding(.vertical, 3)
+        .background(
+            RoundedRectangle(cornerRadius: 5)
+                .fill(Color(statusColor: evidence.status.statusColor).opacity(isFault ? 0.18 : 0.08))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 5)
+                .stroke(Color(statusColor: evidence.status.statusColor).opacity(isFault ? 0.42 : 0.16), lineWidth: 1)
+        )
+        .help("\(evidence.tier.settingsName): \(evidence.summary)")
     }
 }
 
@@ -486,11 +563,30 @@ struct SettingsRootView: View {
     private var hosts: some View {
         SettingsPane {
             SettingsSection("Monitored Hosts") {
-                HStack {
+                HStack(spacing: 10) {
                     Text("\(model.snapshot.hosts.count) configured")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     Spacer()
+                    Button {
+                        model.addDefaultGatewayHost()
+                    } label: {
+                        Label("Default Gateway", systemImage: "network")
+                    }
+                    .disabled(model.gatewayDetectionText == "Detecting...")
+                    Button {
+                        model.beginAddingHost()
+                    } label: {
+                        Label("Add Host", systemImage: "plus")
+                    }
+                    .keyboardShortcut("n", modifiers: [.command])
+                }
+                .controlSize(.small)
+
+                if let gateway = model.gatewayDetectionText {
+                    Text(gateway)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
 
                 VStack(spacing: 8) {
@@ -513,8 +609,10 @@ struct SettingsRootView: View {
                 }
             }
 
-            SettingsSection(model.editingHostID == nil ? "Add Host" : "Edit Host") {
-                hostEditor
+            if model.isCreatingHost || model.editingHostID != nil {
+                SettingsSection(model.editingHostID == nil ? "Add Host" : "Edit Host") {
+                    hostEditor
+                }
             }
         }
     }
@@ -557,38 +655,69 @@ struct SettingsRootView: View {
                     Spacer(minLength: 0)
                 }
 
-                SettingsField("Notifications") {
-                    Picker("Notifications", selection: $model.draftNotificationPolicy) {
-                        ForEach(HostNotificationPolicy.allCases, id: \.self) { policy in
-                            Text(policy.displayName).tag(policy)
-                        }
-                    }
-                    .labelsHidden()
-                    .frame(maxWidth: 220)
+                Button {
+                    model.showsAdvancedHostFields.toggle()
+                } label: {
+                    Label(model.showsAdvancedHostFields ? "Hide Advanced" : "Show Advanced", systemImage: model.showsAdvancedHostFields ? "chevron.down" : "chevron.right")
+                        .font(.caption.weight(.semibold))
                 }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
 
-                HStack(alignment: .top, spacing: 14) {
-                    SettingsField("Interval") {
-                        UnitNumberField(value: $model.draftIntervalMilliseconds, unit: "ms", width: 78)
-                    }
-                    SettingsField("Timeout") {
-                        UnitNumberField(value: $model.draftTimeoutMilliseconds, unit: "ms", width: 78)
-                    }
-                    SettingsField("Degraded at") {
-                        UnitNumberField(value: $model.draftDegradedThresholdMilliseconds, unit: "ms", width: 78)
+                if model.showsAdvancedHostFields {
+                    VStack(alignment: .leading, spacing: 10) {
+                        SettingsField("Notifications") {
+                            Picker("Notifications", selection: $model.draftNotificationPolicy) {
+                                ForEach(HostNotificationPolicy.allCases, id: \.self) { policy in
+                                    Text(policy.displayName).tag(policy)
+                                }
+                            }
+                            .labelsHidden()
+                            .frame(maxWidth: 220)
+                        }
+
+                        SettingsField("Network role") {
+                            Picker("Network role", selection: Binding(
+                                get: { model.draftNetworkTier?.rawValue ?? Self.autoNetworkTierSelection },
+                                set: { selection in
+                                    model.draftNetworkTier = selection == Self.autoNetworkTierSelection ? nil : NetworkTier(rawValue: selection)
+                            }
+                        )) {
+                            Text("Auto (\(model.draftHost.effectiveNetworkTier.settingsName))").tag(Self.autoNetworkTierSelection)
+                            Divider()
+                            ForEach(NetworkTier.allCases, id: \.self) { tier in
+                                Text(tier.settingsName).tag(tier.rawValue)
+                            }
+                        }
+                            .labelsHidden()
+                            .frame(maxWidth: 220)
+                        }
+
+                        HStack(alignment: .top, spacing: 14) {
+                            SettingsField("Interval") {
+                                UnitNumberField(value: $model.draftIntervalMilliseconds, unit: "ms", width: 78)
+                            }
+                            SettingsField("Timeout") {
+                                UnitNumberField(value: $model.draftTimeoutMilliseconds, unit: "ms", width: 78)
+                            }
+                            SettingsField("Degraded at") {
+                                UnitNumberField(value: $model.draftDegradedThresholdMilliseconds, unit: "ms", width: 78)
+                            }
+                        }
+
+                        Stepper("Down after \(model.draftDownAfterFailures) failures", value: $model.draftDownAfterFailures, in: 1...10)
+                            .frame(width: 190, alignment: .leading)
                     }
                 }
             }
 
             HStack(spacing: 10) {
-                Stepper("Down after \(model.draftDownAfterFailures) failures", value: $model.draftDownAfterFailures, in: 1...10)
-                    .frame(width: 190, alignment: .leading)
-                Spacer()
                 if let result = model.draftTestResultText {
                     Text(result)
                         .font(.caption)
                         .foregroundStyle(result.hasPrefix("Failed") ? .red : .secondary)
                 }
+                Spacer()
                 Button {
                     model.testDraftHost()
                 } label: {
@@ -604,27 +733,14 @@ struct SettingsRootView: View {
                 Button {
                     model.clearDraftHost()
                 } label: {
-                    Label(model.editingHostID == nil ? "Clear" : "New Host", systemImage: model.editingHostID == nil ? "xmark" : "square.and.pencil")
-                }
-                .disabled(model.editingHostID == nil && model.draftHostName.isEmpty && model.draftHostAddress.isEmpty)
-            }
-            .controlSize(.small)
-
-            HStack(spacing: 12) {
-                Button {
-                    model.addDefaultGatewayHost()
-                } label: {
-                    Label("Use Default Gateway", systemImage: "network")
-                }
-                if let gateway = model.gatewayDetectionText {
-                    Text(gateway)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    Label("Cancel", systemImage: "xmark")
                 }
             }
             .controlSize(.small)
         }
     }
+
+    private static let autoNetworkTierSelection = "__auto_network_tier__"
 
     private var display: some View {
         SettingsPane {
