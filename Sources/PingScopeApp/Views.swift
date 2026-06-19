@@ -626,6 +626,9 @@ struct SettingsRootView: View {
                 model.resetToDefaults()
             }
             Spacer()
+            Button("Quit PingScope") {
+                NSApp.terminate(nil)
+            }
             Button("Done") {
                 NSApp.keyWindow?.close()
             }
