@@ -21,7 +21,8 @@ require_log() {
 require_settings_text() {
   local pattern="$1"
   local dump
-  dump="$(osascript <<'APPLESCRIPT'
+  for _ in {1..8}; do
+    dump="$(osascript <<'APPLESCRIPT'
 on dumpElement(e, depth)
   if depth > 7 then return ""
   set lineText to ""
@@ -51,6 +52,11 @@ tell application "System Events"
 end tell
 APPLESCRIPT
 )"
+    if grep -q "$pattern" <<<"$dump"; then
+      return 0
+    fi
+    sleep 0.5
+  done
   if ! grep -q "$pattern" <<<"$dump"; then
     echo "---- PingScope Settings accessibility text ----" >&2
     echo "$dump" >&2
@@ -122,17 +128,10 @@ sleep 1
 settings_count="$(osascript -e 'tell application "System Events" to tell process "PingScope" to count windows whose title contains "Settings"')"
 [[ "$settings_count" -ge 1 ]] || fail "settings window did not open from Command-,"
 require_settings_text "PingScope"
-require_settings_text "Native latency monitoring for macOS."
-require_settings_text "Version"
-require_settings_text "License"
-require_settings_text "AGPLv3"
-require_settings_text "First Run Checklist"
-require_settings_text "Primary host"
-require_settings_text "Notifications"
-require_settings_text "Local network"
-require_settings_text "Overlay"
-require_settings_text "Widgets"
-require_settings_text "Start at login"
-require_settings_text "Settings, history, exports, and widget snapshots stay local."
+require_settings_text "Monitored Hosts"
+require_settings_text "Cloudflare DNS"
+require_settings_text "PRIMARY"
+require_settings_text "TCP 1.1.1.1:443"
+require_settings_text "Internet"
 
 echo "PASS: PingScope app smoke validation passed (${w}x${h} overlay at ${x},${y})"

@@ -17,10 +17,10 @@ public enum NetworkTier: String, CaseIterable, Codable, Equatable, Sendable {
 
     public var displayName: String {
         switch self {
-        case .localGateway: "Local gateway"
-        case .ispEdge: "ISP edge"
-        case .upstream: "Upstream internet"
-        case .remoteService: "Remote service"
+        case .localGateway: "Router / gateway"
+        case .ispEdge: "ISP / modem path"
+        case .upstream: "Internet"
+        case .remoteService: "Website or service"
         }
     }
 
@@ -30,6 +30,19 @@ public enum NetworkTier: String, CaseIterable, Codable, Equatable, Sendable {
         case .ispEdge: "ISP / modem path"
         case .upstream: "Internet check"
         case .remoteService: "Website or service"
+        }
+    }
+
+    public var helpText: String {
+        switch self {
+        case .localGateway:
+            "Your local router or default gateway. If this fails, the local network is probably the problem."
+        case .ispEdge:
+            "The next hop after your router, modem, satellite dish, or ISP edge. If this fails while the router works, blame the WAN path."
+        case .upstream:
+            "A general internet target such as public DNS. If this fails while local/ISP checks work, the broader internet path is suspect."
+        case .remoteService:
+            "A specific website, API, or service. If this fails while internet checks work, that service is probably isolated."
         }
     }
 
@@ -781,7 +794,7 @@ public struct NetworkPerspectiveDiagnoser: Sendable {
             return NetworkPerspectiveDiagnosis(
                 scope: .localNetwork,
                 title: title,
-                detail: "\(names(fault.down)) not responding; failures beyond the local gateway are unknown.",
+                detail: "\(names(fault.down)) not responding; failures beyond the router are unknown.",
                 affectedHostIDs: affected,
                 verdict: .localNetworkDown,
                 confidence: confidence,
@@ -793,7 +806,7 @@ public struct NetworkPerspectiveDiagnoser: Sendable {
             return NetworkPerspectiveDiagnosis(
                 scope: .upstream,
                 title: "ISP path down",
-                detail: "Local gateway responds, but the ISP edge is not reachable.",
+                detail: "The router responds, but the modem, dish, or ISP edge is not reachable.",
                 affectedHostIDs: affected,
                 verdict: .ispPathDown,
                 confidence: confidence,
@@ -805,7 +818,7 @@ public struct NetworkPerspectiveDiagnoser: Sendable {
             return NetworkPerspectiveDiagnosis(
                 scope: .upstream,
                 title: "Upstream path down",
-                detail: "Inner tiers respond, but upstream internet hosts are not reachable.",
+                detail: "Router and ISP checks respond, but internet checks are not reachable.",
                 affectedHostIDs: affected,
                 verdict: .upstreamDown,
                 confidence: confidence,

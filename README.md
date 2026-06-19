@@ -135,13 +135,13 @@ Sparkle uses the Keychain account `pingscope-ed25519`. The public key is already
 Release command:
 
 ```bash
-scripts/release-github.sh --version 0.1.2 --release-notes RELEASE_NOTES.md
+scripts/release-github.sh --version 0.1.3 --release-notes RELEASE_NOTES.md
 ```
 
 Validate the published Sparkle feed and Developer ID DMG:
 
 ```bash
-PING_SCOPE_DMG_SHA256=<release-dmg-sha256> scripts/validate-sparkle-feed.sh 0.1.2
+PING_SCOPE_DMG_SHA256=<release-dmg-sha256> scripts/validate-sparkle-feed.sh 0.1.3
 ```
 
 ## Architecture

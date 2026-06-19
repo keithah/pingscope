@@ -763,7 +763,7 @@ struct SettingsRootView: View {
                                     model.draftNetworkTier = selection == Self.autoNetworkTierSelection ? nil : NetworkTier(rawValue: selection)
                             }
                         )) {
-                            Text("Auto (\(model.draftHost.effectiveNetworkTier.settingsName))").tag(Self.autoNetworkTierSelection)
+                            Text("Auto: \(model.draftHost.effectiveNetworkTier.settingsName)").tag(Self.autoNetworkTierSelection)
                             Divider()
                             ForEach(NetworkTier.allCases, id: \.self) { tier in
                                 Text(tier.settingsName).tag(tier.rawValue)
@@ -771,6 +771,11 @@ struct SettingsRootView: View {
                         }
                             .labelsHidden()
                             .frame(maxWidth: 220)
+                            Text(model.draftHost.effectiveNetworkTier.helpText)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .frame(maxWidth: 340, alignment: .leading)
                         }
 
                         HStack(alignment: .top, spacing: 14) {
@@ -1486,7 +1491,7 @@ struct HostSettingsRow: View {
                             .foregroundStyle(.secondary)
                     }
                 }
-                Text("\(host.method.rawValue.uppercased()) \(host.address)\(host.port.map { ":\($0)" } ?? "")")
+                Text("\(host.method.rawValue.uppercased()) \(host.address)\(host.port.map { ":\($0)" } ?? "") • \(host.effectiveNetworkTier.shortName)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)

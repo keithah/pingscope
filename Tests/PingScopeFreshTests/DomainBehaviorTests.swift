@@ -458,7 +458,7 @@ final class DomainBehaviorTests: XCTestCase {
         XCTAssertEqual(diagnosis.verdict, .localNetworkDown)
         XCTAssertEqual(diagnosis.confidence, .high)
         XCTAssertEqual(diagnosis.faultTier, .localGateway)
-        XCTAssertEqual(diagnosis.evidenceNote, "1/1 local gateway host down")
+        XCTAssertEqual(diagnosis.evidenceNote, "1/1 router / gateway host down")
         assertEvidence(
             diagnosis.tierEvidence,
             equals: [
@@ -485,7 +485,7 @@ final class DomainBehaviorTests: XCTestCase {
         XCTAssertEqual(diagnosis.verdict, .upstreamDown)
         XCTAssertEqual(diagnosis.confidence, .high)
         XCTAssertEqual(diagnosis.faultTier, .upstream)
-        XCTAssertEqual(diagnosis.evidenceNote, "1/1 upstream internet host down")
+        XCTAssertEqual(diagnosis.evidenceNote, "1/1 internet host down")
         assertEvidence(
             diagnosis.tierEvidence,
             equals: [
@@ -566,7 +566,7 @@ final class DomainBehaviorTests: XCTestCase {
         XCTAssertEqual(diagnosis.scope, .upstream)
         XCTAssertEqual(diagnosis.title, "Upstream path down")
         XCTAssertEqual(diagnosis.confidence, .tentative)
-        XCTAssertEqual(diagnosis.evidenceNote, "1/2 upstream internet hosts down")
+        XCTAssertEqual(diagnosis.evidenceNote, "1/2 internet hosts down")
         assertEvidence(
             diagnosis.tierEvidence,
             equals: [
@@ -588,7 +588,7 @@ final class DomainBehaviorTests: XCTestCase {
         )
 
         XCTAssertEqual(diagnosis.scope, .partialDegradation)
-        XCTAssertEqual(diagnosis.title, "Upstream internet degraded")
+        XCTAssertEqual(diagnosis.title, "Internet degraded")
         XCTAssertEqual(diagnosis.verdict, .partialDegradation(tier: .upstream))
         XCTAssertEqual(diagnosis.confidence, .tentative)
         assertEvidence(

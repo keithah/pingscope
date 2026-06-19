@@ -1,6 +1,6 @@
-# PingScope 0.1.2
+# PingScope 0.1.3
 
-Second patch release for the fresh native rebuild, focused on overlay settings reliability, Sparkle feed hosting, widget version consistency, and release validation.
+Third patch release for the fresh native rebuild, focused on macOS 15 availability, Starlink-aware diagnostics, and clearer network-failure interpretation.
 
 ## Highlights
 
@@ -16,6 +16,10 @@ Second patch release for the fresh native rebuild, focused on overlay settings r
 
 ## Fixes
 
+- Lowered the App Store build minimum requirement from macOS 26 to macOS 15.
+- Added native Starlink dish probing with local HTTP/2 gRPC status reads, live telemetry capture, and silent detection on launch/network changes.
+- Added network-diagnosis roles for Router / Gateway, ISP / modem path, Internet checks, and Website / service targets.
+- The popover can show all configured hosts in a unified multi-host graph.
 - Fixed Display > Overlay settings so Show Overlay, Always on Top, Compact Graph Mode, and Opacity consistently apply to the live overlay window.
 - Fixed the overlay window's initial level so the saved Always on Top setting is respected when the overlay is first created.
 - Fixed the About checklist overlay action to use the same app delegate bridge as the main settings controls.
@@ -28,6 +32,7 @@ Second patch release for the fresh native rebuild, focused on overlay settings r
 
 ## Distribution
 
+- App Store release 0.1.3 is live and ready for sale.
 - Developer ID DMG is signed, notarized, stapled, and Gatekeeper-verified.
 - Sparkle appcast is signed with the PingScope EdDSA key and is now hosted from GitHub Pages.
 - Widget extension versions now follow the app's shared marketing version and build number.
