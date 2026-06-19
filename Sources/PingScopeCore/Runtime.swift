@@ -230,6 +230,7 @@ public actor PingRuntime {
     private let historyStore: (any PingHistoryStore)?
     private var allowsLocalNetworkProbes: Bool
     private var alertEngine: AlertDecisionEngine
+    private let networkDiagnoser = NetworkPerspectiveDiagnoser()
     private var healthByHost: [UUID: HostHealth] = [:]
     private var samplesByHost: [UUID: SampleSeries] = [:]
     private var streamTask: Task<Void, Never>?
@@ -285,7 +286,8 @@ public actor PingRuntime {
     }
 
     public func ingest(_ result: PingResult) async {
-        let host = await hostStore.hosts().first { $0.id == result.hostID }
+        let hosts = await hostStore.hosts()
+        let host = hosts.first { $0.id == result.hostID }
         var health = healthByHost[result.hostID] ?? HostHealth(hostID: result.hostID, thresholds: host?.thresholds ?? .defaults)
         let previousStatus = health.status
         health.ingest(result)
@@ -304,7 +306,13 @@ public actor PingRuntime {
         if host?.notifications == .muted {
             alerts = []
         } else {
-            alerts = alertEngine.evaluate(result: result, previousStatus: previousStatus, currentStatus: health.status).map { [$0] } ?? []
+            let diagnosis = networkDiagnoser.diagnose(hosts: hosts, healthByHost: healthByHost)
+            if let diagnosisAlert = alertEngine.evaluateDiagnosis(diagnosis, at: result.timestamp),
+               !shouldSuppressDiagnosisAlert(diagnosisAlert, hosts: hosts) {
+                alerts = [diagnosisAlert]
+            } else {
+                alerts = alertEngine.evaluate(result: result, previousStatus: previousStatus, currentStatus: health.status).map { [$0] } ?? []
+            }
         }
         publishSnapshot(alerts: alerts)
     }
@@ -374,6 +382,17 @@ public actor PingRuntime {
                 samplesByHost: samplesByHost,
                 alerts: alerts
             ))
+        }
+    }
+
+    private func shouldSuppressDiagnosisAlert(_ alert: AlertDecision, hosts: [HostConfig]) -> Bool {
+        switch alert {
+        case let .remoteServiceDown(hostIDs):
+            !hostIDs.isEmpty && hostIDs.allSatisfy { id in
+                hosts.first { $0.id == id }?.notifications == .muted
+            }
+        default:
+            false
         }
     }
 }

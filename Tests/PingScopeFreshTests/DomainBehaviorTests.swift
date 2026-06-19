@@ -248,6 +248,103 @@ final class DomainBehaviorTests: XCTestCase {
         )
     }
 
+    func testNotificationRulesIncludeSpecificDiagnosisAlertsByDefault() {
+        let rules = NotificationRuleSet()
+
+        XCTAssertTrue(rules.alertTypes.contains(.localNetworkDown))
+        XCTAssertTrue(rules.alertTypes.contains(.ispPathDown))
+        XCTAssertTrue(rules.alertTypes.contains(.upstreamDown))
+        XCTAssertTrue(rules.alertTypes.contains(.remoteServiceDown))
+        XCTAssertFalse(rules.alertTypes.contains(.pathDegraded))
+    }
+
+    func testDiagnosisAlertsUseSpecificTypesWhenHighConfidence() {
+        let hostID = UUID()
+        var engine = AlertDecisionEngine(rules: NotificationRuleSet(
+            isEnabled: true,
+            cooldown: .seconds(60),
+            alertTypes: [.upstreamDown, .internetLoss, .recovered],
+            latencyThreshold: .milliseconds(250),
+            notifyOnRecovery: true
+        ))
+        let base = Date(timeIntervalSince1970: 3_000)
+
+        let diagnosis = NetworkPerspectiveDiagnosis(
+            scope: .upstream,
+            title: "Upstream path down",
+            detail: "test",
+            affectedHostIDs: [hostID],
+            verdict: .upstreamDown,
+            confidence: .high,
+            faultTier: .upstream
+        )
+
+        XCTAssertEqual(engine.evaluateDiagnosis(diagnosis, at: base), .upstreamDown)
+        XCTAssertNil(engine.evaluateDiagnosis(diagnosis, at: base.addingTimeInterval(5)))
+        XCTAssertEqual(
+            engine.evaluateDiagnosis(
+                NetworkPerspectiveDiagnosis(
+                    scope: .allReachable,
+                    title: "Everything reachable",
+                    detail: "test",
+                    verdict: .allReachable
+                ),
+                at: base.addingTimeInterval(90)
+            ),
+            .pathRecovered
+        )
+    }
+
+    func testTentativeDiagnosisAlertsFallBackToInternetLoss() {
+        let hostID = UUID()
+        var engine = AlertDecisionEngine(rules: NotificationRuleSet(
+            isEnabled: true,
+            cooldown: .seconds(60),
+            alertTypes: [.upstreamDown, .internetLoss],
+            latencyThreshold: .milliseconds(250),
+            notifyOnRecovery: true
+        ))
+
+        let diagnosis = NetworkPerspectiveDiagnosis(
+            scope: .upstream,
+            title: "Upstream path down",
+            detail: "test",
+            affectedHostIDs: [hostID],
+            verdict: .upstreamDown,
+            confidence: .tentative,
+            faultTier: .upstream
+        )
+
+        XCTAssertEqual(engine.evaluateDiagnosis(diagnosis, at: Date(timeIntervalSince1970: 4_000)), .internetLoss)
+    }
+
+    func testDegradedDiagnosisAlertIsOptIn() {
+        var engine = AlertDecisionEngine(rules: NotificationRuleSet())
+        let diagnosis = NetworkPerspectiveDiagnosis(
+            scope: .partialDegradation,
+            title: "Internet check degraded",
+            detail: "test",
+            verdict: .partialDegradation(tier: .upstream),
+            confidence: .high,
+            faultTier: .upstream
+        )
+
+        XCTAssertNil(engine.evaluateDiagnosis(diagnosis, at: Date(timeIntervalSince1970: 5_000)))
+
+        engine.rules.alertTypes.insert(.pathDegraded)
+        XCTAssertNil(engine.evaluateDiagnosis(diagnosis, at: Date(timeIntervalSince1970: 5_100)))
+
+        let changedDiagnosis = NetworkPerspectiveDiagnosis(
+            scope: .partialDegradation,
+            title: "Router degraded",
+            detail: "test",
+            verdict: .partialDegradation(tier: .localGateway),
+            confidence: .high,
+            faultTier: .localGateway
+        )
+        XCTAssertEqual(engine.evaluateDiagnosis(changedDiagnosis, at: Date(timeIntervalSince1970: 5_200)), .pathDegraded(tier: .localGateway))
+    }
+
     func testNotificationRulesRoundTripForSettingsPersistence() throws {
         let rules = NotificationRuleSet(
             isEnabled: true,

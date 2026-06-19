@@ -859,6 +859,11 @@ struct SettingsRootView: View {
                 SettingsToggleRow(systemImage: "speedometer", tint: .yellow, title: "High latency", isOn: alertBinding(.highLatency))
                 SettingsToggleRow(systemImage: "network", tint: .blue, title: "Network change", isOn: alertBinding(.networkChange))
                 SettingsToggleRow(systemImage: "wifi.slash", tint: .orange, title: "Internet loss", isOn: alertBinding(.internetLoss))
+                SettingsToggleRow(systemImage: "network.slash", tint: .red, title: "Local network down", isOn: alertBinding(.localNetworkDown))
+                SettingsToggleRow(systemImage: "cable.connector.slash", tint: .orange, title: "ISP path down", isOn: alertBinding(.ispPathDown))
+                SettingsToggleRow(systemImage: "wifi.exclamationmark", tint: .orange, title: "Internet path down", isOn: alertBinding(.upstreamDown))
+                SettingsToggleRow(systemImage: "exclamationmark.triangle.fill", tint: .yellow, title: "Remote service down", isOn: alertBinding(.remoteServiceDown))
+                SettingsToggleRow(systemImage: "waveform.path.ecg", tint: .yellow, title: "Path degraded", isOn: alertBinding(.pathDegraded))
             }
 
             SettingsSection("Network Status Alerts") {

@@ -800,7 +800,17 @@ public struct NotificationRuleSet: Codable, Equatable, Sendable {
     public init(
         isEnabled: Bool = true,
         cooldown: Duration = .seconds(300),
-            alertTypes: Set<AlertType> = [.hostDown, .recovered, .highLatency, .networkChange, .internetLoss],
+        alertTypes: Set<AlertType> = [
+            .hostDown,
+            .recovered,
+            .highLatency,
+            .networkChange,
+            .internetLoss,
+            .localNetworkDown,
+            .ispPathDown,
+            .upstreamDown,
+            .remoteServiceDown
+        ],
         latencyThreshold: Duration = .milliseconds(250),
         notifyOnRecovery: Bool = true
     ) {
@@ -818,6 +828,11 @@ public enum AlertType: String, Codable, Hashable, Sendable {
     case highLatency
     case networkChange
     case internetLoss
+    case localNetworkDown
+    case ispPathDown
+    case upstreamDown
+    case remoteServiceDown
+    case pathDegraded
 }
 
 public enum AlertDecision: Equatable, Sendable {
@@ -827,11 +842,18 @@ public enum AlertDecision: Equatable, Sendable {
     case networkChange(previousGateway: String?, currentGateway: String?)
     case internetLoss
     case networkStatus(NetworkConnectivityStatus)
+    case localNetworkDown
+    case ispPathDown
+    case upstreamDown
+    case remoteServiceDown(hostIDs: [UUID])
+    case pathDegraded(tier: NetworkTier)
+    case pathRecovered
 }
 
 public struct AlertDecisionEngine: Sendable {
     public var rules: NotificationRuleSet
     private var lastSentAt: [AlertType: Date] = [:]
+    private var lastDiagnosisSignature: String?
 
     public init(rules: NotificationRuleSet = NotificationRuleSet()) {
         self.rules = rules
@@ -897,9 +919,85 @@ public struct AlertDecisionEngine: Sendable {
         return .internetLoss
     }
 
+    public mutating func evaluateDiagnosis(
+        _ diagnosis: NetworkPerspectiveDiagnosis,
+        at date: Date = Date()
+    ) -> AlertDecision? {
+        guard rules.isEnabled else { return nil }
+
+        let signature = diagnosis.alertSignature
+        defer { lastDiagnosisSignature = signature }
+        guard signature != lastDiagnosisSignature else { return nil }
+
+        if diagnosis.verdict == .allReachable {
+            guard lastDiagnosisSignature != nil,
+                  rules.notifyOnRecovery,
+                  rules.alertTypes.contains(.recovered),
+                  shouldSend(.recovered, at: date)
+            else { return nil }
+            lastSentAt[.recovered] = date
+            return .pathRecovered
+        }
+
+        let candidate = alertCandidate(for: diagnosis)
+        guard let candidate else { return nil }
+        guard rules.alertTypes.contains(candidate.type) else { return nil }
+        guard shouldSend(candidate.type, at: date) else { return nil }
+        lastSentAt[candidate.type] = date
+        return candidate.decision
+    }
+
     private func shouldSend(_ type: AlertType, at date: Date) -> Bool {
         guard let lastSent = lastSentAt[type] else { return true }
         return date.timeIntervalSince(lastSent) >= rules.cooldown.seconds
+    }
+
+    private func alertCandidate(for diagnosis: NetworkPerspectiveDiagnosis) -> (type: AlertType, decision: AlertDecision)? {
+        if diagnosis.confidence != .high {
+            switch diagnosis.verdict {
+            case .localNetworkDown, .ispPathDown, .upstreamDown, .remoteServiceDown, .multipleFailures:
+                return (.internetLoss, .internetLoss)
+            case let .partialDegradation(tier):
+                return (.pathDegraded, .pathDegraded(tier: tier))
+            case .noData, .allReachable:
+                return nil
+            }
+        }
+
+        switch diagnosis.verdict {
+        case .localNetworkDown:
+            return (.localNetworkDown, .localNetworkDown)
+        case .ispPathDown:
+            return (.ispPathDown, .ispPathDown)
+        case .upstreamDown:
+            return (.upstreamDown, .upstreamDown)
+        case let .remoteServiceDown(hostIDs):
+            return (.remoteServiceDown, .remoteServiceDown(hostIDs: hostIDs))
+        case let .partialDegradation(tier):
+            return (.pathDegraded, .pathDegraded(tier: tier))
+        case let .multipleFailures(hostIDs):
+            return (.hostDown, .remoteServiceDown(hostIDs: hostIDs))
+        case .noData, .allReachable:
+            return nil
+        }
+    }
+}
+
+private extension NetworkPerspectiveDiagnosis {
+    var alertSignature: String {
+        switch verdict {
+        case .noData: "noData"
+        case .allReachable: "allReachable"
+        case .localNetworkDown: "localNetworkDown"
+        case .ispPathDown: "ispPathDown"
+        case .upstreamDown: "upstreamDown"
+        case let .remoteServiceDown(hostIDs):
+            "remoteServiceDown:\(hostIDs.map(\.uuidString).sorted().joined(separator: ","))"
+        case let .partialDegradation(tier):
+            "partialDegradation:\(tier.rawValue)"
+        case let .multipleFailures(hostIDs):
+            "multipleFailures:\(hostIDs.map(\.uuidString).sorted().joined(separator: ","))"
+        }
     }
 }
 

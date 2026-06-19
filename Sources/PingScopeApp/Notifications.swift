@@ -170,6 +170,26 @@ private struct NotificationMessage {
         case let .networkStatus(status):
             title = status.displayName
             body = "PingScope detected a network status change."
+        case .localNetworkDown:
+            title = "Local network down"
+            body = "PingScope thinks the router or local gateway is the failing boundary."
+        case .ispPathDown:
+            title = "ISP path down"
+            body = "The local gateway responds, but the ISP or modem path does not."
+        case .upstreamDown:
+            title = "Internet path down"
+            body = "Local connectivity is available, but upstream internet checks are failing."
+        case let .remoteServiceDown(hostIDs):
+            let names = hostIDs.prefix(3).map { Self.hostName($0, in: hosts) }.joined(separator: ", ")
+            let extra = hostIDs.count > 3 ? ", +\(hostIDs.count - 3) more" : ""
+            title = hostIDs.count == 1 ? "\(names) is unreachable" : "Remote services unreachable"
+            body = "\(names)\(extra) failed while inner network checks were reachable."
+        case let .pathDegraded(tier):
+            title = "\(tier.settingsName) degraded"
+            body = "PingScope detected slow or unreliable responses on this part of the path."
+        case .pathRecovered:
+            title = "Network path recovered"
+            body = "PingScope measurements are reachable again."
         }
     }
 

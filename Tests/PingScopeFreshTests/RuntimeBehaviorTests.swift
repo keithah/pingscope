@@ -109,7 +109,7 @@ final class RuntimeBehaviorTests: XCTestCase {
         let nextSnapshot = await iterator.next()
         let snapshot = try XCTUnwrap(nextSnapshot)
 
-        XCTAssertEqual(snapshot.alerts, [.hostDown(hostID: host.id)])
+        XCTAssertEqual(snapshot.alerts, [.remoteServiceDown(hostIDs: [host.id])])
     }
 
     func testRuntimeSuppressesAlertEventsForMutedHosts() async throws {
