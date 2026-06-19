@@ -863,14 +863,14 @@ struct SettingsRootView: View {
                         AppDelegate.shared?.setOverlayCompactMode($0)
                     }
                 ))
-                SettingsRow(systemImage: "slider.horizontal.3", tint: .teal, title: "Opacity") {
+                SettingsRow(systemImage: "slider.horizontal.3", tint: .teal, title: "Window opacity") {
                     HStack(spacing: 10) {
                         Slider(value: Binding(
                             get: { model.overlayOpacity },
                             set: {
-                                DebugLog.write("settings overlay opacity changed value=\($0)")
+                                DebugLog.write("settings window opacity changed value=\($0)")
                                 model.overlayOpacity = $0
-                                AppDelegate.shared?.applyOverlayBehavior()
+                                AppDelegate.shared?.applyWindowOpacity()
                             }
                         ), in: 0.55...1)
                         .frame(width: 160)

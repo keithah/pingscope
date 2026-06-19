@@ -155,6 +155,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         DebugLog.write("overlay behavior applied opacity=\(model.overlayOpacity) alwaysOnTop=\(model.overlayAlwaysOnTop) level=\(window.level.rawValue)")
     }
 
+    func applyWindowOpacity() {
+        let alpha = CGFloat(model.overlayOpacity)
+        overlayController?.window?.alphaValue = alpha
+        popover?.contentViewController?.view.window?.alphaValue = alpha
+        DebugLog.write("window opacity applied value=\(model.overlayOpacity)")
+    }
+
     func openPopoverFromOverlay() {
         DebugLog.write("AppDelegate.openPopoverFromOverlay called")
         guard let anchorView = overlayController?.window?.contentView else {
@@ -311,6 +318,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
         popover.show(relativeTo: anchorView.bounds, of: anchorView, preferredEdge: .minY)
         self.popover = popover
+        applyWindowOpacity()
+        DispatchQueue.main.async { [weak self, weak popover] in
+            guard self?.popover === popover else { return }
+            self?.applyWindowOpacity()
+        }
     }
 
     private func showContextMenu(from view: NSView) {
