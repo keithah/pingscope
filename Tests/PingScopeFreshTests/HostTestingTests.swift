@@ -45,7 +45,7 @@ final class HostTestingTests: XCTestCase {
         let detector = StarlinkDishDetector(statusClient: FakeStarlinkStatusClient(status: StarlinkStatus(
             popPingLatencyMilliseconds: 42,
             telemetry: StarlinkTelemetry(state: "CONNECTED")
-        )))
+        )), hosts: [.defaultStarlinkDish])
 
         let host = await detector.detect(timeout: .milliseconds(100))
 
@@ -58,6 +58,28 @@ final class HostTestingTests: XCTestCase {
         let host = await detector.detect(timeout: .milliseconds(100))
 
         XCTAssertNil(host)
+    }
+
+    func testStarlinkDishDetectorReturnsReachableCandidate() async {
+        let defaultHost = HostConfig.defaultStarlinkDish
+        let routerHost = HostConfig(
+            displayName: "Starlink",
+            address: "192.168.1.1",
+            tier: .ispEdge,
+            method: .starlink,
+            port: 9000,
+            interval: .seconds(5),
+            timeout: .seconds(2),
+            thresholds: LatencyThresholds(degradedMilliseconds: 150, downAfterFailures: 3)
+        )
+        let detector = StarlinkDishDetector(
+            statusClient: SelectiveStarlinkStatusClient(address: routerHost.address, port: routerHost.port),
+            hosts: [defaultHost, routerHost]
+        )
+
+        let host = await detector.detect(timeout: .milliseconds(100))
+
+        XCTAssertEqual(host, routerHost)
     }
 
     func testStarlinkDishDetectorTimesOut() async {
@@ -100,6 +122,18 @@ private struct FakeStarlinkStatusClient: StarlinkStatusFetching {
 private struct FailingStarlinkStatusClient: StarlinkStatusFetching {
     func fetchStatus(host: HostConfig) async throws -> StarlinkStatus {
         throw StarlinkStatusFetchError.unavailable
+    }
+}
+
+private struct SelectiveStarlinkStatusClient: StarlinkStatusFetching {
+    let address: String
+    let port: UInt16?
+
+    func fetchStatus(host: HostConfig) async throws -> StarlinkStatus {
+        guard host.address == address, host.port == port else {
+            throw StarlinkStatusFetchError.unavailable
+        }
+        return StarlinkStatus(popPingLatencyMilliseconds: 42, telemetry: StarlinkTelemetry(state: "CONNECTED"))
     }
 }
 

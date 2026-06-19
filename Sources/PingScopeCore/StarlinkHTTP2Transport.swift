@@ -11,6 +11,7 @@ public struct StarlinkHTTP2Transport: StarlinkGRPCTransport {
         }
 
         let connection = NWConnection(host: NWEndpoint.Host(host.address), port: nwPort, using: .tcp)
+        let sessionBox = StarlinkHTTP2SessionBox()
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
                 let session = StarlinkHTTP2Session(
@@ -20,11 +21,30 @@ public struct StarlinkHTTP2Transport: StarlinkGRPCTransport {
                     requestFrame: requestFrame,
                     continuation: continuation
                 )
+                sessionBox.set(session)
                 session.start()
             }
         } onCancel: {
-            connection.cancel()
+            sessionBox.cancel()
         }
+    }
+}
+
+private final class StarlinkHTTP2SessionBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var session: StarlinkHTTP2Session?
+
+    func set(_ session: StarlinkHTTP2Session) {
+        lock.lock()
+        self.session = session
+        lock.unlock()
+    }
+
+    func cancel() {
+        lock.lock()
+        let session = session
+        lock.unlock()
+        session?.cancel()
     }
 }
 
@@ -69,6 +89,10 @@ private final class StarlinkHTTP2Session: @unchecked Sendable {
             }
         }
         connection.start(queue: .global(qos: .utility))
+    }
+
+    func cancel() {
+        finish(.failure(CancellationError()))
     }
 
     private func sendRequest() {

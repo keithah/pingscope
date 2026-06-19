@@ -93,6 +93,29 @@ public struct HostConfig: Identifiable, Codable, Equatable, Sendable {
         timeout: .seconds(2),
         thresholds: LatencyThresholds(degradedMilliseconds: 150, downAfterFailures: 3)
     )
+    public static let starlinkDiscoveryCandidates: [HostConfig] = [
+        .defaultStarlinkDish,
+        HostConfig(
+            displayName: "Starlink",
+            address: "192.168.1.1",
+            tier: .ispEdge,
+            method: .starlink,
+            port: 9000,
+            interval: .seconds(5),
+            timeout: .seconds(2),
+            thresholds: LatencyThresholds(degradedMilliseconds: 150, downAfterFailures: 3)
+        ),
+        HostConfig(
+            displayName: "Starlink",
+            address: "192.168.1.1",
+            tier: .ispEdge,
+            method: .starlink,
+            port: PingMethod.starlink.defaultPort,
+            interval: .seconds(5),
+            timeout: .seconds(2),
+            thresholds: LatencyThresholds(degradedMilliseconds: 150, downAfterFailures: 3)
+        )
+    ]
 
     public var validationErrors: [HostValidationError] {
         var errors: [HostValidationError] = []

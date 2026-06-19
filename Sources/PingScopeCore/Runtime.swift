@@ -86,37 +86,54 @@ public struct DefaultGatewayDetector: Sendable {
 }
 
 public struct StarlinkDishDetector: Sendable {
+    private enum DetectionResult: Sendable {
+        case detected(HostConfig)
+        case miss
+        case timeout
+    }
+
     private let statusClient: any StarlinkStatusFetching
-    private let host: HostConfig
+    private let hosts: [HostConfig]
 
     public init(
         statusClient: any StarlinkStatusFetching = StarlinkStatusGRPCClient(transport: StarlinkHTTP2Transport()),
-        host: HostConfig = .defaultStarlinkDish
+        hosts: [HostConfig] = HostConfig.starlinkDiscoveryCandidates
     ) {
         self.statusClient = statusClient
-        self.host = host
+        self.hosts = hosts
     }
 
     public func detect(timeout: Duration = .seconds(2)) async -> HostConfig? {
-        await withTaskGroup(of: HostConfig?.self, returning: HostConfig?.self) { group in
+        await withTaskGroup(of: DetectionResult.self, returning: HostConfig?.self) { group in
             let statusClient = statusClient
-            let host = host
-            group.addTask {
-                do {
-                    _ = try await statusClient.fetchStatus(host: host)
-                    return host
-                } catch {
-                    return nil
+            for host in hosts {
+                group.addTask {
+                    do {
+                        _ = try await statusClient.fetchStatus(host: host)
+                        return .detected(host)
+                    } catch {
+                        return .miss
+                    }
                 }
             }
             group.addTask {
                 try? await Task.sleep(for: timeout)
-                return nil
+                return .timeout
             }
 
-            let detected = await group.next() ?? nil
-            group.cancelAll()
-            return detected
+            while let result = await group.next() {
+                switch result {
+                case .detected(let detected):
+                    group.cancelAll()
+                    return detected
+                case .timeout:
+                    group.cancelAll()
+                    return nil
+                case .miss:
+                    break
+                }
+            }
+            return nil
         }
     }
 }
