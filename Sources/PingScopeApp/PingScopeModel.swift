@@ -67,6 +67,11 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
             UserDefaults.standard.overlayShowsAllHosts = overlayShowsAllHosts
         }
     }
+    @Published var popoverShowsAllHosts: Bool {
+        didSet {
+            UserDefaults.standard.popoverShowsAllHosts = popoverShowsAllHosts
+        }
+    }
     @Published var overlayShowsLegend: Bool {
         didSet {
             UserDefaults.standard.overlayShowsLegend = overlayShowsLegend
@@ -151,6 +156,7 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
         self.overlayOpacity = UserDefaults.standard.overlayOpacity
         self.overlayCompactMode = UserDefaults.standard.overlayCompactMode
         self.overlayShowsAllHosts = UserDefaults.standard.overlayShowsAllHosts
+        self.popoverShowsAllHosts = UserDefaults.standard.popoverShowsAllHosts
         self.overlayShowsLegend = UserDefaults.standard.overlayShowsLegend
         self.allowsLocalNetworkProbes = allowsLocalNetworkProbes
         self.startsAtLogin = UserDefaults.standard.startsAtLogin ?? (SMAppService.mainApp.status == .enabled)
@@ -1079,6 +1085,15 @@ private extension UserDefaults {
         }
         set {
             set(newValue, forKey: "overlayShowsAllHosts")
+        }
+    }
+
+    var popoverShowsAllHosts: Bool {
+        get {
+            bool(forKey: "popoverShowsAllHosts")
+        }
+        set {
+            set(newValue, forKey: "popoverShowsAllHosts")
         }
     }
 

@@ -6,7 +6,6 @@ struct StatusPopoverView: View {
     @ObservedObject var model: PingScopeModel
     var onSettings: () -> Void = {}
     @EnvironmentObject private var softwareUpdateController: SoftwareUpdateController
-    @State private var graphMode: PopoverGraphMode = .primary
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -39,12 +38,12 @@ struct StatusPopoverView: View {
             VStack(alignment: .leading, spacing: 4) {
                 if model.snapshot.hosts.count > 1 {
                     Picker("Host", selection: Binding(
-                        get: { graphMode == .all ? Self.allHostsSelectionID : (model.primaryHost?.id.uuidString ?? model.snapshot.hosts.first?.id.uuidString ?? "") },
+                        get: { model.popoverShowsAllHosts ? Self.allHostsSelectionID : (model.primaryHost?.id.uuidString ?? model.snapshot.hosts.first?.id.uuidString ?? "") },
                         set: { selection in
                             if selection == Self.allHostsSelectionID {
-                                graphMode = .all
+                                model.popoverShowsAllHosts = true
                             } else if let id = UUID(uuidString: selection) {
-                                graphMode = .primary
+                                model.popoverShowsAllHosts = false
                                 model.selectHost(id)
                             }
                         }
@@ -91,7 +90,7 @@ struct StatusPopoverView: View {
     private static let allHostsSelectionID = "__all_hosts__"
 
     private var hostSubtitle: String {
-        if graphMode == .all {
+        if model.popoverShowsAllHosts {
             return "\(model.snapshot.hosts.filter(\.isEnabled).count) enabled hosts"
         }
         return "\(model.primaryHost?.method.displayName ?? "TCP") \(model.primaryHost?.address ?? "")"
@@ -99,11 +98,10 @@ struct StatusPopoverView: View {
 
     @ViewBuilder
     private var graph: some View {
-        switch graphMode {
-        case .primary:
-            LatencyGraph(samples: model.visibleSamples, showsAxes: true)
-        case .all:
+        if model.popoverShowsAllHosts {
             MultiHostLatencyGraph(series: multiHostGraphSeries, showsAxes: true)
+        } else {
+            LatencyGraph(samples: model.visibleSamples, showsAxes: true)
         }
     }
 
@@ -151,25 +149,11 @@ struct StatusPopoverView: View {
     }
 
     private var latestStarlinkTelemetry: StarlinkTelemetry? {
-        guard graphMode == .primary,
+        guard !model.popoverShowsAllHosts,
               model.primaryHost?.method == .starlink else {
             return nil
         }
         return model.visibleSamples.reversed().compactMap(\.metadata.starlink).first
-    }
-}
-
-private enum PopoverGraphMode: String, CaseIterable, Identifiable {
-    case primary
-    case all
-
-    var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .primary: "Primary"
-        case .all: "All"
-        }
     }
 }
 
