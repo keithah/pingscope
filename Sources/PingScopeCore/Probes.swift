@@ -34,9 +34,14 @@ public enum BuildFlavor: Sendable {
 
 public struct DefaultProbeFactory: ProbeFactory {
     private let flavor: BuildFlavor
+    private let starlinkStatusClient: any StarlinkStatusFetching
 
-    public init(flavor: BuildFlavor = .current) {
+    public init(
+        flavor: BuildFlavor = .current,
+        starlinkStatusClient: any StarlinkStatusFetching = StarlinkUnavailableStatusClient()
+    ) {
         self.flavor = flavor
+        self.starlinkStatusClient = starlinkStatusClient
     }
 
     public func makeProbe(for method: PingMethod) async -> any PingProbe {
@@ -51,6 +56,8 @@ public struct DefaultProbeFactory: ProbeFactory {
             probe = NetworkProbe(parameters: .udp)
         case .icmp:
             probe = ProcessICMPProbe()
+        case .starlink:
+            probe = StarlinkProbe(statusClient: starlinkStatusClient)
         }
         return TimeoutProbe(wrapping: probe)
     }
@@ -165,6 +172,78 @@ public struct TimeoutProbe: PingProbe {
             let result = await group.next() ?? .failure(hostID: host.id, reason: .unknown).withHostMetadata(from: host)
             group.cancelAll()
             return result
+        }
+    }
+}
+
+public struct StarlinkStatus: Equatable, Sendable {
+    public var popPingLatencyMilliseconds: Double?
+    public var telemetry: StarlinkTelemetry
+
+    public init(popPingLatencyMilliseconds: Double?, telemetry: StarlinkTelemetry) {
+        self.popPingLatencyMilliseconds = popPingLatencyMilliseconds
+        self.telemetry = telemetry
+    }
+
+    public var isConnected: Bool {
+        guard let state = telemetry.state?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !state.isEmpty else {
+            return popPingLatencyMilliseconds != nil
+        }
+        return state.caseInsensitiveCompare("CONNECTED") == .orderedSame
+    }
+}
+
+public protocol StarlinkStatusFetching: Sendable {
+    func fetchStatus(host: HostConfig) async throws -> StarlinkStatus
+}
+
+public enum StarlinkStatusFetchError: Error, Equatable, Sendable {
+    case unavailable
+    case invalidStatus
+}
+
+public struct StarlinkUnavailableStatusClient: StarlinkStatusFetching {
+    public init() {}
+
+    public func fetchStatus(host: HostConfig) async throws -> StarlinkStatus {
+        throw StarlinkStatusFetchError.unavailable
+    }
+}
+
+public struct StarlinkProbe: PingProbe {
+    private let statusClient: any StarlinkStatusFetching
+
+    public init(statusClient: any StarlinkStatusFetching) {
+        self.statusClient = statusClient
+    }
+
+    public func measure(_ host: HostConfig) async -> PingResult {
+        do {
+            let status = try await statusClient.fetchStatus(host: host)
+            let metadata = ProbeMetadata(note: status.telemetry.noteSummary, starlink: status.telemetry)
+            guard status.isConnected,
+                  let latencyMilliseconds = status.popPingLatencyMilliseconds,
+                  latencyMilliseconds >= 0 else {
+                return .failure(
+                    hostID: host.id,
+                    reason: .networkUnavailable,
+                    metadata: metadata
+                ).withHostMetadata(from: host)
+            }
+            return .success(
+                hostID: host.id,
+                latency: .milliseconds(latencyMilliseconds),
+                metadata: metadata
+            ).withHostMetadata(from: host)
+        } catch is CancellationError {
+            return .failure(hostID: host.id, reason: .cancelled).withHostMetadata(from: host)
+        } catch {
+            return .failure(
+                hostID: host.id,
+                reason: .starlinkUnavailable,
+                metadata: ProbeMetadata(note: "Starlink dish status unavailable")
+            ).withHostMetadata(from: host)
         }
     }
 }

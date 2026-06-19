@@ -83,6 +83,16 @@ public struct HostConfig: Identifiable, Codable, Equatable, Sendable {
     }
 
     public static let defaultInternet = HostConfig(displayName: "Cloudflare DNS", address: "1.1.1.1")
+    public static let defaultStarlinkDish = HostConfig(
+        displayName: "Starlink",
+        address: "192.168.100.1",
+        tier: .ispEdge,
+        method: .starlink,
+        port: PingMethod.starlink.defaultPort,
+        interval: .seconds(5),
+        timeout: .seconds(2),
+        thresholds: LatencyThresholds(degradedMilliseconds: 150, downAfterFailures: 3)
+    )
 
     public var validationErrors: [HostValidationError] {
         var errors: [HostValidationError] = []
@@ -138,6 +148,9 @@ public struct NetworkTierClassifier: Sendable {
         if let tier = host.tier {
             return tier
         }
+        if host.method == .starlink {
+            return .ispEdge
+        }
         if host.displayName.localizedCaseInsensitiveContains("gateway") {
             return .localGateway
         }
@@ -175,17 +188,28 @@ public enum PingMethod: String, CaseIterable, Codable, Sendable {
     case tcp
     case udp
     case icmp
+    case starlink
 
     public var defaultPort: UInt16? {
         switch self {
         case .tcp: 443
         case .udp: 53
         case .icmp: nil
+        case .starlink: 9200
+        }
+    }
+
+    public var displayName: String {
+        switch self {
+        case .tcp: "TCP"
+        case .udp: "UDP"
+        case .icmp: "ICMP"
+        case .starlink: "Starlink"
         }
     }
 
     public static var appStoreAvailableCases: [PingMethod] {
-        [.tcp, .udp]
+        [.tcp, .udp, .starlink]
     }
 }
 
@@ -222,6 +246,7 @@ public enum FailureReason: String, Codable, Equatable, Sendable {
     case networkUnavailable
     case cancelled
     case icmpUnavailable
+    case starlinkUnavailable
     case unknown
 
     public var userMessage: String {
@@ -232,6 +257,7 @@ public enum FailureReason: String, Codable, Equatable, Sendable {
         case .networkUnavailable: "Network unavailable"
         case .cancelled: "Cancelled"
         case .icmpUnavailable: "ICMP unavailable"
+        case .starlinkUnavailable: "Starlink unavailable"
         case .unknown: "No response"
         }
     }
@@ -239,9 +265,72 @@ public enum FailureReason: String, Codable, Equatable, Sendable {
 
 public struct ProbeMetadata: Codable, Equatable, Sendable {
     public var note: String?
+    public var starlink: StarlinkTelemetry?
 
-    public init(note: String? = nil) {
+    public init(note: String? = nil, starlink: StarlinkTelemetry? = nil) {
         self.note = note
+        self.starlink = starlink
+    }
+}
+
+public struct StarlinkTelemetry: Codable, Equatable, Sendable {
+    public var state: String?
+    public var popPingDropRate: Double?
+    public var downlinkThroughputBps: Double?
+    public var uplinkThroughputBps: Double?
+    public var fractionObstructed: Double?
+    public var last24hObstructedSeconds: Double?
+    public var uptimeSeconds: Double?
+    public var hardwareVersion: String?
+    public var softwareVersion: String?
+    public var countryCode: String?
+    public var activeAlerts: [String]
+
+    public init(
+        state: String? = nil,
+        popPingDropRate: Double? = nil,
+        downlinkThroughputBps: Double? = nil,
+        uplinkThroughputBps: Double? = nil,
+        fractionObstructed: Double? = nil,
+        last24hObstructedSeconds: Double? = nil,
+        uptimeSeconds: Double? = nil,
+        hardwareVersion: String? = nil,
+        softwareVersion: String? = nil,
+        countryCode: String? = nil,
+        activeAlerts: [String] = []
+    ) {
+        self.state = state
+        self.popPingDropRate = popPingDropRate.map(Self.clampedDropRate)
+        self.downlinkThroughputBps = downlinkThroughputBps
+        self.uplinkThroughputBps = uplinkThroughputBps
+        self.fractionObstructed = fractionObstructed
+        self.last24hObstructedSeconds = last24hObstructedSeconds
+        self.uptimeSeconds = uptimeSeconds
+        self.hardwareVersion = hardwareVersion
+        self.softwareVersion = softwareVersion
+        self.countryCode = countryCode
+        self.activeAlerts = activeAlerts
+    }
+
+    public var noteSummary: String {
+        var parts: [String] = []
+        if let state, !state.isEmpty {
+            parts.append("state=\(state)")
+        }
+        if let popPingDropRate {
+            parts.append("drop=\(Int((popPingDropRate * 100).rounded()))%")
+        }
+        if let fractionObstructed {
+            parts.append("obstructed=\(Int((fractionObstructed * 100).rounded()))%")
+        }
+        if !activeAlerts.isEmpty {
+            parts.append("alerts=\(activeAlerts.joined(separator: "|"))")
+        }
+        return parts.isEmpty ? "Starlink dish status" : parts.joined(separator: " ")
+    }
+
+    private static func clampedDropRate(_ value: Double) -> Double {
+        min(1, max(0, value))
     }
 }
 
@@ -422,7 +511,13 @@ public struct SampleStats: Equatable, Sendable {
         transmitted = samples.count
         let latencies = samples.compactMap { $0.latency?.milliseconds }
         received = latencies.count
-        lossPercent = transmitted == 0 ? 0 : (Double(transmitted - received) / Double(transmitted)) * 100
+        let lossFraction: Double = samples.map { sample -> Double in
+            if let starlinkDropRate = sample.metadata.starlink?.popPingDropRate {
+                return min(1, max(0, starlinkDropRate))
+            }
+            return sample.isSuccess ? 0 : 1
+        }.reduce(0.0) { $0 + $1 }
+        lossPercent = transmitted == 0 ? 0 : (lossFraction / Double(transmitted)) * 100
         minimumMilliseconds = latencies.min()
         maximumMilliseconds = latencies.max()
         averageMilliseconds = latencies.isEmpty ? nil : latencies.reduce(0, +) / Double(latencies.count)

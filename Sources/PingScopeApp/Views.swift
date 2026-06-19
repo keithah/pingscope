@@ -24,6 +24,9 @@ struct StatusPopoverView: View {
                 .frame(height: 150)
 
             stats
+            if let telemetry = latestStarlinkTelemetry {
+                StarlinkTelemetrySummary(telemetry: telemetry)
+            }
             NetworkDiagnosisRow(diagnosis: model.networkDiagnosis)
 
             RecentSamplesView(samples: Array(model.visibleSamples.suffix(8)).reversed(), range: model.selectedRange)
@@ -92,7 +95,7 @@ struct StatusPopoverView: View {
         if graphMode == .all {
             return "\(model.snapshot.hosts.filter(\.isEnabled).count) enabled hosts"
         }
-        return "\(model.primaryHost?.method.rawValue.uppercased() ?? "TCP") \(model.primaryHost?.address ?? "")"
+        return "\(model.primaryHost?.method.displayName ?? "TCP") \(model.primaryHost?.address ?? "")"
     }
 
     @ViewBuilder
@@ -147,6 +150,14 @@ struct StatusPopoverView: View {
         guard let value else { return "--" }
         return "\(Int(value.rounded()))ms"
     }
+
+    private var latestStarlinkTelemetry: StarlinkTelemetry? {
+        guard graphMode == .primary,
+              model.primaryHost?.method == .starlink else {
+            return nil
+        }
+        return model.visibleSamples.reversed().compactMap(\.metadata.starlink).first
+    }
 }
 
 private enum PopoverGraphMode: String, CaseIterable, Identifiable {
@@ -160,6 +171,68 @@ private enum PopoverGraphMode: String, CaseIterable, Identifiable {
         case .primary: "Primary"
         case .all: "All"
         }
+    }
+}
+
+private struct StarlinkTelemetrySummary: View {
+    let telemetry: StarlinkTelemetry
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Starlink")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+            LazyVGrid(columns: [
+                GridItem(.flexible(), alignment: .leading),
+                GridItem(.flexible(), alignment: .leading),
+                GridItem(.flexible(), alignment: .leading)
+            ], alignment: .leading, spacing: 8) {
+                item("State", telemetry.state ?? "--")
+                item("Drop", percent(telemetry.popPingDropRate))
+                item("Obstructed", percent(telemetry.fractionObstructed))
+                item("Down", throughput(telemetry.downlinkThroughputBps))
+                item("Up", throughput(telemetry.uplinkThroughputBps))
+                item("Uptime", uptime(telemetry.uptimeSeconds))
+            }
+            if !telemetry.activeAlerts.isEmpty {
+                Text(telemetry.activeAlerts.joined(separator: ", "))
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                    .lineLimit(1)
+            }
+        }
+        .padding(10)
+        .background(Color.secondary.opacity(0.10), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    private func item(_ label: String, _ value: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(label)
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.secondary)
+            Text(value)
+                .font(.caption.monospacedDigit())
+                .lineLimit(1)
+        }
+    }
+
+    private func percent(_ value: Double?) -> String {
+        guard let value else { return "--" }
+        return "\(Int((value * 100).rounded()))%"
+    }
+
+    private func throughput(_ value: Double?) -> String {
+        guard let value else { return "--" }
+        return "\(Int((value / 1_000_000).rounded())) Mbps"
+    }
+
+    private func uptime(_ value: Double?) -> String {
+        guard let value else { return "--" }
+        let hours = Int(value / 3_600)
+        if hours >= 24 {
+            return "\(hours / 24)d \(hours % 24)h"
+        }
+        return "\(hours)h"
     }
 }
 
@@ -574,6 +647,11 @@ struct SettingsRootView: View {
                         Label("Default Gateway", systemImage: "network")
                     }
                     .disabled(model.gatewayDetectionText == "Detecting...")
+                    Button {
+                        model.useStarlinkDishPreset()
+                    } label: {
+                        Label("Starlink", systemImage: "dot.radiowaves.left.and.right")
+                    }
                     Button {
                         model.beginAddingHost()
                     } label: {

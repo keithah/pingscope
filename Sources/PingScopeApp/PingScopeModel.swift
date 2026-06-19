@@ -418,6 +418,13 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
         draftTestResultText = nil
     }
 
+    func useStarlinkDishPreset() {
+        loadDraft(from: .defaultStarlinkDish)
+        editingHostID = nil
+        isCreatingHost = true
+        draftTestResultText = nil
+    }
+
     func testDraftHost() {
         let host = draftHost
         guard host.validationErrors.isEmpty else {

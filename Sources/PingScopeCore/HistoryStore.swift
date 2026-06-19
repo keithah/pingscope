@@ -88,17 +88,19 @@ public actor SQLiteHistoryStore: PingHistoryStore {
             timestamp REAL NOT NULL,
             latency_ms REAL,
             failure_reason TEXT,
-            metadata_note TEXT
+            metadata_note TEXT,
+            metadata_json TEXT
         );
         """)
+        try addColumnIfNeeded(table: "ping_samples", column: "metadata_json", definition: "TEXT")
         try execute("CREATE INDEX IF NOT EXISTS ping_samples_host_time ON ping_samples(host_id, timestamp);")
     }
 
     private func insert(_ result: PingResult) throws {
         let sql = """
         INSERT OR REPLACE INTO ping_samples
-        (id, host_id, address, method, port, timestamp, latency_ms, failure_reason, metadata_note)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
+        (id, host_id, address, method, port, timestamp, latency_ms, failure_reason, metadata_note, metadata_json)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
         """
         try withStatement(sql) { statement in
             bindText(result.id.uuidString, to: 1, in: statement)
@@ -126,6 +128,12 @@ public actor SQLiteHistoryStore: PingHistoryStore {
             } else {
                 sqlite3_bind_null(statement, 9)
             }
+            if let metadataData = try? JSONEncoder().encode(result.metadata),
+               let metadataText = String(data: metadataData, encoding: .utf8) {
+                bindText(metadataText, to: 10, in: statement)
+            } else {
+                sqlite3_bind_null(statement, 10)
+            }
             guard sqlite3_step(statement) == SQLITE_DONE else {
                 throw SQLiteHistoryError.stepFailed
             }
@@ -134,7 +142,7 @@ public actor SQLiteHistoryStore: PingHistoryStore {
 
     private func query(hostID: UUID, since: Date, limit: Int) throws -> [PingResult] {
         let sql = """
-        SELECT id, host_id, address, method, port, timestamp, latency_ms, failure_reason, metadata_note
+        SELECT id, host_id, address, method, port, timestamp, latency_ms, failure_reason, metadata_note, metadata_json
         FROM ping_samples
         WHERE host_id = ? AND timestamp >= ?
         ORDER BY timestamp ASC
@@ -168,6 +176,23 @@ public actor SQLiteHistoryStore: PingHistoryStore {
         guard let db = connection.db else { throw SQLiteHistoryError.openFailed }
         guard sqlite3_exec(db, sql, nil, nil, nil) == SQLITE_OK else {
             throw SQLiteHistoryError.stepFailed
+        }
+    }
+
+    private func addColumnIfNeeded(table: String, column: String, definition: String) throws {
+        guard connection.db != nil else { throw SQLiteHistoryError.openFailed }
+        let escapedTable = table.replacingOccurrences(of: "'", with: "''")
+        var exists = false
+        try withStatement("PRAGMA table_info('\(escapedTable)');") { statement in
+            while sqlite3_step(statement) == SQLITE_ROW {
+                if text(at: 1, in: statement) == column {
+                    exists = true
+                    break
+                }
+            }
+        }
+        if !exists {
+            try execute("ALTER TABLE \(table) ADD COLUMN \(column) \(definition);")
         }
     }
 
@@ -208,7 +233,14 @@ public actor SQLiteHistoryStore: PingHistoryStore {
             latency = .milliseconds(sqlite3_column_double(statement, 6))
         }
         let failureReason = text(at: 7, in: statement).flatMap(FailureReason.init(rawValue:))
-        let metadata = ProbeMetadata(note: text(at: 8, in: statement))
+        let metadata: ProbeMetadata
+        if let metadataText = text(at: 9, in: statement),
+           let metadataData = metadataText.data(using: .utf8),
+           let decoded = try? JSONDecoder().decode(ProbeMetadata.self, from: metadataData) {
+            metadata = decoded
+        } else {
+            metadata = ProbeMetadata(note: text(at: 8, in: statement))
+        }
 
         return PingResult(
             id: id,

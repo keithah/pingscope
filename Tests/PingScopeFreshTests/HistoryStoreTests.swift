@@ -30,6 +30,36 @@ final class HistoryStoreTests: XCTestCase {
         XCTAssertEqual(samples[1].metadata.note, "late")
     }
 
+    func testSQLiteHistoryStorePersistsStarlinkMetadata() async throws {
+        let url = temporaryHistoryURL()
+        let host = HostConfig.defaultStarlinkDish
+        let base = Date(timeIntervalSince1970: 1_500)
+        let store = SQLiteHistoryStore(url: url)
+        await store.append(.success(
+            hostID: host.id,
+            latency: .milliseconds(38),
+            timestamp: base,
+            metadata: ProbeMetadata(
+                note: "state=CONNECTED",
+                starlink: StarlinkTelemetry(
+                    state: "CONNECTED",
+                    popPingDropRate: 0.2,
+                    downlinkThroughputBps: 99_000_000,
+                    activeAlerts: ["obstructed"]
+                )
+            )
+        ).withHostMetadata(from: host))
+
+        let reloaded = SQLiteHistoryStore(url: url)
+        let samples = await reloaded.samples(hostID: host.id, since: base.addingTimeInterval(-1), limit: 10)
+
+        XCTAssertEqual(samples.count, 1)
+        XCTAssertEqual(samples[0].metadata.note, "state=CONNECTED")
+        XCTAssertEqual(samples[0].metadata.starlink?.state, "CONNECTED")
+        XCTAssertEqual(samples[0].metadata.starlink?.popPingDropRate, 0.2)
+        XCTAssertEqual(samples[0].metadata.starlink?.activeAlerts, ["obstructed"])
+    }
+
     func testSQLiteHistoryStorePrunesByRetention() async throws {
         let url = temporaryHistoryURL()
         let hostID = UUID()
@@ -82,6 +112,23 @@ final class HistoryStoreTests: XCTestCase {
         XCTAssertTrue(csv.contains("\"Comma, Host\""))
         XCTAssertTrue(csv.contains(",OK,18,,fresh"))
         XCTAssertTrue(csv.contains(",Failed,,timeout,late"))
+
+        let starlinkCSV = HistoryExporter.csv(
+            samples: [
+                PingResult.success(
+                    hostID: host.id,
+                    latency: .milliseconds(41),
+                    timestamp: Date(timeIntervalSince1970: 1_002),
+                    metadata: ProbeMetadata(
+                        note: "state=CONNECTED",
+                        starlink: StarlinkTelemetry(state: "CONNECTED", popPingDropRate: 0.12, downlinkThroughputBps: 80_000_000)
+                    )
+                ).withHostMetadata(from: host)
+            ],
+            host: host
+        )
+        XCTAssertTrue(starlinkCSV.contains("starlink_state,starlink_drop_rate"))
+        XCTAssertTrue(starlinkCSV.contains(",state=CONNECTED,CONNECTED,0.12,80000000.0"))
 
         let jsonData = try HistoryExporter.data(samples: samples, host: host, format: .json)
         let json = try XCTUnwrap(String(data: jsonData, encoding: .utf8))

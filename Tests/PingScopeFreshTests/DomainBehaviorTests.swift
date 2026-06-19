@@ -49,6 +49,10 @@ final class DomainBehaviorTests: XCTestCase {
         host.apply(method: .icmp)
         XCTAssertEqual(host.method, .icmp)
         XCTAssertNil(host.port)
+
+        host.apply(method: .starlink)
+        XCTAssertEqual(host.method, .starlink)
+        XCTAssertEqual(host.port, 9200)
     }
 
     func testHealthRequiresConsecutiveFailuresBeforeDown() {
@@ -99,6 +103,28 @@ final class DomainBehaviorTests: XCTestCase {
         XCTAssertEqual(try XCTUnwrap(series.stats.minimumMilliseconds), 20, accuracy: 0.01)
         XCTAssertEqual(try XCTUnwrap(series.stats.averageMilliseconds), 110.0 / 3.0, accuracy: 0.01)
         XCTAssertEqual(try XCTUnwrap(series.stats.maximumMilliseconds), 50, accuracy: 0.01)
+    }
+
+    func testStarlinkDropRateContributesToSampleLoss() {
+        let hostID = UUID()
+        let samples = [
+            PingResult.success(
+                hostID: hostID,
+                latency: .milliseconds(40),
+                metadata: ProbeMetadata(starlink: StarlinkTelemetry(popPingDropRate: 0.25))
+            ),
+            PingResult.success(
+                hostID: hostID,
+                latency: .milliseconds(45),
+                metadata: ProbeMetadata(starlink: StarlinkTelemetry(popPingDropRate: 0.50))
+            )
+        ]
+
+        let stats = SampleStats(samples: samples)
+
+        XCTAssertEqual(stats.transmitted, 2)
+        XCTAssertEqual(stats.received, 2)
+        XCTAssertEqual(stats.lossPercent, 37.5, accuracy: 0.01)
     }
 
     func testMonitorSessionDurationValuesAreLimitedForIOSLiveActivity() {
@@ -412,6 +438,7 @@ final class DomainBehaviorTests: XCTestCase {
         XCTAssertEqual(classifier.tier(for: HostConfig(displayName: "Google", address: "8.8.8.8")), .upstream)
         XCTAssertEqual(classifier.tier(for: HostConfig(displayName: "Example", address: "example.com")), .remoteService)
         XCTAssertEqual(classifier.tier(for: HostConfig(displayName: "ISP Resolver", address: "1.1.1.1", tier: .ispEdge)), .ispEdge)
+        XCTAssertEqual(classifier.tier(for: .defaultStarlinkDish), .ispEdge)
     }
 
     func testNetworkPerspectivePrioritizesDefaultGatewayFailure() {
