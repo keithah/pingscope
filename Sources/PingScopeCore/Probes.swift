@@ -38,7 +38,7 @@ public struct DefaultProbeFactory: ProbeFactory {
 
     public init(
         flavor: BuildFlavor = .current,
-        starlinkStatusClient: any StarlinkStatusFetching = StarlinkUnavailableStatusClient()
+        starlinkStatusClient: any StarlinkStatusFetching = StarlinkStatusGRPCClient(transport: StarlinkHTTP2Transport())
     ) {
         self.flavor = flavor
         self.starlinkStatusClient = starlinkStatusClient
@@ -198,9 +198,37 @@ public protocol StarlinkStatusFetching: Sendable {
     func fetchStatus(host: HostConfig) async throws -> StarlinkStatus
 }
 
+public protocol StarlinkGRPCTransport: Sendable {
+    func unary(path: String, requestFrame: Data, host: HostConfig) async throws -> Data
+}
+
 public enum StarlinkStatusFetchError: Error, Equatable, Sendable {
     case unavailable
     case invalidStatus
+}
+
+public struct StarlinkStatusGRPCClient: StarlinkStatusFetching {
+    public static let statusPath = "/SpaceX.API.Device.Device/Handle"
+
+    private let transport: any StarlinkGRPCTransport
+    private let codec: StarlinkProtobufCodec
+
+    public init(
+        transport: any StarlinkGRPCTransport,
+        codec: StarlinkProtobufCodec = StarlinkProtobufCodec()
+    ) {
+        self.transport = transport
+        self.codec = codec
+    }
+
+    public func fetchStatus(host: HostConfig) async throws -> StarlinkStatus {
+        let response = try await transport.unary(
+            path: Self.statusPath,
+            requestFrame: codec.makeGetStatusGRPCFrame(),
+            host: host
+        )
+        return try codec.decodeStatus(fromGRPCFrame: response)
+    }
 }
 
 public struct StarlinkUnavailableStatusClient: StarlinkStatusFetching {
@@ -248,7 +276,7 @@ public struct StarlinkProbe: PingProbe {
     }
 }
 
-private final class ContinuationGate: @unchecked Sendable {
+final class ContinuationGate: @unchecked Sendable {
     private let lock = NSLock()
     private var resumed = false
 

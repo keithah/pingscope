@@ -52,6 +52,22 @@ final class ProbeBehaviorTests: XCTestCase {
         XCTAssertEqual(result.metadata.starlink?.popPingDropRate, 1)
     }
 
+    func testStarlinkGRPCClientUsesDeviceHandlePathAndDecodesResponse() async throws {
+        let codec = StarlinkProtobufCodec()
+        let transport = RecordingStarlinkTransport(response: codec.makeGRPCFrame(message: makeStarlinkResponse(latency: 38, dropRate: 0.05)))
+        let client = StarlinkStatusGRPCClient(transport: transport, codec: codec)
+
+        let status = try await client.fetchStatus(host: .defaultStarlinkDish)
+
+        XCTAssertEqual(status.popPingLatencyMilliseconds ?? 0, 38, accuracy: 0.001)
+        XCTAssertEqual(status.telemetry.popPingDropRate ?? 0, 0.05, accuracy: 0.001)
+        XCTAssertEqual(status.telemetry.state, "CONNECTED")
+        let snapshot = await transport.snapshot()
+        XCTAssertEqual(snapshot.path, StarlinkStatusGRPCClient.statusPath)
+        XCTAssertEqual(snapshot.hostAddress, "192.168.100.1")
+        XCTAssertEqual(snapshot.requestFrame, codec.makeGetStatusGRPCFrame())
+    }
+
     func testTimeoutProbeCancelsLateProbeAndReturnsTimeout() async {
         let host = HostConfig(displayName: "Slow", address: "example.com", timeout: .milliseconds(10))
         let slowProbe = CancellableSlowProbe()
@@ -85,4 +101,36 @@ private struct FakeStarlinkStatusClient: StarlinkStatusFetching {
     func fetchStatus(host: HostConfig) async throws -> StarlinkStatus {
         status
     }
+}
+
+private actor RecordingStarlinkTransport: StarlinkGRPCTransport {
+    private let response: Data
+    private(set) var path: String?
+    private(set) var requestFrame: Data?
+    private(set) var hostAddress: String?
+
+    init(response: Data) {
+        self.response = response
+    }
+
+    func unary(path: String, requestFrame: Data, host: HostConfig) async throws -> Data {
+        self.path = path
+        self.requestFrame = requestFrame
+        hostAddress = host.address
+        return response
+    }
+
+    func snapshot() -> (path: String?, requestFrame: Data?, hostAddress: String?) {
+        (path, requestFrame, hostAddress)
+    }
+}
+
+private func makeStarlinkResponse(latency: Float, dropRate: Float) -> Data {
+    var dish = ProtobufWriter()
+    dish.writeFixed32(field: 1003, dropRate)
+    dish.writeFixed32(field: 1009, latency)
+
+    var response = ProtobufWriter()
+    response.writeLengthDelimited(field: 2004, dish.data)
+    return response.data
 }
