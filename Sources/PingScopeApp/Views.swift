@@ -26,6 +26,9 @@ struct StatusPopoverView: View {
             if let telemetry = latestStarlinkTelemetry {
                 StarlinkTelemetrySummary(telemetry: telemetry)
             }
+            if let degradationReason {
+                CompactDiagnosisReasonRow(diagnosis: degradationReason)
+            }
 
             RecentSamplesView(samples: Array(model.visibleSamples.suffix(8)).reversed(), range: model.selectedRange)
         }
@@ -154,6 +157,116 @@ struct StatusPopoverView: View {
             return nil
         }
         return model.visibleSamples.reversed().compactMap(\.metadata.starlink).first
+    }
+
+    private var degradationReason: NetworkPerspectiveDiagnosis? {
+        let diagnosis = model.networkDiagnosis
+        switch diagnosis.scope {
+        case .localNetwork, .upstream, .remoteService, .partialDegradation:
+            return diagnosis
+        case .noData, .allReachable:
+            return nil
+        }
+    }
+}
+
+private struct CompactDiagnosisReasonRow: View {
+    let diagnosis: NetworkPerspectiveDiagnosis
+
+    var body: some View {
+        HStack(spacing: 9) {
+            Image(systemName: iconName)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(tint)
+                .frame(width: 15)
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    Text("Why \(stateName)?")
+                        .font(.caption.weight(.semibold))
+                    Text(diagnosis.title)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(tint)
+                        .lineLimit(1)
+                }
+                Text(reasonText)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .background(tint.opacity(0.10), in: RoundedRectangle(cornerRadius: 7))
+        .overlay(
+            RoundedRectangle(cornerRadius: 7)
+                .stroke(tint.opacity(0.24), lineWidth: 1)
+        )
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(accessibilityText)
+        .help(accessibilityText)
+    }
+
+    private var stateName: String {
+        switch diagnosis.scope {
+        case .partialDegradation:
+            "degraded"
+        case .localNetwork, .upstream, .remoteService:
+            "down"
+        case .noData, .allReachable:
+            "healthy"
+        }
+    }
+
+    private var reasonText: String {
+        if let evidenceNote = diagnosis.evidenceNote, !evidenceNote.isEmpty {
+            "\(diagnosis.detail) \(evidenceNote)."
+        } else {
+            diagnosis.detail
+        }
+    }
+
+    private var accessibilityText: String {
+        var parts = ["Why \(stateName)?", diagnosis.title, diagnosis.detail]
+        if let evidenceNote = diagnosis.evidenceNote {
+            parts.append(evidenceNote)
+        }
+        if diagnosis.confidence == .tentative {
+            parts.append(diagnosis.confidence.displayName)
+        }
+        return parts.joined(separator: ". ")
+    }
+
+    private var iconName: String {
+        switch diagnosis.scope {
+        case .localNetwork:
+            "network.slash"
+        case .upstream:
+            "wifi.exclamationmark"
+        case .remoteService:
+            "exclamationmark.triangle.fill"
+        case .partialDegradation:
+            "speedometer"
+        case .noData:
+            "circle"
+        case .allReachable:
+            "checkmark.circle.fill"
+        }
+    }
+
+    private var tint: Color {
+        switch diagnosis.scope {
+        case .localNetwork:
+            .red
+        case .upstream:
+            .orange
+        case .remoteService, .partialDegradation:
+            .yellow
+        case .noData:
+            .secondary
+        case .allReachable:
+            .green
+        }
     }
 }
 

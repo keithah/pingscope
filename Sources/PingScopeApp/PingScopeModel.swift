@@ -123,7 +123,7 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
     private var widgetSnapshotStore: WidgetSnapshotStore?
     private var snapshotTask: Task<Void, Never>?
     private var networkTask: Task<Void, Never>?
-    private var starlinkDetectionTask: Task<Void, Never>?
+    private var endpointRefreshTask: Task<Void, Never>?
     private var historyTask: Task<Void, Never>?
     private var lastHistoryKey: String?
     private var lastObservedGateway: String?
@@ -358,14 +358,14 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
         Task { await runtime.start() }
         startNetworkMonitoring()
         startNetworkPathMonitoring()
-        detectStarlinkDishSilently()
+        refreshNetworkEndpoints(removeMissingStarlink: true)
         refreshNotificationPermission()
     }
 
     func stop() {
         snapshotTask?.cancel()
         networkTask?.cancel()
-        starlinkDetectionTask?.cancel()
+        endpointRefreshTask?.cancel()
         historyTask?.cancel()
         pathMonitor.cancel()
         Task { await runtime.stop() }
@@ -728,10 +728,12 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
                 DebugLog.write("starlink discovery pass started")
                 if let starlinkHost = await starlinkDetector.detect(timeout: .seconds(5)) {
                     await MainActor.run {
-                        self?.syncStarlinkHost(starlinkHost)
+                        self?.reconcileStarlinkDetection(starlinkHost, removeMissing: true)
                     }
                 } else {
-                    DebugLog.write("starlink discovery pass missed")
+                    await MainActor.run {
+                        self?.reconcileStarlinkDetection(nil, removeMissing: true)
+                    }
                 }
                 try? await Task.sleep(for: .seconds(15))
             }
@@ -756,13 +758,7 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
         handleNetworkStatus(status, forceRestart: changedPath)
 
         guard status == .connected, changedPath else { return }
-        detectStarlinkDishSilently()
-        Task { [gatewayDetector] in
-            let host = await gatewayDetector.detect()
-            await MainActor.run {
-                self.handleGatewayObservation(host?.address)
-            }
-        }
+        refreshNetworkEndpoints(removeMissingStarlink: true, retryDelays: [.seconds(1), .seconds(3)])
     }
 
     private func handleGatewayObservation(_ gateway: String?) {
@@ -817,18 +813,55 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
         }
     }
 
-    private func detectStarlinkDishSilently() {
-        starlinkDetectionTask?.cancel()
-        starlinkDetectionTask = Task { [weak self, starlinkDetector] in
-            DebugLog.write("starlink startup detection started")
-            guard let host = await starlinkDetector.detect(timeout: .seconds(5)) else {
-                DebugLog.write("starlink detection missed")
-                return
-            }
-            await MainActor.run {
-                self?.syncStarlinkHost(host)
+    private func refreshNetworkEndpoints(removeMissingStarlink: Bool, retryDelays: [Duration] = []) {
+        endpointRefreshTask?.cancel()
+        endpointRefreshTask = Task { [weak self, gatewayDetector, starlinkDetector] in
+            await Self.detectNetworkEndpoints(
+                gatewayDetector: gatewayDetector,
+                starlinkDetector: starlinkDetector,
+                removeMissingStarlink: removeMissingStarlink,
+                owner: self
+            )
+            for delay in retryDelays {
+                guard !Task.isCancelled else { return }
+                try? await Task.sleep(for: delay)
+                guard !Task.isCancelled else { return }
+                await Self.detectNetworkEndpoints(
+                    gatewayDetector: gatewayDetector,
+                    starlinkDetector: starlinkDetector,
+                    removeMissingStarlink: removeMissingStarlink,
+                    owner: self
+                )
             }
         }
+    }
+
+    private nonisolated static func detectNetworkEndpoints(
+        gatewayDetector: DefaultGatewayDetector,
+        starlinkDetector: StarlinkDishDetector,
+        removeMissingStarlink: Bool,
+        owner: PingScopeModel?
+    ) async {
+        DebugLog.write("network endpoint refresh started removeMissingStarlink=\(removeMissingStarlink)")
+        async let gatewayHost = gatewayDetector.detect()
+        async let starlinkHost = starlinkDetector.detect(timeout: .seconds(5))
+        let gateway = await gatewayHost?.address
+        let starlink = await starlinkHost
+        await MainActor.run {
+            owner?.handleGatewayObservation(gateway)
+            owner?.reconcileStarlinkDetection(starlink, removeMissing: removeMissingStarlink)
+        }
+    }
+
+    private func reconcileStarlinkDetection(_ host: HostConfig?, removeMissing: Bool) {
+        guard let host else {
+            DebugLog.write("starlink discovery pass missed removeMissing=\(removeMissing)")
+            if removeMissing {
+                removeStaleStarlinkHosts()
+            }
+            return
+        }
+        syncStarlinkHost(host)
     }
 
     private func syncStarlinkHost(_ host: HostConfig) {
@@ -868,6 +901,30 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
             return primary.id
         }
         return gatewayHost?.id ?? snapshot.hosts.first(where: { $0.method != .starlink })?.id
+    }
+
+    private func removeStaleStarlinkHosts() {
+        let staleHosts = snapshot.hosts.filter { $0.method == .starlink }
+        guard !staleHosts.isEmpty else { return }
+        let staleIDs = Set(staleHosts.map(\.id))
+        let fallbackPrimaryID = snapshot.hosts.first {
+            $0.displayName == "Default Gateway" && !staleIDs.contains($0.id)
+        }?.id ?? snapshot.hosts.first {
+            !staleIDs.contains($0.id)
+        }?.id
+        let primaryIsStale = snapshot.primaryHost.map { staleIDs.contains($0.id) } ?? false
+        DebugLog.write("removing stale starlink hosts count=\(staleHosts.count) primaryIsStale=\(primaryIsStale)")
+        if let editingHostID, staleIDs.contains(editingHostID) {
+            clearDraftHost()
+        }
+        Task {
+            for host in staleHosts {
+                await runtime.deleteHost(host.id)
+            }
+            if primaryIsStale, let fallbackPrimaryID {
+                await runtime.selectPrimaryHost(fallbackPrimaryID)
+            }
+        }
     }
 
     private func syncDefaultGatewayHost(address gateway: String) {
