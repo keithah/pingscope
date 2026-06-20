@@ -64,6 +64,27 @@ APPLESCRIPT
   fi
 }
 
+select_settings_tab() {
+  local tab="$1"
+  case "$tab" in
+    Hosts)
+      swift -e 'import CoreGraphics; import Foundation
+let info = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
+guard let window = info.first(where: {
+    ($0[kCGWindowOwnerName as String] as? String) == "PingScope"
+    && (($0[kCGWindowName as String] as? String)?.contains("Settings") ?? false)
+}), let bounds = window[kCGWindowBounds as String] as? [String: Any],
+   let x = bounds["X"] as? Int,
+   let y = bounds["Y"] as? Int else { exit(0) }
+let point = CGPoint(x: x + 78, y: y + 130)
+CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown, mouseCursorPosition: point, mouseButton: .left)?.post(tap: .cghidEventTap)
+usleep(120000)
+CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp, mouseCursorPosition: point, mouseButton: .left)?.post(tap: .cghidEventTap)
+usleep(500000)'
+      ;;
+  esac
+}
+
 post_click() {
   local x="$1"
   local y="$2"
@@ -87,12 +108,13 @@ window_bounds() {
 osascript -e 'tell application "System Events" to if not UI elements enabled then error "Accessibility is not enabled for this terminal"'
 
 rm -f "$LOG_PATH"
+pkill -x PingScope 2>/dev/null || true
+sleep 0.5
 defaults write com.hadm.PingScope overlayVisible -bool true
 defaults write com.hadm.PingScope overlayCompactMode -bool false
 defaults write com.hadm.PingScope widgetsEnabled -bool false
-defaults write com.hadm.PingScope selectedSettingsTab about
-pkill -x PingScope 2>/dev/null || true
-sleep 0.5
+defaults write com.hadm.PingScope selectedSettingsTab hosts
+killall cfprefsd 2>/dev/null || true
 open "$APP_PATH"
 sleep 2
 
@@ -127,6 +149,8 @@ osascript \
 sleep 1
 settings_count="$(osascript -e 'tell application "System Events" to tell process "PingScope" to count windows whose title contains "Settings"')"
 [[ "$settings_count" -ge 1 ]] || fail "settings window did not open from Command-,"
+select_settings_tab "Hosts"
+sleep 0.5
 require_settings_text "PingScope"
 require_settings_text "Monitored Hosts"
 require_settings_text "Cloudflare DNS"
