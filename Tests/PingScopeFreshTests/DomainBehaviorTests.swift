@@ -232,6 +232,7 @@ final class DomainBehaviorTests: XCTestCase {
             cooldown: .seconds(60),
             alertTypes: [.hostDown, .recovered, .highLatency],
             latencyThreshold: .milliseconds(100),
+            highLatencyConsecutiveSamples: 1,
             notifyOnRecovery: true
         )
         var engine = AlertDecisionEngine(rules: rules)
@@ -248,6 +249,44 @@ final class DomainBehaviorTests: XCTestCase {
 
         let recovered = PingResult.success(hostID: hostID, latency: .milliseconds(20), timestamp: base.addingTimeInterval(170))
         XCTAssertEqual(engine.evaluate(result: recovered, previousStatus: .down, currentStatus: .healthy), .recovered(hostID: hostID))
+    }
+
+    func testHighLatencyAlertRequiresSustainedConsecutiveSamplesAndResetsOnRecovery() {
+        let hostID = UUID()
+        let rules = NotificationRuleSet(
+            isEnabled: true,
+            cooldown: .seconds(60),
+            alertTypes: [.highLatency],
+            latencyThreshold: .milliseconds(100),
+            highLatencyConsecutiveSamples: 5,
+            notifyOnRecovery: true
+        )
+        var engine = AlertDecisionEngine(rules: rules)
+        let base = Date(timeIntervalSince1970: 2_000)
+
+        for index in 0..<4 {
+            let result = PingResult.success(
+                hostID: hostID,
+                latency: .milliseconds(150),
+                timestamp: base.addingTimeInterval(Double(index))
+            )
+            XCTAssertNil(engine.evaluate(result: result, previousStatus: .degraded, currentStatus: .degraded))
+        }
+
+        let recovered = PingResult.success(hostID: hostID, latency: .milliseconds(20), timestamp: base.addingTimeInterval(4))
+        XCTAssertNil(engine.evaluate(result: recovered, previousStatus: .degraded, currentStatus: .healthy))
+
+        for index in 5..<9 {
+            let result = PingResult.success(
+                hostID: hostID,
+                latency: .milliseconds(150),
+                timestamp: base.addingTimeInterval(Double(index))
+            )
+            XCTAssertNil(engine.evaluate(result: result, previousStatus: .degraded, currentStatus: .degraded))
+        }
+
+        let sustained = PingResult.success(hostID: hostID, latency: .milliseconds(150), timestamp: base.addingTimeInterval(9))
+        XCTAssertEqual(engine.evaluate(result: sustained, previousStatus: .degraded, currentStatus: .degraded), .highLatency(hostID: hostID))
     }
 
     func testNotificationRulesDetectNetworkChangeAndInternetLoss() {
@@ -272,6 +311,35 @@ final class DomainBehaviorTests: XCTestCase {
             engine.evaluateInternetLoss(results: results, at: date.addingTimeInterval(90)),
             .internetLoss
         )
+    }
+
+    func testInternetLossSensitivityCanBeTuned() {
+        let failedHostID = UUID()
+        let healthyHostID = UUID()
+        let date = Date(timeIntervalSince1970: 2_100)
+        let results = [
+            PingResult.failure(hostID: failedHostID, reason: .timeout, timestamp: date),
+            PingResult.success(hostID: healthyHostID, latency: .milliseconds(20), timestamp: date)
+        ]
+
+        var defaultEngine = AlertDecisionEngine(rules: NotificationRuleSet(
+            isEnabled: true,
+            cooldown: .seconds(60),
+            alertTypes: [.internetLoss],
+            latencyThreshold: .milliseconds(250),
+            notifyOnRecovery: true
+        ))
+        XCTAssertNil(defaultEngine.evaluateInternetLoss(results: results, at: date))
+
+        var sensitiveEngine = AlertDecisionEngine(rules: NotificationRuleSet(
+            isEnabled: true,
+            cooldown: .seconds(60),
+            alertTypes: [.internetLoss],
+            latencyThreshold: .milliseconds(250),
+            internetLossFailureRatio: 0.5,
+            notifyOnRecovery: true
+        ))
+        XCTAssertEqual(sensitiveEngine.evaluateInternetLoss(results: results, at: date), .internetLoss)
     }
 
     func testNotificationRulesIncludeSpecificDiagnosisAlertsByDefault() {
@@ -344,6 +412,30 @@ final class DomainBehaviorTests: XCTestCase {
         XCTAssertEqual(engine.evaluateDiagnosis(diagnosis, at: Date(timeIntervalSince1970: 4_000)), .internetLoss)
     }
 
+    func testSensitiveDiagnosisAlertsUseSpecificTentativeFailures() {
+        let hostID = UUID()
+        var engine = AlertDecisionEngine(rules: NotificationRuleSet(
+            isEnabled: true,
+            cooldown: .seconds(60),
+            alertTypes: [.upstreamDown, .internetLoss],
+            latencyThreshold: .milliseconds(250),
+            diagnosisSensitivity: .sensitive,
+            notifyOnRecovery: true
+        ))
+
+        let diagnosis = NetworkPerspectiveDiagnosis(
+            scope: .upstream,
+            title: "Upstream path down",
+            detail: "test",
+            affectedHostIDs: [hostID],
+            verdict: .upstreamDown,
+            confidence: .tentative,
+            faultTier: .upstream
+        )
+
+        XCTAssertEqual(engine.evaluateDiagnosis(diagnosis, at: Date(timeIntervalSince1970: 4_100)), .upstreamDown)
+    }
+
     func testDegradedDiagnosisAlertIsOptIn() {
         var engine = AlertDecisionEngine(rules: NotificationRuleSet())
         let diagnosis = NetworkPerspectiveDiagnosis(
@@ -357,18 +449,35 @@ final class DomainBehaviorTests: XCTestCase {
 
         XCTAssertNil(engine.evaluateDiagnosis(diagnosis, at: Date(timeIntervalSince1970: 5_000)))
 
-        engine.rules.alertTypes.insert(.pathDegraded)
-        XCTAssertNil(engine.evaluateDiagnosis(diagnosis, at: Date(timeIntervalSince1970: 5_100)))
+        var enabledEngine = AlertDecisionEngine(rules: NotificationRuleSet(
+            alertTypes: [.pathDegraded],
+            pathDegradedConsecutiveSamples: 1
+        ))
+        XCTAssertEqual(enabledEngine.evaluateDiagnosis(diagnosis, at: Date(timeIntervalSince1970: 5_100)), .pathDegraded(tier: .upstream))
+    }
 
-        let changedDiagnosis = NetworkPerspectiveDiagnosis(
+    func testPathDegradedAlertRequiresRepeatedDiagnoses() {
+        var engine = AlertDecisionEngine(rules: NotificationRuleSet(
+            isEnabled: true,
+            cooldown: .seconds(60),
+            alertTypes: [.pathDegraded],
+            latencyThreshold: .milliseconds(250),
+            pathDegradedConsecutiveSamples: 3,
+            notifyOnRecovery: true
+        ))
+        let diagnosis = NetworkPerspectiveDiagnosis(
             scope: .partialDegradation,
-            title: "Router degraded",
+            title: "Internet check degraded",
             detail: "test",
-            verdict: .partialDegradation(tier: .localGateway),
+            verdict: .partialDegradation(tier: .upstream),
             confidence: .high,
-            faultTier: .localGateway
+            faultTier: .upstream
         )
-        XCTAssertEqual(engine.evaluateDiagnosis(changedDiagnosis, at: Date(timeIntervalSince1970: 5_200)), .pathDegraded(tier: .localGateway))
+
+        XCTAssertNil(engine.evaluateDiagnosis(diagnosis, at: Date(timeIntervalSince1970: 5_300)))
+        XCTAssertNil(engine.evaluateDiagnosis(diagnosis, at: Date(timeIntervalSince1970: 5_301)))
+        XCTAssertEqual(engine.evaluateDiagnosis(diagnosis, at: Date(timeIntervalSince1970: 5_302)), .pathDegraded(tier: .upstream))
+        XCTAssertNil(engine.evaluateDiagnosis(diagnosis, at: Date(timeIntervalSince1970: 5_303)))
     }
 
     func testNotificationRulesRoundTripForSettingsPersistence() throws {
@@ -377,6 +486,10 @@ final class DomainBehaviorTests: XCTestCase {
             cooldown: .seconds(120),
             alertTypes: [.hostDown, .recovered],
             latencyThreshold: .milliseconds(180),
+            highLatencyConsecutiveSamples: 7,
+            internetLossFailureRatio: 0.75,
+            diagnosisSensitivity: .sensitive,
+            pathDegradedConsecutiveSamples: 4,
             notifyOnRecovery: true
         )
 
@@ -385,6 +498,35 @@ final class DomainBehaviorTests: XCTestCase {
 
         XCTAssertEqual(decoded, rules)
         XCTAssertFalse(decoded.alertTypes.contains(.highLatency))
+    }
+
+    func testNotificationRulesDecodeMissingConsecutiveLatencySettingWithDefault() throws {
+        let rules = NotificationRuleSet(
+            isEnabled: true,
+            cooldown: .seconds(120),
+            alertTypes: [.highLatency],
+            latencyThreshold: .milliseconds(300),
+            highLatencyConsecutiveSamples: 8,
+            internetLossFailureRatio: 0.5,
+            diagnosisSensitivity: .sensitive,
+            pathDegradedConsecutiveSamples: 6,
+            notifyOnRecovery: false
+        )
+        var object = try JSONSerialization.jsonObject(with: JSONEncoder().encode(rules)) as! [String: Any]
+        object.removeValue(forKey: "highLatencyConsecutiveSamples")
+        object.removeValue(forKey: "internetLossFailureRatio")
+        object.removeValue(forKey: "diagnosisSensitivity")
+        object.removeValue(forKey: "pathDegradedConsecutiveSamples")
+        let data = try JSONSerialization.data(withJSONObject: object)
+
+        let decoded = try JSONDecoder().decode(NotificationRuleSet.self, from: data)
+
+        XCTAssertEqual(decoded.highLatencyConsecutiveSamples, 5)
+        XCTAssertEqual(decoded.internetLossFailureRatio, 1.0)
+        XCTAssertEqual(decoded.diagnosisSensitivity, .balanced)
+        XCTAssertEqual(decoded.pathDegradedConsecutiveSamples, 3)
+        XCTAssertEqual(decoded.latencyThreshold.milliseconds, 300)
+        XCTAssertFalse(decoded.notifyOnRecovery)
     }
 
     func testHostConfigIdentifiesLocalNetworkAddresses() {

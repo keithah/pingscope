@@ -180,14 +180,10 @@ private struct CompactDiagnosisReasonRow: View {
                 .foregroundStyle(tint)
                 .frame(width: 15)
             VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 6) {
-                    Text("Why \(stateName)?")
-                        .font(.caption.weight(.semibold))
-                    Text(diagnosis.title)
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(tint)
-                        .lineLimit(1)
-                }
+                Text(diagnosis.title)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(tint)
+                    .lineLimit(1)
                 Text(reasonText)
                     .font(.caption2)
                     .foregroundStyle(.secondary)
@@ -207,17 +203,6 @@ private struct CompactDiagnosisReasonRow: View {
         .help(accessibilityText)
     }
 
-    private var stateName: String {
-        switch diagnosis.scope {
-        case .partialDegradation:
-            "degraded"
-        case .localNetwork, .upstream, .remoteService:
-            "down"
-        case .noData, .allReachable:
-            "healthy"
-        }
-    }
-
     private var reasonText: String {
         if let evidenceNote = diagnosis.evidenceNote, !evidenceNote.isEmpty {
             "\(diagnosis.detail) \(evidenceNote)."
@@ -227,7 +212,7 @@ private struct CompactDiagnosisReasonRow: View {
     }
 
     private var accessibilityText: String {
-        var parts = ["Why \(stateName)?", diagnosis.title, diagnosis.detail]
+        var parts = [diagnosis.title, diagnosis.detail]
         if let evidenceNote = diagnosis.evidenceNote {
             parts.append(evidenceNote)
         }
@@ -1068,11 +1053,54 @@ struct SettingsRootView: View {
                         set: { model.notificationRules.latencyThreshold = .milliseconds($0) }
                     ), unit: "ms", width: 82)
                 }
+                SettingsRow(systemImage: "number", tint: .yellow, title: "High latency after") {
+                    Stepper(
+                        "\(model.notificationRules.highLatencyConsecutiveSamples) pings",
+                        value: Binding(
+                            get: { model.notificationRules.highLatencyConsecutiveSamples },
+                            set: { model.notificationRules.highLatencyConsecutiveSamples = max(1, $0) }
+                        ),
+                        in: 1...20
+                    )
+                    .frame(width: 150, alignment: .trailing)
+                }
                 SettingsRow(systemImage: "timer", tint: .blue, title: "Cooldown") {
                     UnitNumberField(value: Binding(
                         get: { model.notificationRules.cooldown.seconds },
                         set: { model.notificationRules.cooldown = .seconds($0) }
                     ), unit: "sec", width: 82)
+                }
+                SettingsRow(systemImage: "wifi.slash", tint: .orange, title: "Internet loss at") {
+                    Stepper(
+                        "\(Int(model.notificationRules.internetLossFailureRatio * 100))% failed",
+                        value: Binding(
+                            get: { model.notificationRules.internetLossFailureRatio },
+                            set: { model.notificationRules.internetLossFailureRatio = min(max($0, 0.1), 1.0) }
+                        ),
+                        in: 0.5...1.0,
+                        step: 0.25
+                    )
+                    .frame(width: 160, alignment: .trailing)
+                }
+                SettingsRow(systemImage: "point.3.connected.trianglepath.dotted", tint: .orange, title: "Path confidence") {
+                    Picker("Path confidence", selection: $model.notificationRules.diagnosisSensitivity) {
+                        ForEach(DiagnosisAlertSensitivity.allCases, id: \.self) { sensitivity in
+                            Text(sensitivity.displayName).tag(sensitivity)
+                        }
+                    }
+                    .labelsHidden()
+                    .frame(width: 150)
+                }
+                SettingsRow(systemImage: "waveform.path.ecg", tint: .yellow, title: "Path degraded after") {
+                    Stepper(
+                        "\(model.notificationRules.pathDegradedConsecutiveSamples) diagnoses",
+                        value: Binding(
+                            get: { model.notificationRules.pathDegradedConsecutiveSamples },
+                            set: { model.notificationRules.pathDegradedConsecutiveSamples = max(1, $0) }
+                        ),
+                        in: 1...20
+                    )
+                    .frame(width: 170, alignment: .trailing)
                 }
             }
         }

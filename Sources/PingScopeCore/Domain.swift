@@ -467,6 +467,20 @@ public enum NetworkConnectivityStatus: String, CaseIterable, Codable, Equatable,
     }
 }
 
+public enum DiagnosisAlertSensitivity: String, CaseIterable, Codable, Equatable, Sendable {
+    case conservative
+    case balanced
+    case sensitive
+
+    public var displayName: String {
+        switch self {
+        case .conservative: "Conservative"
+        case .balanced: "Balanced"
+        case .sensitive: "Sensitive"
+        }
+    }
+}
+
 public struct HostHealth: Codable, Equatable, Sendable {
     public var hostID: UUID
     public var latestResult: PingResult?
@@ -926,6 +940,10 @@ public struct NotificationRuleSet: Codable, Equatable, Sendable {
     public var cooldown: Duration
     public var alertTypes: Set<AlertType>
     public var latencyThreshold: Duration
+    public var highLatencyConsecutiveSamples: Int
+    public var internetLossFailureRatio: Double
+    public var diagnosisSensitivity: DiagnosisAlertSensitivity
+    public var pathDegradedConsecutiveSamples: Int
     public var notifyOnRecovery: Bool
 
     public init(
@@ -943,13 +961,63 @@ public struct NotificationRuleSet: Codable, Equatable, Sendable {
             .remoteServiceDown
         ],
         latencyThreshold: Duration = .milliseconds(250),
+        highLatencyConsecutiveSamples: Int = 5,
+        internetLossFailureRatio: Double = 1.0,
+        diagnosisSensitivity: DiagnosisAlertSensitivity = .balanced,
+        pathDegradedConsecutiveSamples: Int = 3,
         notifyOnRecovery: Bool = true
     ) {
         self.isEnabled = isEnabled
         self.cooldown = cooldown
         self.alertTypes = alertTypes
         self.latencyThreshold = latencyThreshold
+        self.highLatencyConsecutiveSamples = max(1, highLatencyConsecutiveSamples)
+        self.internetLossFailureRatio = Self.clampedRatio(internetLossFailureRatio)
+        self.diagnosisSensitivity = diagnosisSensitivity
+        self.pathDegradedConsecutiveSamples = max(1, pathDegradedConsecutiveSamples)
         self.notifyOnRecovery = notifyOnRecovery
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case isEnabled
+        case cooldown
+        case alertTypes
+        case latencyThreshold
+        case highLatencyConsecutiveSamples
+        case internetLossFailureRatio
+        case diagnosisSensitivity
+        case pathDegradedConsecutiveSamples
+        case notifyOnRecovery
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.isEnabled = try container.decodeIfPresent(Bool.self, forKey: .isEnabled) ?? true
+        self.cooldown = try container.decodeIfPresent(Duration.self, forKey: .cooldown) ?? .seconds(300)
+        self.alertTypes = try container.decodeIfPresent(Set<AlertType>.self, forKey: .alertTypes) ?? NotificationRuleSet().alertTypes
+        self.latencyThreshold = try container.decodeIfPresent(Duration.self, forKey: .latencyThreshold) ?? .milliseconds(250)
+        self.highLatencyConsecutiveSamples = max(1, try container.decodeIfPresent(Int.self, forKey: .highLatencyConsecutiveSamples) ?? 5)
+        self.internetLossFailureRatio = Self.clampedRatio(try container.decodeIfPresent(Double.self, forKey: .internetLossFailureRatio) ?? 1.0)
+        self.diagnosisSensitivity = try container.decodeIfPresent(DiagnosisAlertSensitivity.self, forKey: .diagnosisSensitivity) ?? .balanced
+        self.pathDegradedConsecutiveSamples = max(1, try container.decodeIfPresent(Int.self, forKey: .pathDegradedConsecutiveSamples) ?? 3)
+        self.notifyOnRecovery = try container.decodeIfPresent(Bool.self, forKey: .notifyOnRecovery) ?? true
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(isEnabled, forKey: .isEnabled)
+        try container.encode(cooldown, forKey: .cooldown)
+        try container.encode(alertTypes, forKey: .alertTypes)
+        try container.encode(latencyThreshold, forKey: .latencyThreshold)
+        try container.encode(highLatencyConsecutiveSamples, forKey: .highLatencyConsecutiveSamples)
+        try container.encode(internetLossFailureRatio, forKey: .internetLossFailureRatio)
+        try container.encode(diagnosisSensitivity, forKey: .diagnosisSensitivity)
+        try container.encode(pathDegradedConsecutiveSamples, forKey: .pathDegradedConsecutiveSamples)
+        try container.encode(notifyOnRecovery, forKey: .notifyOnRecovery)
+    }
+
+    private static func clampedRatio(_ ratio: Double) -> Double {
+        min(max(ratio, 0.1), 1.0)
     }
 }
 
@@ -985,6 +1053,10 @@ public struct AlertDecisionEngine: Sendable {
     public var rules: NotificationRuleSet
     private var lastSentAt: [AlertType: Date] = [:]
     private var lastDiagnosisSignature: String?
+    private var lastAlertedDiagnosisSignature: String?
+    private var diagnosisStreakSignature: String?
+    private var diagnosisStreakCount = 0
+    private var consecutiveHighLatencyCounts: [UUID: Int] = [:]
 
     public init(rules: NotificationRuleSet = NotificationRuleSet()) {
         self.rules = rules
@@ -998,11 +1070,18 @@ public struct AlertDecisionEngine: Sendable {
         guard rules.isEnabled else { return nil }
 
         let candidate: (AlertType, AlertDecision)?
+        let isHighLatency = result.latency.map { $0 >= rules.latencyThreshold } ?? false
+        if isHighLatency {
+            consecutiveHighLatencyCounts[result.hostID, default: 0] += 1
+        } else {
+            consecutiveHighLatencyCounts[result.hostID] = nil
+        }
+
         if currentStatus == .down, previousStatus != .down {
             candidate = (.hostDown, .hostDown(hostID: result.hostID))
         } else if previousStatus == .down, currentStatus != .down, rules.notifyOnRecovery {
             candidate = (.recovered, .recovered(hostID: result.hostID))
-        } else if let latency = result.latency, latency >= rules.latencyThreshold {
+        } else if isHighLatency, consecutiveHighLatencyCounts[result.hostID, default: 0] >= rules.highLatencyConsecutiveSamples {
             candidate = (.highLatency, .highLatency(hostID: result.hostID))
         } else {
             candidate = nil
@@ -1040,11 +1119,13 @@ public struct AlertDecisionEngine: Sendable {
     ) -> AlertDecision? {
         guard rules.isEnabled,
               rules.alertTypes.contains(.internetLoss),
-              !results.isEmpty,
-              results.allSatisfy({ !$0.isSuccess })
+              !results.isEmpty
         else {
             return nil
         }
+        let failedCount = results.filter { !$0.isSuccess }.count
+        let failureRatio = Double(failedCount) / Double(results.count)
+        guard failureRatio >= rules.internetLossFailureRatio else { return nil }
         guard shouldSend(.internetLoss, at: date) else { return nil }
         lastSentAt[.internetLoss] = date
         return .internetLoss
@@ -1057,11 +1138,15 @@ public struct AlertDecisionEngine: Sendable {
         guard rules.isEnabled else { return nil }
 
         let signature = diagnosis.alertSignature
-        defer { lastDiagnosisSignature = signature }
-        guard signature != lastDiagnosisSignature else { return nil }
+        let previousSignature = lastDiagnosisSignature
+        lastDiagnosisSignature = signature
 
         if diagnosis.verdict == .allReachable {
-            guard lastDiagnosisSignature != nil,
+            diagnosisStreakSignature = nil
+            diagnosisStreakCount = 0
+            lastAlertedDiagnosisSignature = nil
+            guard previousSignature != nil,
+                  previousSignature != signature,
                   rules.notifyOnRecovery,
                   rules.alertTypes.contains(.recovered),
                   shouldSend(.recovered, at: date)
@@ -1070,11 +1155,23 @@ public struct AlertDecisionEngine: Sendable {
             return .pathRecovered
         }
 
+        if diagnosisStreakSignature == signature {
+            diagnosisStreakCount += 1
+        } else {
+            diagnosisStreakSignature = signature
+            diagnosisStreakCount = 1
+        }
+
         let candidate = alertCandidate(for: diagnosis)
         guard let candidate else { return nil }
         guard rules.alertTypes.contains(candidate.type) else { return nil }
+        if candidate.type == .pathDegraded {
+            guard diagnosisStreakCount >= rules.pathDegradedConsecutiveSamples else { return nil }
+        }
+        guard signature != lastAlertedDiagnosisSignature else { return nil }
         guard shouldSend(candidate.type, at: date) else { return nil }
         lastSentAt[candidate.type] = date
+        lastAlertedDiagnosisSignature = signature
         return candidate.decision
     }
 
@@ -1085,6 +1182,12 @@ public struct AlertDecisionEngine: Sendable {
 
     private func alertCandidate(for diagnosis: NetworkPerspectiveDiagnosis) -> (type: AlertType, decision: AlertDecision)? {
         if diagnosis.confidence != .high {
+            if rules.diagnosisSensitivity == .conservative {
+                return nil
+            }
+            if rules.diagnosisSensitivity == .sensitive {
+                return specificAlertCandidate(for: diagnosis)
+            }
             switch diagnosis.verdict {
             case .localNetworkDown, .ispPathDown, .upstreamDown, .remoteServiceDown, .multipleFailures:
                 return (.internetLoss, .internetLoss)
@@ -1095,6 +1198,10 @@ public struct AlertDecisionEngine: Sendable {
             }
         }
 
+        return specificAlertCandidate(for: diagnosis)
+    }
+
+    private func specificAlertCandidate(for diagnosis: NetworkPerspectiveDiagnosis) -> (type: AlertType, decision: AlertDecision)? {
         switch diagnosis.verdict {
         case .localNetworkDown:
             return (.localNetworkDown, .localNetworkDown)
