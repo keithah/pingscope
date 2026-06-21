@@ -529,6 +529,51 @@ final class DomainBehaviorTests: XCTestCase {
         XCTAssertFalse(decoded.notifyOnRecovery)
     }
 
+    func testNotificationAlertStylePresetsApplyExpectedRules() {
+        let quiet = NotificationRuleSet(style: .quiet)
+        XCTAssertEqual(quiet.alertStyle, .quiet)
+        XCTAssertTrue(quiet.alertTypes.contains(.hostDown))
+        XCTAssertTrue(quiet.alertTypes.contains(.recovered))
+        XCTAssertTrue(quiet.alertTypes.contains(.internetLoss))
+        XCTAssertTrue(quiet.alertTypes.contains(.localNetworkDown))
+        XCTAssertTrue(quiet.alertTypes.contains(.ispPathDown))
+        XCTAssertTrue(quiet.alertTypes.contains(.upstreamDown))
+        XCTAssertTrue(quiet.alertTypes.contains(.remoteServiceDown))
+        XCTAssertFalse(quiet.alertTypes.contains(.highLatency))
+        XCTAssertFalse(quiet.alertTypes.contains(.networkChange))
+        XCTAssertFalse(quiet.alertTypes.contains(.pathDegraded))
+        XCTAssertEqual(quiet.highLatencyConsecutiveSamples, 10)
+        XCTAssertEqual(quiet.pathDegradedConsecutiveSamples, 5)
+
+        let balanced = NotificationRuleSet(style: .balanced)
+        XCTAssertEqual(balanced.alertStyle, .balanced)
+        XCTAssertTrue(balanced.alertTypes.contains(.highLatency))
+        XCTAssertTrue(balanced.alertTypes.contains(.networkChange))
+        XCTAssertFalse(balanced.alertTypes.contains(.pathDegraded))
+        XCTAssertEqual(balanced.highLatencyConsecutiveSamples, 5)
+        XCTAssertEqual(balanced.internetLossFailureRatio, 1.0)
+        XCTAssertEqual(balanced.diagnosisSensitivity, .balanced)
+        XCTAssertEqual(balanced.pathDegradedConsecutiveSamples, 3)
+
+        let verbose = NotificationRuleSet(style: .verbose)
+        XCTAssertEqual(verbose.alertStyle, .verbose)
+        XCTAssertEqual(verbose.alertTypes, Set(AlertType.allCases))
+        XCTAssertEqual(verbose.highLatencyConsecutiveSamples, 3)
+        XCTAssertEqual(verbose.internetLossFailureRatio, 0.75)
+        XCTAssertEqual(verbose.diagnosisSensitivity, .sensitive)
+        XCTAssertEqual(verbose.pathDegradedConsecutiveSamples, 2)
+    }
+
+    func testNotificationAlertStyleDetectsCustomRules() {
+        var rules = NotificationRuleSet(style: .balanced)
+        rules.highLatencyConsecutiveSamples = 6
+
+        XCTAssertEqual(rules.alertStyle, .custom)
+
+        rules.apply(style: .quiet)
+        XCTAssertEqual(rules.alertStyle, .quiet)
+    }
+
     func testHostConfigIdentifiesLocalNetworkAddresses() {
         XCTAssertTrue(HostConfig(displayName: "Router", address: "192.168.1.1").requiresLocalNetworkPermission)
         XCTAssertTrue(HostConfig(displayName: "Link Local", address: "169.254.1.4").requiresLocalNetworkPermission)

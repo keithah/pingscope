@@ -935,6 +935,37 @@ private extension HostConfig {
     }
 }
 
+public enum NotificationAlertStyle: String, CaseIterable, Codable, Equatable, Sendable {
+    case quiet
+    case balanced
+    case verbose
+    case custom
+
+    public static let presetCases: [NotificationAlertStyle] = [.quiet, .balanced, .verbose]
+
+    public var displayName: String {
+        switch self {
+        case .quiet: "Quiet"
+        case .balanced: "Balanced"
+        case .verbose: "Verbose"
+        case .custom: "Custom"
+        }
+    }
+
+    public var detail: String {
+        switch self {
+        case .quiet:
+            "Only outage and recovery alerts."
+        case .balanced:
+            "Recommended alerts without noisy transient changes."
+        case .verbose:
+            "All alert categories with faster sensitivity."
+        case .custom:
+            "Manual alert and threshold settings."
+        }
+    }
+}
+
 public struct NotificationRuleSet: Codable, Equatable, Sendable {
     public var isEnabled: Bool
     public var cooldown: Duration
@@ -976,6 +1007,73 @@ public struct NotificationRuleSet: Codable, Equatable, Sendable {
         self.diagnosisSensitivity = diagnosisSensitivity
         self.pathDegradedConsecutiveSamples = max(1, pathDegradedConsecutiveSamples)
         self.notifyOnRecovery = notifyOnRecovery
+    }
+
+    public init(style: NotificationAlertStyle) {
+        self = Self.rules(for: style)
+    }
+
+    public var alertStyle: NotificationAlertStyle {
+        for style in [NotificationAlertStyle.quiet, .balanced, .verbose] {
+            if matchesPreset(style) {
+                return style
+            }
+        }
+        return .custom
+    }
+
+    public mutating func apply(style: NotificationAlertStyle) {
+        guard style != .custom else { return }
+        let wasEnabled = isEnabled
+        self = Self.rules(for: style)
+        isEnabled = wasEnabled
+    }
+
+    public static func rules(for style: NotificationAlertStyle) -> NotificationRuleSet {
+        switch style {
+        case .quiet:
+            NotificationRuleSet(
+                alertTypes: [
+                    .hostDown,
+                    .recovered,
+                    .internetLoss,
+                    .localNetworkDown,
+                    .ispPathDown,
+                    .upstreamDown,
+                    .remoteServiceDown
+                ],
+                latencyThreshold: .milliseconds(250),
+                highLatencyConsecutiveSamples: 10,
+                internetLossFailureRatio: 1.0,
+                diagnosisSensitivity: .conservative,
+                pathDegradedConsecutiveSamples: 5,
+                notifyOnRecovery: true
+            )
+        case .balanced, .custom:
+            NotificationRuleSet()
+        case .verbose:
+            NotificationRuleSet(
+                alertTypes: Set(AlertType.allCases),
+                latencyThreshold: .milliseconds(250),
+                highLatencyConsecutiveSamples: 3,
+                internetLossFailureRatio: 0.75,
+                diagnosisSensitivity: .sensitive,
+                pathDegradedConsecutiveSamples: 2,
+                notifyOnRecovery: true
+            )
+        }
+    }
+
+    private func matchesPreset(_ style: NotificationAlertStyle) -> Bool {
+        let preset = Self.rules(for: style)
+        return cooldown == preset.cooldown
+            && alertTypes == preset.alertTypes
+            && latencyThreshold == preset.latencyThreshold
+            && highLatencyConsecutiveSamples == preset.highLatencyConsecutiveSamples
+            && internetLossFailureRatio == preset.internetLossFailureRatio
+            && diagnosisSensitivity == preset.diagnosisSensitivity
+            && pathDegradedConsecutiveSamples == preset.pathDegradedConsecutiveSamples
+            && notifyOnRecovery == preset.notifyOnRecovery
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -1021,7 +1119,7 @@ public struct NotificationRuleSet: Codable, Equatable, Sendable {
     }
 }
 
-public enum AlertType: String, Codable, Hashable, Sendable {
+public enum AlertType: String, CaseIterable, Codable, Hashable, Sendable {
     case hostDown
     case recovered
     case highLatency
