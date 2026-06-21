@@ -8,6 +8,7 @@ EXPECTED_SHA256="${PING_SCOPE_DMG_SHA256:-}"
 WORK_DIR="${PING_SCOPE_SPARKLE_VALIDATE_DIR:-/tmp/pingscope-sparkle-feed}"
 KEY_ACCOUNT="${SPARKLE_KEY_ACCOUNT:-pingscope-ed25519}"
 DOWNLOAD_DMG="${PING_SCOPE_DOWNLOAD_DMG:-1}"
+CURL=(curl --fail --location --show-error --silent --proto '=https' --proto-redir '=https' --connect-timeout 10 --max-time 120 --retry 3)
 
 find_sign_update() {
   local tool
@@ -28,7 +29,12 @@ mkdir -p "${WORK_DIR}"
 APPCAST="${WORK_DIR}/appcast.xml"
 META="${WORK_DIR}/appcast-meta.env"
 
-curl -LfsS "${FEED_URL}" -o "${APPCAST}"
+case "${FEED_URL}" in
+  https://*) ;;
+  *) fail "Sparkle feed URL must be https: ${FEED_URL}" ;;
+esac
+
+"${CURL[@]}" "${FEED_URL}" -o "${APPCAST}"
 
 python3 - "${APPCAST}" "${VERSION}" "${BUILD_VERSION}" >"${META}" <<'PY'
 import shlex
@@ -76,7 +82,7 @@ source "${META}"
 
 if [[ "${DOWNLOAD_DMG}" -eq 1 ]]; then
   DMG="${WORK_DIR}/$(basename "${DMG_URL}")"
-  curl -LfsS "${DMG_URL}" -o "${DMG}"
+  "${CURL[@]}" "${DMG_URL}" -o "${DMG}"
 
   actual_size=$(stat -f %z "${DMG}")
   [[ "${actual_size}" == "${DMG_LENGTH}" ]] || fail "DMG length mismatch: appcast=${DMG_LENGTH}, downloaded=${actual_size}"

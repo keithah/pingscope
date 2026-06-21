@@ -49,6 +49,7 @@ private final class StarlinkHTTP2SessionBox: @unchecked Sendable {
 }
 
 private final class StarlinkHTTP2Session: @unchecked Sendable {
+    private static let maxResponseBytes = 256 * 1024
     private let connection: NWConnection
     private let path: String
     private let host: HostConfig
@@ -138,6 +139,10 @@ private final class StarlinkHTTP2Session: @unchecked Sendable {
                 case .settings where frame.flags & HTTP2FrameFlags.ack == 0:
                     connection.send(content: StarlinkHTTP2RequestBuilder.settingsAckFrame(), completion: .contentProcessed { _ in })
                 case .data where frame.streamID == 1:
+                    guard responseData.count + frame.payload.count <= Self.maxResponseBytes else {
+                        finish(.failure(StarlinkStatusFetchError.responseTooLarge))
+                        return
+                    }
                     responseData.append(frame.payload)
                     if let completeResponse = completeGRPCFrame(from: responseData) {
                         finish(.success(completeResponse))
@@ -156,15 +161,18 @@ private final class StarlinkHTTP2Session: @unchecked Sendable {
     }
 
     private func completeGRPCFrame(from data: Data) -> Data? {
-        let bytes = [UInt8](data)
-        guard bytes.count >= 5 else {
+        guard data.count >= 5 else {
             return nil
         }
-        let length = (Int(bytes[1]) << 24) | (Int(bytes[2]) << 16) | (Int(bytes[3]) << 8) | Int(bytes[4])
-        guard length >= 0, bytes.count >= 5 + length else {
+        let start = data.startIndex
+        let length = (Int(data[data.index(start, offsetBy: 1)]) << 24)
+            | (Int(data[data.index(start, offsetBy: 2)]) << 16)
+            | (Int(data[data.index(start, offsetBy: 3)]) << 8)
+            | Int(data[data.index(start, offsetBy: 4)])
+        guard length <= Self.maxResponseBytes - 5, data.count >= 5 + length else {
             return nil
         }
-        return Data(bytes[0..<(5 + length)])
+        return Data(data[start..<data.index(start, offsetBy: 5 + length)])
     }
 
     private func finish(_ result: Result<Data, any Error>) {
@@ -311,32 +319,40 @@ struct HTTP2FrameParser {
 
     mutating func drainFrames() throws -> [HTTP2Frame] {
         var frames: [HTTP2Frame] = []
-        let bytes = [UInt8](buffer)
         var offset = 0
 
-        while bytes.count - offset >= 9 {
-            let length = (Int(bytes[offset]) << 16) | (Int(bytes[offset + 1]) << 8) | Int(bytes[offset + 2])
+        while buffer.count - offset >= 9 {
+            let length = (Int(byte(at: offset)) << 16) | (Int(byte(at: offset + 1)) << 8) | Int(byte(at: offset + 2))
             guard length <= 16_777_215 else {
                 throw StarlinkStatusFetchError.invalidStatus
             }
             let totalLength = 9 + length
-            guard bytes.count - offset >= totalLength else {
+            guard buffer.count - offset >= totalLength else {
                 break
             }
 
-            let type = HTTP2FrameType(rawValue: bytes[offset + 3])
-            let flags = bytes[offset + 4]
-            let streamID = (UInt32(bytes[offset + 5] & 0x7f) << 24)
-                | (UInt32(bytes[offset + 6]) << 16)
-                | (UInt32(bytes[offset + 7]) << 8)
-                | UInt32(bytes[offset + 8])
+            let type = HTTP2FrameType(rawValue: byte(at: offset + 3))
+            let flags = byte(at: offset + 4)
+            let streamID = (UInt32(byte(at: offset + 5) & 0x7f) << 24)
+                | (UInt32(byte(at: offset + 6)) << 16)
+                | (UInt32(byte(at: offset + 7)) << 8)
+                | UInt32(byte(at: offset + 8))
             let payloadStart = offset + 9
-            let payload = Data(bytes[payloadStart..<(payloadStart + length)])
+            let payloadStartIndex = buffer.index(buffer.startIndex, offsetBy: payloadStart)
+            let payloadEndIndex = buffer.index(payloadStartIndex, offsetBy: length)
+            let payload = Data(buffer[payloadStartIndex..<payloadEndIndex])
             frames.append(HTTP2Frame(type: type, flags: flags, streamID: streamID, payload: payload))
             offset += totalLength
         }
 
-        buffer = offset < bytes.count ? Data(bytes[offset...]) : Data()
+        if offset > 0 {
+            let removalEnd = buffer.index(buffer.startIndex, offsetBy: offset)
+            buffer.removeSubrange(buffer.startIndex..<removalEnd)
+        }
         return frames
+    }
+
+    private func byte(at offset: Int) -> UInt8 {
+        buffer[buffer.index(buffer.startIndex, offsetBy: offset)]
     }
 }

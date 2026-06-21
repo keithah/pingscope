@@ -2,6 +2,7 @@
 set -euo pipefail
 
 APP_PATH="${PING_SCOPE_APP_PATH:-/Applications/PingScope.app}"
+CLEAN_BUILD="${PING_SCOPE_CLEAN:-0}"
 
 echo "== SwiftPM tests =="
 swift test
@@ -32,7 +33,10 @@ scripts/validate-history-export.sh
 
 echo
 echo "== App Store sandbox bundle =="
-rm -rf /tmp/pingscope-appstore-roadmap .build/xcode-app-store-Debug
+rm -rf /tmp/pingscope-appstore-roadmap
+if [[ "${CLEAN_BUILD}" == "1" ]]; then
+  rm -rf .build/xcode-app-store-Debug
+fi
 scripts/build-xcode-app-bundle.sh debug /tmp/pingscope-appstore-roadmap app-store >/dev/null
 scripts/verify-sandbox.sh /tmp/pingscope-appstore-roadmap/PingScope.app
 

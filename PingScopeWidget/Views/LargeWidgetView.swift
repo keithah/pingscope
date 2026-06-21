@@ -20,12 +20,13 @@ struct LargeWidgetView: View {
             }
 
             if let snapshot = entry.snapshot {
+                let healthByHostID = snapshot.healthByHostID
                 WidgetLatencySparkline(samples: snapshot.recentSamples, color: .blue)
                     .frame(height: 42)
                     .padding(.vertical, 2)
 
                 ForEach(snapshot.hosts, id: \.id) { host in
-                    let health = snapshot.health.first { $0.hostID == host.id }
+                    let health = healthByHostID[host.id]
                     HStack {
                         Circle()
                             .fill(WidgetStatusStyle.color(for: health))

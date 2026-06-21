@@ -48,18 +48,22 @@ public struct StarlinkProtobufCodec: Sendable {
     }
 
     private func decodeGRPCMessage(from frame: Data) throws -> Data {
-        let bytes = [UInt8](frame)
-        guard bytes.count >= 5 else {
+        guard frame.count >= 5 else {
             throw StarlinkStatusFetchError.invalidStatus
         }
-        guard bytes[0] == 0 else {
+        guard frame.byte(at: 0) == 0 else {
             throw StarlinkStatusFetchError.invalidStatus
         }
-        let length = (Int(bytes[1]) << 24) | (Int(bytes[2]) << 16) | (Int(bytes[3]) << 8) | Int(bytes[4])
-        guard length >= 0, bytes.count >= 5 + length else {
+        let length = (Int(frame.byte(at: 1)) << 24)
+            | (Int(frame.byte(at: 2)) << 16)
+            | (Int(frame.byte(at: 3)) << 8)
+            | Int(frame.byte(at: 4))
+        guard length >= 0, frame.count >= 5 + length else {
             throw StarlinkStatusFetchError.invalidStatus
         }
-        return Data(bytes[5..<(5 + length)])
+        let payloadStart = frame.index(frame.startIndex, offsetBy: 5)
+        let payloadEnd = frame.index(payloadStart, offsetBy: length)
+        return Data(frame[payloadStart..<payloadEnd])
     }
 
     private func decodeDishStatus(_ data: Data) throws -> StarlinkStatus {
@@ -302,15 +306,15 @@ private enum ProtobufValue {
 }
 
 private struct ProtobufReader {
-    private let bytes: [UInt8]
+    private let data: Data
     private var offset = 0
 
     init(data: Data) {
-        bytes = [UInt8](data)
+        self.data = data
     }
 
     mutating func nextField() throws -> ProtobufField? {
-        guard offset < bytes.count else {
+        guard offset < data.count else {
             return nil
         }
         let key = try readVarint()
@@ -327,10 +331,12 @@ private struct ProtobufReader {
             return ProtobufField(number: number, value: .fixed64(try readFixed64()))
         case 2:
             let length = Int(try readVarint())
-            guard length >= 0, offset + length <= bytes.count else {
+            guard length >= 0, offset + length <= data.count else {
                 throw StarlinkStatusFetchError.invalidStatus
             }
-            let value = Data(bytes[offset..<(offset + length)])
+            let start = data.index(data.startIndex, offsetBy: offset)
+            let end = data.index(start, offsetBy: length)
+            let value = Data(data[start..<end])
             offset += length
             return ProtobufField(number: number, value: .lengthDelimited(value))
         case 5:
@@ -344,10 +350,10 @@ private struct ProtobufReader {
         var result: UInt64 = 0
         var shift: UInt64 = 0
         while shift < 64 {
-            guard offset < bytes.count else {
+            guard offset < data.count else {
                 throw StarlinkStatusFetchError.invalidStatus
             }
-            let byte = bytes[offset]
+            let byte = data.byte(at: offset)
             offset += 1
             result |= UInt64(byte & 0x7f) << shift
             if byte & 0x80 == 0 {
@@ -359,26 +365,32 @@ private struct ProtobufReader {
     }
 
     private mutating func readFixed32() throws -> UInt32 {
-        guard offset + 4 <= bytes.count else {
+        guard offset + 4 <= data.count else {
             throw StarlinkStatusFetchError.invalidStatus
         }
-        let value = UInt32(bytes[offset])
-            | (UInt32(bytes[offset + 1]) << 8)
-            | (UInt32(bytes[offset + 2]) << 16)
-            | (UInt32(bytes[offset + 3]) << 24)
+        let value = UInt32(data.byte(at: offset))
+            | (UInt32(data.byte(at: offset + 1)) << 8)
+            | (UInt32(data.byte(at: offset + 2)) << 16)
+            | (UInt32(data.byte(at: offset + 3)) << 24)
         offset += 4
         return value
     }
 
     private mutating func readFixed64() throws -> UInt64 {
-        guard offset + 8 <= bytes.count else {
+        guard offset + 8 <= data.count else {
             throw StarlinkStatusFetchError.invalidStatus
         }
         var value: UInt64 = 0
         for index in 0..<8 {
-            value |= UInt64(bytes[offset + index]) << UInt64(index * 8)
+            value |= UInt64(data.byte(at: offset + index)) << UInt64(index * 8)
         }
         offset += 8
         return value
+    }
+}
+
+private extension Data {
+    func byte(at offset: Int) -> UInt8 {
+        self[index(startIndex, offsetBy: offset)]
     }
 }

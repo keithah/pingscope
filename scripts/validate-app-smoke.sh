@@ -112,6 +112,7 @@ pkill -x PingScope 2>/dev/null || true
 sleep 0.5
 defaults write com.hadm.PingScope overlayVisible -bool true
 defaults write com.hadm.PingScope overlayCompactMode -bool false
+defaults write com.hadm.PingScope overlayFrame -string '{{240, 620}, {240, 96}}'
 defaults write com.hadm.PingScope widgetsEnabled -bool false
 defaults write com.hadm.PingScope selectedSettingsTab hosts
 killall cfprefsd 2>/dev/null || true

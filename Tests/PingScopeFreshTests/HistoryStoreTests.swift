@@ -1,4 +1,5 @@
 import XCTest
+import SQLite3
 @testable import PingScopeCore
 
 final class HistoryStoreTests: XCTestCase {
@@ -73,6 +74,31 @@ final class HistoryStoreTests: XCTestCase {
         let samples = await store.samples(hostID: hostID, since: base.addingTimeInterval(-10), limit: 10)
 
         XCTAssertEqual(samples.map { Int($0.latency?.milliseconds ?? 0) }, [20])
+    }
+
+    func testSQLiteHistoryStoreCreatesTimestampPruneIndex() async throws {
+        let url = temporaryHistoryURL()
+        let host = HostConfig(displayName: "Example", address: "example.com")
+        let store = SQLiteHistoryStore(url: url)
+
+        await store.append(.success(hostID: host.id, latency: .milliseconds(10)).withHostMetadata(from: host))
+
+        var db: OpaquePointer?
+        XCTAssertEqual(sqlite3_open_v2(url.path, &db, SQLITE_OPEN_READONLY, nil), SQLITE_OK)
+        defer { sqlite3_close(db) }
+
+        var statement: OpaquePointer?
+        XCTAssertEqual(sqlite3_prepare_v2(db, "PRAGMA index_list('ping_samples');", -1, &statement, nil), SQLITE_OK)
+        defer { sqlite3_finalize(statement) }
+
+        var indexes: Set<String> = []
+        while sqlite3_step(statement) == SQLITE_ROW {
+            if let name = sqlite3_column_text(statement, 1) {
+                indexes.insert(String(cString: name))
+            }
+        }
+
+        XCTAssertTrue(indexes.contains("ping_samples_timestamp"))
     }
 
     func testRuntimeWritesIngestedResultsToHistoryStore() async throws {

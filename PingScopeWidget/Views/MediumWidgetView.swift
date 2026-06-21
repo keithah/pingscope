@@ -7,9 +7,10 @@ struct MediumWidgetView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             if let snapshot = entry.snapshot {
+                let healthByHostID = snapshot.healthByHostID
                 HStack(alignment: .top, spacing: 10) {
                     ForEach(snapshot.hosts.prefix(3), id: \.id) { host in
-                        let health = snapshot.health.first { $0.hostID == host.id }
+                        let health = healthByHostID[host.id]
                         VStack(alignment: .leading, spacing: 4) {
                             HStack(spacing: 5) {
                                 Circle()

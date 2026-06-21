@@ -11,6 +11,7 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
     @Published private(set) var snapshot = RuntimeSnapshot(hosts: [.defaultInternet], primaryHostID: HostConfig.defaultInternet.id, healthByHost: [:], samplesByHost: [:])
     @Published var selectedRange: TimeRange = .fiveMinutes {
         didSet {
+            recomputeVisibleSamples()
             refreshVisibleHistory()
         }
     }
@@ -104,6 +105,8 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
     @Published private(set) var notificationPermissionState: NotificationPermissionState = .unknown
     @Published private(set) var notificationRequestMessage: String?
     @Published private(set) var visibleHistorySamples: [PingResult] = []
+    @Published private(set) var visibleSamples: [PingResult] = []
+    @Published private(set) var primaryStats = SampleStats(samples: [])
     @Published var historyExportHostID: UUID?
     @Published var historyExportRange: TimeRange = .oneHour
     @Published private(set) var historyExportMessage: String?
@@ -136,7 +139,15 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
         let hosts = savedHosts.isEmpty ? [HostConfig.defaultInternet] : BuildFlavor.current.normalizedHosts(savedHosts)
         let hostStore = HostStore(defaultHosts: hosts, primaryHostID: UserDefaults.standard.primaryHostID)
         let probeFactory = DefaultProbeFactory()
-        let historyStore = try? SQLiteHistoryStore(url: SQLiteHistoryStore.defaultURL())
+        let historyStore: SQLiteHistoryStore?
+        do {
+            historyStore = try SQLiteHistoryStore(url: SQLiteHistoryStore.defaultURL(), logger: { message in
+                DebugLog.write(message)
+            })
+        } catch {
+            DebugLog.write("history store unavailable: \(error)")
+            historyStore = nil
+        }
         let allowsLocalNetworkProbes = UserDefaults.standard.allowsLocalNetworkProbes
         let notificationRules = UserDefaults.standard.notificationRules ?? NotificationRuleSet()
         self.runtime = PingRuntime(
@@ -198,18 +209,6 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
 
     var menuBarGlyphContent: MenuBarGlyphContent {
         presenter.menuBarGlyphContent(for: primaryHost, health: snapshot.primaryHealth)
-    }
-
-    var visibleSamples: [PingResult] {
-        presenter.mergedSamples(
-            history: visibleHistorySamples,
-            live: presenter.visibleSamples(in: primarySeries, range: selectedRange),
-            range: selectedRange
-        )
-    }
-
-    var primaryStats: SampleStats {
-        SampleStats(samples: visibleSamples)
     }
 
     var networkDiagnosis: NetworkPerspectiveDiagnosis {
@@ -295,11 +294,25 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
     }
 
     var recentDiagnosticFailures: [PingResult] {
-        visibleSamples
-            .filter { $0.failureReason != nil }
-            .sorted { $0.timestamp > $1.timestamp }
-            .prefix(8)
-            .map { $0 }
+        newestFailures(limit: 8, in: visibleSamples)
+    }
+
+    private func newestFailures(limit: Int, in samples: [PingResult]) -> [PingResult] {
+        guard limit > 0 else { return [] }
+        var failures: [PingResult] = []
+        failures.reserveCapacity(limit)
+        for sample in samples where sample.failureReason != nil {
+            let insertionIndex = failures.firstIndex { sample.timestamp > $0.timestamp } ?? failures.count
+            if insertionIndex < limit {
+                failures.insert(sample, at: insertionIndex)
+                if failures.count > limit {
+                    failures.removeLast()
+                }
+            } else if failures.count < limit {
+                failures.append(sample)
+            }
+        }
+        return failures
     }
 
     var methodsForCurrentBuild: [PingMethod] {
@@ -341,6 +354,7 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
             for await snapshot in snapshots {
                 await MainActor.run {
                     self?.snapshot = snapshot
+                    self?.recomputeVisibleSamples()
                     self?.persistHostState(snapshot)
                     if let state = self?.menuBarState {
                         self?.onMenuStateChanged?(state)
@@ -635,6 +649,7 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
     private func refreshVisibleHistoryIfNeeded() {
         guard let hostID = primaryHost?.id else {
             visibleHistorySamples = []
+            recomputeVisibleSamples()
             lastHistoryKey = nil
             return
         }
@@ -648,6 +663,7 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
     private func refreshVisibleHistory() {
         guard let hostID = primaryHost?.id else {
             visibleHistorySamples = []
+            recomputeVisibleSamples()
             lastHistoryKey = nil
             return
         }
@@ -655,6 +671,8 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
         let range = selectedRange
         let key = "\(hostID.uuidString)-\(range.rawValue)"
         lastHistoryKey = key
+        visibleHistorySamples = []
+        recomputeVisibleSamples()
         historyTask?.cancel()
         historyTask = Task { [runtime] in
             let samples = await runtime.historySamples(
@@ -665,8 +683,19 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
             await MainActor.run {
                 guard self.lastHistoryKey == key else { return }
                 self.visibleHistorySamples = samples
+                self.recomputeVisibleSamples()
             }
         }
+    }
+
+    private func recomputeVisibleSamples() {
+        let samples = presenter.mergedSamples(
+            history: visibleHistorySamples,
+            live: presenter.visibleSamples(in: primarySeries, range: selectedRange),
+            range: selectedRange
+        )
+        visibleSamples = samples
+        primaryStats = SampleStats(samples: samples)
     }
 
     private func persistOverlayFrame(_ notification: Notification) {
@@ -693,9 +722,9 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
     }
 
     private func deliverAlerts(_ alerts: [AlertDecision], hosts: [HostConfig]) {
-        guard notificationRules.isEnabled else { return }
-        for alert in alerts {
-            Task { [notificationDispatcher] in
+        guard notificationRules.isEnabled, !alerts.isEmpty else { return }
+        Task { [notificationDispatcher] in
+            for alert in alerts {
                 await notificationDispatcher.deliver(alert, hosts: hosts)
             }
         }
@@ -725,7 +754,6 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
                     self?.handleGatewayObservation(host?.address)
                 }
 
-                DebugLog.write("starlink discovery pass started")
                 if let starlinkHost = await starlinkDetector.detect(timeout: .seconds(5)) {
                     await MainActor.run {
                         self?.reconcileStarlinkDetection(starlinkHost, removeMissing: true)

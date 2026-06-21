@@ -11,11 +11,15 @@ public protocol PingHistoryStore: Sendable {
 public actor SQLiteHistoryStore: PingHistoryStore {
     private let url: URL
     private let retention: Duration
+    private let logger: (@Sendable (String) -> Void)?
     private let connection = SQLiteConnection()
+    private let pruneInterval: TimeInterval = 60
+    private var lastPruneAttempt: Date?
 
-    public init(url: URL, retention: Duration = .days(7)) {
+    public init(url: URL, retention: Duration = .days(7), logger: (@Sendable (String) -> Void)? = nil) {
         self.url = url
         self.retention = retention
+        self.logger = logger
     }
 
     public static func defaultURL(appName: String = "PingScope") throws -> URL {
@@ -34,8 +38,12 @@ public actor SQLiteHistoryStore: PingHistoryStore {
         do {
             try openIfNeeded()
             try insert(result)
-            try pruneSync(olderThan: result.timestamp.addingTimeInterval(-retention.seconds))
+            if shouldPrune(at: result.timestamp) {
+                try pruneSync(olderThan: result.timestamp.addingTimeInterval(-retention.seconds))
+                lastPruneAttempt = result.timestamp
+            }
         } catch {
+            logger?("history append failed: \(error)")
             return
         }
     }
@@ -45,6 +53,7 @@ public actor SQLiteHistoryStore: PingHistoryStore {
             try openIfNeeded()
             return try query(hostID: hostID, since: since, limit: max(1, limit))
         } catch {
+            logger?("history query failed: \(error)")
             return []
         }
     }
@@ -53,7 +62,9 @@ public actor SQLiteHistoryStore: PingHistoryStore {
         do {
             try openIfNeeded()
             try pruneSync(olderThan: cutoff)
+            lastPruneAttempt = Date()
         } catch {
+            logger?("history prune failed: \(error)")
             return
         }
     }
@@ -63,6 +74,7 @@ public actor SQLiteHistoryStore: PingHistoryStore {
             try openIfNeeded()
             try execute("DELETE FROM ping_samples;")
         } catch {
+            logger?("history delete failed: \(error)")
             return
         }
     }
@@ -73,9 +85,10 @@ public actor SQLiteHistoryStore: PingHistoryStore {
         var opened: OpaquePointer?
         guard sqlite3_open_v2(url.path, &opened, SQLITE_OPEN_CREATE | SQLITE_OPEN_READWRITE | SQLITE_OPEN_FULLMUTEX, nil) == SQLITE_OK,
               let opened else {
-            throw SQLiteHistoryError.openFailed
+            throw SQLiteHistoryError.openFailed(message: opened.map(Self.errorMessage) ?? "unable to open database")
         }
         connection.db = opened
+        sqlite3_busy_timeout(opened, 2_000)
         try execute("PRAGMA journal_mode=WAL;")
         try execute("PRAGMA synchronous=NORMAL;")
         try execute("""
@@ -94,6 +107,12 @@ public actor SQLiteHistoryStore: PingHistoryStore {
         """)
         try addColumnIfNeeded(table: "ping_samples", column: "metadata_json", definition: "TEXT")
         try execute("CREATE INDEX IF NOT EXISTS ping_samples_host_time ON ping_samples(host_id, timestamp);")
+        try execute("CREATE INDEX IF NOT EXISTS ping_samples_timestamp ON ping_samples(timestamp);")
+    }
+
+    private func shouldPrune(at timestamp: Date) -> Bool {
+        guard let lastPruneAttempt else { return true }
+        return timestamp.timeIntervalSince(lastPruneAttempt) >= pruneInterval
     }
 
     private func insert(_ result: PingResult) throws {
@@ -134,8 +153,9 @@ public actor SQLiteHistoryStore: PingHistoryStore {
             } else {
                 sqlite3_bind_null(statement, 10)
             }
-            guard sqlite3_step(statement) == SQLITE_DONE else {
-                throw SQLiteHistoryError.stepFailed
+            let result = sqlite3_step(statement)
+            guard result == SQLITE_DONE else {
+                throw sqliteError(.stepFailed, code: result)
             }
         }
     }
@@ -166,21 +186,28 @@ public actor SQLiteHistoryStore: PingHistoryStore {
     private func pruneSync(olderThan cutoff: Date) throws {
         try withStatement("DELETE FROM ping_samples WHERE timestamp < ?;") { statement in
             sqlite3_bind_double(statement, 1, cutoff.timeIntervalSince1970)
-            guard sqlite3_step(statement) == SQLITE_DONE else {
-                throw SQLiteHistoryError.stepFailed
+            let result = sqlite3_step(statement)
+            guard result == SQLITE_DONE else {
+                throw sqliteError(.stepFailed, code: result)
             }
         }
     }
 
     private func execute(_ sql: String) throws {
-        guard let db = connection.db else { throw SQLiteHistoryError.openFailed }
-        guard sqlite3_exec(db, sql, nil, nil, nil) == SQLITE_OK else {
-            throw SQLiteHistoryError.stepFailed
+        guard let db = connection.db else { throw SQLiteHistoryError.openFailed(message: "database is not open") }
+        var errorMessage: UnsafeMutablePointer<CChar>?
+        let result = sqlite3_exec(db, sql, nil, nil, &errorMessage)
+        guard result == SQLITE_OK else {
+            let message = errorMessage.map { String(cString: $0) } ?? Self.errorMessage(db)
+            if let errorMessage {
+                sqlite3_free(errorMessage)
+            }
+            throw SQLiteHistoryError.stepFailed(code: result, message: message)
         }
     }
 
     private func addColumnIfNeeded(table: String, column: String, definition: String) throws {
-        guard connection.db != nil else { throw SQLiteHistoryError.openFailed }
+        guard connection.db != nil else { throw SQLiteHistoryError.openFailed(message: "database is not open") }
         let escapedTable = table.replacingOccurrences(of: "'", with: "''")
         var exists = false
         try withStatement("PRAGMA table_info('\(escapedTable)');") { statement in
@@ -197,14 +224,32 @@ public actor SQLiteHistoryStore: PingHistoryStore {
     }
 
     private func withStatement(_ sql: String, _ body: (OpaquePointer) throws -> Void) throws {
-        guard let db = connection.db else { throw SQLiteHistoryError.openFailed }
+        guard let db = connection.db else { throw SQLiteHistoryError.openFailed(message: "database is not open") }
         var statement: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK,
+        let result = sqlite3_prepare_v2(db, sql, -1, &statement, nil)
+        guard result == SQLITE_OK,
               let statement else {
-            throw SQLiteHistoryError.prepareFailed
+            throw SQLiteHistoryError.prepareFailed(code: result, message: Self.errorMessage(db))
         }
         defer { sqlite3_finalize(statement) }
         try body(statement)
+    }
+
+    private func sqliteError(_ fallback: SQLiteHistoryError.Kind, code: Int32) -> SQLiteHistoryError {
+        guard let db = connection.db else {
+            return .openFailed(message: "database is not open")
+        }
+        switch fallback {
+        case .prepareFailed:
+            return .prepareFailed(code: code, message: Self.errorMessage(db))
+        case .stepFailed:
+            return .stepFailed(code: code, message: Self.errorMessage(db))
+        }
+    }
+
+    private static func errorMessage(_ db: OpaquePointer) -> String {
+        guard let message = sqlite3_errmsg(db) else { return "unknown SQLite error" }
+        return String(cString: message)
     }
 
     private func result(from statement: OpaquePointer) -> PingResult? {
@@ -265,10 +310,26 @@ public actor SQLiteHistoryStore: PingHistoryStore {
     }
 }
 
-private enum SQLiteHistoryError: Error {
-    case openFailed
-    case prepareFailed
-    case stepFailed
+private enum SQLiteHistoryError: Error, CustomStringConvertible {
+    enum Kind {
+        case prepareFailed
+        case stepFailed
+    }
+
+    case openFailed(message: String)
+    case prepareFailed(code: Int32, message: String)
+    case stepFailed(code: Int32, message: String)
+
+    var description: String {
+        switch self {
+        case .openFailed(let message):
+            "SQLite open failed: \(message)"
+        case .prepareFailed(let code, let message):
+            "SQLite prepare failed (\(code)): \(message)"
+        case .stepFailed(let code, let message):
+            "SQLite step failed (\(code)): \(message)"
+        }
+    }
 }
 
 private final class SQLiteConnection: @unchecked Sendable {

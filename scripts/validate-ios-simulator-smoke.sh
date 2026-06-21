@@ -7,9 +7,14 @@ SIMULATOR_NAME="${PING_SCOPE_IOS_SIMULATOR_NAME:-iPhone 17 Pro}"
 DERIVED_DATA_PATH="${PING_SCOPE_IOS_SMOKE_DERIVED_DATA:-.build/ios-smoke}"
 SCREENSHOT_PATH="${PING_SCOPE_IOS_SMOKE_SCREENSHOT:-.build/ios-smoke/screenshots/pingscope-ios-home.png}"
 APP_BUNDLE_ID="${PING_SCOPE_IOS_BUNDLE_ID:-com.hadm.PingScope}"
+CLEAN_BUILD="${PING_SCOPE_CLEAN:-0}"
 
 echo "== Build iOS app for simulator =="
-rm -rf "${DERIVED_DATA_PATH}"
+if [[ "${CLEAN_BUILD}" == "1" ]]; then
+  rm -rf "${DERIVED_DATA_PATH}"
+else
+  rm -rf "${DERIVED_DATA_PATH}/Build/Products/Debug-iphonesimulator/PingScope.app"
+fi
 xcodebuild \
   -project "${PROJECT}" \
   -scheme "${SCHEME}" \

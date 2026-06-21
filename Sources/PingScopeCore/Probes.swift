@@ -205,6 +205,7 @@ public protocol StarlinkGRPCTransport: Sendable {
 public enum StarlinkStatusFetchError: Error, Equatable, Sendable {
     case unavailable
     case invalidStatus
+    case responseTooLarge
 }
 
 public struct StarlinkStatusGRPCClient: StarlinkStatusFetching {
@@ -302,11 +303,12 @@ public struct ProcessICMPProbe: PingProbe {
         process.arguments = ["-c", "1", "-W", "\(max(1, Int(host.timeout.seconds.rounded())))", host.address]
         process.standardOutput = Pipe()
         process.standardError = Pipe()
+        let processBox = ProcessBox(process)
 
         return await withTaskCancellationHandler {
             do {
                 try process.run()
-                process.waitUntilExit()
+                await process.waitForTermination()
                 if process.terminationStatus == 0 {
                     return .success(hostID: host.id, latency: start.duration(to: .now)).withHostMetadata(from: host)
                 }
@@ -315,11 +317,41 @@ public struct ProcessICMPProbe: PingProbe {
                 return .failure(hostID: host.id, reason: .icmpUnavailable).withHostMetadata(from: host)
             }
         } onCancel: {
-            if process.isRunning {
-                process.terminate()
-            }
+            processBox.terminate()
         }
         #endif
+    }
+}
+
+final class ProcessBox: @unchecked Sendable {
+    private let process: Process
+
+    init(_ process: Process) {
+        self.process = process
+    }
+
+    func terminate() {
+        if process.isRunning {
+            process.terminate()
+        }
+    }
+}
+
+extension Process {
+    func waitForTermination() async {
+        await withCheckedContinuation { continuation in
+            let gate = ContinuationGate()
+            let resume: @Sendable () -> Void = {
+                guard gate.claim() else { return }
+                continuation.resume()
+            }
+            terminationHandler = { _ in
+                resume()
+            }
+            if !isRunning {
+                resume()
+            }
+        }
     }
 }
 

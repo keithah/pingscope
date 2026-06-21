@@ -93,7 +93,12 @@ private final class PingScopeIOSAppModel: ObservableObject {
 
     init() {
         self.hostStore = PingScopeIOSHostStore()
-        self.historyStore = try? SQLiteHistoryStore(url: SQLiteHistoryStore.defaultURL(appName: "PingScope-iOS"))
+        do {
+            self.historyStore = try SQLiteHistoryStore(url: SQLiteHistoryStore.defaultURL(appName: "PingScope-iOS"))
+        } catch {
+            print("PingScope iOS history store unavailable: \(error)")
+            self.historyStore = nil
+        }
         self.backgroundRuntime = LiveMonitorBackgroundRuntime(client: UIApplicationBackgroundTaskClient())
         self.backgroundKeepAliveEnabled = UserDefaults.standard.bool(forKey: Self.backgroundKeepAliveEnabledKey)
         let state = hostStore.load()

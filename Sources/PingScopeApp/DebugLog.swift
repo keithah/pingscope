@@ -3,12 +3,13 @@ import Foundation
 enum DebugLog {
     static let fileURL = URL(fileURLWithPath: "/tmp/pingscope-debug.log")
     private static let lock = NSLock()
+    private nonisolated(unsafe) static let timestampFormatter = ISO8601DateFormatter()
 
     nonisolated static func write(_ message: String) {
         lock.lock()
         defer { lock.unlock() }
 
-        let timestamp = ISO8601DateFormatter().string(from: Date())
+        let timestamp = timestampFormatter.string(from: Date())
         let line = "[\(timestamp)] \(message)\n"
         guard let data = line.data(using: .utf8) else { return }
 

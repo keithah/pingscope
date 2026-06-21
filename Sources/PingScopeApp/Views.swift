@@ -752,7 +752,7 @@ struct SettingsRootView: View {
                         .foregroundStyle(.secondary)
                 }
 
-                VStack(spacing: 8) {
+                LazyVStack(spacing: 8) {
                     ForEach(model.snapshot.hosts) { host in
                         HostSettingsRow(
                             host: host,
@@ -955,7 +955,6 @@ struct SettingsRootView: View {
                         Slider(value: Binding(
                             get: { model.overlayOpacity },
                             set: {
-                                DebugLog.write("settings window opacity changed value=\($0)")
                                 model.overlayOpacity = $0
                                 AppDelegate.shared?.applyWindowOpacity()
                             }
@@ -1886,7 +1885,7 @@ struct LatencyGraph: View {
 
         HStack(spacing: showsAxes ? 6 : 0) {
             if showsAxes {
-                axisLabels(scale: scale, hasData: !latencies.isEmpty)
+                LatencyGraphAxisLabels(scale: scale, hasData: !latencies.isEmpty)
             }
 
             ZStack {
@@ -1900,7 +1899,7 @@ struct LatencyGraph: View {
             }
 
             if showsAxes {
-                rightTicks(scale: scale)
+                LatencyGraphRightTicks(scale: scale)
             }
         }
         .accessibilityLabel("Latency graph")
@@ -1917,7 +1916,7 @@ struct LatencyGraph: View {
                 }
 
                 if showsAxes {
-                    drawGrid(in: size, context: context, scale: scale)
+                    LatencyGraphGrid.draw(in: size, context: context, scale: scale)
                 }
 
                 let maxValue = scale.axisMaximumMilliseconds
@@ -1956,49 +1955,6 @@ struct LatencyGraph: View {
         }
     }
 
-    private func axisLabels(scale: LatencyGraphScale, hasData: Bool) -> some View {
-        VStack(alignment: .trailing) {
-            ForEach(Array(scale.tickMilliseconds.enumerated()), id: \.offset) { _, value in
-                Text(hasData ? scale.label(for: value) : (value == 0 ? "0ms" : "--"))
-                    .frame(height: 12, alignment: .center)
-                if value != scale.tickMilliseconds.last {
-                    Spacer(minLength: 0)
-                }
-            }
-        }
-        .font(.system(size: 9, weight: .regular, design: .monospaced))
-        .monospacedDigit()
-        .foregroundStyle(.secondary)
-        .frame(width: 34)
-    }
-
-    private func rightTicks(scale: LatencyGraphScale) -> some View {
-        VStack(alignment: .leading) {
-            ForEach(Array(scale.tickMilliseconds.enumerated()), id: \.offset) { _, value in
-                Rectangle()
-                    .fill(.secondary.opacity(0.45))
-                    .frame(width: 6, height: 1)
-                if value != scale.tickMilliseconds.last {
-                    Spacer(minLength: 0)
-                }
-            }
-        }
-        .frame(width: 6)
-        .padding(.vertical, 6)
-    }
-
-    private func drawGrid(in size: CGSize, context: GraphicsContext, scale: LatencyGraphScale) {
-        let plotTop: CGFloat = 6
-        let plotHeight = max(size.height - 12, 1)
-        for tick in scale.tickMilliseconds {
-            let normalized = min(max(tick / scale.axisMaximumMilliseconds, 0), 1)
-            let y = plotTop + plotHeight - (plotHeight * CGFloat(normalized))
-            var line = Path()
-            line.move(to: CGPoint(x: 0, y: y))
-            line.addLine(to: CGPoint(x: size.width, y: y))
-            context.stroke(line, with: .color(.secondary.opacity(tick == 0 ? 0.24 : 0.14)), lineWidth: 1)
-        }
-    }
 }
 
 struct HostLatencyGraphSeries: Identifiable {
@@ -2032,7 +1988,7 @@ struct MultiHostLatencyGraph: View {
 
         HStack(spacing: showsAxes ? 6 : 0) {
             if showsAxes {
-                axisLabels(scale: scale, hasData: !latencies.isEmpty)
+                LatencyGraphAxisLabels(scale: scale, hasData: !latencies.isEmpty)
             }
 
             ZStack(alignment: .bottomLeading) {
@@ -2052,7 +2008,7 @@ struct MultiHostLatencyGraph: View {
             }
 
             if showsAxes {
-                rightTicks(scale: scale)
+                LatencyGraphRightTicks(scale: scale)
             }
         }
         .accessibilityLabel("All hosts latency graph")
@@ -2089,7 +2045,7 @@ struct MultiHostLatencyGraph: View {
                 }
 
                 if showsAxes {
-                    drawGrid(in: size, context: context, scale: scale)
+                    LatencyGraphGrid.draw(in: size, context: context, scale: scale)
                 }
 
                 for hostSeries in series where hostSeries.samples.count > 1 {
@@ -2140,7 +2096,13 @@ struct MultiHostLatencyGraph: View {
         )
     }
 
-    private func axisLabels(scale: LatencyGraphScale, hasData: Bool) -> some View {
+}
+
+private struct LatencyGraphAxisLabels: View {
+    let scale: LatencyGraphScale
+    let hasData: Bool
+
+    var body: some View {
         VStack(alignment: .trailing) {
             ForEach(Array(scale.tickMilliseconds.enumerated()), id: \.offset) { _, value in
                 Text(hasData ? scale.label(for: value) : (value == 0 ? "0ms" : "--"))
@@ -2155,8 +2117,12 @@ struct MultiHostLatencyGraph: View {
         .foregroundStyle(.secondary)
         .frame(width: 34)
     }
+}
 
-    private func rightTicks(scale: LatencyGraphScale) -> some View {
+private struct LatencyGraphRightTicks: View {
+    let scale: LatencyGraphScale
+
+    var body: some View {
         VStack(alignment: .leading) {
             ForEach(Array(scale.tickMilliseconds.enumerated()), id: \.offset) { _, value in
                 Rectangle()
@@ -2170,8 +2136,10 @@ struct MultiHostLatencyGraph: View {
         .frame(width: 6)
         .padding(.vertical, 6)
     }
+}
 
-    private func drawGrid(in size: CGSize, context: GraphicsContext, scale: LatencyGraphScale) {
+private enum LatencyGraphGrid {
+    static func draw(in size: CGSize, context: GraphicsContext, scale: LatencyGraphScale) {
         let plotTop: CGFloat = 6
         let plotHeight = max(size.height - 12, 1)
         for tick in scale.tickMilliseconds {

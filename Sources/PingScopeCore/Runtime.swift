@@ -40,19 +40,24 @@ public struct DefaultGatewayDetector: Sendable {
         let output = Pipe()
         process.standardOutput = output
         process.standardError = Pipe()
+        let processBox = ProcessBox(process)
 
-        do {
-            try process.run()
-            process.waitUntilExit()
-            let data = output.fileHandleForReading.readDataToEndOfFile()
-            guard process.terminationStatus == 0,
-                  let text = String(data: data, encoding: .utf8),
-                  let address = Self.parse(routeOutput: text) else {
+        return await withTaskCancellationHandler {
+            do {
+                try process.run()
+                await process.waitForTermination()
+                let data = output.fileHandleForReading.readDataToEndOfFile()
+                guard process.terminationStatus == 0,
+                      let text = String(data: data, encoding: .utf8),
+                      let address = Self.parse(routeOutput: text) else {
+                    return nil
+                }
+                return Self.gatewayHost(address: address)
+            } catch {
                 return nil
             }
-            return Self.gatewayHost(address: address)
-        } catch {
-            return nil
+        } onCancel: {
+            processBox.terminate()
         }
         #else
         return nil

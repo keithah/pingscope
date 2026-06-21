@@ -525,18 +525,40 @@ public struct HostHealth: Codable, Equatable, Sendable {
 public struct SampleSeries: Codable, Equatable, Sendable {
     public var hostID: UUID
     public var capacity: Int
-    public private(set) var samples: [PingResult]
+    private var storage: [PingResult]
+    private var startIndex: Int
+    private var storedCount: Int
+
+    public var samples: [PingResult] {
+        guard storedCount > 0 else { return [] }
+        return (0..<storedCount).map { offset in
+            storage[(startIndex + offset) % storage.count]
+        }
+    }
 
     public init(hostID: UUID, capacity: Int = 300) {
         self.hostID = hostID
         self.capacity = max(1, capacity)
-        self.samples = []
+        self.storage = []
+        self.startIndex = 0
+        self.storedCount = 0
     }
 
     public mutating func append(_ result: PingResult) {
-        samples.append(result)
-        if samples.count > capacity {
-            samples.removeFirst(samples.count - capacity)
+        normalizeCapacityIfNeeded()
+
+        if storage.count < capacity {
+            storage.append(result)
+            storedCount += 1
+            return
+        }
+
+        if storedCount < capacity {
+            storage.append(result)
+            storedCount += 1
+        } else {
+            storage[startIndex] = result
+            startIndex = (startIndex + 1) % storage.count
         }
     }
 
@@ -546,6 +568,47 @@ public struct SampleSeries: Codable, Equatable, Sendable {
 
     public var stats: SampleStats {
         SampleStats(samples: samples)
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case hostID
+        case capacity
+        case samples
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        hostID = try container.decode(UUID.self, forKey: .hostID)
+        capacity = max(1, try container.decode(Int.self, forKey: .capacity))
+        let decodedSamples = try container.decode([PingResult].self, forKey: .samples)
+        storage = Array(decodedSamples.suffix(capacity))
+        startIndex = 0
+        storedCount = storage.count
+    }
+
+    public func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(hostID, forKey: .hostID)
+        try container.encode(capacity, forKey: .capacity)
+        try container.encode(samples, forKey: .samples)
+    }
+
+    public static func == (lhs: SampleSeries, rhs: SampleSeries) -> Bool {
+        lhs.hostID == rhs.hostID
+            && lhs.capacity == rhs.capacity
+            && lhs.samples == rhs.samples
+    }
+
+    private mutating func normalizeCapacityIfNeeded() {
+        let normalizedCapacity = max(1, capacity)
+        guard normalizedCapacity != capacity || storage.count > normalizedCapacity else {
+            return
+        }
+
+        capacity = normalizedCapacity
+        storage = Array(samples.suffix(capacity))
+        startIndex = 0
+        storedCount = storage.count
     }
 }
 
@@ -559,18 +622,31 @@ public struct SampleStats: Equatable, Sendable {
 
     public init(samples: [PingResult]) {
         transmitted = samples.count
-        let latencies = samples.compactMap { $0.latency?.milliseconds }
-        received = latencies.count
-        let lossFraction: Double = samples.map { sample -> Double in
-            if let starlinkDropRate = sample.metadata.starlink?.popPingDropRate {
-                return min(1, max(0, starlinkDropRate))
+        var receivedCount = 0
+        var latencyTotal = 0.0
+        var minimum: Double?
+        var maximum: Double?
+        var lossFraction = 0.0
+
+        for sample in samples {
+            if let latency = sample.latency?.milliseconds {
+                receivedCount += 1
+                latencyTotal += latency
+                minimum = minimum.map { Swift.min($0, latency) } ?? latency
+                maximum = maximum.map { Swift.max($0, latency) } ?? latency
             }
-            return sample.isSuccess ? 0 : 1
-        }.reduce(0.0) { $0 + $1 }
+            if let starlinkDropRate = sample.metadata.starlink?.popPingDropRate {
+                lossFraction += min(1, max(0, starlinkDropRate))
+            } else {
+                lossFraction += sample.isSuccess ? 0 : 1
+            }
+        }
+
+        received = receivedCount
         lossPercent = transmitted == 0 ? 0 : (lossFraction / Double(transmitted)) * 100
-        minimumMilliseconds = latencies.min()
-        maximumMilliseconds = latencies.max()
-        averageMilliseconds = latencies.isEmpty ? nil : latencies.reduce(0, +) / Double(latencies.count)
+        minimumMilliseconds = minimum
+        maximumMilliseconds = maximum
+        averageMilliseconds = receivedCount == 0 ? nil : latencyTotal / Double(receivedCount)
     }
 }
 

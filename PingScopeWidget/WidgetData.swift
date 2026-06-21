@@ -86,6 +86,10 @@ struct WidgetSnapshotData: Codable, Equatable, Sendable {
         return health.first { $0.hostID == primaryHost.id }
     }
 
+    var healthByHostID: [UUID: HostHealth] {
+        Dictionary(uniqueKeysWithValues: health.map { ($0.hostID, $0) })
+    }
+
     var isStale: Bool {
         Date().timeIntervalSince(generatedAt) > 15 * 60
     }
