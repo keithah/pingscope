@@ -20,6 +20,7 @@ DerivedData/
 
 # Swift Package Manager
 .build/
+.superpowers/
 Packages/
 Package.pins
 Package.resolved
