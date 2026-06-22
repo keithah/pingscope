@@ -69,7 +69,11 @@ public struct BoundedBuffer<Element: Codable & Equatable & Sendable>: Codable, E
 
     private mutating func normalizeCapacityIfNeeded() {
         let normalizedCapacity = max(1, capacity)
-        guard normalizedCapacity != capacity || storage.count > normalizedCapacity else {
+        // Re-linearize when the buffer is wrapped (startIndex != 0) but no longer
+        // physically full — this only happens after capacity grows, and leaving it
+        // wrapped would make the next storage.append insert out of logical order.
+        let needsRelinearize = startIndex != 0 && storage.count < normalizedCapacity
+        guard normalizedCapacity != capacity || storage.count > normalizedCapacity || needsRelinearize else {
             return
         }
 

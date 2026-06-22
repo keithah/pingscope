@@ -105,6 +105,25 @@ final class DomainBehaviorTests: XCTestCase {
         XCTAssertEqual(try XCTUnwrap(series.stats.maximumMilliseconds), 50, accuracy: 0.01)
     }
 
+    func testSampleSeriesPreservesOrderAfterCapacityGrowsOnWrappedBuffer() {
+        let hostID = UUID()
+        var series = SampleSeries(hostID: hostID, capacity: 3)
+
+        // Fill the ring buffer past capacity so it wraps (drops the 10ms sample).
+        series.append(.success(hostID: hostID, latency: .milliseconds(10)))
+        series.append(.success(hostID: hostID, latency: .milliseconds(20)))
+        series.append(.success(hostID: hostID, latency: .milliseconds(30)))
+        series.append(.success(hostID: hostID, latency: .milliseconds(40)))
+
+        // Grow capacity while wrapped, then keep appending.
+        series.capacity = 5
+        series.append(.success(hostID: hostID, latency: .milliseconds(50)))
+        series.append(.success(hostID: hostID, latency: .milliseconds(60)))
+
+        let latencies = series.samples.map { $0.latency?.milliseconds }
+        XCTAssertEqual(latencies, [20, 30, 40, 50, 60])
+    }
+
     func testStarlinkDropRateContributesToSampleLoss() {
         let hostID = UUID()
         let samples = [
