@@ -3,9 +3,18 @@ import SQLite3
 
 public protocol PingHistoryStore: Sendable {
     func append(_ result: PingResult) async
+    func append(_ results: [PingResult]) async
     func samples(hostID: UUID, since: Date, limit: Int) async -> [PingResult]
     func prune(olderThan cutoff: Date) async
     func deleteAll() async
+}
+
+public extension PingHistoryStore {
+    func append(_ results: [PingResult]) async {
+        for result in results {
+            await append(result)
+        }
+    }
 }
 
 public actor SQLiteHistoryStore: PingHistoryStore {
@@ -13,6 +22,8 @@ public actor SQLiteHistoryStore: PingHistoryStore {
     private let retention: Duration
     private let logger: (@Sendable (String) -> Void)?
     private let connection = SQLiteConnection()
+    private let metadataEncoder = JSONEncoder()
+    private let metadataDecoder = JSONDecoder()
     private let pruneInterval: TimeInterval = 60
     private var lastPruneAttempt: Date?
 
@@ -35,12 +46,17 @@ public actor SQLiteHistoryStore: PingHistoryStore {
     }
 
     public func append(_ result: PingResult) async {
+        await append([result])
+    }
+
+    public func append(_ results: [PingResult]) async {
+        guard !results.isEmpty else { return }
         do {
             try openIfNeeded()
-            try insert(result)
-            if shouldPrune(at: result.timestamp) {
-                try pruneSync(olderThan: result.timestamp.addingTimeInterval(-retention.seconds))
-                lastPruneAttempt = result.timestamp
+            try insert(results)
+            if let newestTimestamp = results.map(\.timestamp).max(), shouldPrune(at: newestTimestamp) {
+                try pruneSync(olderThan: newestTimestamp.addingTimeInterval(-retention.seconds))
+                lastPruneAttempt = newestTimestamp
             }
         } catch {
             logger?("history append failed: \(error)")
@@ -115,48 +131,70 @@ public actor SQLiteHistoryStore: PingHistoryStore {
         return timestamp.timeIntervalSince(lastPruneAttempt) >= pruneInterval
     }
 
-    private func insert(_ result: PingResult) throws {
+    private func insert(_ results: [PingResult]) throws {
         let sql = """
         INSERT OR REPLACE INTO ping_samples
         (id, host_id, address, method, port, timestamp, latency_ms, failure_reason, metadata_note, metadata_json)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
         """
-        try withStatement(sql) { statement in
-            bindText(result.id.uuidString, to: 1, in: statement)
-            bindText(result.hostID.uuidString, to: 2, in: statement)
-            bindText(result.address, to: 3, in: statement)
-            bindText(result.method.rawValue, to: 4, in: statement)
-            if let port = result.port {
-                sqlite3_bind_int64(statement, 5, Int64(port))
-            } else {
-                sqlite3_bind_null(statement, 5)
+        let shouldWrapInTransaction = true
+        if shouldWrapInTransaction {
+            try execute("BEGIN IMMEDIATE;")
+        }
+        do {
+            try withStatement(sql) { statement in
+                for result in results {
+                    try bindInsert(result, to: statement)
+                    let stepResult = sqlite3_step(statement)
+                    guard stepResult == SQLITE_DONE else {
+                        throw sqliteError(.stepFailed, code: stepResult)
+                    }
+                    sqlite3_reset(statement)
+                    sqlite3_clear_bindings(statement)
+                }
             }
-            sqlite3_bind_double(statement, 6, result.timestamp.timeIntervalSince1970)
-            if let latency = result.latency {
-                sqlite3_bind_double(statement, 7, latency.milliseconds)
-            } else {
-                sqlite3_bind_null(statement, 7)
+            if shouldWrapInTransaction {
+                try execute("COMMIT;")
             }
-            if let failureReason = result.failureReason {
-                bindText(failureReason.rawValue, to: 8, in: statement)
-            } else {
-                sqlite3_bind_null(statement, 8)
+        } catch {
+            if shouldWrapInTransaction {
+                try? execute("ROLLBACK;")
             }
-            if let note = result.metadata.note {
-                bindText(note, to: 9, in: statement)
-            } else {
-                sqlite3_bind_null(statement, 9)
-            }
-            if let metadataData = try? JSONEncoder().encode(result.metadata),
-               let metadataText = String(data: metadataData, encoding: .utf8) {
-                bindText(metadataText, to: 10, in: statement)
-            } else {
-                sqlite3_bind_null(statement, 10)
-            }
-            let result = sqlite3_step(statement)
-            guard result == SQLITE_DONE else {
-                throw sqliteError(.stepFailed, code: result)
-            }
+            throw error
+        }
+    }
+
+    private func bindInsert(_ result: PingResult, to statement: OpaquePointer) throws {
+        bindText(result.id.uuidString, to: 1, in: statement)
+        bindText(result.hostID.uuidString, to: 2, in: statement)
+        bindText(result.address, to: 3, in: statement)
+        bindText(result.method.rawValue, to: 4, in: statement)
+        if let port = result.port {
+            sqlite3_bind_int64(statement, 5, Int64(port))
+        } else {
+            sqlite3_bind_null(statement, 5)
+        }
+        sqlite3_bind_double(statement, 6, result.timestamp.timeIntervalSince1970)
+        if let latency = result.latency {
+            sqlite3_bind_double(statement, 7, latency.milliseconds)
+        } else {
+            sqlite3_bind_null(statement, 7)
+        }
+        if let failureReason = result.failureReason {
+            bindText(failureReason.rawValue, to: 8, in: statement)
+        } else {
+            sqlite3_bind_null(statement, 8)
+        }
+        if let note = result.metadata.note {
+            bindText(note, to: 9, in: statement)
+        } else {
+            sqlite3_bind_null(statement, 9)
+        }
+        if let metadataData = try? metadataEncoder.encode(result.metadata),
+           let metadataText = String(data: metadataData, encoding: .utf8) {
+            bindText(metadataText, to: 10, in: statement)
+        } else {
+            sqlite3_bind_null(statement, 10)
         }
     }
 
@@ -174,10 +212,15 @@ public actor SQLiteHistoryStore: PingHistoryStore {
             sqlite3_bind_double(statement, 2, since.timeIntervalSince1970)
             sqlite3_bind_int(statement, 3, Int32(limit))
 
-            while sqlite3_step(statement) == SQLITE_ROW {
+            var stepResult = sqlite3_step(statement)
+            while stepResult == SQLITE_ROW {
                 if let result = result(from: statement) {
                     results.append(result)
                 }
+                stepResult = sqlite3_step(statement)
+            }
+            guard stepResult == SQLITE_DONE else {
+                throw sqliteError(.stepFailed, code: stepResult)
             }
         }
         return results
@@ -281,7 +324,7 @@ public actor SQLiteHistoryStore: PingHistoryStore {
         let metadata: ProbeMetadata
         if let metadataText = text(at: 9, in: statement),
            let metadataData = metadataText.data(using: .utf8),
-           let decoded = try? JSONDecoder().decode(ProbeMetadata.self, from: metadataData) {
+           let decoded = try? metadataDecoder.decode(ProbeMetadata.self, from: metadataData) {
             metadata = decoded
         } else {
             metadata = ProbeMetadata(note: text(at: 8, in: statement))

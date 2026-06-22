@@ -15,7 +15,7 @@ final class StarlinkHTTP2TransportTests: XCTestCase {
         XCTAssertTrue(request.starts(with: Data("PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n".utf8)))
 
         var parser = HTTP2FrameParser()
-        parser.append(Data(request.dropFirst(24)))
+        try parser.append(Data(request.dropFirst(24)))
         let frames = try parser.drainFrames()
 
         XCTAssertEqual(frames.count, 3)
@@ -38,10 +38,10 @@ final class StarlinkHTTP2TransportTests: XCTestCase {
         let frame = HTTP2Frame(type: .data, flags: HTTP2FrameFlags.endStream, streamID: 1, payload: Data([1, 2, 3, 4])).encoded()
         var parser = HTTP2FrameParser()
 
-        parser.append(Data(frame.prefix(10)))
+        try parser.append(Data(frame.prefix(10)))
         XCTAssertEqual(try parser.drainFrames(), [])
 
-        parser.append(Data(frame.dropFirst(10)))
+        try parser.append(Data(frame.dropFirst(10)))
         let frames = try parser.drainFrames()
 
         XCTAssertEqual(frames, [HTTP2Frame(type: .data, flags: HTTP2FrameFlags.endStream, streamID: 1, payload: Data([1, 2, 3, 4]))])
@@ -49,7 +49,7 @@ final class StarlinkHTTP2TransportTests: XCTestCase {
 
     func testSettingsAckFrameHasAckFlag() throws {
         var parser = HTTP2FrameParser()
-        parser.append(StarlinkHTTP2RequestBuilder.settingsAckFrame())
+        try parser.append(StarlinkHTTP2RequestBuilder.settingsAckFrame())
 
         let frame = try XCTUnwrap(try parser.drainFrames().first)
 
@@ -57,5 +57,15 @@ final class StarlinkHTTP2TransportTests: XCTestCase {
         XCTAssertEqual(frame.flags, HTTP2FrameFlags.ack)
         XCTAssertEqual(frame.streamID, 0)
         XCTAssertTrue(frame.payload.isEmpty)
+    }
+
+    func testFrameParserRejectsOversizedFramesBeforeRetainingPayload() throws {
+        let oversizedPayload = Data(repeating: 0xff, count: 256 * 1024 + 1)
+        let frame = HTTP2Frame(type: .data, flags: HTTP2FrameFlags.endStream, streamID: 1, payload: oversizedPayload).encoded()
+        var parser = HTTP2FrameParser()
+
+        XCTAssertThrowsError(try parser.append(frame)) { error in
+            XCTAssertEqual(error as? StarlinkStatusFetchError, .responseTooLarge)
+        }
     }
 }

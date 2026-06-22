@@ -524,42 +524,24 @@ public struct HostHealth: Codable, Equatable, Sendable {
 
 public struct SampleSeries: Codable, Equatable, Sendable {
     public var hostID: UUID
-    public var capacity: Int
-    private var storage: [PingResult]
-    private var startIndex: Int
-    private var storedCount: Int
+    private var buffer: BoundedBuffer<PingResult>
+
+    public var capacity: Int {
+        get { buffer.capacity }
+        set { buffer.setCapacity(newValue) }
+    }
 
     public var samples: [PingResult] {
-        guard storedCount > 0 else { return [] }
-        return (0..<storedCount).map { offset in
-            storage[(startIndex + offset) % storage.count]
-        }
+        buffer.elements
     }
 
     public init(hostID: UUID, capacity: Int = 300) {
         self.hostID = hostID
-        self.capacity = max(1, capacity)
-        self.storage = []
-        self.startIndex = 0
-        self.storedCount = 0
+        self.buffer = BoundedBuffer(capacity: capacity)
     }
 
     public mutating func append(_ result: PingResult) {
-        normalizeCapacityIfNeeded()
-
-        if storage.count < capacity {
-            storage.append(result)
-            storedCount += 1
-            return
-        }
-
-        if storedCount < capacity {
-            storage.append(result)
-            storedCount += 1
-        } else {
-            storage[startIndex] = result
-            startIndex = (startIndex + 1) % storage.count
-        }
+        buffer.append(result)
     }
 
     public func samples(since cutoff: Date) -> [PingResult] {
@@ -579,11 +561,9 @@ public struct SampleSeries: Codable, Equatable, Sendable {
     public init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         hostID = try container.decode(UUID.self, forKey: .hostID)
-        capacity = max(1, try container.decode(Int.self, forKey: .capacity))
+        let capacity = try container.decode(Int.self, forKey: .capacity)
         let decodedSamples = try container.decode([PingResult].self, forKey: .samples)
-        storage = Array(decodedSamples.suffix(capacity))
-        startIndex = 0
-        storedCount = storage.count
+        buffer = BoundedBuffer(elements: decodedSamples, capacity: capacity)
     }
 
     public func encode(to encoder: any Encoder) throws {
@@ -595,20 +575,7 @@ public struct SampleSeries: Codable, Equatable, Sendable {
 
     public static func == (lhs: SampleSeries, rhs: SampleSeries) -> Bool {
         lhs.hostID == rhs.hostID
-            && lhs.capacity == rhs.capacity
-            && lhs.samples == rhs.samples
-    }
-
-    private mutating func normalizeCapacityIfNeeded() {
-        let normalizedCapacity = max(1, capacity)
-        guard normalizedCapacity != capacity || storage.count > normalizedCapacity else {
-            return
-        }
-
-        capacity = normalizedCapacity
-        storage = Array(samples.suffix(capacity))
-        startIndex = 0
-        storedCount = storage.count
+            && lhs.buffer == rhs.buffer
     }
 }
 
@@ -1312,21 +1279,13 @@ public struct AlertDecisionEngine: Sendable {
         guard rules.isEnabled else { return nil }
 
         let signature = diagnosis.alertSignature
-        let previousSignature = lastDiagnosisSignature
         lastDiagnosisSignature = signature
 
         if diagnosis.verdict == .allReachable {
             diagnosisStreakSignature = nil
             diagnosisStreakCount = 0
             lastAlertedDiagnosisSignature = nil
-            guard previousSignature != nil,
-                  previousSignature != signature,
-                  rules.notifyOnRecovery,
-                  rules.alertTypes.contains(.recovered),
-                  shouldSend(.recovered, at: date)
-            else { return nil }
-            lastSentAt[.recovered] = date
-            return .pathRecovered
+            return nil
         }
 
         if diagnosisStreakSignature == signature {

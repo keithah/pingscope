@@ -34,30 +34,20 @@ public struct DefaultGatewayDetector: Sendable {
 
     public func detect() async -> HostConfig? {
         #if os(macOS)
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/sbin/route")
-        process.arguments = ["-n", "get", "default"]
-        let output = Pipe()
-        process.standardOutput = output
-        process.standardError = Pipe()
-        let processBox = ProcessBox(process)
-
-        return await withTaskCancellationHandler {
-            do {
-                try process.run()
-                await process.waitForTermination()
-                let data = output.fileHandleForReading.readDataToEndOfFile()
-                guard process.terminationStatus == 0,
-                      let text = String(data: data, encoding: .utf8),
-                      let address = Self.parse(routeOutput: text) else {
-                    return nil
-                }
-                return Self.gatewayHost(address: address)
-            } catch {
+        do {
+            let result = try await AsyncProcess.run(
+                executablePath: "/sbin/route",
+                arguments: ["-n", "get", "default"],
+                timeout: .seconds(3)
+            )
+            guard result.terminationStatus == 0,
+                  let text = String(data: result.standardOutput, encoding: .utf8),
+                  let address = Self.parse(routeOutput: text) else {
                 return nil
             }
-        } onCancel: {
-            processBox.terminate()
+            return Self.gatewayHost(address: address)
+        } catch {
+            return nil
         }
         #else
         return nil
@@ -210,8 +200,8 @@ public actor MeasurementScheduler {
         self.logger = logger
     }
 
-    public func start(hosts: [HostConfig], allowsLocalNetworkProbes: Bool = true) -> AsyncStream<PingResult> {
-        stopTasks()
+    public func start(hosts: [HostConfig], allowsLocalNetworkProbes: Bool = true) async -> AsyncStream<PingResult> {
+        await stopTasks()
         continuation?.finish()
         continuation = nil
         generation += 1
@@ -242,22 +232,26 @@ public actor MeasurementScheduler {
         return stream
     }
 
-    public func stop() {
-        stopTasks()
+    public func stop() async {
+        await stopTasks()
         continuation?.finish()
         continuation = nil
     }
 
-    private func stop(generation stoppedGeneration: Int) {
+    private func stop(generation stoppedGeneration: Int) async {
         guard stoppedGeneration == generation else { return }
-        stop()
+        await stop()
     }
 
-    private func stopTasks() {
-        for task in tasks {
+    private func stopTasks() async {
+        let runningTasks = tasks
+        tasks.removeAll()
+        for task in runningTasks {
             task.cancel()
         }
-        tasks.removeAll()
+        for task in runningTasks {
+            await task.value
+        }
     }
 
     private func runLoop(for host: HostConfig, generation: Int) async {
@@ -293,6 +287,10 @@ public actor PingRuntime {
     private var samplesByHost: [UUID: SampleSeries] = [:]
     private var streamTask: Task<Void, Never>?
     private var continuation: AsyncStream<RuntimeSnapshot>.Continuation?
+    private var continuationToken: UUID?
+    private var cachedHosts: [HostConfig] = []
+    private var hostByID: [UUID: HostConfig] = [:]
+    private var cachedPrimaryHostID: UUID?
 
     public init(
         hostStore: HostStore = HostStore(),
@@ -308,9 +306,15 @@ public actor PingRuntime {
         self.alertEngine = AlertDecisionEngine(rules: notificationRules)
     }
 
-    public func snapshots() -> AsyncStream<RuntimeSnapshot> {
-        AsyncStream { continuation in
+    public func snapshots() async -> AsyncStream<RuntimeSnapshot> {
+        await refreshHostCache()
+        let token = UUID()
+        return AsyncStream { continuation in
             self.continuation = continuation
+            self.continuationToken = token
+            continuation.onTermination = { [weak self] _ in
+                Task { await self?.clearContinuation(token: token) }
+            }
             self.publishSnapshot()
         }
     }
@@ -321,8 +325,8 @@ public actor PingRuntime {
 
     public func restartScheduler() async {
         streamTask?.cancel()
-        let hosts = await hostStore.enabledHosts()
-        let resultStream = await scheduler.start(hosts: hosts, allowsLocalNetworkProbes: allowsLocalNetworkProbes)
+        await refreshHostCache()
+        let resultStream = await scheduler.start(hosts: cachedHosts.filter(\.isEnabled), allowsLocalNetworkProbes: allowsLocalNetworkProbes)
         streamTask = Task { [weak self] in
             for await result in resultStream {
                 await self?.ingest(result)
@@ -335,6 +339,8 @@ public actor PingRuntime {
         streamTask?.cancel()
         await scheduler.stop()
         continuation?.finish()
+        continuation = nil
+        continuationToken = nil
     }
 
     public func stopMeasurements() async {
@@ -344,8 +350,10 @@ public actor PingRuntime {
     }
 
     public func ingest(_ result: PingResult) async {
-        let hosts = await hostStore.hosts()
-        let host = hosts.first { $0.id == result.hostID }
+        if cachedHosts.isEmpty {
+            await refreshHostCache()
+        }
+        let host = hostByID[result.hostID]
         var health = healthByHost[result.hostID] ?? HostHealth(hostID: result.hostID, thresholds: host?.thresholds ?? .defaults)
         let previousStatus = health.status
         health.ingest(result)
@@ -355,18 +363,16 @@ public actor PingRuntime {
         series.append(result)
         samplesByHost[result.hostID] = series
         if let historyStore {
-            Task {
-                await historyStore.append(result)
-            }
+            await historyStore.append(result)
         }
 
         let alerts: [AlertDecision]
         if host?.notifications == .muted {
             alerts = []
         } else {
-            let diagnosis = networkDiagnoser.diagnose(hosts: hosts, healthByHost: healthByHost)
+            let diagnosis = networkDiagnoser.diagnose(hosts: cachedHosts, healthByHost: healthByHost)
             if let diagnosisAlert = alertEngine.evaluateDiagnosis(diagnosis, at: result.timestamp),
-               !shouldSuppressDiagnosisAlert(diagnosisAlert, hosts: hosts) {
+               !shouldSuppressDiagnosisAlert(diagnosisAlert) {
                 alerts = [diagnosisAlert]
             } else {
                 alerts = alertEngine.evaluate(result: result, previousStatus: previousStatus, currentStatus: health.status).map { [$0] } ?? []
@@ -376,8 +382,10 @@ public actor PingRuntime {
     }
 
     public func upsertHost(_ host: HostConfig) async {
-        let previous = await hostStore.hosts().first { $0.id == host.id }
+        await refreshHostCache()
+        let previous = hostByID[host.id]
         await hostStore.upsert(host)
+        await refreshHostCache()
         if let previous, previous.measurementEndpoint != host.measurementEndpoint {
             healthByHost[host.id] = HostHealth(hostID: host.id, thresholds: host.thresholds)
             samplesByHost[host.id] = SampleSeries(hostID: host.id)
@@ -389,6 +397,7 @@ public actor PingRuntime {
 
     public func deleteHost(_ id: UUID) async {
         await hostStore.delete(id)
+        await refreshHostCache()
         healthByHost.removeValue(forKey: id)
         samplesByHost.removeValue(forKey: id)
         await restartScheduler()
@@ -396,6 +405,7 @@ public actor PingRuntime {
 
     public func selectPrimaryHost(_ id: UUID) async {
         await hostStore.selectPrimaryHost(id)
+        await refreshHostCache()
         publishSnapshot()
     }
 
@@ -419,6 +429,7 @@ public actor PingRuntime {
 
     public func reset() async {
         await hostStore.reset()
+        await refreshHostCache()
         healthByHost.removeAll()
         samplesByHost.removeAll()
         await historyStore?.deleteAll()
@@ -429,28 +440,37 @@ public actor PingRuntime {
         await historyStore?.samples(hostID: hostID, since: since, limit: limit) ?? []
     }
 
-    private func publishSnapshot(alerts: [AlertDecision] = []) {
-        Task {
-            let hosts = await hostStore.hosts()
-            let primaryID = await hostStore.primaryHostID()
-            continuation?.yield(RuntimeSnapshot(
-                hosts: hosts,
-                primaryHostID: primaryID,
-                healthByHost: healthByHost,
-                samplesByHost: samplesByHost,
-                alerts: alerts
-            ))
-        }
+    private func refreshHostCache() async {
+        cachedHosts = await hostStore.hosts()
+        hostByID = Dictionary(uniqueKeysWithValues: cachedHosts.map { ($0.id, $0) })
+        cachedPrimaryHostID = await hostStore.primaryHostID()
     }
 
-    private func shouldSuppressDiagnosisAlert(_ alert: AlertDecision, hosts: [HostConfig]) -> Bool {
+    private func publishSnapshot(alerts: [AlertDecision] = []) {
+        continuation?.yield(RuntimeSnapshot(
+            hosts: cachedHosts,
+            primaryHostID: cachedPrimaryHostID,
+            healthByHost: healthByHost,
+            samplesByHost: samplesByHost,
+            alerts: alerts
+        ))
+    }
+
+    private func clearContinuation(token: UUID) {
+        guard continuationToken == token else { return }
+        continuation = nil
+        continuationToken = nil
+    }
+
+    private func shouldSuppressDiagnosisAlert(_ alert: AlertDecision) -> Bool {
         switch alert {
         case let .remoteServiceDown(hostIDs):
-            !hostIDs.isEmpty && hostIDs.allSatisfy { id in
-                hosts.first { $0.id == id }?.notifications == .muted
+            let mutedHostIDs = Set(cachedHosts.filter { $0.notifications == .muted }.map(\.id))
+            return !hostIDs.isEmpty && hostIDs.allSatisfy { id in
+                mutedHostIDs.contains(id)
             }
         default:
-            false
+            return false
         }
     }
 }

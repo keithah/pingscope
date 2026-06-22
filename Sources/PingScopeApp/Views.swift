@@ -1880,18 +1880,17 @@ struct LatencyGraph: View {
     var showsAxes = false
 
     var body: some View {
-        let latencies = samples.compactMap { $0.latency?.milliseconds }
-        let scale = LatencyGraphScale(latencies: latencies)
+        let graphData = LatencyGraphData(samples: samples)
 
         HStack(spacing: showsAxes ? 6 : 0) {
             if showsAxes {
-                LatencyGraphAxisLabels(scale: scale, hasData: !latencies.isEmpty)
+                LatencyGraphAxisLabels(scale: graphData.scale, hasData: graphData.hasLatencyData)
             }
 
             ZStack {
-                graphCanvas(scale: scale)
+                graphCanvas(graphData: graphData)
 
-                if latencies.isEmpty {
+                if !graphData.hasLatencyData {
                     Text("No samples in range")
                         .font(.callout)
                         .foregroundStyle(.secondary)
@@ -1899,27 +1898,26 @@ struct LatencyGraph: View {
             }
 
             if showsAxes {
-                LatencyGraphRightTicks(scale: scale)
+                LatencyGraphRightTicks(scale: graphData.scale)
             }
         }
         .accessibilityLabel("Latency graph")
     }
 
-    private func graphCanvas(scale: LatencyGraphScale) -> some View {
+    private func graphCanvas(graphData: LatencyGraphData) -> some View {
         GeometryReader { proxy in
             Canvas { context, size in
-                let latencies = samples.compactMap { $0.latency?.milliseconds }
-                guard latencies.count > 1 else {
+                guard graphData.latencies.count > 1 else {
                     let rect = CGRect(origin: .zero, size: size)
                     context.stroke(Path(roundedRect: rect, cornerRadius: 6), with: .color(.secondary.opacity(0.25)))
                     return
                 }
 
                 if showsAxes {
-                    LatencyGraphGrid.draw(in: size, context: context, scale: scale)
+                    LatencyGraphGrid.draw(in: size, context: context, scale: graphData.scale)
                 }
 
-                let maxValue = scale.axisMaximumMilliseconds
+                let maxValue = graphData.scale.axisMaximumMilliseconds
                 var path = Path()
                 var isDrawingSegment = false
                 let plotTop: CGFloat = showsAxes ? 6 : 0
@@ -1981,20 +1979,17 @@ struct MultiHostLatencyGraph: View {
     var showsLegend = true
 
     var body: some View {
-        let latencies = series.flatMap { hostSeries in
-            hostSeries.samples.compactMap { $0.latency?.milliseconds }
-        }
-        let scale = LatencyGraphScale(latencies: latencies)
+        let graphData = MultiHostLatencyGraphData(series: series)
 
         HStack(spacing: showsAxes ? 6 : 0) {
             if showsAxes {
-                LatencyGraphAxisLabels(scale: scale, hasData: !latencies.isEmpty)
+                LatencyGraphAxisLabels(scale: graphData.scale, hasData: graphData.hasLatencyData)
             }
 
             ZStack(alignment: .bottomLeading) {
-                graphCanvas(scale: scale)
+                graphCanvas(graphData: graphData)
 
-                if latencies.isEmpty {
+                if !graphData.hasLatencyData {
                     Text("No samples in range")
                         .font(.callout)
                         .foregroundStyle(.secondary)
@@ -2008,7 +2003,7 @@ struct MultiHostLatencyGraph: View {
             }
 
             if showsAxes {
-                LatencyGraphRightTicks(scale: scale)
+                LatencyGraphRightTicks(scale: graphData.scale)
             }
         }
         .accessibilityLabel("All hosts latency graph")
@@ -2035,21 +2030,21 @@ struct MultiHostLatencyGraph: View {
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 6))
     }
 
-    private func graphCanvas(scale: LatencyGraphScale) -> some View {
+    private func graphCanvas(graphData: MultiHostLatencyGraphData) -> some View {
         GeometryReader { proxy in
             Canvas { context, size in
-                guard series.contains(where: { $0.samples.count > 1 }) else {
+                guard graphData.hasDrawableSeries else {
                     let rect = CGRect(origin: .zero, size: size)
                     context.stroke(Path(roundedRect: rect, cornerRadius: 6), with: .color(.secondary.opacity(0.25)))
                     return
                 }
 
                 if showsAxes {
-                    LatencyGraphGrid.draw(in: size, context: context, scale: scale)
+                    LatencyGraphGrid.draw(in: size, context: context, scale: graphData.scale)
                 }
 
-                for hostSeries in series where hostSeries.samples.count > 1 {
-                    draw(hostSeries, in: size, context: context, scale: scale)
+                for hostSeries in graphData.drawableSeries {
+                    draw(hostSeries, in: size, context: context, scale: graphData.scale)
                 }
             }
             .frame(width: proxy.size.width, height: proxy.size.height)
@@ -2096,6 +2091,42 @@ struct MultiHostLatencyGraph: View {
         )
     }
 
+}
+
+private struct LatencyGraphData {
+    let latencies: [Double]
+    let scale: LatencyGraphScale
+
+    init(samples: [PingResult]) {
+        latencies = samples.compactMap { $0.latency?.milliseconds }
+        scale = LatencyGraphScale(latencies: latencies)
+    }
+
+    var hasLatencyData: Bool {
+        !latencies.isEmpty
+    }
+}
+
+private struct MultiHostLatencyGraphData {
+    let drawableSeries: [HostLatencyGraphSeries]
+    let latencies: [Double]
+    let scale: LatencyGraphScale
+
+    init(series: [HostLatencyGraphSeries]) {
+        drawableSeries = series.filter { $0.samples.count > 1 }
+        latencies = series.flatMap { hostSeries in
+            hostSeries.samples.compactMap { $0.latency?.milliseconds }
+        }
+        scale = LatencyGraphScale(latencies: latencies)
+    }
+
+    var hasLatencyData: Bool {
+        !latencies.isEmpty
+    }
+
+    var hasDrawableSeries: Bool {
+        !drawableSeries.isEmpty
+    }
 }
 
 private struct LatencyGraphAxisLabels: View {

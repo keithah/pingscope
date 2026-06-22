@@ -26,8 +26,10 @@ enum NotificationPermissionState: String {
 
 final class MacNotificationDispatcher: NSObject, UNUserNotificationCenterDelegate, @unchecked Sendable {
     private var center: UNUserNotificationCenter?
+    private let logger: (@Sendable (String) -> Void)?
 
-    override init() {
+    init(logger: (@Sendable (String) -> Void)? = DebugLog.write) {
+        self.logger = logger
         super.init()
     }
 
@@ -50,6 +52,7 @@ final class MacNotificationDispatcher: NSObject, UNUserNotificationCenterDelegat
         do {
             try await center.add(request)
         } catch {
+            logger?("notification delivery failed alert=\(decision) error=\(error.localizedDescription)")
             return
         }
     }
@@ -108,6 +111,7 @@ final class MacNotificationDispatcher: NSObject, UNUserNotificationCenterDelegat
             try await center.add(request)
             return true
         } catch {
+            logger?("test notification delivery failed error=\(error.localizedDescription)")
             return false
         }
     }
@@ -148,17 +152,22 @@ private struct NotificationMessage {
     let body: String
 
     init(decision: AlertDecision, hosts: [HostConfig]) {
+        let hostNameByID = Dictionary(uniqueKeysWithValues: hosts.map { ($0.id, $0.displayName) })
+        func hostName(_ id: UUID) -> String {
+            hostNameByID[id] ?? "Host"
+        }
+
         switch decision {
         case let .hostDown(hostID):
-            let name = Self.hostName(hostID, in: hosts)
+            let name = hostName(hostID)
             title = "\(name) is down"
             body = "PingScope has reached the configured failure threshold."
         case let .recovered(hostID):
-            let name = Self.hostName(hostID, in: hosts)
+            let name = hostName(hostID)
             title = "\(name) recovered"
             body = "Latency measurements are receiving responses again."
         case let .highLatency(hostID):
-            let name = Self.hostName(hostID, in: hosts)
+            let name = hostName(hostID)
             title = "High latency on \(name)"
             body = "Latency crossed the configured notification threshold."
         case let .networkChange(previousGateway, currentGateway):
@@ -180,7 +189,7 @@ private struct NotificationMessage {
             title = "Internet path down"
             body = "Local connectivity is available, but upstream internet checks are failing."
         case let .remoteServiceDown(hostIDs):
-            let names = hostIDs.prefix(3).map { Self.hostName($0, in: hosts) }.joined(separator: ", ")
+            let names = hostIDs.prefix(3).map(hostName).joined(separator: ", ")
             let extra = hostIDs.count > 3 ? ", +\(hostIDs.count - 3) more" : ""
             title = hostIDs.count == 1 ? "\(names) is unreachable" : "Remote services unreachable"
             body = "\(names)\(extra) failed while inner network checks were reachable."
@@ -191,9 +200,5 @@ private struct NotificationMessage {
             title = "Network path recovered"
             body = "PingScope measurements are reachable again."
         }
-    }
-
-    private static func hostName(_ id: UUID, in hosts: [HostConfig]) -> String {
-        hosts.first { $0.id == id }?.displayName ?? "Host"
     }
 }

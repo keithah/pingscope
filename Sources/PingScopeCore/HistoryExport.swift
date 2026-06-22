@@ -25,6 +25,28 @@ public enum HistoryExportFormat: String, CaseIterable, Identifiable, Sendable {
 }
 
 public enum HistoryExporter {
+    public static func write(samples: [PingResult], host: HostConfig, format: HistoryExportFormat, to url: URL) throws {
+        let temporaryURL = url
+            .deletingLastPathComponent()
+            .appendingPathComponent(".\(url.lastPathComponent).tmp-\(UUID().uuidString)")
+        do {
+            try data(samples: samples, host: host, format: format).write(to: temporaryURL, options: .atomic)
+            if FileManager.default.fileExists(atPath: url.path) {
+                _ = try FileManager.default.replaceItemAt(
+                    url,
+                    withItemAt: temporaryURL,
+                    backupItemName: nil,
+                    options: [.usingNewMetadataOnly]
+                )
+            } else {
+                try FileManager.default.moveItem(at: temporaryURL, to: url)
+            }
+        } catch {
+            try? FileManager.default.removeItem(at: temporaryURL)
+            throw error
+        }
+    }
+
     public static func data(samples: [PingResult], host: HostConfig, format: HistoryExportFormat) throws -> Data {
         switch format {
         case .csv:
@@ -38,24 +60,7 @@ public enum HistoryExporter {
 
     public static func csv(samples: [PingResult], host: HostConfig) -> String {
         let formatter = ISO8601DateFormatter()
-        let header = [
-            "timestamp",
-            "host",
-            "address",
-            "method",
-            "port",
-            "result",
-            "latency_ms",
-            "failure_reason",
-            "note",
-            "starlink_state",
-            "starlink_drop_rate",
-            "starlink_downlink_bps",
-            "starlink_uplink_bps",
-            "starlink_fraction_obstructed",
-            "starlink_last_24h_obstructed_s",
-            "starlink_alerts"
-        ].joined(separator: ",")
+        let header = csvHeader
         let rows = samples.map { csvRow(sample: $0, host: host, formatter: formatter) }
         return ([header] + rows).joined(separator: "\n") + "\n"
     }
@@ -114,6 +119,28 @@ public enum HistoryExporter {
         guard let value else { return "" }
         return String(value)
     }
+
+    private static var csvHeader: String {
+        [
+            "timestamp",
+            "host",
+            "address",
+            "method",
+            "port",
+            "result",
+            "latency_ms",
+            "failure_reason",
+            "note",
+            "starlink_state",
+            "starlink_drop_rate",
+            "starlink_downlink_bps",
+            "starlink_uplink_bps",
+            "starlink_fraction_obstructed",
+            "starlink_last_24h_obstructed_s",
+            "starlink_alerts"
+        ].joined(separator: ",")
+    }
+
 }
 
 private struct HistoryExportDocument: Encodable {

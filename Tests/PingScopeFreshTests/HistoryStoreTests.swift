@@ -167,6 +167,48 @@ final class HistoryStoreTests: XCTestCase {
         XCTAssertTrue(text.contains("Timed out  Failed"))
     }
 
+    func testHistoryExporterWriteMatchesInMemoryFormats() throws {
+        let host = HostConfig(displayName: "Export Host", address: "example.com")
+        let samples = [
+            PingResult.success(
+                hostID: host.id,
+                latency: .milliseconds(18.4),
+                timestamp: Date(timeIntervalSince1970: 1_000),
+                metadata: ProbeMetadata(note: "fresh")
+            ).withHostMetadata(from: host),
+            PingResult.failure(
+                hostID: host.id,
+                reason: .timeout,
+                timestamp: Date(timeIntervalSince1970: 1_001),
+                metadata: ProbeMetadata(note: "late")
+            ).withHostMetadata(from: host)
+        ]
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        for format in [HistoryExportFormat.csv, .text] {
+            let url = directory.appendingPathComponent("history.\(format.fileExtension)")
+            try HistoryExporter.write(samples: samples, host: host, format: format, to: url)
+            let written = try Data(contentsOf: url)
+
+            XCTAssertEqual(written, try HistoryExporter.data(samples: samples, host: host, format: format))
+        }
+
+        let jsonURL = directory.appendingPathComponent("history.json")
+        try HistoryExporter.write(samples: samples, host: host, format: .json, to: jsonURL)
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let writtenJSON = try decoder.decode(HistoryExportDocumentProbe.self, from: Data(contentsOf: jsonURL))
+        let memoryJSON = try decoder.decode(
+            HistoryExportDocumentProbe.self,
+            from: HistoryExporter.data(samples: samples, host: host, format: .json)
+        )
+
+        XCTAssertEqual(writtenJSON.host, memoryJSON.host)
+        XCTAssertEqual(writtenJSON.samples, memoryJSON.samples)
+    }
+
     func testWidgetSnapshotSummarizesRuntimeState() {
         let primary = HostConfig(displayName: "Cloudflare", address: "1.1.1.1")
         let secondary = HostConfig(displayName: "Gateway", address: "192.168.1.1")
@@ -304,4 +346,9 @@ private actor RecordingHistoryStore: PingHistoryStore {
         }
         return stored
     }
+}
+
+private struct HistoryExportDocumentProbe: Decodable {
+    var host: HostConfig
+    var samples: [PingResult]
 }

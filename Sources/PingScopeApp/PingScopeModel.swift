@@ -86,6 +86,7 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
     }
     @Published var startsAtLogin: Bool {
         didSet {
+            guard !isApplyingStartAtLoginChange else { return }
             UserDefaults.standard.startsAtLogin = startsAtLogin
             configureStartAtLogin(startsAtLogin)
         }
@@ -128,7 +129,10 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
     private var networkTask: Task<Void, Never>?
     private var endpointRefreshTask: Task<Void, Never>?
     private var historyTask: Task<Void, Never>?
+    private var isApplyingStartAtLoginChange = false
     private var lastHistoryKey: String?
+    private var lastPersistedHostState: PersistedHostState?
+    private var lastPublishedWidgetSnapshot: WidgetSnapshot?
     private var lastObservedGateway: String?
     private var lastNetworkPathSignature: String?
     var onMenuStateChanged: ((MenuBarState) -> Void)?
@@ -540,6 +544,7 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
     func revealDiagnosticsLog() {
         if !FileManager.default.fileExists(atPath: diagnosticsLogURL.path) {
             DebugLog.write("diagnostics log created from settings")
+            DebugLog.flush()
         }
         NSWorkspace.shared.activateFileViewerSelecting([diagnosticsLogURL])
         diagnosticsMessage = "Opened log in Finder"
@@ -580,8 +585,7 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
                 limit: 100_000
             )
             do {
-                let data = try HistoryExporter.data(samples: samples, host: host, format: format)
-                try data.write(to: url, options: .atomic)
+                try HistoryExporter.write(samples: samples, host: host, format: format, to: url)
                 await MainActor.run {
                     self.isExportingHistory = false
                     self.historyExportMessage = "Exported \(samples.count) samples"
@@ -705,6 +709,9 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
     }
 
     private func persistHostState(_ snapshot: RuntimeSnapshot) {
+        let hostState = PersistedHostState(hosts: snapshot.hosts, primaryHostID: snapshot.primaryHostID)
+        guard hostState != lastPersistedHostState else { return }
+        lastPersistedHostState = hostState
         UserDefaults.standard.hostConfigs = snapshot.hosts
         UserDefaults.standard.primaryHostID = snapshot.primaryHostID
     }
@@ -717,7 +724,13 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
                 try SMAppService.mainApp.unregister()
             }
         } catch {
-            return
+            DebugLog.write("start at login configuration failed enabled=\(isEnabled) error=\(error.localizedDescription)")
+            if startsAtLogin == isEnabled {
+                isApplyingStartAtLoginChange = true
+                startsAtLogin = !isEnabled
+                isApplyingStartAtLoginChange = false
+                UserDefaults.standard.startsAtLogin = startsAtLogin
+            }
         }
     }
 
@@ -749,12 +762,15 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
         networkTask?.cancel()
         networkTask = Task { [weak self, gatewayDetector, starlinkDetector] in
             while !Task.isCancelled {
-                let host = await gatewayDetector.detect()
+                async let gatewayHost = gatewayDetector.detect()
+                async let detectedStarlinkHost = starlinkDetector.detect(timeout: .seconds(5))
+
+                let host = await gatewayHost
                 await MainActor.run {
                     self?.handleGatewayObservation(host?.address)
                 }
 
-                if let starlinkHost = await starlinkDetector.detect(timeout: .seconds(5)) {
+                if let starlinkHost = await detectedStarlinkHost {
                     await MainActor.run {
                         self?.reconcileStarlinkDetection(starlinkHost, removeMissing: true)
                     }
@@ -836,6 +852,8 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
         }
         guard let widgetSnapshotStore else { return }
         let widgetSnapshot = WidgetSnapshot.make(from: snapshot, networkStatus: currentNetworkStatus)
+        guard widgetSnapshot != lastPublishedWidgetSnapshot else { return }
+        lastPublishedWidgetSnapshot = widgetSnapshot
         Task { [widgetSnapshotStore] in
             await widgetSnapshotStore.save(widgetSnapshot)
         }
@@ -1020,12 +1038,14 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
         return cleaned.isEmpty ? "PingScope-History" : cleaned
     }
 
+    @MainActor private static let diagnosticsDateFormatter = ISO8601DateFormatter()
+
     private func diagnosticsSummary() -> String {
         let host = primaryHost
         let latest = primaryHealth.latestResult
         let failures = recentDiagnosticFailures
             .map { result in
-                let time = ISO8601DateFormatter().string(from: result.timestamp)
+                let time = Self.diagnosticsDateFormatter.string(from: result.timestamp)
                 let reason = result.failureReason?.rawValue ?? "unknown"
                 let note = result.metadata.note.map { " note=\($0)" } ?? ""
                 return "- \(time) \(result.method.rawValue.uppercased()) \(result.address)\(result.port.map { ":\($0)" } ?? "") \(reason)\(note)"
@@ -1074,6 +1094,11 @@ struct SetupChecklistItem: Identifiable {
     let isComplete: Bool
     let actionTitle: String?
     let action: (() -> Void)?
+}
+
+private struct PersistedHostState: Equatable {
+    var hosts: [HostConfig]
+    var primaryHostID: UUID?
 }
 
 private extension UserDefaults {

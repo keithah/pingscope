@@ -375,7 +375,7 @@ final class DomainBehaviorTests: XCTestCase {
 
         XCTAssertEqual(engine.evaluateDiagnosis(diagnosis, at: base), .upstreamDown)
         XCTAssertNil(engine.evaluateDiagnosis(diagnosis, at: base.addingTimeInterval(5)))
-        XCTAssertEqual(
+        XCTAssertNil(
             engine.evaluateDiagnosis(
                 NetworkPerspectiveDiagnosis(
                     scope: .allReachable,
@@ -384,8 +384,7 @@ final class DomainBehaviorTests: XCTestCase {
                     verdict: .allReachable
                 ),
                 at: base.addingTimeInterval(90)
-            ),
-            .pathRecovered
+            )
         )
     }
 

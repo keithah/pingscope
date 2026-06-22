@@ -13,16 +13,37 @@ public struct StarlinkHTTP2Transport: StarlinkGRPCTransport {
         let connection = NWConnection(host: NWEndpoint.Host(host.address), port: nwPort, using: .tcp)
         let sessionBox = StarlinkHTTP2SessionBox()
         return try await withTaskCancellationHandler {
-            try await withCheckedThrowingContinuation { continuation in
-                let session = StarlinkHTTP2Session(
-                    connection: connection,
-                    path: path,
-                    host: host,
-                    requestFrame: requestFrame,
-                    continuation: continuation
-                )
-                sessionBox.set(session)
-                session.start()
+            try await withThrowingTaskGroup(of: Data.self) { group in
+                group.addTask {
+                    try await withCheckedThrowingContinuation { continuation in
+                        let session = StarlinkHTTP2Session(
+                            connection: connection,
+                            path: path,
+                            host: host,
+                            requestFrame: requestFrame,
+                            continuation: continuation
+                        )
+                        sessionBox.set(session)
+                        session.start()
+                    }
+                }
+                group.addTask {
+                    try await Task.sleep(for: host.timeout + .seconds(1))
+                    throw StarlinkStatusFetchError.timedOut
+                }
+
+                do {
+                    guard let data = try await group.next() else {
+                        throw StarlinkStatusFetchError.unavailable
+                    }
+                    group.cancelAll()
+                    sessionBox.cancel()
+                    return data
+                } catch {
+                    group.cancelAll()
+                    sessionBox.cancel()
+                    throw error
+                }
             }
         } onCancel: {
             sessionBox.cancel()
@@ -131,8 +152,8 @@ private final class StarlinkHTTP2Session: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
 
-        parser.append(data)
         do {
+            try parser.append(data)
             let frames = try parser.drainFrames()
             for frame in frames {
                 switch frame.type {
@@ -311,10 +332,14 @@ enum HTTP2FrameFlags {
 }
 
 struct HTTP2FrameParser {
+    private static let maxFramePayloadBytes = 256 * 1024
     private var buffer = Data()
 
-    mutating func append(_ data: Data) {
+    mutating func append(_ data: Data) throws {
         buffer.append(data)
+        guard buffer.count <= Self.maxFramePayloadBytes + 9 else {
+            throw StarlinkStatusFetchError.responseTooLarge
+        }
     }
 
     mutating func drainFrames() throws -> [HTTP2Frame] {
@@ -323,8 +348,8 @@ struct HTTP2FrameParser {
 
         while buffer.count - offset >= 9 {
             let length = (Int(byte(at: offset)) << 16) | (Int(byte(at: offset + 1)) << 8) | Int(byte(at: offset + 2))
-            guard length <= 16_777_215 else {
-                throw StarlinkStatusFetchError.invalidStatus
+            guard length <= Self.maxFramePayloadBytes else {
+                throw StarlinkStatusFetchError.responseTooLarge
             }
             let totalLength = 9 + length
             guard buffer.count - offset >= totalLength else {

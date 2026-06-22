@@ -38,7 +38,10 @@ esac
 
 DERIVED_DATA_PATH=".build/xcode-${FLAVOR}-${CONFIGURATION}"
 PRODUCT_APP="${DERIVED_DATA_PATH}/Build/Products/${CONFIGURATION}/PingScope.app"
+LOG_DIR=".build/logs"
+BUILD_LOG="${LOG_DIR}/xcode-${FLAVOR}-${CONFIGURATION}.log"
 rm -rf "${PRODUCT_APP}"
+mkdir -p "${LOG_DIR}"
 
 XCODEBUILD_ARGS=(
   -project PingScope.xcodeproj
@@ -56,7 +59,10 @@ fi
 
 xcodebuild \
   "${XCODEBUILD_ARGS[@]}" \
-  build >/dev/null
+  build >"${BUILD_LOG}" 2>&1 || {
+    cat "${BUILD_LOG}" >&2
+    exit 1
+  }
 
 if [[ ! -d "${PRODUCT_APP}" ]]; then
   echo "Expected Xcode product not found: ${PRODUCT_APP}" >&2

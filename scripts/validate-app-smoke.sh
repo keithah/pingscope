@@ -2,7 +2,8 @@
 set -euo pipefail
 
 APP_PATH="${1:-/Applications/PingScope.app}"
-LOG_PATH="/tmp/pingscope-debug.log"
+CACHE_ROOT="$(getconf DARWIN_USER_CACHE_DIR 2>/dev/null || printf '%s' "${TMPDIR:-/tmp}")"
+LOG_PATH="${CACHE_ROOT%/}/PingScope/pingscope-debug.log"
 
 fail() {
   echo "FAIL: $*" >&2
