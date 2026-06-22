@@ -28,7 +28,7 @@ public enum AsyncProcess {
 
         let outputReadHandle = output.fileHandleForReading
         let errorReadHandle = error.fileHandleForReading
-        let box = ProcessBox(process, readHandles: [outputReadHandle, errorReadHandle])
+        let box = ProcessBox(process)
         return try await withTaskCancellationHandler {
             try process.run()
 
@@ -54,20 +54,15 @@ public enum AsyncProcess {
 
 private final class ProcessBox: @unchecked Sendable {
     private let process: Process
-    private let readHandles: [FileHandle]
 
-    init(_ process: Process, readHandles: [FileHandle]) {
+    init(_ process: Process) {
         self.process = process
-        self.readHandles = readHandles
     }
 
     func terminate() {
         terminateChildProcesses()
         if process.isRunning {
             process.terminate()
-        }
-        for handle in readHandles {
-            try? handle.close()
         }
     }
 
@@ -132,7 +127,7 @@ private extension Process {
                 }
             }
         } onCancel: {
-            let box = ProcessBox(self, readHandles: [])
+            let box = ProcessBox(self)
             box.terminate()
         }
     }
