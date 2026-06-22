@@ -138,6 +138,20 @@ Release command:
 scripts/release-github.sh --version 0.1.3 --release-notes RELEASE_NOTES.md
 ```
 
+## Xcode Cloud
+
+Use Xcode Cloud for `PingScope-AppStore` builds, TestFlight uploads, and App Store submissions. The repository already includes the App Store archive scheme plus Xcode Cloud hook scripts under `ci_scripts/`.
+
+Cloud-managed signing is the intended path for distribution builds. You should not need local Mac App Distribution or Mac Installer Distribution certificates on your machine for Xcode Cloud releases.
+
+Recommended workflow settings:
+
+- Scheme: `PingScope-AppStore`
+- Build for distribution: enabled
+- Archive action: enabled
+- Signing: automatic / cloud-managed
+- Distribution lane: TestFlight first, then App Store submission once validated
+
 Validate the published Sparkle feed and Developer ID DMG:
 
 ```bash
