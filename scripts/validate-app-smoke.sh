@@ -2,8 +2,7 @@
 set -euo pipefail
 
 APP_PATH="${1:-/Applications/PingScope.app}"
-CACHE_ROOT="$(getconf DARWIN_USER_CACHE_DIR 2>/dev/null || printf '%s' "${TMPDIR:-/tmp}")"
-LOG_PATH="${CACHE_ROOT%/}/PingScope/pingscope-debug.log"
+LOG_PATH="${HOME}/Library/Caches/PingScope/pingscope-debug.log"
 
 fail() {
   echo "FAIL: $*" >&2
@@ -12,11 +11,15 @@ fail() {
 
 require_log() {
   local pattern="$1"
-  if ! grep -q "$pattern" "$LOG_PATH"; then
-    echo "---- ${LOG_PATH} ----" >&2
-    tail -200 "$LOG_PATH" >&2 || true
-    fail "missing log pattern: ${pattern}"
-  fi
+  for _ in {1..30}; do
+    if [[ -f "$LOG_PATH" ]] && grep -q "$pattern" "$LOG_PATH"; then
+      return 0
+    fi
+    sleep 0.1
+  done
+  echo "---- ${LOG_PATH} ----" >&2
+  tail -200 "$LOG_PATH" >&2 || true
+  fail "missing log pattern: ${pattern}"
 }
 
 require_settings_text() {
@@ -110,7 +113,12 @@ osascript -e 'tell application "System Events" to if not UI elements enabled the
 
 rm -f "$LOG_PATH"
 pkill -x PingScope 2>/dev/null || true
-sleep 0.5
+for _ in {1..30}; do
+  if ! pgrep -x PingScope >/dev/null 2>&1; then
+    break
+  fi
+  sleep 0.1
+done
 defaults write com.hadm.PingScope overlayVisible -bool true
 defaults write com.hadm.PingScope overlayCompactMode -bool false
 defaults write com.hadm.PingScope overlayFrame -string '{{240, 620}, {240, 96}}'
