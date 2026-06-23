@@ -32,4 +32,55 @@ final class AsyncProcessTests: XCTestCase {
             XCTFail("Expected timedOut, got \(error)")
         }
     }
+
+    func testRunTerminatesProcessWhenSurroundingTaskCancelled() async throws {
+        let start = ContinuousClock.now
+        let task = Task {
+            try? await AsyncProcess.run(
+                executablePath: "/bin/sh",
+                arguments: ["-c", "sleep 5"]
+            )
+        }
+
+        // Let the child start, then cancel the surrounding task.
+        try await Task.sleep(for: .milliseconds(150))
+        task.cancel()
+        _ = await task.value
+
+        let elapsed = start.duration(to: .now)
+        XCTAssertLessThan(elapsed, .seconds(2), "Cancellation should terminate the child instead of waiting for sleep")
+    }
+
+    func testRunReportsNonZeroTerminationStatus() async throws {
+        let result = try await AsyncProcess.run(
+            executablePath: "/bin/sh",
+            arguments: ["-c", "exit 3"],
+            timeout: .seconds(2)
+        )
+
+        XCTAssertEqual(result.terminationStatus, 3)
+    }
+
+    func testRunWithoutTimeoutReturnsCapturedOutput() async throws {
+        let result = try await AsyncProcess.run(
+            executablePath: "/bin/sh",
+            arguments: ["-c", "printf 'hello'"]
+        )
+
+        XCTAssertEqual(result.terminationStatus, 0)
+        XCTAssertEqual(String(data: result.standardOutput, encoding: .utf8), "hello")
+    }
+
+    func testRunDrainsOutputLargerThanPipeBufferWithoutDeadlock() async throws {
+        // 200 KB exceeds the OS pipe buffer; capping output must not stall the child.
+        let result = try await AsyncProcess.run(
+            executablePath: "/bin/sh",
+            arguments: ["-c", "head -c 200000 /dev/zero"],
+            timeout: .seconds(5),
+            maxOutputBytes: 10
+        )
+
+        XCTAssertEqual(result.terminationStatus, 0)
+        XCTAssertEqual(result.standardOutput.count, 10)
+    }
 }

@@ -262,6 +262,58 @@ final class HistoryStoreTests: XCTestCase {
         XCTAssertEqual(widgetSnapshot.networkStatus, .noInternet)
     }
 
+    func testWidgetSnapshotUsesDefaultHealthForHostWithoutRecordedHealth() {
+        let host = HostConfig(displayName: "Edge", address: "9.9.9.9")
+        let runtimeSnapshot = RuntimeSnapshot(
+            hosts: [host],
+            primaryHostID: host.id,
+            healthByHost: [:],
+            samplesByHost: [:]
+        )
+
+        let widgetSnapshot = WidgetSnapshot.make(
+            from: runtimeSnapshot,
+            generatedAt: Date(timeIntervalSince1970: 10)
+        )
+
+        let health = widgetSnapshot.health.first { $0.hostID == host.id }
+        XCTAssertEqual(health?.status, .noData)
+        XCTAssertNil(health?.latencyMilliseconds)
+        XCTAssertEqual(health?.consecutiveFailureCount, 0)
+        XCTAssertNil(health?.latestResultAt)
+    }
+
+    func testWidgetSnapshotLimitsSamplesPerHostAndSortsByTimestamp() {
+        let host = HostConfig(displayName: "Edge", address: "9.9.9.9")
+        var series = SampleSeries(hostID: host.id, capacity: 500)
+        for index in 0..<5 {
+            series.append(.success(
+                hostID: host.id,
+                latency: .milliseconds(Double(index + 1)),
+                timestamp: Date(timeIntervalSince1970: Double(index))
+            ))
+        }
+
+        let runtimeSnapshot = RuntimeSnapshot(
+            hosts: [host],
+            primaryHostID: host.id,
+            healthByHost: [:],
+            samplesByHost: [host.id: series]
+        )
+
+        let widgetSnapshot = WidgetSnapshot.make(
+            from: runtimeSnapshot,
+            sampleLimitPerHost: 3,
+            generatedAt: Date(timeIntervalSince1970: 100)
+        )
+
+        // Keeps the 3 newest samples per host (timestamps 2, 3, 4), sorted ascending.
+        XCTAssertEqual(
+            widgetSnapshot.recentSamples.map { $0.timestamp.timeIntervalSince1970 },
+            [2, 3, 4]
+        )
+    }
+
     func testWidgetSnapshotStorePersistsEncodedSnapshot() async throws {
         let suiteName = "pingscope-widget-tests-\(UUID().uuidString)"
         let store = WidgetSnapshotStore(suiteName: suiteName, key: "snapshot")
