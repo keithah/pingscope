@@ -9,7 +9,8 @@ Usage:
     --app <path/to/PingScope.app> \
     --sign-app "Developer ID Application: ..." \
     [--sign-installer "Developer ID Installer: ..."] \
-    [--notary-profile "NotarytoolProfile"]
+    [--notary-profile "NotarytoolProfile"] \
+    [--notary-key <AuthKey.p8> --notary-key-id <key-id> --notary-issuer <issuer-id>]
 
 Notes:
   - Produces a DMG and (optionally) a PKG in /private/tmp/artifacts.
@@ -22,6 +23,9 @@ APP_PATH=""
 SIGN_APP_IDENTITY=""
 SIGN_INSTALLER_IDENTITY=""
 NOTARY_PROFILE="NotarytoolProfile"
+NOTARY_KEY=""
+NOTARY_KEY_ID=""
+NOTARY_ISSUER=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -35,6 +39,12 @@ while [[ $# -gt 0 ]]; do
       SIGN_INSTALLER_IDENTITY="$2"; shift 2 ;;
     --notary-profile)
       NOTARY_PROFILE="$2"; shift 2 ;;
+    --notary-key)
+      NOTARY_KEY="$2"; shift 2 ;;
+    --notary-key-id)
+      NOTARY_KEY_ID="$2"; shift 2 ;;
+    --notary-issuer)
+      NOTARY_ISSUER="$2"; shift 2 ;;
     -h|--help)
       usage; exit 0 ;;
     *)
@@ -58,6 +68,16 @@ if [[ ! -d "${APP_PATH}" ]]; then
   echo "App not found: ${APP_PATH}" >&2
   exit 2
 fi
+if [[ -n "${NOTARY_KEY}${NOTARY_KEY_ID}${NOTARY_ISSUER}" ]]; then
+  if [[ -z "${NOTARY_KEY}" || -z "${NOTARY_KEY_ID}" || -z "${NOTARY_ISSUER}" ]]; then
+    echo "Notary API key auth requires --notary-key, --notary-key-id, and --notary-issuer." >&2
+    exit 2
+  fi
+  if [[ ! -f "${NOTARY_KEY}" ]]; then
+    echo "Notary API key file not found: ${NOTARY_KEY}" >&2
+    exit 2
+  fi
+fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
@@ -68,6 +88,13 @@ case "${ARTIFACT_DIR}" in
 esac
 rm -rf "${ARTIFACT_DIR}"
 mkdir -p "${ARTIFACT_DIR}"
+
+NOTARY_ARGS=()
+if [[ -n "${NOTARY_KEY}" ]]; then
+  NOTARY_ARGS=(--key "${NOTARY_KEY}" --key-id "${NOTARY_KEY_ID}" --issuer "${NOTARY_ISSUER}")
+else
+  NOTARY_ARGS=(--keychain-profile "${NOTARY_PROFILE}")
+fi
 
 echo "Copying app bundle..."
 cp -R "${APP_PATH}" "${ARTIFACT_DIR}/PingScope.app"
@@ -144,12 +171,12 @@ if [[ -n "${SIGN_INSTALLER_IDENTITY}" ]]; then
 fi
 
 echo "Submitting DMG for notarization..."
-xcrun notarytool submit "${DMG_NAME}" --keychain-profile "${NOTARY_PROFILE}" --wait
+xcrun notarytool submit "${DMG_NAME}" "${NOTARY_ARGS[@]}" --wait
 xcrun stapler staple "${DMG_NAME}"
 
 if [[ -n "${PKG_NAME}" ]]; then
   echo "Submitting PKG for notarization..."
-  xcrun notarytool submit "${PKG_NAME}" --keychain-profile "${NOTARY_PROFILE}" --wait
+  xcrun notarytool submit "${PKG_NAME}" "${NOTARY_ARGS[@]}" --wait
   xcrun stapler staple "${PKG_NAME}"
 fi
 

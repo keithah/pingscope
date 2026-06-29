@@ -3,6 +3,9 @@ set -euo pipefail
 
 VERSION=""
 NOTARY_PROFILE="NotarytoolProfile"
+NOTARY_KEY="${NOTARY_KEY:-}"
+NOTARY_KEY_ID="${NOTARY_KEY_ID:-}"
+NOTARY_ISSUER="${NOTARY_ISSUER:-}"
 SIGN_APP_IDENTITY="${CODESIGN_IDENTITY:-Developer ID Application: Keith Herrington (6R7S5GA944)}"
 SPARKLE_KEY_ACCOUNT="${SPARKLE_KEY_ACCOUNT:-pingscope-ed25519}"
 RELEASE_NOTES=""
@@ -16,13 +19,15 @@ usage() {
   cat <<'USAGE'
 Usage:
   scripts/release-github.sh --version <x.y.z> [--release-notes <file>] [--dry-run]
+                            [--notary-profile <profile>]
+                            [--notary-key <AuthKey.p8> --notary-key-id <key-id> --notary-issuer <issuer-id>]
 
 Builds the Developer ID app, signs and notarizes a DMG, generates Sparkle
 appcast.xml, and publishes a GitHub release with gh.
 
 Required local credentials:
   - Developer ID Application certificate in login keychain.
-  - notarytool keychain profile, default: NotarytoolProfile.
+  - notarytool keychain profile, default: NotarytoolProfile, or App Store Connect API key auth.
   - Sparkle EdDSA private key in Keychain, default account: pingscope-ed25519.
 
 The generated appcast is also published to GitHub Pages at:
@@ -88,6 +93,12 @@ while [[ $# -gt 0 ]]; do
       VERSION="${2-}"; shift 2 ;;
     --notary-profile)
       NOTARY_PROFILE="${2-}"; shift 2 ;;
+    --notary-key)
+      NOTARY_KEY="${2-}"; shift 2 ;;
+    --notary-key-id)
+      NOTARY_KEY_ID="${2-}"; shift 2 ;;
+    --notary-issuer)
+      NOTARY_ISSUER="${2-}"; shift 2 ;;
     --sign-app)
       SIGN_APP_IDENTITY="${2-}"; shift 2 ;;
     --release-notes)
@@ -117,7 +128,21 @@ if [[ "${DRY_RUN}" -eq 0 ]]; then
   gh auth status >/dev/null
 fi
 
-xcrun notarytool history --keychain-profile "${NOTARY_PROFILE}" >/dev/null
+if [[ -n "${NOTARY_KEY}${NOTARY_KEY_ID}${NOTARY_ISSUER}" ]]; then
+  if [[ -z "${NOTARY_KEY}" || -z "${NOTARY_KEY_ID}" || -z "${NOTARY_ISSUER}" ]]; then
+    echo "Notary API key auth requires --notary-key, --notary-key-id, and --notary-issuer." >&2
+    exit 64
+  fi
+  if [[ ! -f "${NOTARY_KEY}" ]]; then
+    echo "Notary API key file not found: ${NOTARY_KEY}" >&2
+    exit 66
+  fi
+  NOTARY_ARGS=(--notary-key "${NOTARY_KEY}" --notary-key-id "${NOTARY_KEY_ID}" --notary-issuer "${NOTARY_ISSUER}")
+  xcrun notarytool history --key "${NOTARY_KEY}" --key-id "${NOTARY_KEY_ID}" --issuer "${NOTARY_ISSUER}" >/dev/null
+else
+  NOTARY_ARGS=(--notary-profile "${NOTARY_PROFILE}")
+  xcrun notarytool history --keychain-profile "${NOTARY_PROFILE}" >/dev/null
+fi
 
 find_sparkle_tool() {
   local tool_name="$1"
@@ -167,7 +192,7 @@ deploy/sign-notarize.sh \
   --version "${VERSION}" \
   --app "${BUILD_DIR}/PingScope.app" \
   --sign-app "${SIGN_APP_IDENTITY}" \
-  --notary-profile "${NOTARY_PROFILE}"
+  "${NOTARY_ARGS[@]}"
 
 ARTIFACT_DIR="/private/tmp/artifacts/PingScope-v${VERSION}"
 DMG="${ARTIFACT_DIR}/PingScope-v${VERSION}.dmg"
