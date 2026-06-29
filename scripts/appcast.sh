@@ -85,8 +85,18 @@ find_generate_appcast() {
   fi
 
   local tool
-  tool=$(find .build "$HOME/Library/Developer/Xcode/DerivedData" -path '*/SourcePackages/artifacts/sparkle/Sparkle/bin/generate_appcast' -type f -perm -111 2>/dev/null | sort | tail -n 1)
-  if [[ -n "${tool}" ]]; then
+  for tool in \
+    .build/artifacts/sparkle/Sparkle/bin/generate_appcast \
+    .build/checkouts/Sparkle/bin/generate_appcast \
+    "${PWD}/DerivedData/SourcePackages/artifacts/sparkle/Sparkle/bin/generate_appcast"
+  do
+    if [[ -x "${tool}" ]]; then
+      printf '%s' "${tool}"
+      return 0
+    fi
+  done
+  tool=$(find .build -path '*/SourcePackages/artifacts/sparkle/Sparkle/bin/generate_appcast' -type f -perm -111 -print -quit 2>/dev/null || true)
+  if [[ -n "${tool}" && -x "${tool}" ]]; then
     printf '%s' "${tool}"
     return 0
   fi

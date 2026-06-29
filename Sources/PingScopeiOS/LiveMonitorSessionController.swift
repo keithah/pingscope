@@ -21,6 +21,7 @@ public actor LiveMonitorSessionController {
     private let policy: MonitorSessionPolicy
     private let backgroundRuntimeLimit: Duration?
     private let historyStore: (any PingHistoryStore)?
+    private let historyWriter: LiveHistoryWriteBuffer?
     private var session: MonitorSessionState?
     private var health: HostHealth
     private var series: SampleSeries
@@ -38,12 +39,14 @@ public actor LiveMonitorSessionController {
         self.policy = policy
         self.backgroundRuntimeLimit = backgroundRuntimeLimit
         self.historyStore = historyStore
+        self.historyWriter = historyStore.map { LiveHistoryWriteBuffer(store: $0) }
         self.health = HostHealth(hostID: self.host.id, thresholds: self.host.thresholds)
         self.series = SampleSeries(hostID: self.host.id)
     }
 
-    public func start(duration: MonitorSessionDuration, at date: Date = Date()) {
+    public func start(duration: MonitorSessionDuration, at date: Date = Date()) async {
         loopTask?.cancel()
+        await historyWriter?.flushNow()
         let newSession = MonitorSessionState(
             hostID: host.id,
             duration: duration,
@@ -62,6 +65,16 @@ public actor LiveMonitorSessionController {
         loopTask?.cancel()
         loopTask = nil
         finish(reason: reason, at: date)
+        Task {
+            await historyWriter?.flushNow()
+        }
+    }
+
+    public func stop(reason: MonitorSessionEndReason = .userStopped, at date: Date = Date()) async {
+        loopTask?.cancel()
+        loopTask = nil
+        finish(reason: reason, at: date)
+        await historyWriter?.flushNow()
     }
 
     public func snapshot() -> LiveMonitorSessionSnapshot {
@@ -107,10 +120,90 @@ public actor LiveMonitorSessionController {
         health.ingest(result)
         series.append(result)
         session = session?.updating(with: result)
-        await historyStore?.append(result)
+        await historyWriter?.append(result)
     }
 
     private func finish(reason: MonitorSessionEndReason, at date: Date) {
         session = session?.ending(at: date, reason: reason)
+    }
+}
+
+private actor LiveHistoryWriteBuffer {
+    private let store: any PingHistoryStore
+    private let maxBatchSize: Int
+    private let flushDelay: Duration
+    private var pending: [PingResult] = []
+    private var flushTask: Task<Void, Never>?
+
+    init(store: any PingHistoryStore, maxBatchSize: Int = 16, flushDelay: Duration = .seconds(2)) {
+        self.store = store
+        self.maxBatchSize = max(1, maxBatchSize)
+        self.flushDelay = flushDelay
+    }
+
+    func append(_ result: PingResult) {
+        pending.append(result)
+        if pending.count >= maxBatchSize {
+            scheduleImmediateFlush()
+        } else {
+            scheduleDelayedFlush()
+        }
+    }
+
+    func flushNow() async {
+        await cancelFlushTask()
+        await drainAll()
+    }
+
+    private func scheduleDelayedFlush() {
+        guard flushTask == nil else { return }
+        flushTask = Task { [flushDelay] in
+            do {
+                try await Task.sleep(for: flushDelay)
+            } catch {
+                return
+            }
+            guard !Task.isCancelled else { return }
+            await flushScheduled()
+        }
+    }
+
+    private func scheduleImmediateFlush() {
+        guard flushTask == nil else { return }
+        flushTask = Task {
+            guard !Task.isCancelled else { return }
+            await flushScheduled()
+        }
+    }
+
+    private func flushScheduled() async {
+        await drainOneBatch()
+        flushTask = nil
+        if pending.count >= maxBatchSize {
+            scheduleImmediateFlush()
+        } else if !pending.isEmpty {
+            scheduleDelayedFlush()
+        }
+    }
+
+    private func drainAll() async {
+        while !pending.isEmpty {
+            await drainOneBatch()
+        }
+    }
+
+    private func drainOneBatch() async {
+        guard !pending.isEmpty else { return }
+        let batch = pending
+        pending.removeAll()
+        await store.append(batch)
+    }
+
+    private func cancelFlushTask() async {
+        while let task = flushTask {
+            flushTask = nil
+            task.cancel()
+            await task.value
+        }
     }
 }

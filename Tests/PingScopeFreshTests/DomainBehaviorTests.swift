@@ -11,6 +11,12 @@ final class DomainBehaviorTests: XCTestCase {
         XCTAssertTrue(valid.validationErrors.isEmpty)
     }
 
+    func testHostConfigValidationRejectsAddressesThatLookLikeProcessOptions() {
+        let invalid = HostConfig(displayName: "Injected", address: "-c 99", method: .icmp, port: nil)
+
+        XCTAssertEqual(invalid.validationErrors, [.invalidAddress])
+    }
+
     func testHostConfigValidationRejectsInvalidTimingAndThresholds() {
         let invalid = HostConfig(
             displayName: "Example",

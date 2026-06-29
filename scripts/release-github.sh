@@ -30,6 +30,10 @@ The generated appcast is also published to GitHub Pages at:
 USAGE
 }
 
+validate_version() {
+  [[ "$1" =~ ^[0-9]+[.][0-9]+[.][0-9]+([-.][0-9A-Za-z]+)*$ ]]
+}
+
 publish_pages_updates() {
   local update_dir="$1"
   local version="$2"
@@ -104,6 +108,10 @@ if [[ -z "${VERSION}" ]]; then
   usage
   exit 64
 fi
+if ! validate_version "${VERSION}"; then
+  echo "Invalid release version: ${VERSION}" >&2
+  exit 64
+fi
 
 if [[ "${DRY_RUN}" -eq 0 ]]; then
   gh auth status >/dev/null
@@ -114,8 +122,21 @@ xcrun notarytool history --keychain-profile "${NOTARY_PROFILE}" >/dev/null
 find_sparkle_tool() {
   local tool_name="$1"
   local tool=""
-  tool=$(find .build "$HOME/Library/Developer/Xcode/DerivedData" -path "*/SourcePackages/artifacts/sparkle/Sparkle/bin/${tool_name}" -type f -perm -111 2>/dev/null | sort | tail -n 1)
-  [[ -n "${tool}" ]] && printf '%s' "${tool}"
+  local env_name="SPARKLE_$(printf '%s' "${tool_name}" | tr '[:lower:]' '[:upper:]')"
+  local env_value="${!env_name:-}"
+  if [[ -n "${env_value}" ]]; then
+    [[ -x "${env_value}" ]] && { printf '%s' "${env_value}"; return 0; }
+    return 1
+  fi
+  for tool in \
+    ".build/artifacts/sparkle/Sparkle/bin/${tool_name}" \
+    ".build/checkouts/Sparkle/bin/${tool_name}" \
+    "${PWD}/DerivedData/SourcePackages/artifacts/sparkle/Sparkle/bin/${tool_name}"
+  do
+    [[ -x "${tool}" ]] && { printf '%s' "${tool}"; return 0; }
+  done
+  tool=$(find .build -path "*/SourcePackages/artifacts/sparkle/Sparkle/bin/${tool_name}" -type f -perm -111 -print -quit 2>/dev/null || true)
+  [[ -n "${tool}" && -x "${tool}" ]] && printf '%s' "${tool}"
 }
 
 GENERATE_KEYS=$(find_sparkle_tool generate_keys)
@@ -131,6 +152,10 @@ if ! security find-identity -v -p codesigning | grep -F "${SIGN_APP_IDENTITY}" >
 fi
 
 BUILD_DIR=".build/release-github/v${VERSION}"
+case "${BUILD_DIR}" in
+  .build/release-github/v*) ;;
+  *) echo "Refusing unsafe build dir: ${BUILD_DIR}" >&2; exit 65 ;;
+esac
 rm -rf "${BUILD_DIR}"
 mkdir -p "${BUILD_DIR}"
 

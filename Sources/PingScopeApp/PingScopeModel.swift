@@ -26,7 +26,7 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
     @Published var draftDownAfterFailures: Int = LatencyThresholds.defaults.downAfterFailures
     @Published var draftIsEnabled = true
     @Published var draftNotificationPolicy: HostNotificationPolicy = .inherit
-    @Published private(set) var draftTestResultText: String?
+    @Published var draftTestResultText: String?
     @Published private(set) var isTestingDraftHost = false
     @Published var editingHostID: UUID?
     @Published var isCreatingHost = false
@@ -35,7 +35,7 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
     @Published var notificationRules: NotificationRuleSet {
         didSet {
             UserDefaults.standard.notificationRules = notificationRules
-            Task { await runtime.updateNotificationRules(notificationRules) }
+            scheduleNotificationRuleUpdate()
         }
     }
     @Published var enabledNetworkStatusAlerts: Set<NetworkConnectivityStatus> {
@@ -83,7 +83,7 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
     @Published var allowsLocalNetworkProbes: Bool {
         didSet {
             UserDefaults.standard.allowsLocalNetworkProbes = allowsLocalNetworkProbes
-            Task { await runtime.setAllowsLocalNetworkProbes(allowsLocalNetworkProbes) }
+            scheduleLocalNetworkProbeUpdate()
         }
     }
     @Published var startsAtLogin: Bool {
@@ -120,7 +120,7 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
 
     private let presenter = DisplayStatePresenter()
     private let networkDiagnoser = NetworkPerspectiveDiagnoser()
-    private let runtime: PingRuntime
+    let runtime: PingRuntime
     private let hostTester: HostTester
     private let gatewayDetector = DefaultGatewayDetector()
     private let starlinkDetector = StarlinkDishDetector()
@@ -132,10 +132,15 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
     private var networkTask: Task<Void, Never>?
     private var endpointRefreshTask: Task<Void, Never>?
     private var historyTask: Task<Void, Never>?
+    var notificationRulesTask: Task<Void, Never>?
+    var localNetworkProbeTask: Task<Void, Never>?
+    private var draftTestTask: Task<Void, Never>?
+    private var draftTestGeneration = 0
     private var isApplyingStartAtLoginChange = false
     private var lastHistoryKey: String?
     private var lastPersistedHostState: PersistedHostState?
     private var lastPublishedWidgetSnapshot: WidgetSnapshot?
+    private let widgetSnapshotHeartbeatInterval: TimeInterval = 5 * 60
     private var lastObservedGateway: String?
     private var lastNetworkPathSignature: String?
     var onMenuStateChanged: ((MenuBarState) -> Void)?
@@ -290,14 +295,6 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
         )
     }
 
-    var canAddDraftHost: Bool {
-        draftHost.validationErrors.isEmpty
-    }
-
-    var draftActionTitle: String {
-        editingHostID == nil ? "Add Host" : "Save Changes"
-    }
-
     func start() {
         snapshotTask?.cancel()
         let stream = Task { await runtime.snapshots() }
@@ -333,6 +330,9 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
         networkTask?.cancel()
         endpointRefreshTask?.cancel()
         historyTask?.cancel()
+        notificationRulesTask?.cancel()
+        localNetworkProbeTask?.cancel()
+        draftTestTask?.cancel()
         pathMonitor.cancel()
         Task { await runtime.stop() }
     }
@@ -409,11 +409,15 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
             return
         }
 
+        draftTestTask?.cancel()
+        draftTestGeneration += 1
+        let generation = draftTestGeneration
         isTestingDraftHost = true
         draftTestResultText = nil
-        Task { [hostTester] in
+        draftTestTask = Task { [hostTester] in
             let result = await hostTester.test(host)
             await MainActor.run {
+                guard generation == self.draftTestGeneration, !Task.isCancelled else { return }
                 self.isTestingDraftHost = false
                 if let latency = result.latency {
                     self.draftTestResultText = "\(Int(latency.milliseconds.rounded()))ms"
@@ -732,12 +736,12 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
         networkTask?.cancel()
         networkTask = Task { [weak self, gatewayDetector, starlinkDetector] in
             while !Task.isCancelled {
-                async let gatewayHost = gatewayDetector.detect()
+                async let gatewayOutcome = gatewayDetector.detectionOutcome()
                 async let starlinkOutcome = starlinkDetector.detectionOutcome(timeout: .seconds(5))
 
-                let host = await gatewayHost
+                let gateway = await gatewayOutcome
                 await MainActor.run {
-                    self?.handleGatewayObservation(host?.address)
+                    self?.handleGatewayObservation(gateway)
                 }
 
                 let outcome = await starlinkOutcome
@@ -763,7 +767,7 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
 
     private func handleNetworkPathUpdate(status: NetworkConnectivityStatus, signature: String) {
         let changedPath = signature != lastNetworkPathSignature
-        DebugLog.write("network path update status=\(status.rawValue) changedPath=\(changedPath) signature=\(signature)")
+        DebugLog.write("network path update status=\(status.rawValue) changedPath=\(changedPath) signature=\(DebugLog.redacted(signature))")
         lastNetworkPathSignature = signature
         handleNetworkStatus(status, forceRestart: changedPath)
 
@@ -771,8 +775,21 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
         refreshNetworkEndpoints(removeMissingStarlink: true, retryDelays: [.seconds(1), .seconds(3)])
     }
 
+    private func handleGatewayObservation(_ outcome: DefaultGatewayDetector.DetectionOutcome) {
+        switch outcome {
+        case let .detected(host):
+            handleGatewayObservation(host.address)
+        case .notFound:
+            handleGatewayObservation(nil)
+        case .failed:
+            DebugLog.write("gateway observation failed currentStatus=\(currentNetworkStatus.rawValue)")
+        case .cancelled:
+            DebugLog.write("gateway observation cancelled currentStatus=\(currentNetworkStatus.rawValue)")
+        }
+    }
+
     private func handleGatewayObservation(_ gateway: String?) {
-        DebugLog.write("gateway observation gateway=\(gateway ?? "nil") currentStatus=\(currentNetworkStatus.rawValue)")
+        DebugLog.write("gateway observation gateway=\(DebugLog.redacted(gateway)) currentStatus=\(currentNetworkStatus.rawValue)")
         if gateway == nil, currentNetworkStatus == .connected {
             handleNetworkStatus(.noInternet)
         }
@@ -816,7 +833,9 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
         }
         guard let widgetSnapshotStore else { return }
         let widgetSnapshot = WidgetSnapshot.make(from: snapshot, networkStatus: currentNetworkStatus)
-        guard !widgetSnapshot.hasSameContent(as: lastPublishedWidgetSnapshot) else { return }
+        let shouldPublish = !widgetSnapshot.hasSameContent(as: lastPublishedWidgetSnapshot)
+            || widgetSnapshot.generatedAt.timeIntervalSince(lastPublishedWidgetSnapshot?.generatedAt ?? .distantPast) >= widgetSnapshotHeartbeatInterval
+        guard shouldPublish else { return }
         lastPublishedWidgetSnapshot = widgetSnapshot
         Task { [widgetSnapshotStore] in
             await widgetSnapshotStore.save(widgetSnapshot)
@@ -853,9 +872,9 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
         owner: PingScopeModel?
     ) async {
         DebugLog.write("network endpoint refresh started removeMissingStarlink=\(removeMissingStarlink)")
-        async let gatewayHost = gatewayDetector.detect()
+        async let gatewayOutcome = gatewayDetector.detectionOutcome()
         async let starlinkOutcome = starlinkDetector.detectionOutcome(timeout: .seconds(5))
-        let gateway = await gatewayHost?.address
+        let gateway = await gatewayOutcome
         let outcome = await starlinkOutcome
         await MainActor.run {
             guard !Task.isCancelled else { return }
@@ -873,6 +892,8 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
             if removeMissing {
                 removeStaleStarlinkHosts()
             }
+        case .failed:
+            DebugLog.write("starlink discovery failed removeMissing=\(removeMissing)")
         case .cancelled:
             DebugLog.write("starlink discovery cancelled removeMissing=\(removeMissing)")
         }
@@ -893,16 +914,20 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
             allowsLocalNetworkProbes = true
         }
 
-        DebugLog.write("starlink dish detected address=\(starlinkHost.address) existing=\(snapshot.hosts.contains { $0.id == starlinkHost.id })")
+        let isExisting = snapshot.hosts.contains { $0.id == starlinkHost.id }
+        DebugLog.write("starlink dish detected address=\(DebugLog.redacted(starlinkHost.address)) existing=\(isExisting)")
         if editingHostID == starlinkHost.id {
             loadDraft(from: starlinkHost)
+        }
+        if let existing = snapshot.hosts.first(where: { $0.id == starlinkHost.id }), existing == starlinkHost {
+            return
         }
         Task {
             await runtime.upsertHost(starlinkHost)
             if let preferredPrimaryID {
                 await runtime.selectPrimaryHost(preferredPrimaryID)
             }
-            DebugLog.write("starlink host upsert requested address=\(starlinkHost.address)")
+            DebugLog.write("starlink host upsert requested address=\(DebugLog.redacted(starlinkHost.address))")
         }
     }
 
@@ -943,7 +968,7 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
         updated.method = .tcp
         updated.port = 80
         allowsLocalNetworkProbes = true
-        DebugLog.write("default gateway host updated from \(existing.address) to \(gateway)")
+        DebugLog.write("default gateway host updated from \(DebugLog.redacted(existing.address)) to \(DebugLog.redacted(gateway))")
         if editingHostID == existing.id {
             loadDraft(from: updated)
         }
@@ -965,21 +990,4 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
         allowsLocalNetworkProbes = true
     }
 
-    private func loadDraft(from host: HostConfig) {
-        editingHostID = host.id
-        isCreatingHost = false
-        showsAdvancedHostFields = false
-        draftHostName = host.displayName
-        draftHostAddress = host.address
-        draftNetworkTier = host.tier
-        draftMethod = host.method
-        draftPort = Int(host.port ?? host.method.defaultPort ?? 0)
-        draftIntervalMilliseconds = host.interval.milliseconds
-        draftTimeoutMilliseconds = host.timeout.milliseconds
-        draftDegradedThresholdMilliseconds = host.thresholds.degradedMilliseconds
-        draftDownAfterFailures = host.thresholds.downAfterFailures
-        draftIsEnabled = host.isEnabled
-        draftNotificationPolicy = host.notifications
-        draftTestResultText = nil
-    }
 }

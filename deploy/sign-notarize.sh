@@ -49,14 +49,23 @@ if [[ -z "${VERSION}" || -z "${APP_PATH}" || -z "${SIGN_APP_IDENTITY}" ]]; then
   usage
   exit 2
 fi
+if [[ ! "${VERSION}" =~ ^[0-9]+[.][0-9]+[.][0-9]+([-.][0-9A-Za-z]+)*$ ]]; then
+  echo "Invalid version: ${VERSION}" >&2
+  exit 2
+fi
 
 if [[ ! -d "${APP_PATH}" ]]; then
   echo "App not found: ${APP_PATH}" >&2
   exit 2
 fi
 
-PROJECT_ROOT="$(pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 ARTIFACT_DIR="/private/tmp/artifacts/PingScope-v${VERSION}"
+case "${ARTIFACT_DIR}" in
+  /private/tmp/artifacts/PingScope-v*) ;;
+  *) echo "Refusing unsafe artifact dir: ${ARTIFACT_DIR}" >&2; exit 2 ;;
+esac
 rm -rf "${ARTIFACT_DIR}"
 mkdir -p "${ARTIFACT_DIR}"
 

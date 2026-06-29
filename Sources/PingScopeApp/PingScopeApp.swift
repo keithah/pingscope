@@ -502,9 +502,6 @@ final class OverlayWindow: NSWindow {
     override var canBecomeKey: Bool { false }
 
     override func sendEvent(_ event: NSEvent) {
-        if [.leftMouseDown, .leftMouseUp, .rightMouseDown, .rightMouseUp].contains(event.type) {
-            DebugLog.write("OverlayWindow.sendEvent type=\(event.type.rawValue) loc=\(event.locationInWindow) key=\(isKeyWindow)")
-        }
         if event.type == .rightMouseDown,
            let presenter = contentView as? OverlayContextMenuPresenting {
             presenter.presentOverlayContextMenu(with: event)
@@ -621,7 +618,7 @@ final class OverlayContainerView: NSView {
     }
 
     override func rightMouseDown(with event: NSEvent) {
-        DebugLog.write("overlay context menu requested loc=\(event.locationInWindow)")
+        DebugLog.write("overlay context menu requested")
         showContextMenu(with: event)
     }
 
@@ -732,7 +729,7 @@ final class OverlayContainerView: NSView {
 
 extension OverlayContainerView: OverlayContextMenuPresenting {
     func presentOverlayContextMenu(with event: NSEvent) {
-        DebugLog.write("overlay context menu requested loc=\(event.locationInWindow)")
+        DebugLog.write("overlay context menu requested")
         NSMenu.popUpContextMenu(contextMenu(), with: event, for: self)
     }
 }
@@ -771,7 +768,7 @@ final class OverlayGraphClickView: NSView {
         let end = event.locationInWindow
         let distance = hypot(end.x - start.x, end.y - start.y)
         guard distance < 4 else { return }
-        DebugLog.write("overlay graph click fired loc=\(event.locationInWindow)")
+        DebugLog.write("overlay graph click fired")
         onClick()
     }
 

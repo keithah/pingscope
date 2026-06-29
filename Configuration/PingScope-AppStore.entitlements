@@ -10,8 +10,8 @@
 	<key>com.apple.security.network.client</key>
 	<true/>
 
-	<!-- File access for future export features -->
-	<key>com.apple.security.files.user-selected.read-write</key>
+	<!-- File access for history export -->
+	<key>com.apple.security.files.user-selected.write-only</key>
 	<true/>
 
 	<!-- App Groups for widget data sharing -->

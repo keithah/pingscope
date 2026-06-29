@@ -30,9 +30,23 @@ public struct HostTester: Sendable {
 }
 
 public struct DefaultGatewayDetector: Sendable {
+    public enum DetectionOutcome: Sendable, Equatable {
+        case detected(HostConfig)
+        case notFound
+        case failed
+        case cancelled
+    }
+
     public init() {}
 
     public func detect() async -> HostConfig? {
+        if case let .detected(host) = await detectionOutcome() {
+            return host
+        }
+        return nil
+    }
+
+    public func detectionOutcome() async -> DetectionOutcome {
         #if os(macOS)
         do {
             let result = try await AsyncProcess.run(
@@ -43,14 +57,16 @@ public struct DefaultGatewayDetector: Sendable {
             guard result.terminationStatus == 0,
                   let text = String(data: result.standardOutput, encoding: .utf8),
                   let address = Self.parse(routeOutput: text) else {
-                return nil
+                return .notFound
             }
-            return Self.gatewayHost(address: address)
+            return .detected(Self.gatewayHost(address: address))
+        } catch is CancellationError {
+            return .cancelled
         } catch {
-            return nil
+            return .failed
         }
         #else
-        return nil
+        return .notFound
         #endif
     }
 
@@ -84,12 +100,14 @@ public struct StarlinkDishDetector: Sendable {
     public enum DetectionOutcome: Sendable, Equatable {
         case detected(HostConfig)
         case notFound
+        case failed
         case cancelled
     }
 
     private enum DetectionResult: Sendable {
         case detected(HostConfig)
         case miss
+        case failed
         case timeout
         case cancelled
     }
@@ -117,7 +135,7 @@ public struct StarlinkDishDetector: Sendable {
                     } catch is CancellationError {
                         return .cancelled
                     } catch {
-                        return .miss
+                        return .failed
                     }
                 }
             }
@@ -130,6 +148,8 @@ public struct StarlinkDishDetector: Sendable {
                 return .timeout
             }
 
+            var pendingCandidates = hosts.count
+            var sawFailure = false
             while let result = await group.next() {
                 switch result {
                 case .detected(let detected):
@@ -141,11 +161,18 @@ public struct StarlinkDishDetector: Sendable {
                 case .cancelled:
                     group.cancelAll()
                     return .cancelled
+                case .failed:
+                    sawFailure = true
+                    pendingCandidates -= 1
                 case .miss:
-                    break
+                    pendingCandidates -= 1
+                }
+                if pendingCandidates == 0 {
+                    group.cancelAll()
+                    return sawFailure ? .failed : .notFound
                 }
             }
-            return .notFound
+            return .failed
         }
     }
 }
@@ -226,7 +253,7 @@ public actor MeasurementScheduler {
         lastFailureLogByHost.removeAll()
         let runGeneration = generation
 
-        let stream = AsyncStream<PingResult> { streamContinuation in
+        let stream = AsyncStream<PingResult>(bufferingPolicy: .bufferingNewest(1)) { streamContinuation in
             self.continuation = streamContinuation
             streamContinuation.onTermination = { [weak self] _ in
                 Task { await self?.stop(generation: runGeneration) }
@@ -345,7 +372,7 @@ public actor PingRuntime {
     public func snapshots() async -> AsyncStream<RuntimeSnapshot> {
         await refreshHostCache()
         let token = UUID()
-        return AsyncStream { continuation in
+        return AsyncStream(bufferingPolicy: .bufferingNewest(1)) { continuation in
             self.continuation = continuation
             self.continuationToken = token
             continuation.onTermination = { [weak self] _ in
@@ -417,6 +444,10 @@ public actor PingRuntime {
     public func upsertHost(_ host: HostConfig) async {
         await refreshHostCache()
         let previous = hostByID[host.id]
+        guard previous != host else {
+            publishSnapshot()
+            return
+        }
         await hostStore.upsert(host)
         await refreshHostCache()
         if let previous, previous.measurementEndpoint != host.measurementEndpoint {

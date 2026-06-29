@@ -1,4 +1,3 @@
-import AppKit
 import PingScopeCore
 import SwiftUI
 
@@ -68,24 +67,6 @@ struct NetworkStatusBadge: View {
             Text(status.displayName)
                 .foregroundStyle(.secondary)
         }
-    }
-}
-
-struct OverlayVisibilityToggle: View {
-    @ObservedObject var model: PingScopeModel
-
-    var body: some View {
-        Toggle("Show overlay", isOn: Binding(
-            get: { model.overlayVisible },
-            set: { isVisible in
-                if isVisible {
-                    AppDelegate.shared?.showOverlay()
-                } else {
-                    AppDelegate.shared?.hideOverlay()
-                }
-            }
-        ))
-        .toggleStyle(.checkbox)
     }
 }
 
@@ -305,4 +286,3 @@ struct NetworkStatusToggleRow: View {
         .toggleStyle(.checkbox)
     }
 }
-

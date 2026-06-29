@@ -17,6 +17,50 @@ struct PersistedHostState: Equatable {
     var primaryHostID: UUID?
 }
 
+extension PingScopeModel {
+    var canAddDraftHost: Bool {
+        draftHost.validationErrors.isEmpty
+    }
+
+    var draftActionTitle: String {
+        editingHostID == nil ? "Add Host" : "Save Changes"
+    }
+
+    func scheduleNotificationRuleUpdate() {
+        notificationRulesTask?.cancel()
+        let rules = notificationRules
+        notificationRulesTask = Task { [runtime] in
+            await runtime.updateNotificationRules(rules)
+        }
+    }
+
+    func scheduleLocalNetworkProbeUpdate() {
+        localNetworkProbeTask?.cancel()
+        let allowsLocalNetworkProbes = allowsLocalNetworkProbes
+        localNetworkProbeTask = Task { [runtime] in
+            await runtime.setAllowsLocalNetworkProbes(allowsLocalNetworkProbes)
+        }
+    }
+
+    func loadDraft(from host: HostConfig) {
+        editingHostID = host.id
+        isCreatingHost = false
+        showsAdvancedHostFields = false
+        draftHostName = host.displayName
+        draftHostAddress = host.address
+        draftNetworkTier = host.tier
+        draftMethod = host.method
+        draftPort = Int(host.port ?? host.method.defaultPort ?? 0)
+        draftIntervalMilliseconds = host.interval.milliseconds
+        draftTimeoutMilliseconds = host.timeout.milliseconds
+        draftDegradedThresholdMilliseconds = host.thresholds.degradedMilliseconds
+        draftDownAfterFailures = host.thresholds.downAfterFailures
+        draftIsEnabled = host.isEnabled
+        draftNotificationPolicy = host.notifications
+        draftTestResultText = nil
+    }
+}
+
 extension UserDefaults {
     var overlayFrame: NSRect? {
         get {

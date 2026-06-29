@@ -52,12 +52,12 @@ final class HostTestingTests: XCTestCase {
         XCTAssertEqual(outcome, .detected(.defaultStarlinkDish))
     }
 
-    func testStarlinkDishDetectorReturnsNilWhenStatusFails() async {
+    func testStarlinkDishDetectorReportsFailureSeparatelyFromConfirmedMiss() async {
         let detector = StarlinkDishDetector(statusClient: FailingStarlinkStatusClient())
 
         let outcome = await detector.detectionOutcome(timeout: .milliseconds(100))
 
-        XCTAssertEqual(outcome, .notFound)
+        XCTAssertEqual(outcome, .failed)
     }
 
     func testStarlinkDishDetectorReturnsReachableCandidate() async {

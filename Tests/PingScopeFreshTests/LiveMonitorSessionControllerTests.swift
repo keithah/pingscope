@@ -43,6 +43,8 @@ final class LiveMonitorSessionControllerTests: XCTestCase {
 
         await controller.start(duration: .thirtySeconds)
         try await Task.sleep(for: .milliseconds(40))
+        let samplesBeforeStop = await history.samples(hostID: host.id, since: .distantPast, limit: 10)
+        XCTAssertEqual(samplesBeforeStop.count, 0)
         await controller.stop()
 
         let samples = await history.samples(hostID: host.id, since: .distantPast, limit: 10)

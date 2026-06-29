@@ -171,19 +171,34 @@ public struct DisplayStatePresenter: Sendable {
 
     public func mergedSamples(history: [PingResult], live: [PingResult], range: TimeRange, now: Date = Date()) -> [PingResult] {
         let cutoff = now.addingTimeInterval(-range.duration)
-        var byID: [UUID: PingResult] = [:]
-        for sample in history where sample.timestamp >= cutoff {
-            byID[sample.id] = sample
-        }
-        for sample in live where sample.timestamp >= cutoff {
-            byID[sample.id] = sample
-        }
-        return byID.values.sorted { lhs, rhs in
-            if lhs.timestamp == rhs.timestamp {
-                return lhs.id.uuidString < rhs.id.uuidString
+        let historySamples = Self.ascendingSamples(history, since: cutoff)
+        let liveSamples = Self.ascendingSamples(live, since: cutoff)
+        var merged: [PingResult] = []
+        merged.reserveCapacity(historySamples.count + liveSamples.count)
+        var seen = Set<UUID>()
+        var historyIndex = 0
+        var liveIndex = 0
+
+        while historyIndex < historySamples.count || liveIndex < liveSamples.count {
+            let next: PingResult
+            if historyIndex == historySamples.count {
+                next = liveSamples[liveIndex]
+                liveIndex += 1
+            } else if liveIndex == liveSamples.count {
+                next = historySamples[historyIndex]
+                historyIndex += 1
+            } else if Self.precedes(historySamples[historyIndex], liveSamples[liveIndex]) {
+                next = historySamples[historyIndex]
+                historyIndex += 1
+            } else {
+                next = liveSamples[liveIndex]
+                liveIndex += 1
             }
-            return lhs.timestamp < rhs.timestamp
+            if seen.insert(next.id).inserted {
+                merged.append(next)
+            }
         }
+        return merged
     }
 
     public func color(for status: HealthStatus) -> StatusColor {
@@ -193,5 +208,33 @@ public struct DisplayStatePresenter: Sendable {
         case .degraded: .yellow
         case .down: .red
         }
+    }
+
+    private static func ascendingSamples(_ samples: [PingResult], since cutoff: Date) -> [PingResult] {
+        guard !samples.isEmpty else { return [] }
+        let filtered = samples.filter { $0.timestamp >= cutoff }
+        guard filtered.count > 1 else { return filtered }
+        if isAscending(filtered) {
+            return filtered
+        }
+        if isDescending(filtered) {
+            return Array(filtered.reversed())
+        }
+        return filtered.sorted(by: precedes)
+    }
+
+    private static func isAscending(_ samples: [PingResult]) -> Bool {
+        zip(samples, samples.dropFirst()).allSatisfy { precedes($0, $1) || $0.id == $1.id }
+    }
+
+    private static func isDescending(_ samples: [PingResult]) -> Bool {
+        zip(samples, samples.dropFirst()).allSatisfy { precedes($1, $0) || $0.id == $1.id }
+    }
+
+    private static func precedes(_ lhs: PingResult, _ rhs: PingResult) -> Bool {
+        if lhs.timestamp == rhs.timestamp {
+            return lhs.id.uuidString < rhs.id.uuidString
+        }
+        return lhs.timestamp < rhs.timestamp
     }
 }

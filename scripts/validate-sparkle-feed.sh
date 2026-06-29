@@ -10,15 +10,38 @@ VERSION="${1:-$(project_setting MARKETING_VERSION)}"
 BUILD_VERSION="${PING_SCOPE_BUILD_VERSION:-$(project_setting CURRENT_PROJECT_VERSION)}"
 FEED_URL="${PING_SCOPE_SPARKLE_FEED_URL:-https://keithah.github.io/pingscope/appcast.xml}"
 EXPECTED_SHA256="${PING_SCOPE_DMG_SHA256:-}"
-WORK_DIR="${PING_SCOPE_SPARKLE_VALIDATE_DIR:-/tmp/pingscope-sparkle-feed}"
+WORK_DIR="${PING_SCOPE_SPARKLE_VALIDATE_DIR:-}"
 KEY_ACCOUNT="${SPARKLE_KEY_ACCOUNT:-pingscope-ed25519}"
 DOWNLOAD_DMG="${PING_SCOPE_DOWNLOAD_DMG:-1}"
 CURL=(curl --fail --location --show-error --silent --proto '=https' --proto-redir '=https' --connect-timeout 10 --max-time 120 --retry 3)
 
+validate_version() {
+  [[ "$1" =~ ^[0-9]+[.][0-9]+[.][0-9]+([-.][0-9A-Za-z]+)*$ ]]
+}
+
+validate_build_version() {
+  [[ "$1" =~ ^[0-9]+$ ]]
+}
+
 find_sign_update() {
+  if [[ -n "${SPARKLE_SIGN_UPDATE:-}" ]]; then
+    [[ -x "${SPARKLE_SIGN_UPDATE}" ]] && { printf '%s' "${SPARKLE_SIGN_UPDATE}"; return 0; }
+    return 1
+  fi
+
   local tool
-  tool=$(find .build "$HOME/Library/Developer/Xcode/DerivedData" -path '*/SourcePackages/artifacts/sparkle/Sparkle/bin/sign_update' -type f -perm -111 2>/dev/null | sort | tail -n 1)
-  if [[ -n "${tool}" ]]; then
+  for tool in \
+    .build/artifacts/sparkle/Sparkle/bin/sign_update \
+    .build/checkouts/Sparkle/bin/sign_update \
+    "${PWD}/DerivedData/SourcePackages/artifacts/sparkle/Sparkle/bin/sign_update"
+  do
+    if [[ -x "${tool}" ]]; then
+      printf '%s' "${tool}"
+      return 0
+    fi
+  done
+  tool=$(find .build -path '*/SourcePackages/artifacts/sparkle/Sparkle/bin/sign_update' -type f -perm -111 -print -quit 2>/dev/null || true)
+  if [[ -n "${tool}" && -x "${tool}" ]]; then
     printf '%s' "${tool}"
     return 0
   fi
@@ -30,9 +53,20 @@ fail() {
   exit 1
 }
 
-mkdir -p "${WORK_DIR}"
+validate_version "${VERSION}" || fail "invalid version: ${VERSION}"
+validate_build_version "${BUILD_VERSION}" || fail "invalid build version: ${BUILD_VERSION}"
+
+EXPECTED_MINIMUM_SYSTEM="$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' Configuration/Info.plist)"
+
+if [[ -z "${WORK_DIR}" ]]; then
+  WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/pingscope-sparkle-feed.XXXXXX")"
+  trap 'rm -rf "${WORK_DIR}"' EXIT
+else
+  mkdir -p "${WORK_DIR}"
+fi
+chmod 700 "${WORK_DIR}"
 APPCAST="${WORK_DIR}/appcast.xml"
-META="${WORK_DIR}/appcast-meta.env"
+META="${WORK_DIR}/appcast-meta.txt"
 
 case "${FEED_URL}" in
   https://*) ;;
@@ -41,12 +75,11 @@ esac
 
 "${CURL[@]}" "${FEED_URL}" -o "${APPCAST}"
 
-python3 - "${APPCAST}" "${VERSION}" "${BUILD_VERSION}" >"${META}" <<'PY'
-import shlex
+python3 - "${APPCAST}" "${VERSION}" "${BUILD_VERSION}" "${EXPECTED_MINIMUM_SYSTEM}" >"${META}" <<'PY'
 import sys
 import xml.etree.ElementTree as ET
 
-appcast, expected_version, expected_build = sys.argv[1:4]
+appcast, expected_version, expected_build, expected_minimum_system = sys.argv[1:5]
 sparkle = "{http://www.andymatuschak.org/xml-namespaces/sparkle}"
 root = ET.parse(appcast).getroot()
 item = root.find("./channel/item")
@@ -73,17 +106,18 @@ if not length.isdigit() or int(length) <= 0:
     raise SystemExit(f"invalid enclosure length: {length!r}")
 if not signature:
     raise SystemExit("missing Sparkle EdDSA signature")
-if minimum_system != "26.0":
-    raise SystemExit(f"expected minimum system 26.0, got {minimum_system!r}")
+if minimum_system != expected_minimum_system:
+    raise SystemExit(f"expected minimum system {expected_minimum_system}, got {minimum_system!r}")
 if release_notes and not release_notes.startswith("https://"):
     raise SystemExit(f"release notes URL must be https: {release_notes!r}")
-print(f"DMG_URL={shlex.quote(url)}")
-print(f"DMG_LENGTH={shlex.quote(length)}")
-print(f"DMG_SIGNATURE={shlex.quote(signature)}")
+print(url)
+print(length)
+print(signature)
 PY
 
-# shellcheck disable=SC1090
-source "${META}"
+DMG_URL="$(sed -n '1p' "${META}")"
+DMG_LENGTH="$(sed -n '2p' "${META}")"
+DMG_SIGNATURE="$(sed -n '3p' "${META}")"
 
 if [[ "${DOWNLOAD_DMG}" -eq 1 ]]; then
   DMG="${WORK_DIR}/$(basename "${DMG_URL}")"

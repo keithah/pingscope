@@ -16,15 +16,24 @@ set -euo pipefail
 # Optional environment:
 #   CODESIGN_IDENTITY="Developer ID Application: ..."
 #   APP_ENTITLEMENTS=/path/to/entitlements.plist
-#   MARKETING_VERSION=0.1.2
-#   CURRENT_PROJECT_VERSION=24
+#   MARKETING_VERSION=0.1.4
+#   CURRENT_PROJECT_VERSION=49
+
+project_setting() {
+  local key="$1"
+  awk -F' = ' -v key="${key}" '$1 ~ ("^[[:space:]]*" key "$") { gsub(/;/, "", $2); print $2; exit }' PingScope.xcodeproj/project.pbxproj
+}
 
 CONFIGURATION="${1:-debug}"
 OUTPUT_DIR="${2:-}"
 FLAVOR="${3:-developer-id}"
-MARKETING_VERSION="${MARKETING_VERSION:-0.1.2}"
-CURRENT_PROJECT_VERSION="${CURRENT_PROJECT_VERSION:-24}"
+MARKETING_VERSION="${MARKETING_VERSION:-$(project_setting MARKETING_VERSION)}"
+CURRENT_PROJECT_VERSION="${CURRENT_PROJECT_VERSION:-$(project_setting CURRENT_PROJECT_VERSION)}"
 BUNDLE_IDENTIFIER="${BUNDLE_IDENTIFIER:-com.hadm.PingScope}"
+if [[ -z "${MARKETING_VERSION}" || -z "${CURRENT_PROJECT_VERSION}" ]]; then
+  echo "Unable to derive MARKETING_VERSION/CURRENT_PROJECT_VERSION from project." >&2
+  exit 2
+fi
 
 case "${CONFIGURATION}" in
   debug|release) ;;

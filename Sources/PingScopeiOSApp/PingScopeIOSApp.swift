@@ -97,6 +97,9 @@ private final class PingScopeIOSAppModel: ObservableObject {
     private var lastGatewayAddress: String?
     private var lastHistoryRefreshAt: Date?
     private var lastPublishedWidgetSnapshot: WidgetSnapshot?
+    private var lastWidgetTimelineReloadAt: Date?
+    private let widgetSnapshotHeartbeatInterval: TimeInterval = 5 * 60
+    private let widgetTimelineReloadInterval: TimeInterval = 5 * 60
 
     init() {
         self.hostStore = PingScopeIOSHostStore()
@@ -135,6 +138,7 @@ private final class PingScopeIOSAppModel: ObservableObject {
     }
 
     deinit {
+        refreshTask?.cancel()
         pathMonitor.cancel()
     }
 
@@ -403,8 +407,8 @@ private final class PingScopeIOSAppModel: ObservableObject {
             return
         }
         let cutoff = Date().addingTimeInterval(-24 * 60 * 60)
-        let samples = await historyStore.samples(hostID: snapshot.host.id, since: cutoff, limit: 100)
-        historySamples = samples.sorted { $0.timestamp > $1.timestamp }
+        let samples = await historyStore.samples(hostID: snapshot.host.id, since: cutoff, limit: 10_000)
+        historySamples = Array(samples.suffix(100)).sorted { $0.timestamp > $1.timestamp }
         rebuildGraphSamples()
         await publishWidgetSnapshot()
     }
@@ -456,10 +460,30 @@ private final class PingScopeIOSAppModel: ObservableObject {
             networkStatus: .connected,
             generatedAt: Date()
         )
-        guard !widgetSnapshot.hasSameContent(as: lastPublishedWidgetSnapshot) else { return }
+        let contentChanged = !widgetSnapshot.hasSameContent(as: lastPublishedWidgetSnapshot)
+        let heartbeatDue = widgetSnapshot.generatedAt.timeIntervalSince(lastPublishedWidgetSnapshot?.generatedAt ?? .distantPast) >= widgetSnapshotHeartbeatInterval
+        guard contentChanged || heartbeatDue else { return }
+        let shouldReloadTimeline = shouldReloadWidgetTimeline(for: widgetSnapshot, contentChanged: contentChanged)
         lastPublishedWidgetSnapshot = widgetSnapshot
         await widgetSnapshotStore.save(widgetSnapshot)
-        WidgetCenter.shared.reloadAllTimelines()
+        if shouldReloadTimeline {
+            lastWidgetTimelineReloadAt = widgetSnapshot.generatedAt
+            WidgetCenter.shared.reloadAllTimelines()
+        }
+    }
+
+    private func shouldReloadWidgetTimeline(for widgetSnapshot: WidgetSnapshot, contentChanged: Bool) -> Bool {
+        guard contentChanged else { return false }
+        guard let previous = lastPublishedWidgetSnapshot else { return true }
+        let structuralChange = previous.version != widgetSnapshot.version
+            || previous.primaryHostID != widgetSnapshot.primaryHostID
+            || previous.hosts != widgetSnapshot.hosts
+            || previous.health != widgetSnapshot.health
+            || previous.networkStatus != widgetSnapshot.networkStatus
+        if structuralChange {
+            return true
+        }
+        return widgetSnapshot.generatedAt.timeIntervalSince(lastWidgetTimelineReloadAt ?? .distantPast) >= widgetTimelineReloadInterval
     }
 
     private func beginBackgroundRuntimeIfNeeded() {

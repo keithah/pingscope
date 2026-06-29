@@ -132,11 +132,14 @@ public struct HostConfig: Identifiable, Codable, Equatable, Sendable {
 
     public var validationErrors: [HostValidationError] {
         var errors: [HostValidationError] = []
+        let trimmedAddress = address.trimmingCharacters(in: .whitespacesAndNewlines)
         if displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             errors.append(.missingDisplayName)
         }
-        if address.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        if trimmedAddress.isEmpty {
             errors.append(.missingAddress)
+        } else if trimmedAddress.hasPrefix("-") || trimmedAddress.rangeOfCharacter(from: .controlCharacters) != nil {
+            errors.append(.invalidAddress)
         }
         if method != .icmp, port == nil {
             errors.append(.invalidPort)
@@ -214,6 +217,7 @@ public struct NetworkTierClassifier: Sendable {
 public enum HostValidationError: String, Codable, Equatable, Sendable {
     case missingDisplayName
     case missingAddress
+    case invalidAddress
     case invalidPort
     case intervalTooShort
     case timeoutTooShort
@@ -984,15 +988,5 @@ public struct NetworkPerspectiveDiagnoser: Sendable {
 private extension HostConfig {
     var isLocalNetworkAnchor: Bool {
         requiresLocalNetworkPermission || displayName.localizedCaseInsensitiveContains("gateway")
-    }
-}
-public extension Duration {
-    var seconds: Double {
-        let components = components
-        return Double(components.seconds) + Double(components.attoseconds) / 1_000_000_000_000_000_000
-    }
-
-    var milliseconds: Double {
-        seconds * 1_000
     }
 }

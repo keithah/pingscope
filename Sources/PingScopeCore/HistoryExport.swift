@@ -30,7 +30,7 @@ public enum HistoryExporter {
             .deletingLastPathComponent()
             .appendingPathComponent(".\(url.lastPathComponent).tmp-\(UUID().uuidString)")
         do {
-            try data(samples: samples, host: host, format: format).write(to: temporaryURL, options: .atomic)
+            try writeTemporary(samples: samples, host: host, format: format, to: temporaryURL)
             if FileManager.default.fileExists(atPath: url.path) {
                 _ = try FileManager.default.replaceItemAt(
                     url,
@@ -115,6 +115,43 @@ public enum HistoryExporter {
         return columns.map(csvEscape).joined(separator: ",")
     }
 
+    private static func writeTemporary(samples: [PingResult], host: HostConfig, format: HistoryExportFormat, to url: URL) throws {
+        FileManager.default.createFile(atPath: url.path, contents: nil)
+        let handle = try FileHandle(forWritingTo: url)
+        defer { try? handle.close() }
+        switch format {
+        case .csv:
+            let formatter = ISO8601DateFormatter()
+            try handle.writeLine(csvHeader)
+            for sample in samples {
+                try handle.writeLine(csvRow(sample: sample, host: host, formatter: formatter))
+            }
+        case .json:
+            try handle.write(contentsOf: JSONEncoder.historyEncoder.encode(HistoryExportDocument(host: host, samples: samples)))
+        case .text:
+            try writeText(samples: samples, host: host, to: handle)
+        }
+    }
+
+    private static func writeText(samples: [PingResult], host: HostConfig, to handle: FileHandle) throws {
+        let formatter = ISO8601DateFormatter()
+        try handle.writeLine("PingScope History")
+        try handle.writeLine("Host: \(host.displayName)")
+        try handle.writeLine("Address: \(host.address)")
+        try handle.writeLine("Method: \(host.method.rawValue.uppercased())")
+        try handle.writeLine("Samples: \(samples.count)")
+        try handle.writeLine("")
+        for sample in samples {
+            let timestamp = formatter.string(from: sample.timestamp)
+            let starlinkSuffix = sample.metadata.starlink.map { "  \($0.noteSummary)" } ?? ""
+            if let latency = sample.latency {
+                try handle.writeLine("\(timestamp)  \(Int(latency.milliseconds.rounded()))ms  OK\(starlinkSuffix)")
+            } else {
+                try handle.writeLine("\(timestamp)  \(sample.failureReason?.userMessage ?? "Failed")  Failed\(starlinkSuffix)")
+            }
+        }
+    }
+
     private static func number(_ value: Double?) -> String {
         guard let value else { return "" }
         return String(value)
@@ -155,5 +192,13 @@ private extension JSONEncoder {
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         encoder.dateEncodingStrategy = .iso8601
         return encoder
+    }
+}
+
+private extension FileHandle {
+    func writeLine(_ line: String) throws {
+        if let data = "\(line)\n".data(using: .utf8) {
+            try write(contentsOf: data)
+        }
     }
 }
