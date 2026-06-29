@@ -3,13 +3,13 @@
     <channel>
         <title>PingScope</title>
         <item>
-            <title>0.1.2</title>
-            <pubDate>Thu, 18 Jun 2026 14:00:22 -0700</pubDate>
-            <sparkle:version>25</sparkle:version>
-            <sparkle:shortVersionString>0.1.2</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>
-            <sparkle:releaseNotesLink>https://keithah.github.io/pingscope/PingScope-v0.1.2.md</sparkle:releaseNotesLink>
-            <enclosure url="https://keithah.github.io/pingscope/PingScope-v0.1.2.dmg" length="3990118" type="application/octet-stream" sparkle:edSignature="lXUd7QfCWGnDG5ckMUHwjAeNr4BKJ7DiM8Co2oefJkpMn1wGZzcK8a9XJi4hXuhim4KJDsds5xCDTG4/hjkIAw=="/>
+            <title>0.2.1</title>
+            <pubDate>Mon, 29 Jun 2026 10:19:52 -0700</pubDate>
+            <sparkle:version>63</sparkle:version>
+            <sparkle:shortVersionString>0.2.1</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+            <sparkle:releaseNotesLink>https://keithah.github.io/pingscope/PingScope-v0.2.1.md</sparkle:releaseNotesLink>
+            <enclosure url="https://keithah.github.io/pingscope/PingScope-v0.2.1.dmg" length="4646995" type="application/octet-stream" sparkle:edSignature="6llfqJ5MFYTszJNAwtm+ZYrZusMHRLI0TZOnw29lUSourM1NR6rJknqk57bmHjG2ueq1Diq4bkKxlQf0H/CaAw=="/>
         </item>
     </channel>
 </rss>
