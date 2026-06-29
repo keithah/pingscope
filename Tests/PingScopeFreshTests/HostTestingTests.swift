@@ -47,17 +47,17 @@ final class HostTestingTests: XCTestCase {
             telemetry: StarlinkTelemetry(state: "CONNECTED")
         )), hosts: [.defaultStarlinkDish])
 
-        let host = await detector.detect(timeout: .milliseconds(100))
+        let outcome = await detector.detectionOutcome(timeout: .milliseconds(100))
 
-        XCTAssertEqual(host, .defaultStarlinkDish)
+        XCTAssertEqual(outcome, .detected(.defaultStarlinkDish))
     }
 
     func testStarlinkDishDetectorReturnsNilWhenStatusFails() async {
         let detector = StarlinkDishDetector(statusClient: FailingStarlinkStatusClient())
 
-        let host = await detector.detect(timeout: .milliseconds(100))
+        let outcome = await detector.detectionOutcome(timeout: .milliseconds(100))
 
-        XCTAssertNil(host)
+        XCTAssertEqual(outcome, .notFound)
     }
 
     func testStarlinkDishDetectorReturnsReachableCandidate() async {
@@ -77,17 +77,29 @@ final class HostTestingTests: XCTestCase {
             hosts: [defaultHost, routerHost]
         )
 
-        let host = await detector.detect(timeout: .milliseconds(100))
+        let outcome = await detector.detectionOutcome(timeout: .milliseconds(100))
 
-        XCTAssertEqual(host, routerHost)
+        XCTAssertEqual(outcome, .detected(routerHost))
     }
 
     func testStarlinkDishDetectorTimesOut() async {
         let detector = StarlinkDishDetector(statusClient: SlowStarlinkStatusClient())
 
-        let host = await detector.detect(timeout: .milliseconds(10))
+        let outcome = await detector.detectionOutcome(timeout: .milliseconds(10))
 
-        XCTAssertNil(host)
+        XCTAssertEqual(outcome, .notFound)
+    }
+
+    func testStarlinkDishDetectorReportsCancellationSeparatelyFromMiss() async {
+        let detector = StarlinkDishDetector(statusClient: SlowStarlinkStatusClient())
+        let task = Task {
+            await detector.detectionOutcome(timeout: .seconds(60))
+        }
+
+        task.cancel()
+        let outcome = await task.value
+
+        XCTAssertEqual(outcome, .cancelled)
     }
 }
 

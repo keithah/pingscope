@@ -13,7 +13,7 @@ scripts/validate-probes.sh
 
 echo
 echo "== Xcode Developer ID build with widget =="
-scripts/build-xcode-app-bundle.sh debug /Applications developer-id
+scripts/build-xcode-app-bundle.sh release /Applications developer-id
 
 echo
 echo "== App smoke =="
@@ -35,9 +35,9 @@ echo
 echo "== App Store sandbox bundle =="
 rm -rf /tmp/pingscope-appstore-roadmap
 if [[ "${CLEAN_BUILD}" == "1" ]]; then
-  rm -rf .build/xcode-app-store-Debug
+  rm -rf .build/xcode-app-store-Release
 fi
-scripts/build-xcode-app-bundle.sh debug /tmp/pingscope-appstore-roadmap app-store >/dev/null
+scripts/build-xcode-app-bundle.sh release /tmp/pingscope-appstore-roadmap app-store >/dev/null
 scripts/verify-sandbox.sh /tmp/pingscope-appstore-roadmap/PingScope.app
 
 echo

@@ -451,6 +451,8 @@ public enum NetworkConnectivityStatus: String, CaseIterable, Codable, Equatable,
     case noIPAddress
     case notConnected
 
+    public static let defaultAlertStatuses: Set<NetworkConnectivityStatus> = [.noInternet]
+
     public var displayName: String {
         switch self {
         case .connected: "Connected"
@@ -548,7 +550,11 @@ public struct SampleSeries: Codable, Equatable, Sendable {
     }
 
     public func samples(since cutoff: Date) -> [PingResult] {
-        samples.filter { $0.timestamp >= cutoff }
+        buffer.filter { $0.timestamp >= cutoff }
+    }
+
+    public func recentSamples(limit: Int) -> [PingResult] {
+        buffer.suffix(limit)
     }
 
     public var stats: SampleStats {

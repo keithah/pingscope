@@ -194,6 +194,94 @@ final class RuntimeBehaviorTests: XCTestCase {
         await runtime.stop()
     }
 
+    func testRuntimeResetPreventsFullHistoryBatchFromWritingAfterDiscard() async throws {
+        let host = HostConfig(displayName: "Example", address: "example.com")
+        let historyStore = DelayedHistoryStore(appendDelay: .milliseconds(80))
+        let runtime = PingRuntime(
+            hostStore: HostStore(defaultHosts: [host]),
+            scheduler: MeasurementScheduler(probeFactory: HangingProbeFactory()),
+            historyStore: historyStore
+        )
+
+        for index in 0..<32 {
+            await runtime.ingest(.success(
+                hostID: host.id,
+                latency: .milliseconds(Double(index + 1)),
+                timestamp: Date(timeIntervalSince1970: Double(index))
+            ).withHostMetadata(from: host))
+        }
+
+        try await Task.sleep(for: .milliseconds(10))
+        await runtime.reset()
+        try await Task.sleep(for: .milliseconds(120))
+
+        let samples = await historyStore.samples(hostID: host.id, since: .distantPast, limit: 100)
+        XCTAssertTrue(samples.isEmpty)
+        await runtime.stop()
+    }
+
+    func testRuntimeStopFlushesPendingHistoryFromCancelledTask() async throws {
+        let host = HostConfig(displayName: "Example", address: "example.com")
+        let historyStore = DelayedHistoryStore(appendDelay: .milliseconds(1))
+        let runtime = PingRuntime(
+            hostStore: HostStore(defaultHosts: [host]),
+            scheduler: MeasurementScheduler(probeFactory: CountingProbeFactory(result: .success(hostID: host.id, latency: .milliseconds(7)))),
+            historyStore: historyStore
+        )
+        await runtime.ingest(.success(hostID: host.id, latency: .milliseconds(12)).withHostMetadata(from: host))
+
+        let stopTask = Task {
+            await runtime.stop()
+        }
+        stopTask.cancel()
+        await stopTask.value
+
+        let samples = await historyStore.samples(hostID: host.id, since: .distantPast, limit: 10)
+        XCTAssertEqual(samples.count, 1)
+    }
+
+    func testRuntimeDiscardPendingLeavesNoLiveFlushTask() async throws {
+        let host = HostConfig(displayName: "Example", address: "example.com")
+        let historyStore = ControlledHistoryStore()
+        let runtime = PingRuntime(
+            hostStore: HostStore(defaultHosts: [host]),
+            scheduler: MeasurementScheduler(probeFactory: HangingProbeFactory()),
+            historyStore: historyStore
+        )
+
+        for index in 0..<32 {
+            await runtime.ingest(.success(
+                hostID: host.id,
+                latency: .milliseconds(Double(index + 1)),
+                timestamp: Date(timeIntervalSince1970: Double(index))
+            ).withHostMetadata(from: host))
+        }
+        await historyStore.waitForAppendCount(1)
+
+        let resetTask = Task {
+            await runtime.reset()
+        }
+        try await Task.sleep(for: .milliseconds(50))
+        for index in 32..<64 {
+            await runtime.ingest(.success(
+                hostID: host.id,
+                latency: .milliseconds(Double(index + 1)),
+                timestamp: Date(timeIntervalSince1970: Double(index))
+            ).withHostMetadata(from: host))
+        }
+
+        await historyStore.releaseAppends()
+        await resetTask.value
+        let appendCountAfterReset = await historyStore.appendCount
+        try await Task.sleep(for: .milliseconds(350))
+        let finalAppendCount = await historyStore.appendCount
+        let finalSamples = await historyStore.samples(hostID: host.id, since: .distantPast, limit: 100)
+
+        XCTAssertEqual(finalAppendCount, appendCountAfterReset)
+        XCTAssertTrue(finalSamples.isEmpty)
+        await runtime.stop()
+    }
+
     func testRuntimeRemovesStaleStarlinkBeforeSnapshotObservation() async throws {
         let gateway = HostConfig(displayName: "Default Gateway", address: "192.168.101.1", method: .tcp, port: 80)
         let starlink = HostConfig.defaultStarlinkDish
@@ -373,5 +461,98 @@ private struct DelayedProbe: PingProbe {
     func measure(_ host: HostConfig) async -> PingResult {
         try? await Task.sleep(for: delay)
         return .success(hostID: host.id, latency: .milliseconds(12)).withHostMetadata(from: host)
+    }
+}
+
+private struct HangingProbeFactory: ProbeFactory {
+    func makeProbe(for method: PingMethod) async -> any PingProbe {
+        HangingProbe()
+    }
+}
+
+private struct HangingProbe: PingProbe {
+    func measure(_ host: HostConfig) async -> PingResult {
+        try? await Task.sleep(for: .seconds(60))
+        return .failure(hostID: host.id, reason: .cancelled).withHostMetadata(from: host)
+    }
+}
+
+private actor DelayedHistoryStore: PingHistoryStore {
+    private let appendDelay: Duration
+    private var stored: [PingResult] = []
+
+    init(appendDelay: Duration) {
+        self.appendDelay = appendDelay
+    }
+
+    func append(_ result: PingResult) async {
+        await append([result])
+    }
+
+    func append(_ results: [PingResult]) async {
+        try? await Task.sleep(for: appendDelay)
+        stored.append(contentsOf: results)
+    }
+
+    func samples(hostID: UUID, since: Date, limit: Int) async -> [PingResult] {
+        Array(stored.filter { $0.hostID == hostID && $0.timestamp >= since }.prefix(limit))
+    }
+
+    func prune(olderThan cutoff: Date) async {
+        stored.removeAll { $0.timestamp < cutoff }
+    }
+
+    func deleteAll() async {
+        stored.removeAll()
+    }
+}
+
+private actor ControlledHistoryStore: PingHistoryStore {
+    private(set) var appendCount = 0
+    private var stored: [PingResult] = []
+    private var isReleased = false
+    private var appendWaiters: [CheckedContinuation<Void, Never>] = []
+    private var releaseWaiters: [CheckedContinuation<Void, Never>] = []
+
+    func append(_ result: PingResult) async {
+        await append([result])
+    }
+
+    func append(_ results: [PingResult]) async {
+        appendCount += 1
+        appendWaiters.forEach { $0.resume() }
+        appendWaiters.removeAll()
+        if !isReleased {
+            await withCheckedContinuation { continuation in
+                releaseWaiters.append(continuation)
+            }
+        }
+        stored.append(contentsOf: results)
+    }
+
+    func samples(hostID: UUID, since: Date, limit: Int) async -> [PingResult] {
+        Array(stored.filter { $0.hostID == hostID && $0.timestamp >= since }.prefix(limit))
+    }
+
+    func prune(olderThan cutoff: Date) async {
+        stored.removeAll { $0.timestamp < cutoff }
+    }
+
+    func deleteAll() async {
+        stored.removeAll()
+    }
+
+    func waitForAppendCount(_ count: Int) async {
+        while appendCount < count {
+            await withCheckedContinuation { continuation in
+                appendWaiters.append(continuation)
+            }
+        }
+    }
+
+    func releaseAppends() {
+        isReleased = true
+        releaseWaiters.forEach { $0.resume() }
+        releaseWaiters.removeAll()
     }
 }

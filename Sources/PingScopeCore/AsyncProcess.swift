@@ -8,6 +8,7 @@ public struct AsyncProcessResult: Sendable {
 
 public enum AsyncProcessError: Error, Equatable, Sendable {
     case timedOut
+    case unavailable
 }
 
 public enum AsyncProcess {
@@ -17,6 +18,7 @@ public enum AsyncProcess {
         timeout: Duration? = nil,
         maxOutputBytes: Int = 1_048_576
     ) async throws -> AsyncProcessResult {
+#if os(macOS)
         let process = Process()
         process.executableURL = URL(fileURLWithPath: executablePath)
         process.arguments = arguments
@@ -49,9 +51,13 @@ public enum AsyncProcess {
         } onCancel: {
             box.terminate()
         }
+#else
+        throw AsyncProcessError.unavailable
+#endif
     }
 }
 
+#if os(macOS)
 private final class ProcessBox: @unchecked Sendable {
     private let process: Process
 
@@ -81,7 +87,6 @@ private final class ProcessBox: @unchecked Sendable {
         }
     }
 }
-
 private extension Process {
     func waitForTermination(timeout: Duration, box: ProcessBox) async throws {
         try await withTaskCancellationHandler {
@@ -132,12 +137,37 @@ private extension Process {
         }
     }
 }
+#endif
 
 private extension FileHandle {
     func readToEnd(maxBytes: Int) async -> Data {
+        let reader = FileHandleReader(handle: self, maxBytes: maxBytes)
+        return await reader.read()
+    }
+}
+
+private final class FileHandleReader: @unchecked Sendable {
+    private static let queue = DispatchQueue(label: "com.pingscope.async-process.pipe-reader", qos: .utility, attributes: .concurrent)
+    private let handle: FileHandle
+    private let maxBytes: Int
+
+    init(handle: FileHandle, maxBytes: Int) {
+        self.handle = handle
+        self.maxBytes = maxBytes
+    }
+
+    func read() async -> Data {
+        await withCheckedContinuation { continuation in
+            Self.queue.async {
+                continuation.resume(returning: self.readBlocking())
+            }
+        }
+    }
+
+    private func readBlocking() -> Data {
         var data = Data()
         while true {
-            let chunk = readData(ofLength: 8_192)
+            let chunk = handle.readData(ofLength: 8_192)
             if chunk.isEmpty {
                 return data
             }

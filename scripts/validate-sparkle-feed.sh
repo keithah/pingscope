@@ -1,8 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-VERSION="${1:-0.1.2}"
-BUILD_VERSION="${PING_SCOPE_BUILD_VERSION:-25}"
+project_setting() {
+  local key="$1"
+  awk -F' = ' -v key="${key}" '$1 ~ ("^[[:space:]]*" key "$") { gsub(/;/, "", $2); print $2; exit }' PingScope.xcodeproj/project.pbxproj
+}
+
+VERSION="${1:-$(project_setting MARKETING_VERSION)}"
+BUILD_VERSION="${PING_SCOPE_BUILD_VERSION:-$(project_setting CURRENT_PROJECT_VERSION)}"
 FEED_URL="${PING_SCOPE_SPARKLE_FEED_URL:-https://keithah.github.io/pingscope/appcast.xml}"
 EXPECTED_SHA256="${PING_SCOPE_DMG_SHA256:-}"
 WORK_DIR="${PING_SCOPE_SPARKLE_VALIDATE_DIR:-/tmp/pingscope-sparkle-feed}"
@@ -12,7 +17,7 @@ CURL=(curl --fail --location --show-error --silent --proto '=https' --proto-redi
 
 find_sign_update() {
   local tool
-  tool=$(find "$HOME/Library/Developer/Xcode/DerivedData" -path '*/SourcePackages/artifacts/sparkle/Sparkle/bin/sign_update' -type f -perm -111 2>/dev/null | sort | tail -n 1)
+  tool=$(find .build "$HOME/Library/Developer/Xcode/DerivedData" -path '*/SourcePackages/artifacts/sparkle/Sparkle/bin/sign_update' -type f -perm -111 2>/dev/null | sort | tail -n 1)
   if [[ -n "${tool}" ]]; then
     printf '%s' "${tool}"
     return 0

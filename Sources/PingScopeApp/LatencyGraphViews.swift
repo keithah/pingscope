@@ -76,7 +76,7 @@ struct LatencyGraph: View {
     private func graphCanvas(graphData: LatencyGraphData) -> some View {
         GeometryReader { proxy in
             Canvas { context, size in
-                guard graphData.latencies.count > 1 else {
+                guard graphData.hasDrawableLine else {
                     let rect = CGRect(origin: .zero, size: size)
                     context.stroke(Path(roundedRect: rect, cornerRadius: 6), with: .color(.secondary.opacity(0.25)))
                     return
@@ -93,9 +93,9 @@ struct LatencyGraph: View {
                 let plotBottom: CGFloat = showsAxes ? 6 : 0
                 let plotHeight = max(size.height - plotTop - plotBottom, 1)
 
-                for (index, sample) in samples.enumerated() {
-                    let x = size.width * CGFloat(index) / CGFloat(max(samples.count - 1, 1))
-                    guard let value = sample.latency?.milliseconds else {
+                for pointValue in graphData.points {
+                    let x = size.width * CGFloat(pointValue.index) / CGFloat(max(graphData.points.count - 1, 1))
+                    guard let value = pointValue.latencyMilliseconds else {
                         let failureMark = Path { mark in
                             mark.move(to: CGPoint(x: x, y: plotTop + plotHeight * 0.2))
                             mark.addLine(to: CGPoint(x: x, y: plotTop + plotHeight))
@@ -220,7 +220,7 @@ struct MultiHostLatencyGraph: View {
         }
     }
 
-    private func draw(_ hostSeries: HostLatencyGraphSeries, in size: CGSize, context: GraphicsContext, scale: LatencyGraphScale) {
+    private func draw(_ hostSeries: DrawableHostLatencyGraphSeries, in size: CGSize, context: GraphicsContext, scale: LatencyGraphScale) {
         let maxValue = scale.axisMaximumMilliseconds
         let plotTop: CGFloat = showsAxes ? 6 : 0
         let plotBottom: CGFloat = showsAxes ? 6 : 0
@@ -228,10 +228,10 @@ struct MultiHostLatencyGraph: View {
         var path = Path()
         var isDrawingSegment = false
 
-        for (index, sample) in hostSeries.samples.enumerated() {
-            let x = size.width * CGFloat(index) / CGFloat(max(hostSeries.samples.count - 1, 1))
-            guard let value = sample.latency?.milliseconds else {
-                if hostSeries.isPrimary {
+        for pointValue in hostSeries.points {
+            let x = size.width * CGFloat(pointValue.index) / CGFloat(max(hostSeries.points.count - 1, 1))
+            guard let value = pointValue.latencyMilliseconds else {
+                if hostSeries.source.isPrimary {
                     let failureMark = Path { mark in
                         mark.move(to: CGPoint(x: x, y: plotTop + plotHeight * 0.2))
                         mark.addLine(to: CGPoint(x: x, y: plotTop + plotHeight))
@@ -255,42 +255,85 @@ struct MultiHostLatencyGraph: View {
 
         context.stroke(
             path,
-            with: .color(hostSeries.color.opacity(hostSeries.isPrimary ? 1 : 0.72)),
-            lineWidth: hostSeries.isPrimary ? 2.2 : 1.5
+            with: .color(hostSeries.source.color.opacity(hostSeries.source.isPrimary ? 1 : 0.72)),
+            lineWidth: hostSeries.source.isPrimary ? 2.2 : 1.5
         )
     }
 
 }
 
+private struct LatencyGraphPoint {
+    let index: Int
+    let latencyMilliseconds: Double?
+}
+
 private struct LatencyGraphData {
-    let latencies: [Double]
+    let points: [LatencyGraphPoint]
     let scale: LatencyGraphScale
+    private let latencyCount: Int
 
     init(samples: [PingResult]) {
-        latencies = samples.compactMap { $0.latency?.milliseconds }
+        var latencies: [Double] = []
+        latencies.reserveCapacity(samples.count)
+        var points: [LatencyGraphPoint] = []
+        points.reserveCapacity(samples.count)
+        for (index, sample) in samples.enumerated() {
+            let latency = sample.latency?.milliseconds
+            if let latency {
+                latencies.append(latency)
+            }
+            points.append(LatencyGraphPoint(index: index, latencyMilliseconds: latency))
+        }
+        self.points = points
+        self.latencyCount = latencies.count
         scale = LatencyGraphScale(latencies: latencies)
     }
 
     var hasLatencyData: Bool {
-        !latencies.isEmpty
+        latencyCount > 0
+    }
+
+    var hasDrawableLine: Bool {
+        latencyCount > 1
     }
 }
 
+private struct DrawableHostLatencyGraphSeries {
+    let source: HostLatencyGraphSeries
+    let points: [LatencyGraphPoint]
+}
+
 private struct MultiHostLatencyGraphData {
-    let drawableSeries: [HostLatencyGraphSeries]
-    let latencies: [Double]
+    let drawableSeries: [DrawableHostLatencyGraphSeries]
     let scale: LatencyGraphScale
+    private let latencyCount: Int
 
     init(series: [HostLatencyGraphSeries]) {
-        drawableSeries = series.filter { $0.samples.count > 1 }
-        latencies = series.flatMap { hostSeries in
-            hostSeries.samples.compactMap { $0.latency?.milliseconds }
+        var latencies: [Double] = []
+        var drawableSeries: [DrawableHostLatencyGraphSeries] = []
+        for hostSeries in series {
+            var points: [LatencyGraphPoint] = []
+            points.reserveCapacity(hostSeries.samples.count)
+            var hostLatencyCount = 0
+            for (index, sample) in hostSeries.samples.enumerated() {
+                let latency = sample.latency?.milliseconds
+                if let latency {
+                    latencies.append(latency)
+                    hostLatencyCount += 1
+                }
+                points.append(LatencyGraphPoint(index: index, latencyMilliseconds: latency))
+            }
+            if points.count > 1, hostLatencyCount > 1 {
+                drawableSeries.append(DrawableHostLatencyGraphSeries(source: hostSeries, points: points))
+            }
         }
+        self.drawableSeries = drawableSeries
+        self.latencyCount = latencies.count
         scale = LatencyGraphScale(latencies: latencies)
     }
 
     var hasLatencyData: Bool {
-        !latencies.isEmpty
+        latencyCount > 0
     }
 
     var hasDrawableSeries: Bool {
@@ -352,4 +395,3 @@ private enum LatencyGraphGrid {
         }
     }
 }
-

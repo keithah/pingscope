@@ -81,10 +81,17 @@ public struct DefaultGatewayDetector: Sendable {
 }
 
 public struct StarlinkDishDetector: Sendable {
+    public enum DetectionOutcome: Sendable, Equatable {
+        case detected(HostConfig)
+        case notFound
+        case cancelled
+    }
+
     private enum DetectionResult: Sendable {
         case detected(HostConfig)
         case miss
         case timeout
+        case cancelled
     }
 
     private let statusClient: any StarlinkStatusFetching
@@ -98,21 +105,28 @@ public struct StarlinkDishDetector: Sendable {
         self.hosts = hosts
     }
 
-    public func detect(timeout: Duration = .seconds(2)) async -> HostConfig? {
-        await withTaskGroup(of: DetectionResult.self, returning: HostConfig?.self) { group in
+    public func detectionOutcome(timeout: Duration = .seconds(2)) async -> DetectionOutcome {
+        await withTaskGroup(of: DetectionResult.self, returning: DetectionOutcome.self) { group in
             let statusClient = statusClient
             for host in hosts {
                 group.addTask {
+                    guard !Task.isCancelled else { return .cancelled }
                     do {
                         _ = try await statusClient.fetchStatus(host: host)
                         return .detected(host)
+                    } catch is CancellationError {
+                        return .cancelled
                     } catch {
                         return .miss
                     }
                 }
             }
             group.addTask {
-                try? await Task.sleep(for: timeout)
+                do {
+                    try await Task.sleep(for: timeout)
+                } catch {
+                    return .cancelled
+                }
                 return .timeout
             }
 
@@ -120,15 +134,18 @@ public struct StarlinkDishDetector: Sendable {
                 switch result {
                 case .detected(let detected):
                     group.cancelAll()
-                    return detected
+                    return .detected(detected)
                 case .timeout:
                     group.cancelAll()
-                    return nil
+                    return .notFound
+                case .cancelled:
+                    group.cancelAll()
+                    return .cancelled
                 case .miss:
                     break
                 }
             }
-            return nil
+            return .notFound
         }
     }
 }
@@ -194,6 +211,7 @@ public actor MeasurementScheduler {
     private var tasks: [Task<Void, Never>] = []
     private var continuation: AsyncStream<PingResult>.Continuation?
     private var generation = 0
+    private var lastFailureLogByHost: [UUID: (reason: FailureReason, date: Date)] = [:]
 
     public init(probeFactory: any ProbeFactory, logger: (@Sendable (String) -> Void)? = nil) {
         self.probeFactory = probeFactory
@@ -205,6 +223,7 @@ public actor MeasurementScheduler {
         continuation?.finish()
         continuation = nil
         generation += 1
+        lastFailureLogByHost.removeAll()
         let runGeneration = generation
 
         let stream = AsyncStream<PingResult> { streamContinuation in
@@ -260,13 +279,28 @@ public actor MeasurementScheduler {
             let probe = await probeFactory.makeProbe(for: host.method)
             let result = await probe.measure(host)
             guard !Task.isCancelled, generation == self.generation else { return }
-            if result.failureReason != nil {
+            if shouldLogFailure(result) {
                 logger?("scheduler result host=\(host.displayName) failure=\(String(describing: result.failureReason))")
             }
             continuation?.yield(result)
             try? await Task.sleep(for: host.interval)
         }
         logger?("scheduler runLoop end generation=\(generation) host=\(host.diagnosticDescription)")
+    }
+
+    private func shouldLogFailure(_ result: PingResult) -> Bool {
+        guard let failureReason = result.failureReason else {
+            lastFailureLogByHost.removeValue(forKey: result.hostID)
+            return false
+        }
+        let last = lastFailureLogByHost[result.hostID]
+        if last?.reason == failureReason,
+           let lastDate = last?.date,
+           result.timestamp.timeIntervalSince(lastDate) < 60 {
+            return false
+        }
+        lastFailureLogByHost[result.hostID] = (failureReason, result.timestamp)
+        return true
     }
 }
 
@@ -280,6 +314,7 @@ public actor PingRuntime {
     public let hostStore: HostStore
     private let scheduler: MeasurementScheduler
     private let historyStore: (any PingHistoryStore)?
+    private let historyWriter: HistoryWriteBuffer?
     private var allowsLocalNetworkProbes: Bool
     private var alertEngine: AlertDecisionEngine
     private let networkDiagnoser = NetworkPerspectiveDiagnoser()
@@ -302,6 +337,7 @@ public actor PingRuntime {
         self.hostStore = hostStore
         self.scheduler = scheduler
         self.historyStore = historyStore
+        self.historyWriter = historyStore.map { HistoryWriteBuffer(store: $0) }
         self.allowsLocalNetworkProbes = allowsLocalNetworkProbes
         self.alertEngine = AlertDecisionEngine(rules: notificationRules)
     }
@@ -338,6 +374,7 @@ public actor PingRuntime {
     public func stop() async {
         streamTask?.cancel()
         await scheduler.stop()
+        await historyWriter?.flushNow()
         continuation?.finish()
         continuation = nil
         continuationToken = nil
@@ -359,12 +396,8 @@ public actor PingRuntime {
         health.ingest(result)
         healthByHost[result.hostID] = health
 
-        var series = samplesByHost[result.hostID] ?? SampleSeries(hostID: result.hostID)
-        series.append(result)
-        samplesByHost[result.hostID] = series
-        if let historyStore {
-            await historyStore.append(result)
-        }
+        samplesByHost[result.hostID, default: SampleSeries(hostID: result.hostID)].append(result)
+        await historyWriter?.append(result)
 
         let alerts: [AlertDecision]
         if host?.notifications == .muted {
@@ -442,6 +475,7 @@ public actor PingRuntime {
     }
 
     public func reset() async {
+        await historyWriter?.discardPending()
         await hostStore.reset()
         await refreshHostCache()
         healthByHost.removeAll()
@@ -451,7 +485,8 @@ public actor PingRuntime {
     }
 
     public func historySamples(hostID: UUID, since: Date, limit: Int = 10_000) async -> [PingResult] {
-        await historyStore?.samples(hostID: hostID, since: since, limit: limit) ?? []
+        await historyWriter?.flushNow()
+        return await historyStore?.samples(hostID: hostID, since: since, limit: limit) ?? []
     }
 
     private func refreshHostCache() async {
@@ -492,6 +527,116 @@ public actor PingRuntime {
 private extension HostConfig {
     var measurementEndpoint: String {
         "\(method.rawValue)|\(address)|\(port.map(String.init) ?? "")"
+    }
+}
+
+private actor HistoryWriteBuffer {
+    private let store: any PingHistoryStore
+    private let maxBatchSize: Int
+    private let flushDelay: Duration
+    private var pending: [PingResult] = []
+    private var flushTask: Task<Void, Never>?
+    private var isDiscarding = false
+    private var generation = 0
+
+    init(
+        store: any PingHistoryStore,
+        maxBatchSize: Int = 32,
+        flushDelay: Duration = .milliseconds(250)
+    ) {
+        self.store = store
+        self.maxBatchSize = max(1, maxBatchSize)
+        self.flushDelay = flushDelay
+    }
+
+    func append(_ result: PingResult) {
+        pending.append(result)
+        guard !isDiscarding else { return }
+        if pending.count >= maxBatchSize {
+            guard flushTask == nil else { return }
+            scheduleImmediateFlush()
+            return
+        }
+        scheduleFlushIfNeeded()
+    }
+
+    func flushNow() async {
+        generation += 1
+        while true {
+            await cancelFlushTasks()
+            guard !pending.isEmpty else { return }
+            await drainAllPending()
+        }
+    }
+
+    func discardPending() async {
+        generation += 1
+        isDiscarding = true
+        while true {
+            pending.removeAll()
+            guard flushTask != nil else {
+                pending.removeAll()
+                isDiscarding = false
+                return
+            }
+            await cancelFlushTasks()
+        }
+    }
+
+    private func scheduleFlushIfNeeded() {
+        guard flushTask == nil, !pending.isEmpty else { return }
+        let scheduledGeneration = generation
+        flushTask = Task { [flushDelay] in
+            do {
+                try await Task.sleep(for: flushDelay)
+            } catch {
+                return
+            }
+            guard !Task.isCancelled else { return }
+            await autoFlush(generation: scheduledGeneration)
+        }
+    }
+
+    private func scheduleImmediateFlush() {
+        guard flushTask == nil else { return }
+        let scheduledGeneration = generation
+        flushTask = Task {
+            guard !Task.isCancelled else { return }
+            await autoFlush(generation: scheduledGeneration)
+        }
+    }
+
+    private func autoFlush(generation scheduledGeneration: Int) async {
+        guard scheduledGeneration == generation, !Task.isCancelled else { return }
+        await drainPending()
+        guard scheduledGeneration == generation, !Task.isCancelled else { return }
+        flushTask = nil
+        if pending.count >= maxBatchSize {
+            scheduleImmediateFlush()
+        } else {
+            scheduleFlushIfNeeded()
+        }
+    }
+
+    private func drainAllPending() async {
+        while !pending.isEmpty {
+            await drainPending()
+        }
+    }
+
+    private func drainPending() async {
+        guard !pending.isEmpty else { return }
+        let batch = pending
+        pending.removeAll()
+        await store.append(batch)
+    }
+
+    private func cancelFlushTasks() async {
+        while let task = flushTask {
+            flushTask = nil
+            task.cancel()
+            await task.value
+        }
     }
 }
 

@@ -58,7 +58,7 @@ public struct WidgetSnapshot: Codable, Equatable, Sendable {
 
         let limit = max(1, sampleLimitPerHost)
         let samples = snapshot.samplesByHost.values.flatMap { series in
-            series.samples.suffix(limit).map(WidgetSample.init(result:))
+            series.recentSamples(limit: limit).map(WidgetSample.init(result:))
         }
         .sorted { lhs, rhs in
             if lhs.timestamp == rhs.timestamp {
@@ -87,6 +87,16 @@ public struct WidgetSnapshot: Codable, Equatable, Sendable {
 
     public var isStale: Bool {
         Date().timeIntervalSince(generatedAt) > 15 * 60
+    }
+
+    public func hasSameContent(as other: WidgetSnapshot?) -> Bool {
+        guard let other else { return false }
+        return version == other.version
+            && primaryHostID == other.primaryHostID
+            && hosts == other.hosts
+            && health == other.health
+            && recentSamples == other.recentSamples
+            && networkStatus == other.networkStatus
     }
 }
 

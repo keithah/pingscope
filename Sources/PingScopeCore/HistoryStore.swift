@@ -52,11 +52,13 @@ public actor SQLiteHistoryStore: PingHistoryStore {
     public func append(_ results: [PingResult]) async {
         guard !results.isEmpty else { return }
         do {
-            try openIfNeeded()
-            try insert(results)
-            if let newestTimestamp = results.map(\.timestamp).max(), shouldPrune(at: newestTimestamp) {
-                try pruneSync(olderThan: newestTimestamp.addingTimeInterval(-retention.seconds))
-                lastPruneAttempt = newestTimestamp
+            try await withSQLiteRetry {
+                try openIfNeeded()
+                try insert(results)
+                if let newestTimestamp = results.map(\.timestamp).max(), shouldPrune(at: newestTimestamp) {
+                    try pruneSync(olderThan: newestTimestamp.addingTimeInterval(-retention.seconds))
+                    lastPruneAttempt = newestTimestamp
+                }
             }
         } catch {
             logger?("history append failed: \(error)")
@@ -66,8 +68,10 @@ public actor SQLiteHistoryStore: PingHistoryStore {
 
     public func samples(hostID: UUID, since: Date, limit: Int = 10_000) async -> [PingResult] {
         do {
-            try openIfNeeded()
-            return try query(hostID: hostID, since: since, limit: max(1, limit))
+            return try await withSQLiteRetry {
+                try openIfNeeded()
+                return try query(hostID: hostID, since: since, limit: max(1, limit))
+            }
         } catch {
             logger?("history query failed: \(error)")
             return []
@@ -76,9 +80,11 @@ public actor SQLiteHistoryStore: PingHistoryStore {
 
     public func prune(olderThan cutoff: Date) async {
         do {
-            try openIfNeeded()
-            try pruneSync(olderThan: cutoff)
-            lastPruneAttempt = Date()
+            try await withSQLiteRetry {
+                try openIfNeeded()
+                try pruneSync(olderThan: cutoff)
+                lastPruneAttempt = Date()
+            }
         } catch {
             logger?("history prune failed: \(error)")
             return
@@ -87,8 +93,10 @@ public actor SQLiteHistoryStore: PingHistoryStore {
 
     public func deleteAll() async {
         do {
-            try openIfNeeded()
-            try execute("DELETE FROM ping_samples;")
+            try await withSQLiteRetry {
+                try openIfNeeded()
+                try execute("DELETE FROM ping_samples;")
+            }
         } catch {
             logger?("history delete failed: \(error)")
             return
@@ -99,7 +107,9 @@ public actor SQLiteHistoryStore: PingHistoryStore {
         guard connection.db == nil else { return }
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         var opened: OpaquePointer?
-        guard sqlite3_open_v2(url.path, &opened, SQLITE_OPEN_CREATE | SQLITE_OPEN_READWRITE | SQLITE_OPEN_FULLMUTEX, nil) == SQLITE_OK,
+        // NOMUTEX is safe because this handle is confined to the SQLiteHistoryStore actor.
+        // Do not share connection.db across threads without restoring SQLite serialization.
+        guard sqlite3_open_v2(url.path, &opened, SQLITE_OPEN_CREATE | SQLITE_OPEN_READWRITE | SQLITE_OPEN_NOMUTEX, nil) == SQLITE_OK,
               let opened else {
             throw SQLiteHistoryError.openFailed(message: opened.map(Self.errorMessage) ?? "unable to open database")
         }
@@ -129,6 +139,25 @@ public actor SQLiteHistoryStore: PingHistoryStore {
     private func shouldPrune(at timestamp: Date) -> Bool {
         guard let lastPruneAttempt else { return true }
         return timestamp.timeIntervalSince(lastPruneAttempt) >= pruneInterval
+    }
+
+    private func withSQLiteRetry<T>(_ operation: () throws -> T) async throws -> T {
+        var lastError: Error?
+        for attempt in 0..<3 {
+            do {
+                return try operation()
+            } catch {
+                lastError = error
+                guard isTransientSQLiteError(error), attempt < 2 else { break }
+                try? await Task.sleep(for: .milliseconds(Double(50 * (attempt + 1))))
+            }
+        }
+        throw lastError ?? SQLiteHistoryError.openFailed(message: "unknown SQLite retry failure")
+    }
+
+    private func isTransientSQLiteError(_ error: Error) -> Bool {
+        guard let sqliteError = error as? SQLiteHistoryError else { return false }
+        return sqliteError.isTransient
     }
 
     private func insert(_ results: [PingResult]) throws {
@@ -371,6 +400,15 @@ private enum SQLiteHistoryError: Error, CustomStringConvertible {
             "SQLite prepare failed (\(code)): \(message)"
         case .stepFailed(let code, let message):
             "SQLite step failed (\(code)): \(message)"
+        }
+    }
+
+    var isTransient: Bool {
+        switch self {
+        case .openFailed:
+            false
+        case .prepareFailed(let code, _), .stepFailed(let code, _):
+            code == SQLITE_BUSY || code == SQLITE_LOCKED
         }
     }
 }

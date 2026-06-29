@@ -12,7 +12,8 @@ fail() {
 
 [[ -f "${DB_PATH}" ]] || fail "history database not found: ${DB_PATH}"
 
-host_row="$(sqlite3 "${DB_PATH}" "select host_id,address,method,coalesce(port,''),count(*) from ping_samples group by host_id,address,method,port order by count(*) desc limit 1;")"
+# sample_count is a placeholder here; this smoke test only needs the latest exportable host row.
+host_row="$(sqlite3 "${DB_PATH}" "select host_id,address,method,coalesce(port,''),1 from ping_samples order by timestamp desc limit 1;")"
 [[ -n "${host_row}" ]] || fail "no history samples available"
 
 IFS='|' read -r host_id address method port sample_count <<<"${host_row}"

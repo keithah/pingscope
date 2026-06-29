@@ -49,7 +49,6 @@ public struct NotificationRuleSet: Codable, Equatable, Sendable {
             .hostDown,
             .recovered,
             .highLatency,
-            .networkChange,
             .internetLoss,
             .localNetworkDown,
             .ispPathDown,
@@ -267,6 +266,8 @@ public struct AlertDecisionEngine: Sendable {
     ) -> AlertDecision? {
         guard rules.isEnabled,
               rules.alertTypes.contains(.networkChange),
+              let previousGateway,
+              let currentGateway,
               previousGateway != currentGateway
         else {
             return nil
@@ -393,4 +394,3 @@ private extension NetworkPerspectiveDiagnosis {
         }
     }
 }
-

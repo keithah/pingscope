@@ -522,23 +522,25 @@ private struct PingScopeIOSLatencyGraph: View {
     private let xAxisHeight: CGFloat = 22
 
     var body: some View {
+        let renderData = PingScopeIOSLatencyGraphData(samples: samples, range: range)
+
         VStack(spacing: 4) {
             HStack(spacing: 8) {
-                yAxisLabels
+                yAxisLabels(renderData: renderData)
                     .frame(width: yAxisWidth)
 
                 Canvas { context, size in
                     drawGrid(context: &context, size: size)
-                    drawLine(context: &context, size: size)
+                    drawLine(renderData: renderData, context: &context, size: size)
                 }
             }
 
             HStack {
                 Color.clear
                     .frame(width: yAxisWidth + 8)
-                Text(startDate, style: .time)
+                Text(renderData.startDate, style: .time)
                 Spacer()
-                Text(endDate, style: .time)
+                Text(renderData.endDate, style: .time)
             }
             .font(.caption2.monospacedDigit())
             .foregroundStyle(.secondary)
@@ -550,31 +552,15 @@ private struct PingScopeIOSLatencyGraph: View {
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 8))
     }
 
-    private var yAxisLabels: some View {
+    private func yAxisLabels(renderData: PingScopeIOSLatencyGraphData) -> some View {
         VStack(alignment: .trailing) {
-            ForEach(scale.tickMilliseconds, id: \.self) { tick in
-                Text(scale.label(for: tick))
+            ForEach(renderData.scale.tickMilliseconds, id: \.self) { tick in
+                Text(renderData.scale.label(for: tick))
                     .font(.caption2.monospacedDigit())
                     .foregroundStyle(.secondary)
-                    .frame(maxHeight: .infinity, alignment: tick == scale.tickMilliseconds.first ? .top : tick == 0 ? .bottom : .center)
+                    .frame(maxHeight: .infinity, alignment: tick == renderData.scale.tickMilliseconds.first ? .top : tick == 0 ? .bottom : .center)
             }
         }
-    }
-
-    private var latencies: [Double] {
-        samples.compactMap { $0.latency?.milliseconds }
-    }
-
-    private var scale: LatencyGraphScale {
-        LatencyGraphScale(latencies: latencies)
-    }
-
-    private var endDate: Date {
-        Date()
-    }
-
-    private var startDate: Date {
-        endDate.addingTimeInterval(-range.duration)
     }
 
     private func drawGrid(context: inout GraphicsContext, size: CGSize) {
@@ -587,20 +573,15 @@ private struct PingScopeIOSLatencyGraph: View {
         context.stroke(path, with: .color(.secondary.opacity(0.18)), lineWidth: 1)
     }
 
-    private func drawLine(context: inout GraphicsContext, size: CGSize) {
-        let visibleSamples = samples.filter { $0.timestamp >= startDate && $0.timestamp <= endDate }
-        let points = visibleSamples.compactMap { sample -> (Date, Double)? in
-            guard let latency = sample.latency?.milliseconds else { return nil }
-            return (sample.timestamp, latency)
-        }
-        guard points.count > 1 else { return }
+    private func drawLine(renderData: PingScopeIOSLatencyGraphData, context: inout GraphicsContext, size: CGSize) {
+        guard renderData.points.count > 1 else { return }
         var path = Path()
-        let axisMax = max(scale.axisMaximumMilliseconds, 1)
+        let axisMax = max(renderData.scale.axisMaximumMilliseconds, 1)
 
-        for (index, pointValue) in points.enumerated() {
-            let elapsed = pointValue.0.timeIntervalSince(startDate)
+        for (index, pointValue) in renderData.points.enumerated() {
+            let elapsed = pointValue.timestamp.timeIntervalSince(renderData.startDate)
             let x = size.width * CGFloat(min(max(elapsed / range.duration, 0), 1))
-            let latency = pointValue.1
+            let latency = pointValue.latencyMilliseconds
             let y = size.height - (size.height * CGFloat(min(latency / axisMax, 1)))
             let point = CGPoint(x: x, y: y)
             if index == 0 {
@@ -612,8 +593,30 @@ private struct PingScopeIOSLatencyGraph: View {
         context.stroke(path, with: .color(.blue), lineWidth: 3)
     }
 }
-#else
-public enum PingScopeIOSBuildMarker {
-    public static let isAvailableOnThisPlatform = false
+
+private struct PingScopeIOSLatencyGraphPoint {
+    let timestamp: Date
+    let latencyMilliseconds: Double
+}
+
+private struct PingScopeIOSLatencyGraphData {
+    let startDate: Date
+    let endDate: Date
+    let scale: LatencyGraphScale
+    let points: [PingScopeIOSLatencyGraphPoint]
+
+    init(samples: [PingResult], range: TimeRange) {
+        endDate = Date()
+        startDate = endDate.addingTimeInterval(-range.duration)
+        var latencies: [Double] = []
+        var points: [PingScopeIOSLatencyGraphPoint] = []
+        for sample in samples where sample.timestamp >= startDate && sample.timestamp <= endDate {
+            guard let latency = sample.latency?.milliseconds else { continue }
+            latencies.append(latency)
+            points.append(PingScopeIOSLatencyGraphPoint(timestamp: sample.timestamp, latencyMilliseconds: latency))
+        }
+        self.points = points
+        self.scale = LatencyGraphScale(latencies: latencies)
+    }
 }
 #endif

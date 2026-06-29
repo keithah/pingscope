@@ -111,7 +111,14 @@ fi
 
 xcrun notarytool history --keychain-profile "${NOTARY_PROFILE}" >/dev/null
 
-GENERATE_KEYS=$(find "$HOME/Library/Developer/Xcode/DerivedData" -path '*/SourcePackages/artifacts/sparkle/Sparkle/bin/generate_keys' -type f -perm -111 2>/dev/null | sort | tail -n 1)
+find_sparkle_tool() {
+  local tool_name="$1"
+  local tool=""
+  tool=$(find .build "$HOME/Library/Developer/Xcode/DerivedData" -path "*/SourcePackages/artifacts/sparkle/Sparkle/bin/${tool_name}" -type f -perm -111 2>/dev/null | sort | tail -n 1)
+  [[ -n "${tool}" ]] && printf '%s' "${tool}"
+}
+
+GENERATE_KEYS=$(find_sparkle_tool generate_keys)
 if [[ -z "${GENERATE_KEYS}" ]]; then
   echo "Sparkle generate_keys was not found. Build the Xcode project once to resolve Sparkle." >&2
   exit 69
@@ -127,8 +134,8 @@ BUILD_DIR=".build/release-github/v${VERSION}"
 rm -rf "${BUILD_DIR}"
 mkdir -p "${BUILD_DIR}"
 
-MARKETING_VERSION="${VERSION}" CURRENT_PROJECT_VERSION="${CURRENT_PROJECT_VERSION:-25}" \
-CODESIGN_IDENTITY="${SIGN_APP_IDENTITY}" \
+MARKETING_VERSION="${VERSION}" \
+SKIP_CODESIGN_AFTER_BUILD=1 \
   scripts/build-xcode-app-bundle.sh release "${BUILD_DIR}" developer-id >/dev/null
 
 deploy/sign-notarize.sh \

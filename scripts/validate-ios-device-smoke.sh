@@ -20,8 +20,14 @@ retry() {
     if [[ "${attempt}" -ge "${attempts}" ]]; then
       return 1
     fi
-    echo "Attempt ${attempt} failed; retrying in ${delay_seconds}s..." >&2
-    sleep "${delay_seconds}"
+    local sleep_seconds=$((delay_seconds * (2 ** (attempt - 1))))
+    if [[ "${sleep_seconds}" -gt 15 ]]; then
+      sleep_seconds=15
+    fi
+    local jitter=$((RANDOM % 2))
+    sleep_seconds=$((sleep_seconds + jitter))
+    echo "Attempt ${attempt} failed; retrying in ${sleep_seconds}s..." >&2
+    sleep "${sleep_seconds}"
     attempt=$((attempt + 1))
   done
 }

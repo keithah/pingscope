@@ -99,6 +99,19 @@ final class ProbeBehaviorTests: XCTestCase {
         let wasCancelled = await slowProbe.wasCancelled
         XCTAssertTrue(wasCancelled)
     }
+
+    func testTimeoutProbeCancellationDoesNotReportTimeout() async {
+        let host = HostConfig(displayName: "Slow", address: "example.com", timeout: .seconds(60))
+        let probe = TimeoutProbe(wrapping: CancellableSlowProbe())
+        let task = Task {
+            await probe.measure(host)
+        }
+
+        task.cancel()
+        let result = await task.value
+
+        XCTAssertEqual(result.failureReason, .cancelled)
+    }
 }
 
 private actor CancellableSlowProbe: PingProbe {

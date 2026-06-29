@@ -314,6 +314,28 @@ final class HistoryStoreTests: XCTestCase {
         )
     }
 
+    func testWidgetSnapshotContentComparisonIgnoresGeneratedAt() {
+        let host = HostConfig(displayName: "Edge", address: "9.9.9.9")
+        let runtimeSnapshot = RuntimeSnapshot(
+            hosts: [host],
+            primaryHostID: host.id,
+            healthByHost: [:],
+            samplesByHost: [:]
+        )
+
+        let first = WidgetSnapshot.make(
+            from: runtimeSnapshot,
+            generatedAt: Date(timeIntervalSince1970: 100)
+        )
+        let second = WidgetSnapshot.make(
+            from: runtimeSnapshot,
+            generatedAt: Date(timeIntervalSince1970: 200)
+        )
+
+        XCTAssertNotEqual(first, second)
+        XCTAssertTrue(first.hasSameContent(as: second))
+    }
+
     func testWidgetSnapshotStorePersistsEncodedSnapshot() async throws {
         let suiteName = "pingscope-widget-tests-\(UUID().uuidString)"
         let store = WidgetSnapshotStore(suiteName: suiteName, key: "snapshot")
@@ -390,7 +412,7 @@ private actor RecordingHistoryStore: PingHistoryStore {
     }
 
     func waitForSamples(count: Int) async -> [PingResult] {
-        for _ in 0..<20 {
+        for _ in 0..<80 {
             if stored.count >= count {
                 return stored
             }

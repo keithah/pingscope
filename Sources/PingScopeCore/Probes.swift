@@ -230,7 +230,11 @@ public struct TimeoutProbe: PingProbe {
                 await wrapped.measure(host)
             }
             group.addTask {
-                try? await Task.sleep(for: host.timeout)
+                do {
+                    try await Task.sleep(for: host.timeout)
+                } catch {
+                    return .failure(hostID: host.id, reason: .cancelled).withHostMetadata(from: host)
+                }
                 return .failure(hostID: host.id, reason: .timeout).withHostMetadata(from: host)
             }
             let result = await group.next() ?? .failure(hostID: host.id, reason: .unknown).withHostMetadata(from: host)

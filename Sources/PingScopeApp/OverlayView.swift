@@ -59,23 +59,9 @@ struct OverlayView: View {
     @ViewBuilder
     private var overlayGraph: some View {
         if model.overlayShowsAllHosts {
-            MultiHostLatencyGraph(series: overlayGraphSeries, showsLegend: model.overlayShowsLegend)
+            MultiHostLatencyGraph(series: model.allHostGraphSeries, showsLegend: model.overlayShowsLegend)
         } else {
             LatencyGraph(samples: model.visibleSamples)
-        }
-    }
-
-    private var overlayGraphSeries: [HostLatencyGraphSeries] {
-        let cutoff = Date().addingTimeInterval(-model.selectedRange.duration)
-        return model.snapshot.hosts.enumerated().compactMap { index, host in
-            guard host.isEnabled else { return nil }
-            let samples = model.snapshot.samplesByHost[host.id]?.samples(since: cutoff) ?? []
-            return HostLatencyGraphSeries(
-                host: host,
-                samples: samples,
-                color: HostLatencyGraphSeries.palette[index % HostLatencyGraphSeries.palette.count],
-                isPrimary: host.id == model.primaryHost?.id
-            )
         }
     }
 
@@ -116,4 +102,3 @@ struct OverlayView: View {
         }
     }
 }
-

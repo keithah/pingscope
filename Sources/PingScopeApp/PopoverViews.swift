@@ -102,23 +102,9 @@ struct StatusPopoverView: View {
     @ViewBuilder
     private var graph: some View {
         if model.popoverShowsAllHosts {
-            MultiHostLatencyGraph(series: multiHostGraphSeries, showsAxes: true)
+            MultiHostLatencyGraph(series: model.allHostGraphSeries, showsAxes: true)
         } else {
             LatencyGraph(samples: model.visibleSamples, showsAxes: true)
-        }
-    }
-
-    private var multiHostGraphSeries: [HostLatencyGraphSeries] {
-        let cutoff = Date().addingTimeInterval(-model.selectedRange.duration)
-        return model.snapshot.hosts.enumerated().compactMap { index, host in
-            guard host.isEnabled else { return nil }
-            let samples = model.snapshot.samplesByHost[host.id]?.samples(since: cutoff) ?? []
-            return HostLatencyGraphSeries(
-                host: host,
-                samples: samples,
-                color: HostLatencyGraphSeries.palette[index % HostLatencyGraphSeries.palette.count],
-                isPrimary: host.id == model.primaryHost?.id
-            )
         }
     }
 
@@ -316,4 +302,3 @@ private struct StarlinkTelemetrySummary: View {
         return "\(hours)h"
     }
 }
-

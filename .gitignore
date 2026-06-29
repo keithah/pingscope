@@ -36,6 +36,7 @@ pingmonitor_*
 .Spotlight-V100/
 
 # IDE
+.claude/
 .vscode/
 .idea/
 

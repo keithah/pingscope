@@ -356,6 +356,7 @@ final class DomainBehaviorTests: XCTestCase {
             engine.evaluateNetworkChange(previousGateway: "192.168.1.1", currentGateway: "192.168.4.1", at: date),
             .networkChange(previousGateway: "192.168.1.1", currentGateway: "192.168.4.1")
         )
+        XCTAssertNil(engine.evaluateNetworkChange(previousGateway: "192.168.1.1", currentGateway: nil, at: date))
 
         let results = [PingResult.failure(hostID: hostID, reason: .timeout, timestamp: date.addingTimeInterval(90))]
         XCTAssertEqual(
@@ -598,7 +599,7 @@ final class DomainBehaviorTests: XCTestCase {
         let balanced = NotificationRuleSet(style: .balanced)
         XCTAssertEqual(balanced.alertStyle, .balanced)
         XCTAssertTrue(balanced.alertTypes.contains(.highLatency))
-        XCTAssertTrue(balanced.alertTypes.contains(.networkChange))
+        XCTAssertFalse(balanced.alertTypes.contains(.networkChange))
         XCTAssertFalse(balanced.alertTypes.contains(.pathDegraded))
         XCTAssertEqual(balanced.highLatencyConsecutiveSamples, 5)
         XCTAssertEqual(balanced.internetLossFailureRatio, 1.0)
@@ -637,6 +638,7 @@ final class DomainBehaviorTests: XCTestCase {
         XCTAssertEqual(NetworkConnectivityStatus.noInternet.defaultColorHex, "#F08A3C")
         XCTAssertEqual(NetworkConnectivityStatus.noIPAddress.defaultColorHex, "#FFD24A")
         XCTAssertEqual(NetworkConnectivityStatus.notConnected.defaultColorHex, "#F05B5F")
+        XCTAssertEqual(NetworkConnectivityStatus.defaultAlertStatuses, [.noInternet])
     }
 
     func testHostNotificationPolicyHasUserFacingLabels() {

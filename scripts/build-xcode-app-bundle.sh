@@ -9,14 +9,25 @@ set -euo pipefail
 #
 # Optional environment:
 #   CODESIGN_IDENTITY="Developer ID Application: ..."
-#   MARKETING_VERSION=0.1.2
-#   CURRENT_PROJECT_VERSION=24
+#   MARKETING_VERSION=0.1.4
+#   CURRENT_PROJECT_VERSION=49
+#   SKIP_CODESIGN_AFTER_BUILD=1
 
 CONFIGURATION_INPUT="${1:-debug}"
 OUTPUT_DIR="${2:-.build/xcode-install}"
 FLAVOR="${3:-developer-id}"
-MARKETING_VERSION="${MARKETING_VERSION:-0.1.2}"
-CURRENT_PROJECT_VERSION="${CURRENT_PROJECT_VERSION:-24}"
+
+project_setting() {
+  local key="$1"
+  awk -F' = ' -v key="${key}" '$1 ~ ("^[[:space:]]*" key "$") { gsub(/;/, "", $2); print $2; exit }' PingScope.xcodeproj/project.pbxproj
+}
+
+MARKETING_VERSION="${MARKETING_VERSION:-$(project_setting MARKETING_VERSION)}"
+CURRENT_PROJECT_VERSION="${CURRENT_PROJECT_VERSION:-$(project_setting CURRENT_PROJECT_VERSION)}"
+if [[ -z "${MARKETING_VERSION}" || -z "${CURRENT_PROJECT_VERSION}" ]]; then
+  echo "Unable to derive MARKETING_VERSION/CURRENT_PROJECT_VERSION from project." >&2
+  exit 65
+fi
 
 case "${CONFIGURATION_INPUT}" in
   debug|Debug) CONFIGURATION="Debug" ;;
@@ -81,6 +92,10 @@ default_developer_id_identity() {
 }
 
 SIGN_IDENTITY="${CODESIGN_IDENTITY:-}"
+if [[ "${SKIP_CODESIGN_AFTER_BUILD:-0}" == "1" ]]; then
+  echo "${DEST_APP}"
+  exit 0
+fi
 if [[ -z "${SIGN_IDENTITY}" && "${FLAVOR}" == "developer-id" ]]; then
   SIGN_IDENTITY="$(default_developer_id_identity)"
 fi

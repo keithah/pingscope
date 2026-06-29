@@ -156,6 +156,7 @@ private final class ProbeValidationTCPAttempt: @unchecked Sendable {
     private let gate = ProbeValidationGate()
     private let lock = NSLock()
     private var continuation: CheckedContinuation<Bool, Never>?
+    private var timeoutTask: Task<Void, Never>?
 
     init(host: String, port: NWEndpoint.Port) {
         self.connection = NWConnection(host: NWEndpoint.Host(host), port: port, using: .tcp)
@@ -180,10 +181,17 @@ private final class ProbeValidationTCPAttempt: @unchecked Sendable {
                 }
                 connection.start(queue: .global(qos: .utility))
 
-                Task { [weak self] in
-                    try? await Task.sleep(for: timeout)
+                let timeoutTask = Task { [weak self] in
+                    do {
+                        try await Task.sleep(for: timeout)
+                    } catch {
+                        return
+                    }
                     self?.finish(false)
                 }
+                lock.lock()
+                self.timeoutTask = timeoutTask
+                lock.unlock()
             }
         } onCancel: {
             finish(false)
@@ -197,8 +205,11 @@ private final class ProbeValidationTCPAttempt: @unchecked Sendable {
         lock.lock()
         let continuation = continuation
         self.continuation = nil
+        let timeoutTask = timeoutTask
+        self.timeoutTask = nil
         lock.unlock()
 
+        timeoutTask?.cancel()
         continuation?.resume(returning: result)
     }
 }

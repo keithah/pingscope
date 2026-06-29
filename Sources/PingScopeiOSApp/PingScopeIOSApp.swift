@@ -71,7 +71,12 @@ private final class PingScopeIOSAppModel: ObservableObject {
     @Published var hosts: [HostConfig]
     @Published var snapshot: LiveMonitorSessionSnapshot
     @Published var historySamples: [PingResult] = []
-    @Published var selectedGraphRange: TimeRange = .fiveMinutes
+    @Published var graphSamples: [PingResult] = []
+    @Published var selectedGraphRange: TimeRange = .fiveMinutes {
+        didSet {
+            rebuildGraphSamples()
+        }
+    }
     @Published var gatewayDetectionText: String?
     @Published var backgroundKeepAliveEnabled: Bool
     @Published var backgroundKeepAliveStatus: String = "Disabled"
@@ -90,13 +95,17 @@ private final class PingScopeIOSAppModel: ObservableObject {
     private var liveActivity: Activity<PingScopeLiveActivityAttributes>?
     private var hasStartedInitialSession = false
     private var lastGatewayAddress: String?
+    private var lastHistoryRefreshAt: Date?
+    private var lastPublishedWidgetSnapshot: WidgetSnapshot?
 
     init() {
         self.hostStore = PingScopeIOSHostStore()
         do {
             self.historyStore = try SQLiteHistoryStore(url: SQLiteHistoryStore.defaultURL(appName: "PingScope-iOS"))
         } catch {
+            #if DEBUG
             print("PingScope iOS history store unavailable: \(error)")
+            #endif
             self.historyStore = nil
         }
         self.backgroundRuntime = LiveMonitorBackgroundRuntime(client: UIApplicationBackgroundTaskClient())
@@ -110,8 +119,9 @@ private final class PingScopeIOSAppModel: ObservableObject {
             session: nil,
             health: HostHealth(hostID: host.id, thresholds: host.thresholds)
         )
+        self.graphSamples = snapshot.series.samples
         Task {
-            await refreshHistory()
+            await refreshHistory(force: true)
         }
         locationKeepAlive.onStatusChange = { [weak self] status in
             guard let self else { return }
@@ -126,14 +136,6 @@ private final class PingScopeIOSAppModel: ObservableObject {
 
     deinit {
         pathMonitor.cancel()
-    }
-
-    var graphSamples: [PingResult] {
-        presenter.mergedSamples(
-            history: historySamples,
-            live: snapshot.series.samples,
-            range: selectedGraphRange
-        )
     }
 
     func selectHost(_ hostID: UUID) {
@@ -213,7 +215,7 @@ private final class PingScopeIOSAppModel: ObservableObject {
             await backgroundRuntime.end()
             await controller.stop(reason: .userStopped)
             await refreshSnapshot()
-            await refreshHistory()
+            await refreshHistory(force: true)
             await endLiveActivity()
             applyBackgroundKeepAlive()
         }
@@ -248,14 +250,14 @@ private final class PingScopeIOSAppModel: ObservableObject {
             while !Task.isCancelled {
                 await refreshSnapshot()
                 if snapshot.session?.phase() == .ended {
-                    await refreshHistory()
+                    await refreshHistory(force: true)
                     await backgroundRuntime.end()
                     await endLiveActivity()
                     applyBackgroundKeepAlive()
                     break
                 }
                 await updateLiveActivity()
-                await refreshHistory()
+                await refreshHistoryIfStale()
                 try? await Task.sleep(for: .seconds(1))
             }
         }
@@ -359,7 +361,7 @@ private final class PingScopeIOSAppModel: ObservableObject {
             session: nil,
             health: HostHealth(hostID: host.id, thresholds: host.thresholds)
         )
-        await refreshHistory()
+        await refreshHistory(force: true)
         if let restartDuration {
             await controller.start(duration: restartDuration)
             await refreshSnapshot()
@@ -385,19 +387,38 @@ private final class PingScopeIOSAppModel: ObservableObject {
 
     private func refreshSnapshot() async {
         snapshot = await controller.snapshot()
+        rebuildGraphSamples()
         await publishWidgetSnapshot()
     }
 
-    private func refreshHistory() async {
+    private func refreshHistory(force: Bool = false) async {
+        if !force, let lastHistoryRefreshAt, Date().timeIntervalSince(lastHistoryRefreshAt) < 30 {
+            return
+        }
+        lastHistoryRefreshAt = Date()
         guard let historyStore else {
             historySamples = []
+            rebuildGraphSamples()
             await publishWidgetSnapshot()
             return
         }
         let cutoff = Date().addingTimeInterval(-24 * 60 * 60)
         let samples = await historyStore.samples(hostID: snapshot.host.id, since: cutoff, limit: 100)
         historySamples = samples.sorted { $0.timestamp > $1.timestamp }
+        rebuildGraphSamples()
         await publishWidgetSnapshot()
+    }
+
+    private func refreshHistoryIfStale() async {
+        await refreshHistory(force: false)
+    }
+
+    private func rebuildGraphSamples() {
+        graphSamples = presenter.mergedSamples(
+            history: historySamples,
+            live: snapshot.series.samples,
+            range: selectedGraphRange
+        )
     }
 
     private func publishWidgetSnapshot() async {
@@ -407,12 +428,6 @@ private final class PingScopeIOSAppModel: ObservableObject {
             live: snapshot.series.samples,
             range: .tenMinutes
         )
-        .sorted { lhs, rhs in
-            if lhs.timestamp == rhs.timestamp {
-                return lhs.id.uuidString < rhs.id.uuidString
-            }
-            return lhs.timestamp < rhs.timestamp
-        }
         .suffix(60)
 
         let widgetSnapshot = WidgetSnapshot(
@@ -441,6 +456,8 @@ private final class PingScopeIOSAppModel: ObservableObject {
             networkStatus: .connected,
             generatedAt: Date()
         )
+        guard !widgetSnapshot.hasSameContent(as: lastPublishedWidgetSnapshot) else { return }
+        lastPublishedWidgetSnapshot = widgetSnapshot
         await widgetSnapshotStore.save(widgetSnapshot)
         WidgetCenter.shared.reloadAllTimelines()
     }
@@ -459,7 +476,7 @@ private final class PingScopeIOSAppModel: ObservableObject {
         refreshTask = nil
         await controller.stop(reason: .backgroundRuntimeExpired)
         await refreshSnapshot()
-        await refreshHistory()
+        await refreshHistory(force: true)
         await endLiveActivity()
         applyBackgroundKeepAlive()
     }

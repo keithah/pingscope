@@ -85,7 +85,7 @@ find_generate_appcast() {
   fi
 
   local tool
-  tool=$(find "$HOME/Library/Developer/Xcode/DerivedData" -path '*/SourcePackages/artifacts/sparkle/Sparkle/bin/generate_appcast' -type f -perm -111 2>/dev/null | sort | tail -n 1)
+  tool=$(find .build "$HOME/Library/Developer/Xcode/DerivedData" -path '*/SourcePackages/artifacts/sparkle/Sparkle/bin/generate_appcast' -type f -perm -111 2>/dev/null | sort | tail -n 1)
   if [[ -n "${tool}" ]]; then
     printf '%s' "${tool}"
     return 0

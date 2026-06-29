@@ -181,12 +181,24 @@ extension UserDefaults {
     var enabledNetworkStatusAlerts: Set<NetworkConnectivityStatus> {
         get {
             guard let values = array(forKey: "enabledNetworkStatusAlerts") as? [String] else {
-                return Set(NetworkConnectivityStatus.allCases)
+                return NetworkConnectivityStatus.defaultAlertStatuses
             }
             return Set(values.compactMap(NetworkConnectivityStatus.init(rawValue:)))
         }
         set {
             set(newValue.map(\.rawValue), forKey: "enabledNetworkStatusAlerts")
+        }
+    }
+
+    func migrateNoisyNetworkStatusAlertDefaults() {
+        let migrationKey = "didMigrateNoisyNetworkStatusAlertDefaults"
+        guard !bool(forKey: migrationKey) else { return }
+        defer { set(true, forKey: migrationKey) }
+
+        guard let values = array(forKey: "enabledNetworkStatusAlerts") as? [String] else { return }
+        let statuses = Set(values.compactMap(NetworkConnectivityStatus.init(rawValue:)))
+        if statuses == Set(NetworkConnectivityStatus.allCases) {
+            enabledNetworkStatusAlerts = NetworkConnectivityStatus.defaultAlertStatuses
         }
     }
 }

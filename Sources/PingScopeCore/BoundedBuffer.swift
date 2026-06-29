@@ -13,6 +13,28 @@ public struct BoundedBuffer<Element: Codable & Equatable & Sendable>: Codable, E
         }
     }
 
+    public func suffix(_ maxLength: Int) -> [Element] {
+        let count = min(max(0, maxLength), storedCount)
+        guard count > 0 else { return [] }
+        let firstOffset = storedCount - count
+        return (firstOffset..<storedCount).map { offset in
+            storage[(startIndex + offset) % storage.count]
+        }
+    }
+
+    public func filter(_ isIncluded: (Element) -> Bool) -> [Element] {
+        guard storedCount > 0 else { return [] }
+        var matches: [Element] = []
+        matches.reserveCapacity(storedCount)
+        for offset in 0..<storedCount {
+            let element = storage[(startIndex + offset) % storage.count]
+            if isIncluded(element) {
+                matches.append(element)
+            }
+        }
+        return matches
+    }
+
     public init(capacity: Int) {
         self.capacity = max(1, capacity)
         self.storage = []
