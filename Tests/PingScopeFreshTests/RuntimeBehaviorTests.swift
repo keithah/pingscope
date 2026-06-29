@@ -194,6 +194,29 @@ final class RuntimeBehaviorTests: XCTestCase {
         await runtime.stop()
     }
 
+    func testRuntimeRemovesStaleStarlinkBeforeSnapshotObservation() async throws {
+        let gateway = HostConfig(displayName: "Default Gateway", address: "192.168.101.1", method: .tcp, port: 80)
+        let starlink = HostConfig.defaultStarlinkDish
+        let runtime = PingRuntime(
+            hostStore: HostStore(defaultHosts: [gateway, starlink], primaryHostID: starlink.id),
+            scheduler: MeasurementScheduler(probeFactory: CountingProbeFactory(result: .success(hostID: gateway.id, latency: .milliseconds(9))))
+        )
+        await runtime.ingest(.success(hostID: starlink.id, latency: .milliseconds(22)).withHostMetadata(from: starlink))
+
+        let removedIDs = await runtime.removeStarlinkHosts()
+        let stream = await runtime.snapshots()
+        var iterator = stream.makeAsyncIterator()
+        let nextSnapshot = await iterator.next()
+        let snapshot = try XCTUnwrap(nextSnapshot)
+
+        XCTAssertEqual(removedIDs, [starlink.id])
+        XCTAssertEqual(snapshot.hosts.map(\.id), [gateway.id])
+        XCTAssertEqual(snapshot.primaryHost?.id, gateway.id)
+        XCTAssertNil(snapshot.healthByHost[starlink.id])
+        XCTAssertNil(snapshot.samplesByHost[starlink.id])
+        await runtime.stop()
+    }
+
     func testDisplayPresenterFiltersSamplesToSelectedRange() {
         let hostID = UUID()
         let now = Date(timeIntervalSince1970: 10_000)

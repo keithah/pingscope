@@ -403,6 +403,20 @@ public actor PingRuntime {
         await restartScheduler()
     }
 
+    public func removeStarlinkHosts() async -> [UUID] {
+        await refreshHostCache()
+        let ids = cachedHosts.filter { $0.method == .starlink }.map(\.id)
+        guard !ids.isEmpty else { return [] }
+        for id in ids {
+            await hostStore.delete(id)
+            healthByHost.removeValue(forKey: id)
+            samplesByHost.removeValue(forKey: id)
+        }
+        await refreshHostCache()
+        await restartScheduler()
+        return ids
+    }
+
     public func selectPrimaryHost(_ id: UUID) async {
         await hostStore.selectPrimaryHost(id)
         await refreshHostCache()

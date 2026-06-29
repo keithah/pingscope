@@ -18,8 +18,8 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
     @Published var draftHostName = ""
     @Published var draftHostAddress = ""
     @Published var draftNetworkTier: NetworkTier?
-    @Published var draftMethod: PingMethod = .tcp
-    @Published var draftPort: Int = Int(PingMethod.tcp.defaultPort ?? 0)
+    @Published var draftMethod: PingMethod = .https
+    @Published var draftPort: Int = Int(PingMethod.https.defaultPort ?? 0)
     @Published var draftIntervalMilliseconds: Double = 2_000
     @Published var draftTimeoutMilliseconds: Double = 2_000
     @Published var draftDegradedThresholdMilliseconds: Double = LatencyThresholds.defaults.degradedMilliseconds
@@ -139,7 +139,7 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
     var onOverlayGraphClicked: (() -> Void)?
 
     override init() {
-        let savedHosts = UserDefaults.standard.hostConfigs
+        let savedHosts = HostConfigMigrator().migrate(UserDefaults.standard.hostConfigs)
         let hosts = savedHosts.isEmpty ? [HostConfig.defaultInternet] : BuildFlavor.current.normalizedHosts(savedHosts)
         let hostStore = HostStore(defaultHosts: hosts, primaryHostID: UserDefaults.standard.primaryHostID)
         let probeFactory = DefaultProbeFactory()
@@ -241,62 +241,6 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
     var widgetsStatusText: String {
         widgetsEnabled ? "Shared data enabled" : "Disabled"
     }
-
-    var setupChecklistItems: [SetupChecklistItem] {
-        [
-            SetupChecklistItem(
-                title: "Primary host",
-                detail: primaryHost?.displayName ?? "No primary host selected",
-                isComplete: primaryHost != nil,
-                actionTitle: nil,
-                action: nil
-            ),
-            SetupChecklistItem(
-                title: "Notifications",
-                detail: notificationPermissionState.displayName,
-                isComplete: [.authorized, .provisional].contains(notificationPermissionState),
-                actionTitle: notificationPermissionState == .notDetermined ? "Request" : "Open Settings",
-                action: { [weak self] in
-                    if self?.notificationPermissionState == .notDetermined {
-                        self?.requestNotificationPermission()
-                    } else {
-                        self?.openNotificationSettings()
-                    }
-                }
-            ),
-            SetupChecklistItem(
-                title: "Local network",
-                detail: allowsLocalNetworkProbes ? "Allowed for local hosts" : "Only public hosts",
-                isComplete: allowsLocalNetworkProbes || !(primaryHost?.requiresLocalNetworkPermission ?? false),
-                actionTitle: "Enable",
-                action: { [weak self] in self?.allowsLocalNetworkProbes = true }
-            ),
-            SetupChecklistItem(
-                title: "Overlay",
-                detail: overlayVisible ? "Visible" : "Hidden",
-                isComplete: overlayVisible,
-                actionTitle: "Show",
-                action: {
-                    AppDelegate.shared?.showOverlay()
-                }
-            ),
-            SetupChecklistItem(
-                title: "Widgets",
-                detail: widgetsStatusText,
-                isComplete: widgetsEnabled,
-                actionTitle: "Enable",
-                action: { [weak self] in self?.widgetsEnabled = true }
-            ),
-            SetupChecklistItem(
-                title: "Start at login",
-                detail: startsAtLogin ? "Enabled" : "Disabled",
-                isComplete: startsAtLogin,
-                actionTitle: "Enable",
-                action: { [weak self] in self?.startsAtLogin = true }
-            )
-        ]
-    }
-
     var recentDiagnosticFailures: [PingResult] {
         newestFailures(limit: 8, in: visibleSamples)
     }
@@ -396,6 +340,7 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
     func resumeMeasurementsAfterSystemChange() {
         startNetworkMonitoring()
         Task { await runtime.restartScheduler() }
+        refreshNetworkEndpoints(removeMissingStarlink: true, retryDelays: [.seconds(1), .seconds(3)])
     }
 
     func selectHost(_ id: UUID) {
@@ -429,8 +374,8 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
         draftHostName = ""
         draftHostAddress = ""
         draftNetworkTier = nil
-        draftMethod = .tcp
-        draftPort = Int(PingMethod.tcp.defaultPort ?? 0)
+        draftMethod = .https
+        draftPort = Int(PingMethod.https.defaultPort ?? 0)
         draftIntervalMilliseconds = 2_000
         draftTimeoutMilliseconds = 2_000
         draftDegradedThresholdMilliseconds = LatencyThresholds.defaults.degradedMilliseconds
@@ -950,26 +895,12 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
     }
 
     private func removeStaleStarlinkHosts() {
-        let staleHosts = snapshot.hosts.filter { $0.method == .starlink }
-        guard !staleHosts.isEmpty else { return }
-        let staleIDs = Set(staleHosts.map(\.id))
-        let fallbackPrimaryID = snapshot.hosts.first {
-            $0.displayName == "Default Gateway" && !staleIDs.contains($0.id)
-        }?.id ?? snapshot.hosts.first {
-            !staleIDs.contains($0.id)
-        }?.id
-        let primaryIsStale = snapshot.primaryHost.map { staleIDs.contains($0.id) } ?? false
-        DebugLog.write("removing stale starlink hosts count=\(staleHosts.count) primaryIsStale=\(primaryIsStale)")
-        if let editingHostID, staleIDs.contains(editingHostID) {
-            clearDraftHost()
-        }
         Task {
-            for host in staleHosts {
-                await runtime.deleteHost(host.id)
+            let removedIDs = await runtime.removeStarlinkHosts()
+            if let editingHostID, removedIDs.contains(editingHostID) {
+                clearDraftHost()
             }
-            if primaryIsStale, let fallbackPrimaryID {
-                await runtime.selectPrimaryHost(fallbackPrimaryID)
-            }
+            DebugLog.write("stale starlink removal completed count=\(removedIDs.count)")
         }
     }
 
@@ -1011,32 +942,6 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
         allowsLocalNetworkProbes = true
     }
 
-    nonisolated private static func networkStatus(from path: NWPath) -> NetworkConnectivityStatus {
-        switch path.status {
-        case .satisfied:
-            .connected
-        case .requiresConnection:
-            .noInternet
-        case .unsatisfied:
-            path.availableInterfaces.isEmpty ? .notConnected : .noIPAddress
-        @unknown default:
-            .notConnected
-        }
-    }
-
-    nonisolated private static func networkPathSignature(from path: NWPath) -> String {
-        let interfaces = path.availableInterfaces
-            .map { "\($0.type)-\($0.name)" }
-            .sorted()
-            .joined(separator: ",")
-        return "\(path.status)|\(path.isExpensive)|\(path.isConstrained)|\(interfaces)"
-    }
-
-    private static func safeFilename(_ value: String) -> String {
-        let invalid = CharacterSet(charactersIn: "/\\?%*|\"<>:")
-        let cleaned = value.components(separatedBy: invalid).joined(separator: "-")
-        return cleaned.isEmpty ? "PingScope-History" : cleaned
-    }
 
     @MainActor private static let diagnosticsDateFormatter = ISO8601DateFormatter()
 
@@ -1084,203 +989,5 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
         draftIsEnabled = host.isEnabled
         draftNotificationPolicy = host.notifications
         draftTestResultText = nil
-    }
-}
-
-struct SetupChecklistItem: Identifiable {
-    var id: String { title }
-    let title: String
-    let detail: String
-    let isComplete: Bool
-    let actionTitle: String?
-    let action: (() -> Void)?
-}
-
-private struct PersistedHostState: Equatable {
-    var hosts: [HostConfig]
-    var primaryHostID: UUID?
-}
-
-private extension UserDefaults {
-    var overlayFrame: NSRect? {
-        get {
-            guard let string = string(forKey: "overlayFrame") else { return nil }
-            return NSRectFromString(string)
-        }
-        set {
-            guard let newValue else {
-                removeObject(forKey: "overlayFrame")
-                return
-            }
-            set(NSStringFromRect(newValue), forKey: "overlayFrame")
-        }
-    }
-
-    var hostConfigs: [HostConfig] {
-        get {
-            guard let data = data(forKey: "hostConfigs") else { return [] }
-            return (try? JSONDecoder().decode([HostConfig].self, from: data)) ?? []
-        }
-        set {
-            let data = try? JSONEncoder().encode(newValue)
-            set(data, forKey: "hostConfigs")
-        }
-    }
-
-    var primaryHostID: UUID? {
-        get {
-            guard let string = string(forKey: "primaryHostID") else { return nil }
-            return UUID(uuidString: string)
-        }
-        set {
-            set(newValue?.uuidString, forKey: "primaryHostID")
-        }
-    }
-
-    var notificationRules: NotificationRuleSet? {
-        get {
-            guard let data = data(forKey: "notificationRules") else { return nil }
-            return try? JSONDecoder().decode(NotificationRuleSet.self, from: data)
-        }
-        set {
-            if let data = try? newValue.map(JSONEncoder().encode) {
-                set(data, forKey: "notificationRules")
-            } else {
-                removeObject(forKey: "notificationRules")
-            }
-        }
-    }
-
-    var overlayVisible: Bool {
-        get {
-            bool(forKey: "overlayVisible")
-        }
-        set {
-            set(newValue, forKey: "overlayVisible")
-        }
-    }
-
-    var overlayAlwaysOnTop: Bool {
-        get {
-            guard object(forKey: "overlayAlwaysOnTop") != nil else { return true }
-            return bool(forKey: "overlayAlwaysOnTop")
-        }
-        set {
-            set(newValue, forKey: "overlayAlwaysOnTop")
-        }
-    }
-
-    var overlayOpacity: Double {
-        get {
-            guard object(forKey: "overlayOpacity") != nil else { return 1 }
-            return min(max(double(forKey: "overlayOpacity"), 0.55), 1)
-        }
-        set {
-            set(min(max(newValue, 0.55), 1), forKey: "overlayOpacity")
-        }
-    }
-
-    var overlayCompactMode: Bool {
-        get {
-            bool(forKey: "overlayCompactMode")
-        }
-        set {
-            set(newValue, forKey: "overlayCompactMode")
-        }
-    }
-
-    var overlayShowsAllHosts: Bool {
-        get {
-            bool(forKey: "overlayShowsAllHosts")
-        }
-        set {
-            set(newValue, forKey: "overlayShowsAllHosts")
-        }
-    }
-
-    var popoverShowsAllHosts: Bool {
-        get {
-            bool(forKey: "popoverShowsAllHosts")
-        }
-        set {
-            set(newValue, forKey: "popoverShowsAllHosts")
-        }
-    }
-
-    var overlayShowsLegend: Bool {
-        get {
-            bool(forKey: "overlayShowsLegend")
-        }
-        set {
-            set(newValue, forKey: "overlayShowsLegend")
-        }
-    }
-
-    var widgetsEnabled: Bool {
-        get {
-            bool(forKey: "widgetsEnabled")
-        }
-        set {
-            set(newValue, forKey: "widgetsEnabled")
-        }
-    }
-
-    var widgetSharingOptedIn: Bool? {
-        get {
-            guard object(forKey: "widgetSharingOptedIn") != nil else { return nil }
-            return bool(forKey: "widgetSharingOptedIn")
-        }
-        set {
-            if let newValue {
-                set(newValue, forKey: "widgetSharingOptedIn")
-            } else {
-                removeObject(forKey: "widgetSharingOptedIn")
-            }
-        }
-    }
-
-    var allowsLocalNetworkProbes: Bool {
-        get {
-            bool(forKey: "allowsLocalNetworkProbes")
-        }
-        set {
-            set(newValue, forKey: "allowsLocalNetworkProbes")
-        }
-    }
-
-    var startsAtLogin: Bool? {
-        get {
-            guard object(forKey: "startsAtLogin") != nil else { return nil }
-            return bool(forKey: "startsAtLogin")
-        }
-        set {
-            if let newValue {
-                set(newValue, forKey: "startsAtLogin")
-            } else {
-                removeObject(forKey: "startsAtLogin")
-            }
-        }
-    }
-
-    var enabledNetworkStatusAlerts: Set<NetworkConnectivityStatus> {
-        get {
-            guard let values = array(forKey: "enabledNetworkStatusAlerts") as? [String] else {
-                return Set(NetworkConnectivityStatus.allCases)
-            }
-            return Set(values.compactMap(NetworkConnectivityStatus.init(rawValue:)))
-        }
-        set {
-            set(newValue.map(\.rawValue), forKey: "enabledNetworkStatusAlerts")
-        }
-    }
-}
-
-private extension HistoryExportFormat {
-    var contentType: UTType {
-        switch self {
-        case .csv: .commaSeparatedText
-        case .json: .json
-        case .text: .plainText
-        }
     }
 }

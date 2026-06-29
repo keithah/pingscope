@@ -42,6 +42,10 @@ final class DomainBehaviorTests: XCTestCase {
     func testHostConfigApplyingMethodSetsMethodAwarePort() {
         var host = HostConfig(displayName: "Example", address: "example.com", method: .tcp, port: 443)
 
+        host.apply(method: .https)
+        XCTAssertEqual(host.method, .https)
+        XCTAssertEqual(host.port, 443)
+
         host.apply(method: .udp)
         XCTAssertEqual(host.method, .udp)
         XCTAssertEqual(host.port, 53)
@@ -53,6 +57,34 @@ final class DomainBehaviorTests: XCTestCase {
         host.apply(method: .starlink)
         XCTAssertEqual(host.method, .starlink)
         XCTAssertEqual(host.port, 9200)
+    }
+
+    func testDefaultInternetUsesHTTPSRoundTripProbe() {
+        XCTAssertEqual(HostConfig.defaultInternet.displayName, "Cloudflare DNS")
+        XCTAssertEqual(HostConfig.defaultInternet.address, "1.1.1.1")
+        XCTAssertEqual(HostConfig.defaultInternet.method, .https)
+        XCTAssertEqual(HostConfig.defaultInternet.port, 443)
+    }
+
+    func testHostConfigMigratorMigratesStockCloudflareTCPHostToHTTPS() {
+        let legacy = HostConfig(
+            id: UUID(uuidString: "00000000-0000-0000-0000-000000000001")!,
+            displayName: "Cloudflare DNS",
+            address: "1.1.1.1",
+            method: .tcp,
+            port: 443
+        )
+        let customTCP = HostConfig(
+            id: UUID(uuidString: "00000000-0000-0000-0000-000000000002")!,
+            displayName: "My API",
+            address: "1.1.1.1",
+            method: .tcp,
+            port: 443
+        )
+        let migrator = HostConfigMigrator()
+
+        XCTAssertEqual(migrator.migrate(legacy).method, .https)
+        XCTAssertEqual(migrator.migrate(customTCP).method, .tcp)
     }
 
     func testHealthRequiresConsecutiveFailuresBeforeDown() {

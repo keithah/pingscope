@@ -50,6 +50,8 @@ public struct DefaultProbeFactory: ProbeFactory {
         }
         let probe: any PingProbe
         switch method {
+        case .https:
+            probe = HTTPSRoundTripProbe()
         case .tcp:
             probe = NetworkProbe(parameters: .tcp)
         case .udp:
@@ -150,6 +152,68 @@ public struct NetworkProbe: PingProbe {
         } onCancel: {
             connection.cancel()
         }
+    }
+}
+
+public protocol HTTPSRoundTripFetching: Sendable {
+    func fetch(_ request: URLRequest) async throws
+}
+
+public struct URLSessionHTTPSRoundTripFetcher: HTTPSRoundTripFetching {
+    public init() {}
+
+    public func fetch(_ request: URLRequest) async throws {
+        _ = try await URLSession.shared.data(for: request)
+    }
+}
+
+public struct HTTPSRoundTripProbe: PingProbe {
+    private let fetcher: any HTTPSRoundTripFetching
+
+    public init(fetcher: any HTTPSRoundTripFetching = URLSessionHTTPSRoundTripFetcher()) {
+        self.fetcher = fetcher
+    }
+
+    public func measure(_ host: HostConfig) async -> PingResult {
+        guard let request = makeRequest(for: host) else {
+            return .failure(hostID: host.id, reason: .unknown).withHostMetadata(from: host)
+        }
+
+        let start = ContinuousClock.now
+        do {
+            try await fetcher.fetch(request)
+            return .success(
+                hostID: host.id,
+                latency: start.duration(to: .now),
+                metadata: ProbeMetadata(note: "HTTPS response received")
+            ).withHostMetadata(from: host)
+        } catch is CancellationError {
+            return .failure(hostID: host.id, reason: .cancelled).withHostMetadata(from: host)
+        } catch {
+            return .failure(
+                hostID: host.id,
+                reason: error.failureReason,
+                metadata: ProbeMetadata(note: error.localizedDescription)
+            ).withHostMetadata(from: host)
+        }
+    }
+
+    private func makeRequest(for host: HostConfig) -> URLRequest? {
+        guard let port = host.port ?? host.method.defaultPort else { return nil }
+        var components = URLComponents()
+        components.scheme = "https"
+        components.host = host.address
+        components.port = Int(port)
+        components.path = "/"
+        components.queryItems = [URLQueryItem(name: "pingscope", value: "1")]
+        guard let url = components.url else { return nil }
+
+        var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalAndRemoteCacheData, timeoutInterval: host.timeout.seconds)
+        request.httpMethod = "HEAD"
+        request.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
+        request.setValue("no-cache", forHTTPHeaderField: "Pragma")
+        request.setValue("PingScope", forHTTPHeaderField: "User-Agent")
+        return request
     }
 }
 
@@ -319,6 +383,26 @@ private extension NWError {
         }
         if text.contains("network") {
             return .networkUnavailable
+        }
+        return .unknown
+    }
+}
+
+private extension Error {
+    var failureReason: FailureReason {
+        if let urlError = self as? URLError {
+            switch urlError.code {
+            case .timedOut:
+                return .timeout
+            case .cannotFindHost, .dnsLookupFailed:
+                return .dnsFailure
+            case .cannotConnectToHost, .networkConnectionLost:
+                return .networkUnavailable
+            case .cancelled:
+                return .cancelled
+            default:
+                return .unknown
+            }
         }
         return .unknown
     }

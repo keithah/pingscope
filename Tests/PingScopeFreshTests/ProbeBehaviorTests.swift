@@ -3,8 +3,8 @@ import XCTest
 
 final class ProbeBehaviorTests: XCTestCase {
     func testAppStoreFlavorHidesICMPAndReturnsUnavailableProbe() async {
-        XCTAssertEqual(BuildFlavor.appStore.availableMethods, [.tcp, .udp, .starlink])
-        XCTAssertEqual(BuildFlavor.developerID.availableMethods, [.tcp, .udp, .icmp, .starlink])
+        XCTAssertEqual(BuildFlavor.appStore.availableMethods, [.https, .tcp, .udp, .starlink])
+        XCTAssertEqual(BuildFlavor.developerID.availableMethods, [.https, .tcp, .udp, .icmp, .starlink])
 
         let host = HostConfig(displayName: "Raw ICMP", address: "1.1.1.1", method: .icmp, port: nil)
         let probe = await DefaultProbeFactory(flavor: .appStore).makeProbe(for: .icmp)
@@ -12,6 +12,26 @@ final class ProbeBehaviorTests: XCTestCase {
 
         XCTAssertEqual(result.failureReason, .icmpUnavailable)
         XCTAssertEqual(result.method, .icmp)
+    }
+
+    func testHTTPSProbeMeasuresUntilFetcherCompletes() async throws {
+        let host = HostConfig(displayName: "Cloudflare DNS", address: "1.1.1.1", method: .https, port: 443)
+        let fetcher = DelayedHTTPSFetcher(delay: .milliseconds(25))
+        let probe = HTTPSRoundTripProbe(fetcher: fetcher)
+
+        let result = await probe.measure(host)
+
+        XCTAssertEqual(result.method, .https)
+        XCTAssertEqual(result.port, 443)
+        XCTAssertEqual(result.metadata.note, "HTTPS response received")
+        XCTAssertGreaterThanOrEqual(try XCTUnwrap(result.latency).milliseconds, 20)
+        let method = await fetcher.method
+        XCTAssertEqual(method, "HEAD")
+        let request = await fetcher.request
+        XCTAssertEqual(request?.scheme, "https")
+        XCTAssertEqual(request?.host, "1.1.1.1")
+        XCTAssertEqual(request?.port, 443)
+        XCTAssertEqual(request?.query, "pingscope=1")
     }
 
     func testStarlinkProbeMapsConnectedStatusToLatencyResult() async throws {
@@ -92,6 +112,22 @@ private actor CancellableSlowProbe: PingProbe {
             wasCancelled = true
             return .failure(hostID: host.id, reason: .cancelled).withHostMetadata(from: host)
         }
+    }
+}
+
+private actor DelayedHTTPSFetcher: HTTPSRoundTripFetching {
+    private let delay: Duration
+    private(set) var request: URLComponents?
+    private(set) var method: String?
+
+    init(delay: Duration) {
+        self.delay = delay
+    }
+
+    func fetch(_ request: URLRequest) async throws {
+        self.request = URLComponents(url: try XCTUnwrap(request.url), resolvingAgainstBaseURL: false)
+        self.method = request.httpMethod
+        try await Task.sleep(for: delay)
     }
 }
 
