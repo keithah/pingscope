@@ -8,6 +8,14 @@ PingScope is primarily a Mac app, with an iOS companion app in progress:
 - **App Store builds** stay sandbox-compliant and hide ICMP.
 - **iOS builds** monitor continuously while the app is open, offer explicit `30s` and `1m` sessions, publish Live Activity updates during finite background runtime, and keep local recent history. An advanced opt-in Background Keep Alive mode can use Always Location permission while monitoring is active; it is disabled by default.
 
+## Screenshots
+
+| Floating overlay | Hosts settings | iOS companion |
+| --- | --- | --- |
+| ![PingScope floating overlay showing a live latency graph](images/overlay.png) | ![PingScope Settings on the Hosts tab](images/settings-hosts.png) | ![PingScope iOS companion home screen](images/ios-home.png) |
+
+The compact overlay shows the current latency and a live graph for the selected host; the settings window manages hosts, methods, thresholds, and notification policy; the iOS companion runs continuous or finite sessions with a local history graph.
+
 ## Features
 
 - iStat-style menu bar status: colored dot with latency text underneath.
@@ -16,7 +24,7 @@ PingScope is primarily a Mac app, with an iOS companion app in progress:
 - Host management for TCP, UDP, and Developer ID ICMP.
 - Default gateway detection.
 - Per-host settings for method, port, interval, timeout, degraded threshold, down-after failures, enabled state, and notification policy.
-- Notifications for host down, recovery, high latency, network changes, internet loss, and selected network status states.
+- Notifications for host down, recovery, high latency, internet loss, and selected network status states. Network-change alerts are available but off by default to keep things quiet.
 - Durable local history with export to CSV, JSON, or text.
 - Widget data sharing as an opt-in setting, so shared-container permission is not requested on every launch.
 - Start at login support.
@@ -65,11 +73,14 @@ Status colors:
 
 ## Development
 
-Requirements:
+Runtime requirements:
 
-- macOS 26 or later.
-- Xcode 26 or later.
-- Swift 6.2 toolchain.
+- macOS 15 or later (Mac app).
+- iOS 18 or later (iOS companion).
+
+Build requirements:
+
+- Xcode 26 or later with the Swift 6.2 toolchain.
 - Optional: Developer ID Application certificate for signed local distribution builds.
 
 Common commands:
@@ -82,7 +93,7 @@ scripts/validate-ios-simulator-smoke.sh
 scripts/validate-ios-device-smoke.sh
 xcodebuild -project PingScope.xcodeproj -scheme PingScope-iOS -destination 'generic/platform=iOS Simulator' build CODE_SIGNING_ALLOWED=NO
 scripts/validate-probes.sh
-PING_SCOPE_DMG_SHA256=<release-dmg-sha256> scripts/validate-sparkle-feed.sh 0.1.2
+PING_SCOPE_DMG_SHA256=<release-dmg-sha256> scripts/validate-sparkle-feed.sh
 scripts/validate-network-transitions.sh
 scripts/build-xcode-app-bundle.sh debug /Applications developer-id
 scripts/validate-roadmap.sh
@@ -135,7 +146,7 @@ Sparkle uses the Keychain account `pingscope-ed25519`. The public key is already
 Release command:
 
 ```bash
-scripts/release-github.sh --version 0.1.3 --release-notes RELEASE_NOTES.md
+scripts/release-github.sh --version 0.2.1 --release-notes RELEASE_NOTES.md
 ```
 
 ## Xcode Cloud
@@ -155,8 +166,10 @@ Recommended workflow settings:
 Validate the published Sparkle feed and Developer ID DMG:
 
 ```bash
-PING_SCOPE_DMG_SHA256=<release-dmg-sha256> scripts/validate-sparkle-feed.sh 0.1.3
+PING_SCOPE_DMG_SHA256=<release-dmg-sha256> scripts/validate-sparkle-feed.sh
 ```
+
+When no version argument is passed, `validate-sparkle-feed.sh` derives the version and build number from `PingScope.xcodeproj/project.pbxproj`.
 
 ## Architecture
 
