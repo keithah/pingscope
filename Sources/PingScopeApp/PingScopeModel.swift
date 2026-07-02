@@ -694,7 +694,10 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
     }
 
     private func persistOverlayFrame(_ notification: Notification) {
-        guard let window = notification.object as? NSWindow else { return }
+        // The model may become the delegate of other windows; only the overlay
+        // window's frame may be persisted as the overlay frame, or an unrelated
+        // window's move teleports the overlay (potentially off-screen).
+        guard let window = notification.object as? NSWindow, window is OverlayWindow else { return }
         overlayFrame = window.frame
         UserDefaults.standard.overlayFrame = window.frame
     }

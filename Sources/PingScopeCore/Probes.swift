@@ -5,13 +5,45 @@ public enum BuildFlavor: Sendable {
     case appStore
     case developerID
 
-    public static var current: BuildFlavor {
+    public static var current: BuildFlavor { detected }
+
+    /// The `APPSTORE` compilation condition is set on the Xcode app targets,
+    /// but target-level `SWIFT_ACTIVE_COMPILATION_CONDITIONS` never propagates
+    /// into Swift package targets -- so when Xcode Cloud archives the App Store
+    /// scheme, this package compiles without the flag and `#if APPSTORE` alone
+    /// would misreport the flavor (and offer ICMP, which the sandbox cannot
+    /// deliver). Detect the store flavor at runtime instead: both App Store
+    /// ("receipt") and TestFlight ("sandboxReceipt") installs carry a store
+    /// receipt in the bundle; Developer ID and local builds have none.
+    private static let detected: BuildFlavor = {
         #if APPSTORE
-        .appStore
+        return .appStore
         #else
-        .developerID
+        let bundleURL = Bundle.main.bundleURL
+        #if os(macOS)
+        let receiptCandidates = [
+            bundleURL.appendingPathComponent("Contents/_MASReceipt/receipt"),
+            bundleURL.appendingPathComponent("Contents/_MASReceipt/sandboxReceipt")
+        ]
+        #else
+        let receiptCandidates = [
+            bundleURL.appendingPathComponent("StoreKit/receipt"),
+            bundleURL.appendingPathComponent("StoreKit/sandboxReceipt")
+        ]
         #endif
-    }
+        if receiptCandidates.contains(where: { FileManager.default.fileExists(atPath: $0.path) }) {
+            return .appStore
+        }
+        // A sandboxed process cannot use ICMP either way (the ping helper is
+        // denied), so a store build whose receipt has not materialized yet
+        // must still report the App Store flavor rather than offer methods
+        // that cannot work.
+        if ProcessInfo.processInfo.environment["APP_SANDBOX_CONTAINER_ID"] != nil {
+            return .appStore
+        }
+        return .developerID
+        #endif
+    }()
 
     public var availableMethods: [PingMethod] {
         switch self {
