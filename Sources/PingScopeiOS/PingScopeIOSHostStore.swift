@@ -45,13 +45,18 @@ public final class PingScopeIOSHostStore: @unchecked Sendable {
     }
 
     private func loadHosts() -> [HostConfig] {
-        guard
-            let data = defaults.data(forKey: hostsKey),
-            let hosts = try? JSONDecoder().decode([HostConfig].self, from: data),
-            !hosts.isEmpty
-        else {
-            return defaultHosts
+        if let data = defaults.data(forKey: hostsKey),
+           let hosts = try? JSONDecoder().decode([HostConfig].self, from: data),
+           !hosts.isEmpty {
+            return hosts
         }
-        return hosts
+        // First launch: persist the generated defaults immediately so their IDs
+        // are stable across launches. History rows are keyed by host ID, so
+        // handing out unsaved defaults would mint fresh IDs on every relaunch
+        // and orphan all previously recorded samples.
+        if let data = try? JSONEncoder().encode(defaultHosts) {
+            defaults.set(data, forKey: hostsKey)
+        }
+        return defaultHosts
     }
 }

@@ -303,7 +303,9 @@ final class LiveMonitorSessionControllerTests: XCTestCase {
             await cleanup.record()
         }
         await client.expireMostRecent()
-        try? await Task.sleep(for: .milliseconds(20))
+        // The expiration handler only spawns a Task; wait for the cleanup to
+        // actually run rather than racing it against a wall-clock sleep.
+        await cleanup.waitForRecord()
         await runtime.end()
 
         let cleanupCount = await cleanup.countSnapshot()
@@ -407,9 +409,20 @@ private actor RecordingBackgroundTaskClient: LiveMonitorBackgroundTaskClient {
 
 private actor ExpirationCleanupRecorder {
     private(set) var count = 0
+    private var waiters: [CheckedContinuation<Void, Never>] = []
 
     func record() {
         count += 1
+        waiters.forEach { $0.resume() }
+        waiters.removeAll()
+    }
+
+    func waitForRecord() async {
+        while count == 0 {
+            await withCheckedContinuation { continuation in
+                waiters.append(continuation)
+            }
+        }
     }
 
     func countSnapshot() -> Int {

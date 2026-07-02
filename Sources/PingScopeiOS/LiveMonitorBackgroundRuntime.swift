@@ -51,7 +51,13 @@ public actor LiveMonitorBackgroundRuntime {
         let handler = expirationHandler
         expirationHandler = nil
 
-        await handler?()
+        // UIKit requires the background task to be ended promptly once its
+        // expiration handler fires; overrunning the grace period gets the
+        // process killed by the watchdog (0x8badf00d). End the OS task first,
+        // then run the app-level cleanup best-effort in whatever time remains
+        // -- the reverse order gates endBackgroundTask behind a SQLite flush,
+        // a history reload, a widget publish, and a Live Activity end.
         await client.endBackgroundTask(activeTaskID)
+        await handler?()
     }
 }
