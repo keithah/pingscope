@@ -346,6 +346,85 @@ final class DomainBehaviorTests: XCTestCase {
         XCTAssertEqual(engine.evaluate(result: sustained, previousStatus: .degraded, currentStatus: .degraded), .highLatency(hostID: hostID))
     }
 
+    func testTransitionAlertCooldownIsScopedPerHost() {
+        let hostA = UUID()
+        let hostB = UUID()
+        let rules = NotificationRuleSet(
+            isEnabled: true,
+            cooldown: .seconds(300),
+            alertTypes: [.hostDown, .recovered],
+            latencyThreshold: .milliseconds(250),
+            notifyOnRecovery: true
+        )
+        var engine = AlertDecisionEngine(rules: rules)
+        let base = Date(timeIntervalSince1970: 1_500)
+
+        XCTAssertEqual(
+            engine.evaluate(
+                result: .failure(hostID: hostA, reason: .timeout, timestamp: base),
+                previousStatus: .healthy,
+                currentStatus: .down
+            ),
+            .hostDown(hostID: hostA)
+        )
+        // Host B's down transition happens exactly once, so if host A's alert had
+        // consumed a shared cooldown, B's outage would be lost forever.
+        XCTAssertEqual(
+            engine.evaluate(
+                result: .failure(hostID: hostB, reason: .timeout, timestamp: base.addingTimeInterval(60)),
+                previousStatus: .healthy,
+                currentStatus: .down
+            ),
+            .hostDown(hostID: hostB)
+        )
+        // Recovery is a separate alert type and is not gated by hostDown's cooldown.
+        XCTAssertEqual(
+            engine.evaluate(
+                result: .success(hostID: hostA, latency: .milliseconds(5), timestamp: base.addingTimeInterval(90)),
+                previousStatus: .down,
+                currentStatus: .healthy
+            ),
+            .recovered(hostID: hostA)
+        )
+        // The same host flapping back down inside its own cooldown stays suppressed.
+        XCTAssertNil(
+            engine.evaluate(
+                result: .failure(hostID: hostA, reason: .timeout, timestamp: base.addingTimeInterval(120)),
+                previousStatus: .healthy,
+                currentStatus: .down
+            )
+        )
+    }
+
+    func testDiagnosisAlertCandidateConsumesCooldownOnlyOnceCommitted() throws {
+        var engine = AlertDecisionEngine(rules: NotificationRuleSet(
+            isEnabled: true,
+            cooldown: .seconds(300),
+            alertTypes: [.upstreamDown],
+            latencyThreshold: .milliseconds(250),
+            notifyOnRecovery: true
+        ))
+        let base = Date(timeIntervalSince1970: 6_000)
+        let diagnosis = NetworkPerspectiveDiagnosis(
+            scope: .upstream,
+            title: "Upstream path down",
+            detail: "test",
+            affectedHostIDs: [UUID()],
+            verdict: .upstreamDown,
+            confidence: .high,
+            faultTier: .upstream
+        )
+
+        // An uncommitted (i.e. suppressed) candidate must not consume the
+        // cooldown or the signature dedupe of a later, actually-delivered alert.
+        XCTAssertEqual(engine.diagnosisAlertCandidate(diagnosis, at: base)?.decision, .upstreamDown)
+        let delivered = try XCTUnwrap(engine.diagnosisAlertCandidate(diagnosis, at: base.addingTimeInterval(5)))
+        XCTAssertEqual(delivered.decision, .upstreamDown)
+
+        engine.commit(delivered)
+        XCTAssertNil(engine.diagnosisAlertCandidate(diagnosis, at: base.addingTimeInterval(10)))
+    }
+
     func testNotificationRulesDetectNetworkChangeAndInternetLoss() {
         let hostID = UUID()
         let rules = NotificationRuleSet(

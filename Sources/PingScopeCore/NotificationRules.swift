@@ -212,8 +212,31 @@ public enum AlertDecision: Equatable, Sendable {
 }
 
 public struct AlertDecisionEngine: Sendable {
+    /// A diagnosis alert the engine is willing to emit but has not yet committed.
+    ///
+    /// ``diagnosisAlertCandidate(_:at:)`` performs all streak bookkeeping and
+    /// gating but leaves the cooldown and last-alerted signature untouched; the
+    /// caller commits via ``commit(_:)`` only once it has decided to actually
+    /// deliver the alert. Otherwise a suppressed candidate would consume the
+    /// cooldown budget of a later, real one.
+    public struct DiagnosisAlertCandidate: Equatable, Sendable {
+        public let decision: AlertDecision
+        fileprivate let type: AlertType
+        fileprivate let signature: String
+        fileprivate let date: Date
+    }
+
+    /// Host-scoped alert types (down / recovered / high latency) cool down per
+    /// host; everything else is a single network-wide event. Without the host
+    /// dimension, host A's edge-triggered `hostDown` would consume the cooldown
+    /// and permanently swallow host B's transition inside the same window.
+    private struct CooldownKey: Hashable, Sendable {
+        let type: AlertType
+        let hostID: UUID?
+    }
+
     public var rules: NotificationRuleSet
-    private var lastSentAt: [AlertType: Date] = [:]
+    private var lastSentAt: [CooldownKey: Date] = [:]
     private var lastDiagnosisSignature: String?
     private var lastAlertedDiagnosisSignature: String?
     private var diagnosisStreakSignature: String?
@@ -252,10 +275,10 @@ public struct AlertDecisionEngine: Sendable {
         guard let (type, decision) = candidate, rules.alertTypes.contains(type) else {
             return nil
         }
-        guard shouldSend(type, at: result.timestamp) else {
+        guard shouldSend(type, hostID: result.hostID, at: result.timestamp) else {
             return nil
         }
-        lastSentAt[type] = result.timestamp
+        lastSentAt[CooldownKey(type: type, hostID: result.hostID)] = result.timestamp
         return decision
     }
 
@@ -273,7 +296,7 @@ public struct AlertDecisionEngine: Sendable {
             return nil
         }
         guard shouldSend(.networkChange, at: date) else { return nil }
-        lastSentAt[.networkChange] = date
+        lastSentAt[CooldownKey(type: .networkChange, hostID: nil)] = date
         return .networkChange(previousGateway: previousGateway, currentGateway: currentGateway)
     }
 
@@ -291,14 +314,27 @@ public struct AlertDecisionEngine: Sendable {
         let failureRatio = Double(failedCount) / Double(results.count)
         guard failureRatio >= rules.internetLossFailureRatio else { return nil }
         guard shouldSend(.internetLoss, at: date) else { return nil }
-        lastSentAt[.internetLoss] = date
+        lastSentAt[CooldownKey(type: .internetLoss, hostID: nil)] = date
         return .internetLoss
     }
 
+    /// Evaluates and immediately commits. Use ``diagnosisAlertCandidate(_:at:)`` +
+    /// ``commit(_:)`` instead when the caller may still suppress the alert.
     public mutating func evaluateDiagnosis(
         _ diagnosis: NetworkPerspectiveDiagnosis,
         at date: Date = Date()
     ) -> AlertDecision? {
+        guard let candidate = diagnosisAlertCandidate(diagnosis, at: date) else { return nil }
+        commit(candidate)
+        return candidate.decision
+    }
+
+    /// Runs the streak/signature bookkeeping for this diagnosis and returns the
+    /// alert the engine would emit, without committing cooldown state.
+    public mutating func diagnosisAlertCandidate(
+        _ diagnosis: NetworkPerspectiveDiagnosis,
+        at date: Date = Date()
+    ) -> DiagnosisAlertCandidate? {
         guard rules.isEnabled else { return nil }
 
         let signature = diagnosis.alertSignature
@@ -326,13 +362,23 @@ public struct AlertDecisionEngine: Sendable {
         }
         guard signature != lastAlertedDiagnosisSignature else { return nil }
         guard shouldSend(candidate.type, at: date) else { return nil }
-        lastSentAt[candidate.type] = date
-        lastAlertedDiagnosisSignature = signature
-        return candidate.decision
+        return DiagnosisAlertCandidate(
+            decision: candidate.decision,
+            type: candidate.type,
+            signature: signature,
+            date: date
+        )
     }
 
-    private func shouldSend(_ type: AlertType, at date: Date) -> Bool {
-        guard let lastSent = lastSentAt[type] else { return true }
+    /// Records that `candidate` was actually delivered, starting its cooldown and
+    /// deduplicating the diagnosis signature.
+    public mutating func commit(_ candidate: DiagnosisAlertCandidate) {
+        lastSentAt[CooldownKey(type: candidate.type, hostID: nil)] = candidate.date
+        lastAlertedDiagnosisSignature = candidate.signature
+    }
+
+    private func shouldSend(_ type: AlertType, hostID: UUID? = nil, at date: Date) -> Bool {
+        guard let lastSent = lastSentAt[CooldownKey(type: type, hostID: hostID)] else { return true }
         return date.timeIntervalSince(lastSent) >= rules.cooldown.seconds
     }
 

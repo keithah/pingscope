@@ -93,7 +93,7 @@ final class RuntimeBehaviorTests: XCTestCase {
         await scheduler.stop()
     }
 
-    func testRuntimePublishesOneShotAlertEvents() async throws {
+    func testRuntimePublishesOneShotAlertEventsOnDedicatedStream() async throws {
         let host = HostConfig(
             displayName: "Example",
             address: "example.com",
@@ -101,15 +101,13 @@ final class RuntimeBehaviorTests: XCTestCase {
         )
         let store = HostStore(defaultHosts: [host])
         let runtime = PingRuntime(hostStore: store, scheduler: MeasurementScheduler(probeFactory: CountingProbeFactory(result: .failure(hostID: host.id, reason: .timeout))))
-        let stream = await runtime.snapshots()
-        var iterator = stream.makeAsyncIterator()
-        _ = await iterator.next()
+        let alertStream = await runtime.alerts()
 
         await runtime.ingest(.failure(hostID: host.id, reason: .timeout))
-        let nextSnapshot = await iterator.next()
-        let snapshot = try XCTUnwrap(nextSnapshot)
+        await runtime.stop()
 
-        XCTAssertEqual(snapshot.alerts, [.remoteServiceDown(hostIDs: [host.id])])
+        let decisions = await collectDecisions(from: alertStream)
+        XCTAssertEqual(decisions, [.remoteServiceDown(hostIDs: [host.id])])
     }
 
     func testRuntimeSuppressesAlertEventsForMutedHosts() async throws {
@@ -121,15 +119,60 @@ final class RuntimeBehaviorTests: XCTestCase {
         )
         let store = HostStore(defaultHosts: [host])
         let runtime = PingRuntime(hostStore: store, scheduler: MeasurementScheduler(probeFactory: CountingProbeFactory(result: .failure(hostID: host.id, reason: .timeout))))
-        let stream = await runtime.snapshots()
-        var iterator = stream.makeAsyncIterator()
-        _ = await iterator.next()
+        let alertStream = await runtime.alerts()
 
         await runtime.ingest(.failure(hostID: host.id, reason: .timeout))
-        let nextSnapshot = await iterator.next()
-        let snapshot = try XCTUnwrap(nextSnapshot)
+        await runtime.stop()
 
-        XCTAssertEqual(snapshot.alerts, [])
+        let decisions = await collectDecisions(from: alertStream)
+        XCTAssertEqual(decisions, [])
+    }
+
+    func testRuntimeDeliversRecoveryAlongsideSameTickDiagnosisAlert() async throws {
+        let thresholds = LatencyThresholds(degradedMilliseconds: 100, downAfterFailures: 1)
+        let hostA = HostConfig(displayName: "A", address: "a.example", thresholds: thresholds)
+        let hostB = HostConfig(displayName: "B", address: "b.example", thresholds: thresholds)
+        let runtime = PingRuntime(
+            hostStore: HostStore(defaultHosts: [hostA, hostB]),
+            scheduler: MeasurementScheduler(probeFactory: HangingProbeFactory()),
+            notificationRules: NotificationRuleSet(cooldown: .seconds(0), diagnosisSensitivity: .sensitive)
+        )
+        let alertStream = await runtime.alerts()
+        let base = Date(timeIntervalSince1970: 7_000)
+
+        await runtime.ingest(.failure(hostID: hostA.id, reason: .timeout, timestamp: base))
+        await runtime.ingest(.failure(hostID: hostB.id, reason: .timeout, timestamp: base.addingTimeInterval(1)))
+        // Host A recovers on the same tick that shifts the network diagnosis to
+        // "B only": the diagnosis alert must not swallow A's recovery transition.
+        await runtime.ingest(.success(hostID: hostA.id, latency: .milliseconds(8), timestamp: base.addingTimeInterval(2)))
+        await runtime.stop()
+
+        let decisions = await collectDecisions(from: alertStream)
+        XCTAssertTrue(decisions.contains(.recovered(hostID: hostA.id)), "expected recovery in \(decisions)")
+    }
+
+    func testRuntimeSuppressedMutedDiagnosisDoesNotConsumeCooldown() async throws {
+        let thresholds = LatencyThresholds(degradedMilliseconds: 100, downAfterFailures: 1)
+        let muted = HostConfig(displayName: "Muted", address: "muted.example", thresholds: thresholds, notifications: .muted)
+        let other = HostConfig(displayName: "Other", address: "other.example", thresholds: thresholds)
+        let runtime = PingRuntime(
+            hostStore: HostStore(defaultHosts: [muted, other]),
+            scheduler: MeasurementScheduler(probeFactory: HangingProbeFactory()),
+            notificationRules: NotificationRuleSet(diagnosisSensitivity: .sensitive)
+        )
+        let alertStream = await runtime.alerts()
+        let base = Date(timeIntervalSince1970: 8_000)
+
+        // The muted host's outage produces an all-muted diagnosis that is never
+        // delivered; it must not consume the .remoteServiceDown cooldown.
+        await runtime.ingest(.failure(hostID: muted.id, reason: .timeout, timestamp: base))
+        await runtime.ingest(.success(hostID: other.id, latency: .milliseconds(8), timestamp: base.addingTimeInterval(1)))
+        // 60s later (well inside the 300s cooldown) the unmuted host fails too.
+        await runtime.ingest(.failure(hostID: other.id, reason: .timeout, timestamp: base.addingTimeInterval(60)))
+        await runtime.stop()
+
+        let decisions = await collectDecisions(from: alertStream)
+        XCTAssertEqual(decisions, [.remoteServiceDown(hostIDs: [muted.id, other.id])])
     }
 
     func testRuntimeCanPauseMeasurementsWithoutClosingSnapshots() async throws {
@@ -408,6 +451,16 @@ final class RuntimeBehaviorTests: XCTestCase {
 }
 
 private struct TestTimeout: Error {}
+
+/// Drains the alert stream once the runtime has been stopped (which finishes the
+/// continuation) and flattens the decisions in publish order.
+private func collectDecisions(from stream: AsyncStream<RuntimeAlertEvent>) async -> [AlertDecision] {
+    var decisions: [AlertDecision] = []
+    for await event in stream {
+        decisions.append(contentsOf: event.decisions)
+    }
+    return decisions
+}
 
 private func firstResult(from stream: AsyncStream<PingResult>, timeout: Duration) async throws -> PingResult? {
     try await withThrowingTaskGroup(of: PingResult?.self) { group in
