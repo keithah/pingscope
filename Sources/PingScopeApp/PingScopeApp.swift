@@ -136,19 +136,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// after a display-configuration change (external monitor unplugged,
     /// clamshell, resolution change). The overlay then reads as enabled in
     /// Settings while nothing is visible anywhere. Clamp it back onto a
-    /// screen before showing.
+    /// screen before showing. The geometry lives in
+    /// `clampedOverlayFrame(_:into:minVisible:)` so it is unit-testable.
     func constrainOverlayToVisibleScreen() {
         guard let window = overlayController?.window else { return }
-        var frame = window.frame
-        let sufficientlyVisible = NSScreen.screens.contains { screen in
-            let overlap = frame.intersection(screen.visibleFrame)
-            return overlap.width >= 60 && overlap.height >= 24
+        var screens = NSScreen.screens.map(\.visibleFrame)
+        if let preferred = (window.screen ?? NSScreen.main)?.visibleFrame {
+            screens.removeAll { $0 == preferred }
+            screens.insert(preferred, at: 0)
         }
-        guard !sufficientlyVisible,
-              let visible = (window.screen ?? NSScreen.main ?? NSScreen.screens.first)?.visibleFrame
-        else { return }
-        frame.origin.x = min(max(frame.origin.x, visible.minX), max(visible.maxX - frame.width, visible.minX))
-        frame.origin.y = min(max(frame.origin.y, visible.minY), max(visible.maxY - frame.height, visible.minY))
+        guard let frame = clampedOverlayFrame(
+            window.frame,
+            into: screens,
+            minVisible: CGSize(width: 60, height: 24)
+        ) else { return }
         DebugLog.write("overlay frame off-screen; constrained to \(frame)")
         window.setFrame(frame, display: true)
         model.overlayFrame = frame

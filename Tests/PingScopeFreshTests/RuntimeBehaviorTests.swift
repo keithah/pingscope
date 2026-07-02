@@ -93,6 +93,45 @@ final class RuntimeBehaviorTests: XCTestCase {
         await scheduler.stop()
     }
 
+    func testSchedulerBuffersRealisticBurstWithoutDroppingResults() async throws {
+        // The scheduler's result stream is bufferingNewest(1024): deep enough
+        // that a realistic burst survives a stalled consumer intact -- the old
+        // bufferingNewest(1) policy conflated results and skewed loss stats.
+        // Two hosts each produce 150 results while nothing consumes; all 300
+        // must then drain out with per-host counts exact.
+        let hostA = HostConfig(displayName: "A", address: "a.example", interval: .milliseconds(1))
+        let hostB = HostConfig(displayName: "B", address: "b.example", interval: .milliseconds(1))
+        let perHost = 150
+        let scheduler = MeasurementScheduler(probeFactory: LimitedBurstProbeFactory(limit: perHost))
+        let stream = await scheduler.start(hosts: [hostA, hostB])
+
+        // Both host loops finish their whole burst (second host starts after
+        // the scheduler's 250ms stagger) before we read a single result.
+        try await Task.sleep(for: .seconds(1.5))
+
+        let expected = perHost * 2
+        let consumer = Task { () -> [UUID: Int] in
+            var received: [UUID: Int] = [:]
+            var total = 0
+            for await result in stream {
+                received[result.hostID, default: 0] += 1
+                total += 1
+                if total == expected { break }
+            }
+            return received
+        }
+        let deadline = Task {
+            try? await Task.sleep(for: .seconds(5))
+            consumer.cancel()
+        }
+        let received = await consumer.value
+        deadline.cancel()
+
+        XCTAssertEqual(received[hostA.id], perHost, "dropped results for host A: \(received)")
+        XCTAssertEqual(received[hostB.id], perHost, "dropped results for host B: \(received)")
+        await scheduler.stop()
+    }
+
     func testRuntimePublishesOneShotAlertEventsOnDedicatedStream() async throws {
         let host = HostConfig(
             displayName: "Example",
@@ -571,6 +610,39 @@ private struct DelayedProbe: PingProbe {
 private struct HangingProbeFactory: ProbeFactory {
     func makeProbe(for method: PingMethod) async -> any PingProbe {
         HangingProbe()
+    }
+}
+
+/// Returns an instant success for the first `limit` measurements of each host,
+/// then hangs, so a test can bound exactly how many results a scheduler run
+/// produces per host.
+private struct LimitedBurstProbeFactory: ProbeFactory {
+    let probe: LimitedBurstProbe
+
+    init(limit: Int) {
+        probe = LimitedBurstProbe(limit: limit)
+    }
+
+    func makeProbe(for method: PingMethod) async -> any PingProbe {
+        probe
+    }
+}
+
+private actor LimitedBurstProbe: PingProbe {
+    private let limit: Int
+    private var countsByHost: [UUID: Int] = [:]
+
+    init(limit: Int) {
+        self.limit = limit
+    }
+
+    func measure(_ host: HostConfig) async -> PingResult {
+        guard countsByHost[host.id, default: 0] < limit else {
+            try? await Task.sleep(for: .seconds(60))
+            return .failure(hostID: host.id, reason: .cancelled).withHostMetadata(from: host)
+        }
+        countsByHost[host.id, default: 0] += 1
+        return .success(hostID: host.id, latency: .milliseconds(5)).withHostMetadata(from: host)
     }
 }
 

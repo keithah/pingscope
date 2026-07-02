@@ -12,38 +12,53 @@ public enum BuildFlavor: Sendable {
     /// into Swift package targets -- so when Xcode Cloud archives the App Store
     /// scheme, this package compiles without the flag and `#if APPSTORE` alone
     /// would misreport the flavor (and offer ICMP, which the sandbox cannot
-    /// deliver). Detect the store flavor at runtime instead: both App Store
-    /// ("receipt") and TestFlight ("sandboxReceipt") installs carry a store
-    /// receipt in the bundle; Developer ID and local builds have none.
+    /// deliver). Detect the store flavor at runtime instead via ``detect``.
     private static let detected: BuildFlavor = {
         #if APPSTORE
-        return .appStore
+        let hasCompileFlag = true
         #else
-        let bundleURL = Bundle.main.bundleURL
-        #if os(macOS)
-        let receiptCandidates = [
-            bundleURL.appendingPathComponent("Contents/_MASReceipt/receipt"),
-            bundleURL.appendingPathComponent("Contents/_MASReceipt/sandboxReceipt")
-        ]
-        #else
-        let receiptCandidates = [
-            bundleURL.appendingPathComponent("StoreKit/receipt"),
-            bundleURL.appendingPathComponent("StoreKit/sandboxReceipt")
-        ]
+        let hasCompileFlag = false
         #endif
-        if receiptCandidates.contains(where: { FileManager.default.fileExists(atPath: $0.path) }) {
+        return detect(
+            hasCompileFlag: hasCompileFlag,
+            bundleURL: Bundle.main.bundleURL,
+            fileExists: { FileManager.default.fileExists(atPath: $0.path) },
+            sandboxContainerID: ProcessInfo.processInfo.environment["APP_SANDBOX_CONTAINER_ID"]
+        )
+    }()
+
+    /// Flavor detection with injectable inputs, in priority order: the compile
+    /// flag when the build system managed to set it; a store receipt in the
+    /// bundle -- both App Store ("receipt") and TestFlight ("sandboxReceipt")
+    /// installs carry one (macOS keeps it under `Contents/_MASReceipt/`, iOS
+    /// under `StoreKit/`), while Developer ID and local builds have none; and
+    /// finally the app-sandbox container, because a sandboxed process cannot
+    /// use ICMP either way, so a store build whose receipt has not materialized
+    /// yet must still report the App Store flavor rather than offer methods
+    /// that cannot work.
+    static func detect(
+        hasCompileFlag: Bool,
+        bundleURL: URL,
+        fileExists: (URL) -> Bool,
+        sandboxContainerID: String?
+    ) -> BuildFlavor {
+        if hasCompileFlag {
             return .appStore
         }
-        // A sandboxed process cannot use ICMP either way (the ping helper is
-        // denied), so a store build whose receipt has not materialized yet
-        // must still report the App Store flavor rather than offer methods
-        // that cannot work.
-        if ProcessInfo.processInfo.environment["APP_SANDBOX_CONTAINER_ID"] != nil {
+        let receiptCandidates = [
+            "Contents/_MASReceipt/receipt",
+            "Contents/_MASReceipt/sandboxReceipt",
+            "StoreKit/receipt",
+            "StoreKit/sandboxReceipt"
+        ].map { bundleURL.appendingPathComponent($0) }
+        if receiptCandidates.contains(where: fileExists) {
+            return .appStore
+        }
+        if sandboxContainerID != nil {
             return .appStore
         }
         return .developerID
-        #endif
-    }()
+    }
 
     public var availableMethods: [PingMethod] {
         switch self {
