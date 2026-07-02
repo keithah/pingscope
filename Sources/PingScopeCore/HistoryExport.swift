@@ -26,24 +26,30 @@ public enum HistoryExportFormat: String, CaseIterable, Identifiable, Sendable {
 
 public enum HistoryExporter {
     public static func write(samples: [PingResult], host: HostConfig, format: HistoryExportFormat, to url: URL) throws {
-        let temporaryURL = url
-            .deletingLastPathComponent()
-            .appendingPathComponent(".\(url.lastPathComponent).tmp-\(UUID().uuidString)")
-        do {
-            try writeTemporary(samples: samples, host: host, format: format, to: temporaryURL)
-            if FileManager.default.fileExists(atPath: url.path) {
-                _ = try FileManager.default.replaceItemAt(
-                    url,
-                    withItemAt: temporaryURL,
-                    backupItemName: nil,
-                    options: [.usingNewMetadataOnly]
-                )
-            } else {
-                try FileManager.default.moveItem(at: temporaryURL, to: url)
-            }
-        } catch {
-            try? FileManager.default.removeItem(at: temporaryURL)
-            throw error
+        // The sandbox extension granted by NSSavePanel covers only the exact
+        // path the user chose, so the streaming temp file must not be a sibling
+        // of `url` -- the sandboxed App Store build is denied that create. An
+        // item-replacement directory is sandbox-legal and lives on the
+        // destination volume, which keeps the final replace/move atomic.
+        let stagingDirectory = try FileManager.default.url(
+            for: .itemReplacementDirectory,
+            in: .userDomainMask,
+            appropriateFor: url,
+            create: true
+        )
+        defer { try? FileManager.default.removeItem(at: stagingDirectory) }
+
+        let temporaryURL = stagingDirectory.appendingPathComponent(url.lastPathComponent)
+        try writeTemporary(samples: samples, host: host, format: format, to: temporaryURL)
+        if FileManager.default.fileExists(atPath: url.path) {
+            _ = try FileManager.default.replaceItemAt(
+                url,
+                withItemAt: temporaryURL,
+                backupItemName: nil,
+                options: [.usingNewMetadataOnly]
+            )
+        } else {
+            try FileManager.default.moveItem(at: temporaryURL, to: url)
         }
     }
 
@@ -116,7 +122,9 @@ public enum HistoryExporter {
     }
 
     private static func writeTemporary(samples: [PingResult], host: HostConfig, format: HistoryExportFormat, to url: URL) throws {
-        FileManager.default.createFile(atPath: url.path, contents: nil)
+        guard FileManager.default.createFile(atPath: url.path, contents: nil) else {
+            throw CocoaError(.fileWriteUnknown, userInfo: [NSFilePathErrorKey: url.path])
+        }
         let handle = try FileHandle(forWritingTo: url)
         defer { try? handle.close() }
         switch format {

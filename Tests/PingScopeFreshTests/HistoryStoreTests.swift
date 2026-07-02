@@ -372,6 +372,49 @@ final class HistoryStoreTests: XCTestCase {
         XCTAssertNil(inspectionDefaults.data(forKey: WidgetSnapshotStore.legacyKey))
     }
 
+    /// The legacy `widgetData` blob is written with an ISO-8601 date encoder, so
+    /// its only reader (the widget's fallback path) must decode with `.iso8601`.
+    /// The default strategy always throws on the Date fields, which silently
+    /// killed the widget's legacy fallback branch.
+    func testLegacyWidgetBlobRoundTripsWithISO8601Decoder() async throws {
+        let suiteName = "pingscope-widget-legacy-tests-\(UUID().uuidString)"
+        let store = WidgetSnapshotStore(suiteName: suiteName, key: "snapshot")
+        let inspectionDefaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { inspectionDefaults.removePersistentDomain(forName: suiteName) }
+        let hostID = UUID()
+        await store.save(WidgetSnapshot(
+            primaryHostID: hostID,
+            hosts: [WidgetHost(id: hostID, displayName: "H", address: "1.1.1.1", method: .https, port: 443, isPrimary: true)],
+            health: [WidgetHostHealth(hostID: hostID, status: .healthy, latencyMilliseconds: 7, consecutiveFailureCount: 0, failureReason: nil, latestResultAt: Date(timeIntervalSince1970: 6_000))],
+            recentSamples: [],
+            networkStatus: .connected,
+            generatedAt: Date(timeIntervalSince1970: 6_001)
+        ))
+
+        let raw = try XCTUnwrap(inspectionDefaults.data(forKey: WidgetSnapshotStore.legacyKey))
+        // Mirrors the widget target's WidgetData / Provider.loadLegacyData decoder.
+        struct LegacyMirror: Decodable {
+            struct Result: Decodable {
+                var hostID: UUID
+                var latencyMS: Double?
+                var isSuccess: Bool
+                var timestamp: Date
+            }
+            var results: [Result]
+            var lastUpdate: Date
+        }
+        let widgetDecoder = JSONDecoder()
+        widgetDecoder.dateDecodingStrategy = .iso8601
+
+        let decoded = try widgetDecoder.decode(LegacyMirror.self, from: raw)
+        XCTAssertEqual(decoded.lastUpdate, Date(timeIntervalSince1970: 6_001))
+        XCTAssertEqual(decoded.results.map(\.hostID), [hostID])
+        XCTAssertThrowsError(
+            try JSONDecoder().decode(LegacyMirror.self, from: raw),
+            "a default-strategy decoder must not silently pass; the widget must use .iso8601"
+        )
+    }
+
     private func temporaryHistoryURL() -> URL {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("pingscope-history-tests-\(UUID().uuidString)", isDirectory: true)
