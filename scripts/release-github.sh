@@ -144,14 +144,17 @@ else
   xcrun notarytool history --keychain-profile "${NOTARY_PROFILE}" >/dev/null
 fi
 
+# Prints the tool path, or nothing if it cannot be found. Always exits 0 so the
+# caller's diagnostic runs: under `set -e` a non-zero return from the command
+# substitution would abort the script before the "not found" message.
 find_sparkle_tool() {
   local tool_name="$1"
   local tool=""
   local env_name="SPARKLE_$(printf '%s' "${tool_name}" | tr '[:lower:]' '[:upper:]')"
   local env_value="${!env_name:-}"
   if [[ -n "${env_value}" ]]; then
-    [[ -x "${env_value}" ]] && { printf '%s' "${env_value}"; return 0; }
-    return 1
+    [[ -x "${env_value}" ]] && printf '%s' "${env_value}"
+    return 0
   fi
   for tool in \
     ".build/artifacts/sparkle/Sparkle/bin/${tool_name}" \
@@ -161,7 +164,10 @@ find_sparkle_tool() {
     [[ -x "${tool}" ]] && { printf '%s' "${tool}"; return 0; }
   done
   tool=$(find .build -path "*/SourcePackages/artifacts/sparkle/Sparkle/bin/${tool_name}" -type f -perm -111 -print -quit 2>/dev/null || true)
-  [[ -n "${tool}" && -x "${tool}" ]] && printf '%s' "${tool}"
+  if [[ -n "${tool}" && -x "${tool}" ]]; then
+    printf '%s' "${tool}"
+  fi
+  return 0
 }
 
 GENERATE_KEYS=$(find_sparkle_tool generate_keys)
@@ -228,11 +234,20 @@ fi
 git tag "${TAG}"
 git push origin "${TAG}"
 
+# appcast.sh only writes the standalone notes asset when --release-notes was
+# supplied, and it keeps that file's extension. Referencing the hard-coded .md
+# unconditionally made every release without a Markdown notes file fail after
+# the tag had already been pushed.
+RELEASE_ASSETS=("${DMG}" "${UPDATE_DIR}/appcast.xml" "${CHECKSUMS}")
+if [[ -n "${RELEASE_NOTES}" ]]; then
+  NOTES_ASSET="${UPDATE_DIR}/PingScope-v${VERSION}.${RELEASE_NOTES##*.}"
+  if [[ -f "${NOTES_ASSET}" ]]; then
+    RELEASE_ASSETS+=("${NOTES_ASSET}")
+  fi
+fi
+
 gh release create "${TAG}" \
-  "${DMG}" \
-  "${UPDATE_DIR}/appcast.xml" \
-  "${UPDATE_DIR}/PingScope-v${VERSION}.md" \
-  "${CHECKSUMS}" \
+  "${RELEASE_ASSETS[@]}" \
   --title "PingScope ${VERSION}" \
   --notes-file "${RELEASE_NOTES:-/dev/stdin}" <<EOF
 PingScope ${VERSION}
