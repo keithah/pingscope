@@ -112,6 +112,114 @@ final class ProbeBehaviorTests: XCTestCase {
 
         XCTAssertEqual(result.failureReason, .cancelled)
     }
+
+    func testProcessICMPProbeParsesRoundTripFromPingOutput() {
+        let output = """
+        PING 1.1.1.1 (1.1.1.1): 56 data bytes
+        64 bytes from 1.1.1.1: icmp_seq=0 ttl=57 time=12.345 ms
+
+        --- 1.1.1.1 ping statistics ---
+        1 packets transmitted, 1 packets received, 0.0% packet loss
+        round-trip min/avg/max/stddev = 12.345/12.345/12.345/0.000 ms
+        """
+        XCTAssertEqual(ProcessICMPProbe.parseRoundTripMilliseconds(from: output), 12.345)
+        XCTAssertEqual(ProcessICMPProbe.parseRoundTripMilliseconds(from: "a time=0.081 ms\nb time=9 ms"), 0.081)
+        XCTAssertNil(ProcessICMPProbe.parseRoundTripMilliseconds(from: "no reply here"))
+        XCTAssertNil(ProcessICMPProbe.parseRoundTripMilliseconds(from: "x time=abc ms"))
+    }
+
+    func testStarlinkProbeRejectsNonFiniteLatency() async {
+        // A non-finite Float from the dish passes `>= 0` (infinity) and would
+        // trap in Duration.milliseconds; the payload is untrusted input.
+        let probe = StarlinkProbe(statusClient: FakeStarlinkStatusClient(status: StarlinkStatus(
+            popPingLatencyMilliseconds: .infinity,
+            telemetry: StarlinkTelemetry(state: "CONNECTED")
+        )))
+
+        let result = await probe.measure(.defaultStarlinkDish)
+
+        XCTAssertNil(result.latency)
+        XCTAssertEqual(result.failureReason, .networkUnavailable)
+    }
+
+    func testNetworkProbeResolvesWhenCancelledBeforeStart() async {
+        // Cancellation delivered before connection.start() runs the onCancel
+        // handler ahead of the operation body. A never-started NWConnection
+        // emits no state update, so without an explicit resolution the
+        // continuation leaks and measure() hangs forever (deadlocking stop()).
+        let host = HostConfig(
+            displayName: "Unroutable", address: "203.0.113.1",
+            method: .tcp, port: 65_000, timeout: .seconds(5)
+        )
+        for _ in 0..<32 {
+            let task = Task { await NetworkProbe(parameters: .tcp).measure(host) }
+            task.cancel()
+            let result = await withTaskGroup(of: PingResult?.self) { group -> PingResult? in
+                group.addTask { await task.value }
+                group.addTask {
+                    try? await Task.sleep(for: .seconds(10))
+                    return nil
+                }
+                let first = await group.next() ?? nil
+                group.cancelAll()
+                return first
+            }
+            XCTAssertNotNil(result, "cancelled probe never resolved")
+            guard result != nil else { return }
+        }
+    }
+
+    func testTCPConnectionRefusedIsTerminalAndGatewayTierCountsAsReachable() async throws {
+        let port = Self.closedLoopbackPort()
+        try XCTSkipIf(port == nil, "unable to allocate a loopback port in this environment")
+        guard let port else { return }
+
+        // NWConnection parks a refused connection in .waiting; for a one-shot
+        // probe that must be terminal and carry the real reason, not .timeout.
+        let remote = HostConfig(
+            displayName: "Remote", address: "127.0.0.1", tier: .remoteService,
+            method: .tcp, port: port, timeout: .seconds(5)
+        )
+        let remoteResult = await NetworkProbe(parameters: .tcp).measure(remote)
+        XCTAssertNil(remoteResult.latency)
+        XCTAssertEqual(remoteResult.failureReason, .connectionRefused)
+
+        // A TCP RST proves the host is reachable at L3; gateway-tier hosts are
+        // probed for reachability, so a refusal there is a successful round trip.
+        let gateway = HostConfig(
+            displayName: "Default Gateway", address: "127.0.0.1", tier: .localGateway,
+            method: .tcp, port: port, timeout: .seconds(5)
+        )
+        let gatewayResult = await NetworkProbe(parameters: .tcp).measure(gateway)
+        XCTAssertNotNil(gatewayResult.latency, "a refused gateway probe should count as reachable")
+        XCTAssertNil(gatewayResult.failureReason)
+    }
+
+    /// Binds an ephemeral loopback port and immediately closes it, yielding a
+    /// port that reliably refuses connections.
+    private static func closedLoopbackPort() -> UInt16? {
+        var address = sockaddr_in()
+        address.sin_family = sa_family_t(AF_INET)
+        address.sin_port = 0
+        address.sin_addr.s_addr = inet_addr("127.0.0.1")
+        let fd = socket(AF_INET, SOCK_STREAM, 0)
+        guard fd >= 0 else { return nil }
+        defer { close(fd) }
+        var length = socklen_t(MemoryLayout<sockaddr_in>.size)
+        let bound = withUnsafeMutablePointer(to: &address) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { pointer in
+                bind(fd, pointer, socklen_t(MemoryLayout<sockaddr_in>.size))
+            }
+        }
+        guard bound == 0 else { return nil }
+        _ = withUnsafeMutablePointer(to: &address) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { pointer in
+                getsockname(fd, pointer, &length)
+            }
+        }
+        let port = UInt16(bigEndian: address.sin_port)
+        return port == 0 ? nil : port
+    }
 }
 
 private actor CancellableSlowProbe: PingProbe {

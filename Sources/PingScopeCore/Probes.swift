@@ -102,6 +102,13 @@ public struct NetworkProbe: PingProbe {
 
         let nwParameters: NWParameters = parameters == .tcp ? .tcp : .udp
         let connection = NWConnection(host: NWEndpoint.Host(host.address), port: nwPort, using: nwParameters)
+        // Cancellation can be delivered before `connection.start()` runs (the
+        // onCancel handler fires immediately, ahead of the operation block, when
+        // the task is already cancelled). A never-started connection never emits
+        // a state update, so relying on the state handler alone would leak the
+        // continuation and hang the scheduler's stop(). The relay guarantees the
+        // continuation is resolved no matter when cancellation lands.
+        let cancellationRelay = ProbeCancellationRelay()
 
         return await withTaskCancellationHandler {
             await withCheckedContinuation { continuation in
@@ -111,6 +118,24 @@ public struct NetworkProbe: PingProbe {
                     guard gate.claim() else { return }
                     connection.cancel()
                     continuation.resume(returning: result.withHostMetadata(from: host))
+                }
+
+                let finishTerminalError: @Sendable (NWError) -> Void = { error in
+                    let reason = error.failureReason
+                    // A TCP RST proves the host is reachable at L3. Gateway-tier
+                    // hosts (the auto-detected default gateway in particular) are
+                    // probed for reachability, not for a listening service, and
+                    // most routers do not serve the probed port -- so a refusal
+                    // there is a successful round trip, not an outage.
+                    if reason == .connectionRefused, parameters == .tcp, host.effectiveNetworkTier == .localGateway {
+                        finish(.success(
+                            hostID: host.id,
+                            latency: start.duration(to: .now),
+                            metadata: ProbeMetadata(note: "TCP connection refused; host reachable")
+                        ))
+                    } else {
+                        finish(.failure(hostID: host.id, reason: reason, metadata: ProbeMetadata(note: error.localizedDescription)))
+                    }
                 }
 
                 connection.stateUpdateHandler = { state in
@@ -138,8 +163,14 @@ public struct NetworkProbe: PingProbe {
                                 }
                             })
                         }
+                    case .waiting(let error):
+                        // NWConnection parks refused/unreachable connections in
+                        // .waiting and retries on network changes. For a one-shot
+                        // latency probe that is a terminal answer; letting it sit
+                        // burns the full timeout and misreports the reason.
+                        finishTerminalError(error)
                     case .failed(let error):
-                        finish(.failure(hostID: host.id, reason: error.failureReason, metadata: ProbeMetadata(note: error.localizedDescription)))
+                        finishTerminalError(error)
                     case .cancelled:
                         finish(.failure(hostID: host.id, reason: .cancelled))
                     default:
@@ -148,10 +179,46 @@ public struct NetworkProbe: PingProbe {
                 }
 
                 connection.start(queue: .global(qos: .utility))
+                // Installed after start() so a pre-start cancellation never calls
+                // start() on an already-cancelled connection.
+                cancellationRelay.install {
+                    finish(.failure(hostID: host.id, reason: .cancelled))
+                }
             }
         } onCancel: {
-            connection.cancel()
+            cancellationRelay.cancel()
         }
+    }
+}
+
+/// Bridges `withTaskCancellationHandler`'s `onCancel` (which may fire before,
+/// during, or after the operation body) to a handler that is only known once the
+/// body has set the probe up. Whichever of `install`/`cancel` happens second
+/// invokes the handler exactly once.
+final class ProbeCancellationRelay: @unchecked Sendable {
+    private let lock = NSLock()
+    private var handler: (@Sendable () -> Void)?
+    private var isCancelled = false
+
+    func install(_ newHandler: @escaping @Sendable () -> Void) {
+        lock.lock()
+        let fireImmediately = isCancelled
+        if !fireImmediately {
+            handler = newHandler
+        }
+        lock.unlock()
+        if fireImmediately {
+            newHandler()
+        }
+    }
+
+    func cancel() {
+        lock.lock()
+        isCancelled = true
+        let installed = handler
+        handler = nil
+        lock.unlock()
+        installed?()
     }
 }
 
@@ -314,6 +381,9 @@ public struct StarlinkProbe: PingProbe {
             let metadata = ProbeMetadata(note: status.telemetry.noteSummary, starlink: status.telemetry)
             guard status.isConnected,
                   let latencyMilliseconds = status.popPingLatencyMilliseconds,
+                  // Non-finite values pass `>= 0` (infinity) and would trap in
+                  // Duration.milliseconds; the dish payload is untrusted input.
+                  latencyMilliseconds.isFinite,
                   latencyMilliseconds >= 0 else {
                 return .failure(
                     hostID: host.id,
@@ -362,10 +432,21 @@ public struct ProcessICMPProbe: PingProbe {
         do {
             let result = try await AsyncProcess.run(
                 executablePath: "/sbin/ping",
-                arguments: ["-c", "1", "-W", "\(max(1, Int(host.timeout.seconds.rounded())))", host.address],
+                // macOS `ping -W` is milliseconds, not seconds.
+                arguments: ["-c", "1", "-W", "\(max(1, Int(host.timeout.milliseconds.rounded())))", host.address],
                 timeout: host.timeout + .seconds(1)
             )
             if result.terminationStatus == 0 {
+                let output = String(data: result.standardOutput, encoding: .utf8) ?? ""
+                if let milliseconds = Self.parseRoundTripMilliseconds(from: output) {
+                    return .success(
+                        hostID: host.id,
+                        latency: .milliseconds(milliseconds),
+                        metadata: ProbeMetadata(note: "ICMP echo reply")
+                    ).withHostMetadata(from: host)
+                }
+                // ping exited 0 but the reply line was unparseable; the process
+                // lifetime is the only (over-)estimate left.
                 return .success(hostID: host.id, latency: start.duration(to: .now)).withHostMetadata(from: host)
             }
             return .failure(hostID: host.id, reason: .unknown).withHostMetadata(from: host)
@@ -374,10 +455,36 @@ public struct ProcessICMPProbe: PingProbe {
         }
         #endif
     }
+
+    /// Extracts the reply RTT from `ping` stdout (`... time=12.345 ms`).
+    ///
+    /// The child process's wall-clock lifetime is dominated by fork/exec, DNS
+    /// resolution, and teardown, so it is not usable as a latency measurement.
+    public static func parseRoundTripMilliseconds(from output: String) -> Double? {
+        for line in output.split(separator: "\n") {
+            guard let range = line.range(of: "time=") else { continue }
+            let value = line[range.upperBound...].prefix { $0.isNumber || $0 == "." }
+            guard let milliseconds = Double(value), milliseconds.isFinite, milliseconds >= 0 else { continue }
+            return milliseconds
+        }
+        return nil
+    }
 }
 
 private extension NWError {
     var failureReason: FailureReason {
+        // Prefer the typed error over the localized (and locale-dependent) text.
+        if case .posix(let code) = self {
+            switch code {
+            case .ECONNREFUSED: return .connectionRefused
+            case .ETIMEDOUT: return .timeout
+            case .EHOSTUNREACH, .ENETUNREACH, .ENETDOWN: return .networkUnavailable
+            default: break
+            }
+        }
+        if case .dns = self {
+            return .dnsFailure
+        }
         let text = localizedDescription.lowercased()
         if text.contains("dns") || text.contains("name") {
             return .dnsFailure
