@@ -58,7 +58,9 @@ struct LatencyGraph: View {
             ZStack {
                 graphCanvas(graphData: graphData)
 
-                if !graphData.hasLatencyData {
+                // Only claim the range is empty when it truly is. A window full
+                // of failures still has samples -- they render as red marks.
+                if graphData.isEmpty {
                     Text("No samples in range")
                         .font(.callout)
                         .foregroundStyle(.secondary)
@@ -75,7 +77,10 @@ struct LatencyGraph: View {
     private func graphCanvas(graphData: LatencyGraphData) -> some View {
         GeometryReader { proxy in
             Canvas { context, size in
-                guard graphData.hasDrawableLine else {
+                // Bail out only when there is nothing at all to plot. During a
+                // total outage every sample is a failure: the line stroke is a
+                // no-op but the per-point loop must still stamp the red marks.
+                guard !graphData.isEmpty else {
                     let rect = CGRect(origin: .zero, size: size)
                     context.stroke(Path(roundedRect: rect, cornerRadius: 6), with: .color(.secondary.opacity(0.25)))
                     return
@@ -157,7 +162,7 @@ struct MultiHostLatencyGraph: View {
             ZStack(alignment: .bottomLeading) {
                 graphCanvas(graphData: graphData)
 
-                if !graphData.hasLatencyData {
+                if graphData.isEmpty {
                     Text("No samples in range")
                         .font(.callout)
                         .foregroundStyle(.secondary)
@@ -288,12 +293,12 @@ private struct LatencyGraphData {
         scale = LatencyGraphScale(latencies: latencies)
     }
 
-    var hasLatencyData: Bool {
-        latencyCount > 0
+    var isEmpty: Bool {
+        points.isEmpty
     }
 
-    var hasDrawableLine: Bool {
-        latencyCount > 1
+    var hasLatencyData: Bool {
+        latencyCount > 0
     }
 }
 
@@ -322,13 +327,20 @@ private struct MultiHostLatencyGraphData {
                 }
                 points.append(LatencyGraphPoint(index: index, latencyMilliseconds: latency))
             }
-            if points.count > 1, hostLatencyCount > 1 {
+            // Fully-failed series must still be drawn: their line is a no-op but
+            // the primary host's failure marks are exactly what an outage looks
+            // like. Only a series with no samples at all has nothing to render.
+            if !points.isEmpty {
                 drawableSeries.append(DrawableHostLatencyGraphSeries(source: hostSeries, points: points))
             }
         }
         self.drawableSeries = drawableSeries
         self.latencyCount = latencies.count
         scale = LatencyGraphScale(latencies: latencies)
+    }
+
+    var isEmpty: Bool {
+        drawableSeries.isEmpty
     }
 
     var hasLatencyData: Bool {
