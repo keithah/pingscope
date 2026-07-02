@@ -39,6 +39,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var instanceLockFD: Int32 = -1
     private var wakeObserver: NSObjectProtocol?
     private var sleepObserver: NSObjectProtocol?
+    private var screenObserver: NSObjectProtocol?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         Self.shared = self
@@ -46,6 +47,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             NSApp.terminate(nil)
             return
         }
+        DebugLog.write("launch flavor=\(BuildFlavor.current) sandboxed=\(ProcessInfo.processInfo.environment["APP_SANDBOX_CONTAINER_ID"] != nil)")
         NSApp.setActivationPolicy(.accessory)
         installStatusItem()
         model.start()
@@ -124,8 +126,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         model.overlayVisible = true
         applyOverlayBehavior()
+        constrainOverlayToVisibleScreen()
         overlayController?.showWindow(nil)
         DebugLog.write("overlay shown frame=\(String(describing: overlayController?.window?.frame))")
+    }
+
+    /// A borderless window is exempt from AppKit's automatic frame
+    /// constraining, so a persisted overlay frame can be entirely off-screen
+    /// after a display-configuration change (external monitor unplugged,
+    /// clamshell, resolution change). The overlay then reads as enabled in
+    /// Settings while nothing is visible anywhere. Clamp it back onto a
+    /// screen before showing. The geometry lives in
+    /// `clampedOverlayFrame(_:into:minVisible:)` so it is unit-testable.
+    func constrainOverlayToVisibleScreen() {
+        guard let window = overlayController?.window else { return }
+        var screens = NSScreen.screens.map(\.visibleFrame)
+        if let preferred = (window.screen ?? NSScreen.main)?.visibleFrame {
+            screens.removeAll { $0 == preferred }
+            screens.insert(preferred, at: 0)
+        }
+        guard let frame = clampedOverlayFrame(
+            window.frame,
+            into: screens,
+            minVisible: CGSize(width: 60, height: 24)
+        ) else { return }
+        DebugLog.write("overlay frame off-screen; constrained to \(frame)")
+        window.setFrame(frame, display: true)
+        model.overlayFrame = frame
+        UserDefaults.standard.overlayFrame = frame
     }
 
     func hideOverlay() {
@@ -375,6 +403,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func installPowerObservers() {
         let center = NSWorkspace.shared.notificationCenter
         let model = model
+        screenObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.didChangeScreenParametersNotification,
+            object: nil,
+            queue: .main
+        ) { _ in
+            Task { @MainActor in
+                guard let delegate = AppDelegate.shared, delegate.model.overlayVisible else { return }
+                delegate.constrainOverlayToVisibleScreen()
+            }
+        }
         wakeObserver = center.addObserver(
             forName: NSWorkspace.didWakeNotification,
             object: nil,
@@ -402,6 +440,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         if let sleepObserver {
             center.removeObserver(sleepObserver)
+        }
+        if let screenObserver {
+            NotificationCenter.default.removeObserver(screenObserver)
         }
     }
 

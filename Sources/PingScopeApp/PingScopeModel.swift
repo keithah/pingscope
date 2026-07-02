@@ -100,7 +100,13 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
             if widgetsEnabled {
                 publishWidgetSnapshot(snapshot)
             } else {
+                // Remove what was already written to the shared app-group
+                // container, so opting out stops exposing data to the widget
+                // rather than only stopping future publishes.
+                let store = widgetSnapshotStore ?? WidgetSnapshotStore()
                 widgetSnapshotStore = nil
+                lastPublishedWidgetSnapshot = nil
+                Task { await store.delete() }
             }
         }
     }
@@ -129,6 +135,7 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
     private let pathMonitorQueue = DispatchQueue(label: "com.pingscope.network-path")
     private var widgetSnapshotStore: WidgetSnapshotStore?
     private var snapshotTask: Task<Void, Never>?
+    private var alertTask: Task<Void, Never>?
     private var networkTask: Task<Void, Never>?
     private var endpointRefreshTask: Task<Void, Never>?
     private var historyTask: Task<Void, Never>?
@@ -308,13 +315,25 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
                     if let state = self?.menuBarState {
                         self?.onMenuStateChanged?(state)
                     }
-                    self?.deliverAlerts(snapshot.alerts, hosts: snapshot.hosts)
                     self?.evaluateInternetLoss(from: snapshot)
                     self?.ensureLocalNetworkProbesForSelectedLocalHost(snapshot)
                     self?.refreshVisibleHistoryIfNeeded()
                     if self?.widgetsEnabled == true {
                         self?.publishWidgetSnapshot(snapshot)
                     }
+                }
+            }
+        }
+        // Alerts arrive on their own non-conflating stream: the snapshot stream
+        // above deliberately drops intermediate states when the main actor is
+        // busy, which would silently and permanently lose one-shot alerts.
+        alertTask?.cancel()
+        let alertStream = Task { await runtime.alerts() }
+        alertTask = Task { [weak self] in
+            let events = await alertStream.value
+            for await event in events {
+                await MainActor.run {
+                    self?.deliverAlerts(event.decisions, hosts: event.hosts)
                 }
             }
         }
@@ -327,6 +346,7 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
 
     func stop() {
         snapshotTask?.cancel()
+        alertTask?.cancel()
         networkTask?.cancel()
         endpointRefreshTask?.cancel()
         historyTask?.cancel()
@@ -674,7 +694,10 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
     }
 
     private func persistOverlayFrame(_ notification: Notification) {
-        guard let window = notification.object as? NSWindow else { return }
+        // The model may become the delegate of other windows; only the overlay
+        // window's frame may be persisted as the overlay frame, or an unrelated
+        // window's move teleports the overlay (potentially off-screen).
+        guard let window = notification.object as? NSWindow, window is OverlayWindow else { return }
         overlayFrame = window.frame
         UserDefaults.standard.overlayFrame = window.frame
     }

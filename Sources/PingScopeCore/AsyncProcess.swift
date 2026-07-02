@@ -49,7 +49,7 @@ public enum AsyncProcess {
                 standardError: await errorData
             )
         } onCancel: {
-            box.terminate()
+            box.terminateDetached()
         }
 #else
         throw AsyncProcessError.unavailable
@@ -69,6 +69,17 @@ private final class ProcessBox: @unchecked Sendable {
         terminateChildProcesses()
         if process.isRunning {
             process.terminate()
+        }
+    }
+
+    /// `terminate()` forks `/usr/bin/pkill` and blocks in `waitUntilExit()`.
+    /// Task cancellation handlers run synchronously on whatever thread called
+    /// `cancel()` -- frequently the main actor -- so from `onCancel` the kill
+    /// must be hopped off that thread. The awaiting caller still observes the
+    /// termination via the process's terminationHandler.
+    func terminateDetached() {
+        Task.detached(priority: .utility) { [self] in
+            terminate()
         }
     }
 
@@ -112,7 +123,7 @@ private extension Process {
                 }
             }
         } onCancel: {
-            box.terminate()
+            box.terminateDetached()
         }
     }
 
@@ -132,8 +143,7 @@ private extension Process {
                 }
             }
         } onCancel: {
-            let box = ProcessBox(self)
-            box.terminate()
+            ProcessBox(self).terminateDetached()
         }
     }
 }

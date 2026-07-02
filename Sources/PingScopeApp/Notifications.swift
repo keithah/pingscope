@@ -25,6 +25,9 @@ enum NotificationPermissionState: String {
 }
 
 final class MacNotificationDispatcher: NSObject, UNUserNotificationCenterDelegate, @unchecked Sendable {
+    // The dispatcher's nonisolated async methods run concurrently; `center` is
+    // the only mutable state, so the lock is what makes @unchecked Sendable true.
+    private let centerLock = NSLock()
     private var center: UNUserNotificationCenter?
     private let logger: (@Sendable (String) -> Void)?
 
@@ -132,6 +135,8 @@ final class MacNotificationDispatcher: NSObject, UNUserNotificationCenterDelegat
     }
 
     private func notificationCenterIfAvailable() -> UNUserNotificationCenter? {
+        centerLock.lock()
+        defer { centerLock.unlock() }
         if let center {
             return center
         }

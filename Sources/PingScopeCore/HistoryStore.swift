@@ -110,30 +110,45 @@ public actor SQLiteHistoryStore: PingHistoryStore {
         // NOMUTEX is safe because this handle is confined to the SQLiteHistoryStore actor.
         // Do not share connection.db across threads without restoring SQLite serialization.
         guard sqlite3_open_v2(url.path, &opened, SQLITE_OPEN_CREATE | SQLITE_OPEN_READWRITE | SQLITE_OPEN_NOMUTEX, nil) == SQLITE_OK,
-              let opened else {
-            throw SQLiteHistoryError.openFailed(message: opened.map(Self.errorMessage) ?? "unable to open database")
+              let handle = opened else {
+            // SQLite returns a handle even on failure so the error message can be
+            // read; it must still be closed or every failed open leaks a connection.
+            let message = opened.map(Self.errorMessage) ?? "unable to open database"
+            if let opened {
+                sqlite3_close(opened)
+            }
+            throw SQLiteHistoryError.openFailed(message: message)
         }
-        connection.db = opened
-        sqlite3_busy_timeout(opened, 2_000)
-        try execute("PRAGMA journal_mode=WAL;")
-        try execute("PRAGMA synchronous=NORMAL;")
-        try execute("""
-        CREATE TABLE IF NOT EXISTS ping_samples (
-            id TEXT PRIMARY KEY,
-            host_id TEXT NOT NULL,
-            address TEXT NOT NULL,
-            method TEXT NOT NULL,
-            port INTEGER,
-            timestamp REAL NOT NULL,
-            latency_ms REAL,
-            failure_reason TEXT,
-            metadata_note TEXT,
-            metadata_json TEXT
-        );
-        """)
-        try addColumnIfNeeded(table: "ping_samples", column: "metadata_json", definition: "TEXT")
-        try execute("CREATE INDEX IF NOT EXISTS ping_samples_host_time ON ping_samples(host_id, timestamp);")
-        try execute("CREATE INDEX IF NOT EXISTS ping_samples_timestamp ON ping_samples(timestamp);")
+        connection.db = handle
+        do {
+            sqlite3_busy_timeout(handle, 2_000)
+            try execute("PRAGMA journal_mode=WAL;")
+            try execute("PRAGMA synchronous=NORMAL;")
+            try execute("""
+            CREATE TABLE IF NOT EXISTS ping_samples (
+                id TEXT PRIMARY KEY,
+                host_id TEXT NOT NULL,
+                address TEXT NOT NULL,
+                method TEXT NOT NULL,
+                port INTEGER,
+                timestamp REAL NOT NULL,
+                latency_ms REAL,
+                failure_reason TEXT,
+                metadata_note TEXT,
+                metadata_json TEXT
+            );
+            """)
+            try addColumnIfNeeded(table: "ping_samples", column: "metadata_json", definition: "TEXT")
+            try execute("CREATE INDEX IF NOT EXISTS ping_samples_host_time ON ping_samples(host_id, timestamp);")
+            try execute("CREATE INDEX IF NOT EXISTS ping_samples_timestamp ON ping_samples(timestamp);")
+        } catch {
+            // Never cache a half-initialized connection: openIfNeeded no-ops once
+            // connection.db is set, which would make withSQLiteRetry retry against
+            // a schema-less handle forever instead of reopening.
+            sqlite3_close(handle)
+            connection.db = nil
+            throw error
+        }
     }
 
     private func shouldPrune(at timestamp: Date) -> Bool {

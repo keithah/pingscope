@@ -205,6 +205,24 @@ final class LiveMonitorSessionControllerTests: XCTestCase {
         XCTAssertEqual(state.selectedHost.id, hosts[0].id)
     }
 
+    func testIOSHostStoreLeavesUndecodableHostsBlobIntact() {
+        let suiteName = "PingScopeIOSHostStoreTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        // A blob this build cannot decode (written by a newer app version, or
+        // transiently corrupt). Loading must fall back to defaults without
+        // overwriting it: replacing the stored hosts would permanently orphan
+        // every history row keyed by their IDs, even after upgrading back.
+        let undecodable = Data("not host json".utf8)
+        defaults.set(undecodable, forKey: "PingScope.iOS.hosts")
+        let store = PingScopeIOSHostStore(defaults: defaults)
+
+        let state = store.load()
+
+        XCTAssertEqual(state.hosts, PingScopeIOSHostStore.defaultHosts)
+        XCTAssertEqual(defaults.data(forKey: "PingScope.iOS.hosts"), undecodable)
+    }
+
     func testIOSHostDraftBuildsValidatedHostFromEditableFields() {
         let host = HostConfig(
             id: UUID(),
@@ -303,12 +321,70 @@ final class LiveMonitorSessionControllerTests: XCTestCase {
             await cleanup.record()
         }
         await client.expireMostRecent()
-        try? await Task.sleep(for: .milliseconds(20))
+        // The expiration handler only spawns a Task; wait for the cleanup to
+        // actually run rather than racing it against a wall-clock sleep.
+        await cleanup.waitForRecord()
         await runtime.end()
 
         let cleanupCount = await cleanup.countSnapshot()
         let endedIDs = await client.endedIDsSnapshot()
         XCTAssertEqual(cleanupCount, 1)
+        XCTAssertEqual(endedIDs, [LiveMonitorBackgroundTaskID(rawValue: 1)])
+    }
+
+    func testBackgroundRuntimeExpirationRunsCleanupBeforeEndingTask() async {
+        let client = RecordingBackgroundTaskClient()
+        let runtime = LiveMonitorBackgroundRuntime(client: client)
+        let cleanup = ExpirationCleanupRecorder()
+        let endsSeenByCleanup = ExpirationObservationBox()
+
+        await runtime.begin {
+            // Capture whether the OS task had already been ended when the
+            // cleanup ran: ending first frees iOS to suspend the process
+            // before the history flush and Live Activity end have happened.
+            let ended = await client.endedIDsSnapshot()
+            await endsSeenByCleanup.set(ended)
+            await cleanup.record()
+        }
+        await client.expireMostRecent()
+        await cleanup.waitForRecord()
+
+        // The task must still end promptly once the cleanup finishes.
+        var endedIDs = await client.endedIDsSnapshot()
+        var attempts = 0
+        while endedIDs.isEmpty, attempts < 200 {
+            attempts += 1
+            try? await Task.sleep(for: .milliseconds(10))
+            endedIDs = await client.endedIDsSnapshot()
+        }
+
+        let observed = await endsSeenByCleanup.get()
+        XCTAssertEqual(observed, [], "cleanup must run while the background task is still alive")
+        XCTAssertEqual(endedIDs, [LiveMonitorBackgroundTaskID(rawValue: 1)])
+    }
+
+    func testBackgroundRuntimeExpirationEndsTaskEvenWhenCleanupStalls() async {
+        let client = RecordingBackgroundTaskClient()
+        let runtime = LiveMonitorBackgroundRuntime(
+            client: client,
+            expirationCleanupDeadline: .milliseconds(20)
+        )
+
+        await runtime.begin {
+            // A cleanup stuck on I/O must not hold the background task past the
+            // deadline; overrunning the watchdog grace period kills the process.
+            try? await Task.sleep(for: .seconds(60))
+        }
+        await client.expireMostRecent()
+
+        var endedIDs = await client.endedIDsSnapshot()
+        var attempts = 0
+        while endedIDs.isEmpty, attempts < 200 {
+            attempts += 1
+            try? await Task.sleep(for: .milliseconds(10))
+            endedIDs = await client.endedIDsSnapshot()
+        }
+
         XCTAssertEqual(endedIDs, [LiveMonitorBackgroundTaskID(rawValue: 1)])
     }
 
@@ -407,12 +483,35 @@ private actor RecordingBackgroundTaskClient: LiveMonitorBackgroundTaskClient {
 
 private actor ExpirationCleanupRecorder {
     private(set) var count = 0
+    private var waiters: [CheckedContinuation<Void, Never>] = []
 
     func record() {
         count += 1
+        waiters.forEach { $0.resume() }
+        waiters.removeAll()
+    }
+
+    func waitForRecord() async {
+        while count == 0 {
+            await withCheckedContinuation { continuation in
+                waiters.append(continuation)
+            }
+        }
     }
 
     func countSnapshot() -> Int {
         count
+    }
+}
+
+private actor ExpirationObservationBox {
+    private var value: [LiveMonitorBackgroundTaskID]?
+
+    func set(_ newValue: [LiveMonitorBackgroundTaskID]) {
+        value = newValue
+    }
+
+    func get() -> [LiveMonitorBackgroundTaskID]? {
+        value
     }
 }

@@ -253,7 +253,13 @@ public actor MeasurementScheduler {
         lastFailureLogByHost.removeAll()
         let runGeneration = generation
 
-        let stream = AsyncStream<PingResult>(bufferingPolicy: .bufferingNewest(1)) { streamContinuation in
+        // Deep but bounded: multiple hosts probe concurrently and the runtime
+        // consumes results serially, so `bufferingNewest(1)` silently dropped
+        // results (skewing loss statistics and delaying down-transition
+        // detection). Fully unbounded is the other failure mode -- a consumer
+        // stalled on slow history writes would accumulate results without limit
+        // over a long unattended session. 1024 absorbs any realistic burst.
+        let stream = AsyncStream<PingResult>(bufferingPolicy: .bufferingNewest(1024)) { streamContinuation in
             self.continuation = streamContinuation
             streamContinuation.onTermination = { [weak self] _ in
                 Task { await self?.stop(generation: runGeneration) }
@@ -350,6 +356,9 @@ public actor PingRuntime {
     private var streamTask: Task<Void, Never>?
     private var continuation: AsyncStream<RuntimeSnapshot>.Continuation?
     private var continuationToken: UUID?
+    private var alertContinuation: AsyncStream<RuntimeAlertEvent>.Continuation?
+    private var alertContinuationToken: UUID?
+    private var pendingAlertEvents: [RuntimeAlertEvent] = []
     private var cachedHosts: [HostConfig] = []
     private var hostByID: [UUID: HostConfig] = [:]
     private var cachedPrimaryHostID: UUID?
@@ -369,16 +378,46 @@ public actor PingRuntime {
         self.alertEngine = AlertDecisionEngine(rules: notificationRules)
     }
 
+    /// Latest-state stream. Deliberately conflating (`bufferingNewest(1)`): a slow
+    /// consumer should skip to the newest state, not replay stale intermediates.
+    /// One-shot events must never ride this stream -- use ``alerts()``.
     public func snapshots() async -> AsyncStream<RuntimeSnapshot> {
         await refreshHostCache()
         let token = UUID()
         return AsyncStream(bufferingPolicy: .bufferingNewest(1)) { continuation in
+            // Finish a superseded subscriber's stream so its `for await` loop
+            // ends instead of hanging on an orphaned continuation forever.
+            self.continuation?.finish()
             self.continuation = continuation
             self.continuationToken = token
             continuation.onTermination = { [weak self] _ in
                 Task { await self?.clearContinuation(token: token) }
             }
             self.publishSnapshot()
+        }
+    }
+
+    /// One-shot alert events. Unbounded: unlike snapshots, an alert dropped by a
+    /// conflating buffer is lost permanently (the decision engine has already
+    /// committed its cooldown and edge-transition state by the time it is yielded).
+    /// Alerts produced before any subscriber attached are held and replayed to
+    /// the next subscriber, so an outage present at launch is never lost to the
+    /// registration race with the scheduler's first results.
+    public func alerts() -> AsyncStream<RuntimeAlertEvent> {
+        let token = UUID()
+        return AsyncStream(bufferingPolicy: .unbounded) { continuation in
+            // Finish a superseded subscriber's stream so its `for await` loop
+            // ends instead of hanging on an orphaned continuation forever.
+            self.alertContinuation?.finish()
+            self.alertContinuation = continuation
+            self.alertContinuationToken = token
+            continuation.onTermination = { [weak self] _ in
+                Task { await self?.clearAlertContinuation(token: token) }
+            }
+            for event in self.pendingAlertEvents {
+                continuation.yield(event)
+            }
+            self.pendingAlertEvents.removeAll()
         }
     }
 
@@ -405,6 +444,9 @@ public actor PingRuntime {
         continuation?.finish()
         continuation = nil
         continuationToken = nil
+        alertContinuation?.finish()
+        alertContinuation = nil
+        alertContinuationToken = nil
     }
 
     public func stopMeasurements() async {
@@ -426,19 +468,45 @@ public actor PingRuntime {
         samplesByHost[result.hostID, default: SampleSeries(hostID: result.hostID)].append(result)
         await historyWriter?.append(result)
 
-        let alerts: [AlertDecision]
-        if host?.notifications == .muted {
-            alerts = []
-        } else {
+        if host?.notifications != .muted {
+            var alerts: [AlertDecision] = []
+            // Commit the diagnosis engine's cooldown/signature state only once we
+            // know the alert will actually be delivered; otherwise a suppressed
+            // (all-muted) diagnosis would burn the cooldown of a later real one.
             let diagnosis = networkDiagnoser.diagnose(hosts: cachedHosts, healthByHost: healthByHost)
-            if let diagnosisAlert = alertEngine.evaluateDiagnosis(diagnosis, at: result.timestamp),
-               !shouldSuppressDiagnosisAlert(diagnosisAlert) {
-                alerts = [diagnosisAlert]
-            } else {
-                alerts = alertEngine.evaluate(result: result, previousStatus: previousStatus, currentStatus: health.status).map { [$0] } ?? []
+            var diagnosisAlert: AlertDecision?
+            if let candidate = alertEngine.diagnosisAlertCandidate(diagnosis, at: result.timestamp),
+               !shouldSuppressDiagnosisAlert(candidate.decision) {
+                alertEngine.commit(candidate)
+                diagnosisAlert = candidate.decision
             }
+            // Always evaluate the per-host transition so edge detection and the
+            // high-latency streak counters are never perturbed by unrelated
+            // diagnosis activity. A same-tick diagnosis alert already tells the
+            // user something went down, so only the redundant hostDown is elided;
+            // recovery and high-latency transitions are never swallowed.
+            let transitionCandidate = alertEngine.transitionAlertCandidate(
+                result: result,
+                previousStatus: previousStatus,
+                currentStatus: health.status
+            )
+            if let diagnosisAlert {
+                alerts.append(diagnosisAlert)
+            }
+            if let transitionCandidate {
+                if case .hostDown = transitionCandidate.decision, diagnosisAlert != nil {
+                    // Superseded by the root-cause diagnosis for this tick.
+                    // Deliberately not committed: an elided alert must not burn
+                    // the per-host cooldown, or a second outage inside the
+                    // window would produce no notification at all.
+                } else {
+                    alertEngine.commit(transitionCandidate)
+                    alerts.append(transitionCandidate.decision)
+                }
+            }
+            publishAlerts(alerts)
         }
-        publishSnapshot(alerts: alerts)
+        publishSnapshot()
     }
 
     public func upsertHost(_ host: HostConfig) async {
@@ -526,20 +594,42 @@ public actor PingRuntime {
         cachedPrimaryHostID = await hostStore.primaryHostID()
     }
 
-    private func publishSnapshot(alerts: [AlertDecision] = []) {
+    private func publishSnapshot() {
         continuation?.yield(RuntimeSnapshot(
             hosts: cachedHosts,
             primaryHostID: cachedPrimaryHostID,
             healthByHost: healthByHost,
-            samplesByHost: samplesByHost,
-            alerts: alerts
+            samplesByHost: samplesByHost
         ))
+    }
+
+    private func publishAlerts(_ decisions: [AlertDecision]) {
+        guard !decisions.isEmpty else { return }
+        let event = RuntimeAlertEvent(decisions: decisions, hosts: cachedHosts)
+        guard let alertContinuation else {
+            // The decision engine has already committed its cooldown and edge
+            // state, so an alert with no subscriber yet would be permanently
+            // lost. Hold it for the next subscriber; capped so a runtime nobody
+            // ever subscribes to cannot grow without bound.
+            pendingAlertEvents.append(event)
+            if pendingAlertEvents.count > 64 {
+                pendingAlertEvents.removeFirst()
+            }
+            return
+        }
+        alertContinuation.yield(event)
     }
 
     private func clearContinuation(token: UUID) {
         guard continuationToken == token else { return }
         continuation = nil
         continuationToken = nil
+    }
+
+    private func clearAlertContinuation(token: UUID) {
+        guard alertContinuationToken == token else { return }
+        alertContinuation = nil
+        alertContinuationToken = nil
     }
 
     private func shouldSuppressDiagnosisAlert(_ alert: AlertDecision) -> Bool {
@@ -671,25 +761,35 @@ private actor HistoryWriteBuffer {
     }
 }
 
+/// A batch of alert decisions produced by a single ingested result, together with
+/// the host list needed to render them. Delivered on ``PingRuntime/alerts()``, a
+/// non-conflating stream, so no decision is ever silently dropped.
+public struct RuntimeAlertEvent: Sendable, Equatable {
+    public let decisions: [AlertDecision]
+    public let hosts: [HostConfig]
+
+    public init(decisions: [AlertDecision], hosts: [HostConfig]) {
+        self.decisions = decisions
+        self.hosts = hosts
+    }
+}
+
 public struct RuntimeSnapshot: Sendable, Equatable {
     public var hosts: [HostConfig]
     public var primaryHostID: UUID?
     public var healthByHost: [UUID: HostHealth]
     public var samplesByHost: [UUID: SampleSeries]
-    public var alerts: [AlertDecision]
 
     public init(
         hosts: [HostConfig],
         primaryHostID: UUID?,
         healthByHost: [UUID: HostHealth],
-        samplesByHost: [UUID: SampleSeries],
-        alerts: [AlertDecision] = []
+        samplesByHost: [UUID: SampleSeries]
     ) {
         self.hosts = hosts
         self.primaryHostID = primaryHostID
         self.healthByHost = healthByHost
         self.samplesByHost = samplesByHost
-        self.alerts = alerts
     }
 
     public var primaryHost: HostConfig? {
