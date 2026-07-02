@@ -317,12 +317,16 @@ private struct ProtobufReader {
         guard offset < data.count else {
             return nil
         }
+        // These bytes arrive over plain TCP from a user-configured address, so a
+        // malformed or hostile payload must throw, never trap. Validate every
+        // varint before narrowing it to Int or using it in index arithmetic.
         let key = try readVarint()
-        let number = Int(key >> 3)
+        let rawNumber = key >> 3
         let wireType = Int(key & 0x7)
-        guard number > 0 else {
+        guard rawNumber > 0, rawNumber <= UInt64(Int32.max) else {
             throw StarlinkStatusFetchError.invalidStatus
         }
+        let number = Int(rawNumber)
 
         switch wireType {
         case 0:
@@ -330,10 +334,14 @@ private struct ProtobufReader {
         case 1:
             return ProtobufField(number: number, value: .fixed64(try readFixed64()))
         case 2:
-            let length = Int(try readVarint())
-            guard length >= 0, offset + length <= data.count else {
+            let rawLength = try readVarint()
+            // Bounds-check against the remaining bytes before converting: a
+            // length above Int.max traps in Int(_:), and `offset + length`
+            // overflow-traps before a post-hoc guard could reject it.
+            guard rawLength <= UInt64(data.count - offset) else {
                 throw StarlinkStatusFetchError.invalidStatus
             }
+            let length = Int(rawLength)
             let start = data.index(data.startIndex, offsetBy: offset)
             let end = data.index(start, offsetBy: length)
             let value = Data(data[start..<end])
