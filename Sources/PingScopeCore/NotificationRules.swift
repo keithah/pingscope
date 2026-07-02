@@ -247,11 +247,44 @@ public struct AlertDecisionEngine: Sendable {
         self.rules = rules
     }
 
+    /// A per-host transition alert that passed every gate except delivery.
+    /// Produced by ``transitionAlertCandidate(result:previousStatus:currentStatus:)``,
+    /// which performs the streak bookkeeping without touching cooldown state;
+    /// ``commit(_:)-swift.method`` records the cooldown once the caller decides
+    /// the alert will actually be delivered.
+    public struct TransitionAlertCandidate: Equatable, Sendable {
+        public let decision: AlertDecision
+        public let type: AlertType
+        public let hostID: UUID
+        public let date: Date
+    }
+
+    /// Evaluates and immediately commits. Use
+    /// ``transitionAlertCandidate(result:previousStatus:currentStatus:)`` +
+    /// ``commit(_:)-swift.method`` instead when the caller may still suppress
+    /// the alert.
     public mutating func evaluate(
         result: PingResult,
         previousStatus: HealthStatus,
         currentStatus: HealthStatus
     ) -> AlertDecision? {
+        guard let candidate = transitionAlertCandidate(
+            result: result,
+            previousStatus: previousStatus,
+            currentStatus: currentStatus
+        ) else { return nil }
+        commit(candidate)
+        return candidate.decision
+    }
+
+    /// Runs the edge-detection and high-latency streak bookkeeping for this
+    /// result and returns the alert the engine would emit, without committing
+    /// cooldown state.
+    public mutating func transitionAlertCandidate(
+        result: PingResult,
+        previousStatus: HealthStatus,
+        currentStatus: HealthStatus
+    ) -> TransitionAlertCandidate? {
         guard rules.isEnabled else { return nil }
 
         let candidate: (AlertType, AlertDecision)?
@@ -278,8 +311,20 @@ public struct AlertDecisionEngine: Sendable {
         guard shouldSend(type, hostID: result.hostID, at: result.timestamp) else {
             return nil
         }
-        lastSentAt[CooldownKey(type: type, hostID: result.hostID)] = result.timestamp
-        return decision
+        return TransitionAlertCandidate(
+            decision: decision,
+            type: type,
+            hostID: result.hostID,
+            date: result.timestamp
+        )
+    }
+
+    /// Records that `candidate` was actually delivered, starting its per-host
+    /// cooldown. An undelivered candidate must never be committed: burning the
+    /// cooldown for a suppressed alert silently swallows the next real one
+    /// inside the window.
+    public mutating func commit(_ candidate: TransitionAlertCandidate) {
+        lastSentAt[CooldownKey(type: candidate.type, hostID: candidate.hostID)] = candidate.date
     }
 
     public mutating func evaluateNetworkChange(

@@ -425,6 +425,42 @@ final class DomainBehaviorTests: XCTestCase {
         XCTAssertNil(engine.diagnosisAlertCandidate(diagnosis, at: base.addingTimeInterval(10)))
     }
 
+    func testTransitionAlertCandidateConsumesCooldownOnlyOnceCommitted() throws {
+        let hostID = UUID()
+        var engine = AlertDecisionEngine(rules: NotificationRuleSet(
+            isEnabled: true,
+            cooldown: .seconds(300),
+            alertTypes: [.hostDown],
+            latencyThreshold: .milliseconds(250),
+            notifyOnRecovery: true
+        ))
+        let base = Date(timeIntervalSince1970: 6_500)
+
+        // An uncommitted (i.e. elided) candidate must not consume the per-host
+        // cooldown of a later, actually-delivered alert.
+        XCTAssertEqual(
+            engine.transitionAlertCandidate(
+                result: .failure(hostID: hostID, reason: .timeout, timestamp: base),
+                previousStatus: .healthy,
+                currentStatus: .down
+            )?.decision,
+            .hostDown(hostID: hostID)
+        )
+        let delivered = try XCTUnwrap(engine.transitionAlertCandidate(
+            result: .failure(hostID: hostID, reason: .timeout, timestamp: base.addingTimeInterval(60)),
+            previousStatus: .healthy,
+            currentStatus: .down
+        ))
+        XCTAssertEqual(delivered.decision, .hostDown(hostID: hostID))
+
+        engine.commit(delivered)
+        XCTAssertNil(engine.transitionAlertCandidate(
+            result: .failure(hostID: hostID, reason: .timeout, timestamp: base.addingTimeInterval(120)),
+            previousStatus: .healthy,
+            currentStatus: .down
+        ))
+    }
+
     func testNotificationRulesDetectNetworkChangeAndInternetLoss() {
         let hostID = UUID()
         let rules = NotificationRuleSet(

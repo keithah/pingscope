@@ -16,10 +16,20 @@ public protocol LiveMonitorBackgroundTaskClient: Sendable {
 public actor LiveMonitorBackgroundRuntime {
     private let client: any LiveMonitorBackgroundTaskClient
     private var activeTaskID: LiveMonitorBackgroundTaskID?
+    private var expiringTaskID: LiveMonitorBackgroundTaskID?
     private var expirationHandler: (@Sendable () async -> Void)?
 
-    public init(client: any LiveMonitorBackgroundTaskClient) {
+    /// How long the app-level cleanup may run once the OS expiration handler has
+    /// fired, before the background task is ended regardless. The default is
+    /// well inside the few-second watchdog grace period.
+    private let expirationCleanupDeadline: Duration
+
+    public init(
+        client: any LiveMonitorBackgroundTaskClient,
+        expirationCleanupDeadline: Duration = .seconds(2)
+    ) {
         self.client = client
+        self.expirationCleanupDeadline = expirationCleanupDeadline
     }
 
     public func begin(expirationHandler: @escaping @Sendable () async -> Void) async {
@@ -53,11 +63,26 @@ public actor LiveMonitorBackgroundRuntime {
 
         // UIKit requires the background task to be ended promptly once its
         // expiration handler fires; overrunning the grace period gets the
-        // process killed by the watchdog (0x8badf00d). End the OS task first,
-        // then run the app-level cleanup best-effort in whatever time remains
-        // -- the reverse order gates endBackgroundTask behind a SQLite flush,
-        // a history reload, a widget publish, and a Live Activity end.
-        await client.endBackgroundTask(activeTaskID)
+        // process killed by the watchdog (0x8badf00d). But ending the OS task
+        // first frees iOS to suspend the process before any cleanup has run,
+        // losing the SQLite flush and leaving a stale Live Activity behind.
+        // Give the cleanup a bounded slice of the grace period instead; the
+        // deadline task guarantees endBackgroundTask fires even if the cleanup
+        // stalls on I/O, and actor isolation makes ending exactly-once.
+        expiringTaskID = activeTaskID
+        let deadline = Task { [weak self, expirationCleanupDeadline] in
+            try? await Task.sleep(for: expirationCleanupDeadline)
+            guard !Task.isCancelled else { return }
+            await self?.finishExpiration()
+        }
         await handler?()
+        deadline.cancel()
+        await finishExpiration()
+    }
+
+    private func finishExpiration() async {
+        guard let expiringTaskID else { return }
+        self.expiringTaskID = nil
+        await client.endBackgroundTask(expiringTaskID)
     }
 }

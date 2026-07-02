@@ -151,6 +151,57 @@ final class RuntimeBehaviorTests: XCTestCase {
         XCTAssertTrue(decisions.contains(.recovered(hostID: hostA.id)), "expected recovery in \(decisions)")
     }
 
+    func testRuntimeElidedHostDownDoesNotConsumeItsCooldown() async throws {
+        let host = HostConfig(
+            displayName: "Example",
+            address: "example.com",
+            thresholds: LatencyThresholds(degradedMilliseconds: 100, downAfterFailures: 1)
+        )
+        let runtime = PingRuntime(
+            hostStore: HostStore(defaultHosts: [host]),
+            scheduler: MeasurementScheduler(probeFactory: HangingProbeFactory())
+        )
+        let alertStream = await runtime.alerts()
+        let base = Date(timeIntervalSince1970: 9_000)
+
+        // First outage: the same-tick diagnosis supersedes the hostDown
+        // transition, which is elided -- but must not burn its cooldown.
+        await runtime.ingest(.failure(hostID: host.id, reason: .timeout, timestamp: base))
+        await runtime.ingest(.success(hostID: host.id, latency: .milliseconds(8), timestamp: base.addingTimeInterval(10)))
+        // Second outage inside hostDown's cooldown window: the diagnosis is now
+        // suppressed by its own cooldown, so if the elided hostDown had consumed
+        // its cooldown too, this outage would produce no notification at all.
+        await runtime.ingest(.failure(hostID: host.id, reason: .timeout, timestamp: base.addingTimeInterval(60)))
+        await runtime.stop()
+
+        let decisions = await collectDecisions(from: alertStream)
+        XCTAssertTrue(decisions.contains(.hostDown(hostID: host.id)), "expected hostDown in \(decisions)")
+    }
+
+    func testRuntimeHoldsAlertsProducedBeforeAnySubscriber() async throws {
+        let host = HostConfig(
+            displayName: "Example",
+            address: "example.com",
+            thresholds: LatencyThresholds(degradedMilliseconds: 100, downAfterFailures: 1)
+        )
+        let runtime = PingRuntime(
+            hostStore: HostStore(defaultHosts: [host]),
+            scheduler: MeasurementScheduler(probeFactory: HangingProbeFactory())
+        )
+
+        // An outage present at launch can produce its alert before the UI's
+        // alerts() subscription reaches the actor. The decision engine has
+        // already committed its cooldown and edge state, so the event must be
+        // held for the first subscriber, not dropped.
+        await runtime.ingest(.failure(hostID: host.id, reason: .timeout))
+
+        let alertStream = await runtime.alerts()
+        await runtime.stop()
+
+        let decisions = await collectDecisions(from: alertStream)
+        XCTAssertEqual(decisions, [.remoteServiceDown(hostIDs: [host.id])])
+    }
+
     func testRuntimeSuppressedMutedDiagnosisDoesNotConsumeCooldown() async throws {
         let thresholds = LatencyThresholds(degradedMilliseconds: 100, downAfterFailures: 1)
         let muted = HostConfig(displayName: "Muted", address: "muted.example", thresholds: thresholds, notifications: .muted)

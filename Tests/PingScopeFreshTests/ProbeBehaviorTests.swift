@@ -208,7 +208,7 @@ final class ProbeBehaviorTests: XCTestCase {
         var length = socklen_t(MemoryLayout<sockaddr_in>.size)
         let bound = withUnsafeMutablePointer(to: &address) {
             $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { pointer in
-                bind(fd, pointer, socklen_t(MemoryLayout<sockaddr_in>.size))
+                Darwin.bind(fd, pointer, socklen_t(MemoryLayout<sockaddr_in>.size))
             }
         }
         guard bound == 0 else { return nil }

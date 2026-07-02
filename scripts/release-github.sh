@@ -153,6 +153,11 @@ find_sparkle_tool() {
   local env_name="SPARKLE_$(printf '%s' "${tool_name}" | tr '[:lower:]' '[:upper:]')"
   local env_value="${!env_name:-}"
   if [[ -n "${env_value}" ]]; then
+    if [[ ! -x "${env_value}" ]]; then
+      # Name the bad override: the generic "build the Xcode project" advice
+      # below cannot help, because an explicit override suppresses the search.
+      echo "${env_name} is set but not executable: ${env_value}" >&2
+    fi
     [[ -x "${env_value}" ]] && printf '%s' "${env_value}"
     return 0
   fi

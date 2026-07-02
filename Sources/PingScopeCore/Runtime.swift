@@ -253,10 +253,13 @@ public actor MeasurementScheduler {
         lastFailureLogByHost.removeAll()
         let runGeneration = generation
 
-        // Unbounded: multiple hosts probe concurrently and the runtime consumes
-        // results serially, so a bounded buffer would silently drop results
-        // (skewing loss statistics and delaying down-transition detection).
-        let stream = AsyncStream<PingResult>(bufferingPolicy: .unbounded) { streamContinuation in
+        // Deep but bounded: multiple hosts probe concurrently and the runtime
+        // consumes results serially, so `bufferingNewest(1)` silently dropped
+        // results (skewing loss statistics and delaying down-transition
+        // detection). Fully unbounded is the other failure mode -- a consumer
+        // stalled on slow history writes would accumulate results without limit
+        // over a long unattended session. 1024 absorbs any realistic burst.
+        let stream = AsyncStream<PingResult>(bufferingPolicy: .bufferingNewest(1024)) { streamContinuation in
             self.continuation = streamContinuation
             streamContinuation.onTermination = { [weak self] _ in
                 Task { await self?.stop(generation: runGeneration) }
@@ -355,6 +358,7 @@ public actor PingRuntime {
     private var continuationToken: UUID?
     private var alertContinuation: AsyncStream<RuntimeAlertEvent>.Continuation?
     private var alertContinuationToken: UUID?
+    private var pendingAlertEvents: [RuntimeAlertEvent] = []
     private var cachedHosts: [HostConfig] = []
     private var hostByID: [UUID: HostConfig] = [:]
     private var cachedPrimaryHostID: UUID?
@@ -381,6 +385,9 @@ public actor PingRuntime {
         await refreshHostCache()
         let token = UUID()
         return AsyncStream(bufferingPolicy: .bufferingNewest(1)) { continuation in
+            // Finish a superseded subscriber's stream so its `for await` loop
+            // ends instead of hanging on an orphaned continuation forever.
+            self.continuation?.finish()
             self.continuation = continuation
             self.continuationToken = token
             continuation.onTermination = { [weak self] _ in
@@ -393,14 +400,24 @@ public actor PingRuntime {
     /// One-shot alert events. Unbounded: unlike snapshots, an alert dropped by a
     /// conflating buffer is lost permanently (the decision engine has already
     /// committed its cooldown and edge-transition state by the time it is yielded).
+    /// Alerts produced before any subscriber attached are held and replayed to
+    /// the next subscriber, so an outage present at launch is never lost to the
+    /// registration race with the scheduler's first results.
     public func alerts() -> AsyncStream<RuntimeAlertEvent> {
         let token = UUID()
         return AsyncStream(bufferingPolicy: .unbounded) { continuation in
+            // Finish a superseded subscriber's stream so its `for await` loop
+            // ends instead of hanging on an orphaned continuation forever.
+            self.alertContinuation?.finish()
             self.alertContinuation = continuation
             self.alertContinuationToken = token
             continuation.onTermination = { [weak self] _ in
                 Task { await self?.clearAlertContinuation(token: token) }
             }
+            for event in self.pendingAlertEvents {
+                continuation.yield(event)
+            }
+            self.pendingAlertEvents.removeAll()
         }
     }
 
@@ -468,7 +485,7 @@ public actor PingRuntime {
             // diagnosis activity. A same-tick diagnosis alert already tells the
             // user something went down, so only the redundant hostDown is elided;
             // recovery and high-latency transitions are never swallowed.
-            let transitionAlert = alertEngine.evaluate(
+            let transitionCandidate = alertEngine.transitionAlertCandidate(
                 result: result,
                 previousStatus: previousStatus,
                 currentStatus: health.status
@@ -476,11 +493,15 @@ public actor PingRuntime {
             if let diagnosisAlert {
                 alerts.append(diagnosisAlert)
             }
-            if let transitionAlert {
-                if case .hostDown = transitionAlert, diagnosisAlert != nil {
+            if let transitionCandidate {
+                if case .hostDown = transitionCandidate.decision, diagnosisAlert != nil {
                     // Superseded by the root-cause diagnosis for this tick.
+                    // Deliberately not committed: an elided alert must not burn
+                    // the per-host cooldown, or a second outage inside the
+                    // window would produce no notification at all.
                 } else {
-                    alerts.append(transitionAlert)
+                    alertEngine.commit(transitionCandidate)
+                    alerts.append(transitionCandidate.decision)
                 }
             }
             publishAlerts(alerts)
@@ -584,7 +605,19 @@ public actor PingRuntime {
 
     private func publishAlerts(_ decisions: [AlertDecision]) {
         guard !decisions.isEmpty else { return }
-        alertContinuation?.yield(RuntimeAlertEvent(decisions: decisions, hosts: cachedHosts))
+        let event = RuntimeAlertEvent(decisions: decisions, hosts: cachedHosts)
+        guard let alertContinuation else {
+            // The decision engine has already committed its cooldown and edge
+            // state, so an alert with no subscriber yet would be permanently
+            // lost. Hold it for the next subscriber; capped so a runtime nobody
+            // ever subscribes to cannot grow without bound.
+            pendingAlertEvents.append(event)
+            if pendingAlertEvents.count > 64 {
+                pendingAlertEvents.removeFirst()
+            }
+            return
+        }
+        alertContinuation.yield(event)
     }
 
     private func clearContinuation(token: UUID) {

@@ -164,11 +164,17 @@ public struct NetworkProbe: PingProbe {
                             })
                         }
                     case .waiting(let error):
-                        // NWConnection parks refused/unreachable connections in
-                        // .waiting and retries on network changes. For a one-shot
-                        // latency probe that is a terminal answer; letting it sit
-                        // burns the full timeout and misreports the reason.
-                        finishTerminalError(error)
+                        // NWConnection parks refused connections in .waiting and
+                        // retries on network changes. For a one-shot latency probe
+                        // a refusal is a terminal answer; letting it sit burns the
+                        // full timeout and misreports the reason. Anything else
+                        // (ENETDOWN/EHOSTUNREACH during a Wi-Fi handoff or wake
+                        // from sleep) is often transient, so let the connection
+                        // keep retrying within the probe timeout rather than
+                        // report an instant false failure for every host.
+                        if error.failureReason == .connectionRefused {
+                            finishTerminalError(error)
+                        }
                     case .failed(let error):
                         finishTerminalError(error)
                     case .cancelled:

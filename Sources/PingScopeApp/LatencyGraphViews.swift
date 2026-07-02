@@ -206,7 +206,7 @@ struct MultiHostLatencyGraph: View {
     private func graphCanvas(graphData: MultiHostLatencyGraphData) -> some View {
         GeometryReader { proxy in
             Canvas { context, size in
-                guard graphData.hasDrawableSeries else {
+                guard !graphData.isEmpty else {
                     let rect = CGRect(origin: .zero, size: size)
                     context.stroke(Path(roundedRect: rect, cornerRadius: 6), with: .color(.secondary.opacity(0.25)))
                     return
@@ -345,10 +345,6 @@ private struct MultiHostLatencyGraphData {
 
     var hasLatencyData: Bool {
         latencyCount > 0
-    }
-
-    var hasDrawableSeries: Bool {
-        !drawableSeries.isEmpty
     }
 }
 
