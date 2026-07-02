@@ -38,7 +38,7 @@ if [[ "${CLEAN_BUILD}" == "1" ]]; then
   rm -rf .build/xcode-app-store-Release
 fi
 scripts/build-xcode-app-bundle.sh release /tmp/pingscope-appstore-roadmap app-store >/dev/null
-scripts/verify-sandbox.sh /tmp/pingscope-appstore-roadmap/PingScope.app
+scripts/verify-sandbox.sh /tmp/pingscope-appstore-roadmap/PingScope.app appstore
 
 echo
 echo "PASS: roadmap validation passed"

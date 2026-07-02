@@ -72,6 +72,26 @@ final class StarlinkProtobufTests: XCTestCase {
         XCTAssertThrowsError(try codec.decodeStatus(fromResponseMessage: Data()))
     }
 
+    /// The decoder runs on bytes received over plain TCP from a user-configured
+    /// address, so hostile lengths and field numbers must throw, never trap.
+    func testRejectsHostileVarintsWithoutTrapping() {
+        let codec = StarlinkProtobufCodec()
+
+        // Field 1, wire type 2, followed by a length varint of UInt64.max:
+        // narrowing that to Int trapped before it could be bounds-checked.
+        let overflowingLength = Data([0x0A, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x01])
+        XCTAssertThrowsError(try codec.decodeStatus(fromResponseMessage: overflowingLength))
+
+        // Length == Int.max is representable, but `offset + length` overflowed
+        // before the bounds guard could reject it.
+        let intMaxLength = Data([0x0A, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x7F])
+        XCTAssertThrowsError(try codec.decodeStatus(fromResponseMessage: intMaxLength))
+
+        // A field key whose number exceeds Int32.max.
+        let hugeFieldNumber = Data([0xF8, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x01, 0x00])
+        XCTAssertThrowsError(try codec.decodeStatus(fromResponseMessage: hugeFieldNumber))
+    }
+
     private func makeResponse(
         latency: Float?,
         dropRate: Float?,

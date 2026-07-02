@@ -6,12 +6,15 @@ extension SettingsRootView {
         SettingsPane {
             SettingsSection("Export") {
                 SettingsRow(systemImage: "server.rack", tint: .blue, title: "Host") {
-                    Picker("Host", selection: Binding(
-                        get: { model.historyExportHost?.id ?? model.primaryHost?.id ?? model.snapshot.hosts.first?.id ?? UUID() },
+                    // An optional selection avoids minting a fresh UUID() on
+                    // every body evaluation when no host exists, which would
+                    // never match a tag and churn the Picker's selection.
+                    Picker("Host", selection: Binding<UUID?>(
+                        get: { model.historyExportHost?.id ?? model.primaryHost?.id ?? model.snapshot.hosts.first?.id },
                         set: { model.historyExportHostID = $0 }
                     )) {
                         ForEach(model.snapshot.hosts) { host in
-                            Text(host.displayName).tag(host.id)
+                            Text(host.displayName).tag(host.id as UUID?)
                         }
                     }
                     .labelsHidden()

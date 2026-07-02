@@ -31,7 +31,9 @@ struct PingScopeExportValidate {
                 throw ValidationError("\(format.displayName) export was empty")
             }
             let url = outputDirectory.appendingPathComponent("pingscope-export-smoke.\(format.fileExtension)")
-            try data.write(to: url, options: .atomic)
+            // Exercise the same staged-temp-file writer the app uses, not just
+            // Data.write, so a regression in the staging path fails validation.
+            try HistoryExporter.write(samples: samples, host: host, format: format, to: url)
             print("\(format.displayName): \(samples.count) samples -> \(url.path)")
         }
     }

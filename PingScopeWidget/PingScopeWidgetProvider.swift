@@ -33,9 +33,12 @@ struct Provider: TimelineProvider {
     }
 
     private func loadLegacyData() -> WidgetData? {
+        // The app writes this blob with the same ISO-8601 encoder as the primary
+        // snapshot (WidgetSnapshotStore.save). A default-strategy decoder would
+        // always throw on the Date fields, silently killing the fallback path.
         guard let shared = UserDefaults(suiteName: groupIdentifier),
               let data = shared.data(forKey: "widgetData"),
-              let decoded = try? JSONDecoder().decode(WidgetData.self, from: data) else {
+              let decoded = try? JSONDecoder.widgetDecoder.decode(WidgetData.self, from: data) else {
             return nil
         }
         return decoded

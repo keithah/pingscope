@@ -12,11 +12,16 @@ fail() {
 
 [[ -f "${DB_PATH}" ]] || fail "history database not found: ${DB_PATH}"
 
-# sample_count is a placeholder here; this smoke test only needs the latest exportable host row.
-host_row="$(sqlite3 "${DB_PATH}" "select host_id,address,method,coalesce(port,''),1 from ping_samples order by timestamp desc limit 1;")"
+host_row="$(sqlite3 "${DB_PATH}" "select host_id,address,method,coalesce(port,'') from ping_samples order by timestamp desc limit 1;")"
 [[ -n "${host_row}" ]] || fail "no history samples available"
 
-IFS='|' read -r host_id address method port sample_count <<<"${host_row}"
+IFS='|' read -r host_id address method port <<<"${host_row}"
+# host_id came out of the database and is interpolated into the next query (and
+# into the CLI args), so refuse anything that is not a plain UUID.
+[[ "${host_id}" =~ ^[0-9a-fA-F-]{36}$ ]] || fail "unexpected host_id format: ${host_id}"
+# Count the real rows for the chosen host so the gate and the PASS message are
+# not hardcoded to 1 by the row-selection query.
+sample_count="$(sqlite3 "${DB_PATH}" "select count(*) from ping_samples where host_id = '${host_id}';")"
 [[ "${sample_count}" -gt 0 ]] || fail "no samples available for export"
 
 rm -rf "${OUTPUT_DIR}"
