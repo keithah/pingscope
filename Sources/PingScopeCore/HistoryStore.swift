@@ -164,7 +164,7 @@ public actor SQLiteHistoryStore: PingHistoryStore {
             } catch {
                 lastError = error
                 guard isTransientSQLiteError(error), attempt < 2 else { break }
-                try? await Task.sleep(for: .milliseconds(Double(50 * (attempt + 1))))
+                try await Task.sleep(for: .milliseconds(Double(50 * (attempt + 1))))
             }
         }
         throw lastError ?? SQLiteHistoryError.openFailed(message: "unknown SQLite retry failure")

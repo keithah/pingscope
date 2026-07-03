@@ -29,7 +29,7 @@ struct StatusPopoverView: View {
                 CompactDiagnosisReasonRow(diagnosis: degradationReason)
             }
 
-            RecentSamplesView(samples: Array(model.visibleSamples.suffix(8)).reversed(), range: model.selectedRange)
+            RecentSamplesView(samples: Array(model.displayPresentation.visibleSamples.suffix(8)).reversed(), range: model.selectedRange)
         }
         .padding(16)
         .frame(width: 430, height: 540, alignment: .top)
@@ -101,14 +101,18 @@ struct StatusPopoverView: View {
     @ViewBuilder
     private var graph: some View {
         if model.popoverShowsAllHosts {
-            MultiHostLatencyGraph(series: model.allHostGraphSeries, showsAxes: true)
+            MultiHostLatencyGraph(
+                series: model.displayPresentation.allHostGraphSeries,
+                graphData: model.displayPresentation.allHostsGraphData,
+                showsAxes: true
+            )
         } else {
-            LatencyGraph(samples: model.visibleSamples, showsAxes: true)
+            LatencyGraph(graphData: model.displayPresentation.primaryGraphData, showsAxes: true)
         }
     }
 
     private var stats: some View {
-        let stats = model.primaryStats
+        let stats = model.displayPresentation.primaryStats
         return Grid(alignment: .leading, horizontalSpacing: 18, verticalSpacing: 6) {
             GridRow {
                 stat("TX", "\(stats.transmitted)")
@@ -141,7 +145,7 @@ struct StatusPopoverView: View {
               model.primaryHost?.method == .starlink else {
             return nil
         }
-        return model.visibleSamples.reversed().compactMap(\.metadata.starlink).first
+        return model.displayPresentation.visibleSamples.reversed().compactMap(\.metadata.starlink).first
     }
 
     private var degradationReason: NetworkPerspectiveDiagnosis? {

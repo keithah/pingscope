@@ -8,24 +8,72 @@ final class LiveMonitorSessionControllerTests: XCTestCase {
         let probe = RecordingProbe(results: [
             .success(hostID: host.id, latency: .milliseconds(18))
         ])
+        let clock = ManualClock()
         let controller = LiveMonitorSessionController(
             host: host,
             probeFactory: StaticProbeFactory(probe: probe),
-            policy: MonitorSessionPolicy(liveFreshness: .milliseconds(50), staleAfter: .milliseconds(100), probeInterval: .milliseconds(10))
+            policy: MonitorSessionPolicy(liveFreshness: .milliseconds(50), staleAfter: .milliseconds(100), probeInterval: .milliseconds(10)),
+            clock: clock,
+            now: { clock.currentDate }
         )
 
-        await controller.start(duration: .thirtySeconds)
-        try await Task.sleep(for: .milliseconds(40))
+        await controller.start(duration: .thirtySeconds, at: clock.baseDate)
+        // The loop has probed exactly once when it parks on the clock.
+        try await clock.waitForSleepers(atLeast: 1)
 
         let snapshot = await controller.snapshot()
         XCTAssertEqual(snapshot.session?.duration, .thirtySeconds)
-        XCTAssertEqual(snapshot.session?.phase(), .live)
+        XCTAssertEqual(snapshot.session?.phase(at: clock.currentDate), .live)
         XCTAssertEqual(snapshot.health.status, HealthStatus.healthy)
         XCTAssertEqual(snapshot.health.latestResult?.latency?.milliseconds.rounded(), 18)
-        XCTAssertGreaterThanOrEqual(snapshot.series.samples.count, 1)
-        XCTAssertEqual(snapshot.series.stats.received, snapshot.series.samples.count)
+        XCTAssertEqual(snapshot.series.samples.count, 1)
+        XCTAssertEqual(snapshot.series.stats.received, 1)
         let measurementCount = await probe.measurementCount
-        XCTAssertGreaterThanOrEqual(measurementCount, 1)
+        XCTAssertEqual(measurementCount, 1)
+    }
+
+    func testControllerDefaultStartUsesInjectedDateProvider() async throws {
+        let host = HostConfig(id: UUID(), displayName: "Cloudflare", address: "1.1.1.1")
+        let probe = RecordingProbe(results: [
+            .success(hostID: host.id, latency: .milliseconds(18))
+        ])
+        let clock = ManualClock()
+        let controller = LiveMonitorSessionController(
+            host: host,
+            probeFactory: StaticProbeFactory(probe: probe),
+            policy: MonitorSessionPolicy(liveFreshness: .milliseconds(50), staleAfter: .milliseconds(100), probeInterval: .milliseconds(10)),
+            clock: clock,
+            now: { clock.currentDate }
+        )
+
+        await controller.start(duration: .thirtySeconds)
+        try await clock.waitForSleepers(atLeast: 1)
+
+        let snapshot = await controller.snapshot()
+        XCTAssertEqual(snapshot.session?.startedAt, clock.baseDate)
+    }
+
+    func testControllerDefaultStopUsesInjectedDateProvider() async throws {
+        let host = HostConfig(id: UUID(), displayName: "Cloudflare", address: "1.1.1.1")
+        let probe = RecordingProbe(results: [
+            .success(hostID: host.id, latency: .milliseconds(18))
+        ])
+        let clock = ManualClock()
+        let controller = LiveMonitorSessionController(
+            host: host,
+            probeFactory: StaticProbeFactory(probe: probe),
+            policy: MonitorSessionPolicy(liveFreshness: .milliseconds(50), staleAfter: .milliseconds(100), probeInterval: .milliseconds(10)),
+            clock: clock,
+            now: { clock.currentDate }
+        )
+
+        await controller.start(duration: .thirtySeconds, at: clock.baseDate)
+        try await clock.waitForSleepers(atLeast: 1)
+        clock.advance(by: .milliseconds(25))
+        await controller.stop(reason: .userStopped)
+
+        let snapshot = await controller.snapshot()
+        XCTAssertEqual(snapshot.session?.endedAt, clock.currentDate)
     }
 
     func testControllerWritesMeasuredSamplesToHistoryStore() async throws {
@@ -34,15 +82,19 @@ final class LiveMonitorSessionControllerTests: XCTestCase {
             .success(hostID: host.id, latency: .milliseconds(18))
         ])
         let history = RecordingLiveMonitorHistoryStore()
+        let clock = ManualClock()
         let controller = LiveMonitorSessionController(
             host: host,
             probeFactory: StaticProbeFactory(probe: probe),
             policy: MonitorSessionPolicy(liveFreshness: .milliseconds(50), staleAfter: .milliseconds(100), probeInterval: .milliseconds(50)),
-            historyStore: history
+            historyStore: history,
+            clock: clock,
+            now: { clock.currentDate }
         )
 
-        await controller.start(duration: .thirtySeconds)
-        try await Task.sleep(for: .milliseconds(40))
+        await controller.start(duration: .thirtySeconds, at: clock.baseDate)
+        try await clock.waitForSleepers(atLeast: 1)
+        // The write buffer's delayed flush has not fired; nothing is stored yet.
         let samplesBeforeStop = await history.samples(hostID: host.id, since: .distantPast, limit: 10)
         XCTAssertEqual(samplesBeforeStop.count, 0)
         await controller.stop()
@@ -58,15 +110,18 @@ final class LiveMonitorSessionControllerTests: XCTestCase {
             .success(hostID: host.id, latency: .milliseconds(6))
         ])
         let history = RecordingLiveMonitorHistoryStore()
+        let clock = ManualClock()
         let controller = LiveMonitorSessionController(
             host: host,
             probeFactory: StaticProbeFactory(probe: probe),
             policy: MonitorSessionPolicy(liveFreshness: .milliseconds(50), staleAfter: .milliseconds(100), probeInterval: .milliseconds(50)),
-            historyStore: history
+            historyStore: history,
+            clock: clock,
+            now: { clock.currentDate }
         )
 
-        await controller.start(duration: .thirtySeconds)
-        try await Task.sleep(for: .milliseconds(40))
+        await controller.start(duration: .thirtySeconds, at: clock.baseDate)
+        try await clock.waitForSleepers(atLeast: 1)
         await controller.stop()
 
         let samples = await history.samples(hostID: host.id, since: .distantPast, limit: 10)
@@ -81,19 +136,24 @@ final class LiveMonitorSessionControllerTests: XCTestCase {
             .success(hostID: host.id, latency: .milliseconds(18)),
             .success(hostID: host.id, latency: .milliseconds(19))
         ])
+        let clock = ManualClock()
         let controller = LiveMonitorSessionController(
             host: host,
             probeFactory: StaticProbeFactory(probe: probe),
-            policy: MonitorSessionPolicy(liveFreshness: .milliseconds(50), staleAfter: .milliseconds(100), probeInterval: .milliseconds(100))
+            policy: MonitorSessionPolicy(liveFreshness: .milliseconds(50), staleAfter: .milliseconds(100), probeInterval: .milliseconds(100)),
+            clock: clock,
+            now: { clock.currentDate }
         )
 
-        await controller.start(duration: .thirtySeconds)
-        try await Task.sleep(for: .milliseconds(35))
+        await controller.start(duration: .thirtySeconds, at: clock.baseDate)
+        try await clock.waitForSleepers(atLeast: 1)
         let firstSnapshot = await controller.snapshot()
         XCTAssertEqual(firstSnapshot.series.samples.count, 1)
 
-        await controller.start(duration: .oneMinute)
-        try await Task.sleep(for: .milliseconds(35))
+        // Restart cancels the first loop's parked sleep synchronously, so the
+        // next sleeper the clock sees belongs to the new session's loop.
+        await controller.start(duration: .oneMinute, at: clock.currentDate)
+        try await clock.waitForSleepers(atLeast: 1)
 
         let secondSnapshot = await controller.snapshot()
         XCTAssertEqual(secondSnapshot.session?.duration, .oneMinute)
@@ -108,23 +168,81 @@ final class LiveMonitorSessionControllerTests: XCTestCase {
             .success(hostID: host.id, latency: .milliseconds(19)),
             .success(hostID: host.id, latency: .milliseconds(20))
         ])
+        let clock = ManualClock()
         let controller = LiveMonitorSessionController(
             host: host,
             probeFactory: StaticProbeFactory(probe: probe),
-            policy: MonitorSessionPolicy(liveFreshness: .milliseconds(50), staleAfter: .milliseconds(100), probeInterval: .milliseconds(10))
+            policy: MonitorSessionPolicy(liveFreshness: .milliseconds(50), staleAfter: .milliseconds(100), probeInterval: .milliseconds(10)),
+            clock: clock,
+            now: { clock.currentDate }
         )
 
-        await controller.start(duration: .oneMinute)
-        try await Task.sleep(for: .milliseconds(25))
-        await controller.stop(reason: .userStopped)
+        await controller.start(duration: .oneMinute, at: clock.baseDate)
+        try await clock.waitForSleepers(atLeast: 1)
+        await controller.stop(reason: .userStopped, at: clock.currentDate)
         let countAfterStop = await probe.measurementCount
-        try await Task.sleep(for: .milliseconds(40))
+        XCTAssertEqual(countAfterStop, 1)
+        // Advancing past several probe intervals must not wake the cancelled
+        // loop back up.
+        clock.advance(by: .milliseconds(50))
+        await Task.yield()
 
         let snapshot = await controller.snapshot()
-        XCTAssertEqual(snapshot.session?.phase(), .ended)
+        XCTAssertEqual(snapshot.session?.phase(at: clock.currentDate), .ended)
         XCTAssertEqual(snapshot.session?.endReason, .userStopped)
         let finalCount = await probe.measurementCount
         XCTAssertEqual(finalCount, countAfterStop)
+    }
+
+    func testControllerIgnoresLateProbeResultAfterStop() async throws {
+        let host = HostConfig(id: UUID(), displayName: "Cloudflare", address: "1.1.1.1")
+        let probe = BlockingProbe()
+        let now = Date(timeIntervalSince1970: 1_000)
+        let controller = LiveMonitorSessionController(
+            host: host,
+            probeFactory: BlockingProbeFactory(probe: probe),
+            policy: MonitorSessionPolicy(liveFreshness: .milliseconds(50), staleAfter: .milliseconds(100), probeInterval: .milliseconds(10)),
+            now: { now }
+        )
+
+        await controller.start(duration: .oneMinute, at: now)
+        try await probe.waitForMeasurements(atLeast: 1)
+        await controller.stop(reason: .userStopped, at: now.addingTimeInterval(1))
+
+        await probe.releaseNext(.success(hostID: host.id, latency: .milliseconds(18)))
+        try await Task.sleep(for: .milliseconds(20))
+
+        let snapshot = await controller.snapshot()
+        XCTAssertEqual(snapshot.session?.endReason, .userStopped)
+        XCTAssertEqual(snapshot.series.samples.count, 0)
+        XCTAssertNil(snapshot.health.latestResult)
+    }
+
+    func testControllerIgnoresLateProbeResultFromPreviousSessionAfterRestart() async throws {
+        let host = HostConfig(id: UUID(), displayName: "Cloudflare", address: "1.1.1.1")
+        let probe = BlockingProbe()
+        let now = Date(timeIntervalSince1970: 1_000)
+        let controller = LiveMonitorSessionController(
+            host: host,
+            probeFactory: BlockingProbeFactory(probe: probe),
+            policy: MonitorSessionPolicy(liveFreshness: .milliseconds(50), staleAfter: .milliseconds(100), probeInterval: .milliseconds(10)),
+            now: { now }
+        )
+
+        await controller.start(duration: .thirtySeconds, at: now)
+        try await probe.waitForMeasurements(atLeast: 1)
+        await controller.start(duration: .oneMinute, at: now.addingTimeInterval(1))
+        try await probe.waitForMeasurements(atLeast: 2)
+
+        await probe.releaseNext(.success(hostID: host.id, latency: .milliseconds(18)))
+        await probe.releaseNext(.success(hostID: host.id, latency: .milliseconds(19)))
+        try await Task.sleep(for: .milliseconds(20))
+
+        let snapshot = await controller.snapshot()
+        XCTAssertEqual(snapshot.session?.duration, .oneMinute)
+        XCTAssertEqual(snapshot.series.samples.count, 1)
+        XCTAssertEqual(snapshot.series.samples.first?.latency, .milliseconds(19))
+        await controller.stop(reason: .userStopped, at: now.addingTimeInterval(2))
     }
 
     func testControllerContinuousSessionRunsUntilStopped() async throws {
@@ -134,19 +252,24 @@ final class LiveMonitorSessionControllerTests: XCTestCase {
             .success(hostID: host.id, latency: .milliseconds(19)),
             .success(hostID: host.id, latency: .milliseconds(20))
         ])
+        let clock = ManualClock()
         let controller = LiveMonitorSessionController(
             host: host,
             probeFactory: StaticProbeFactory(probe: probe),
-            policy: MonitorSessionPolicy(liveFreshness: .milliseconds(50), staleAfter: .milliseconds(100), probeInterval: .milliseconds(10))
+            policy: MonitorSessionPolicy(liveFreshness: .milliseconds(50), staleAfter: .milliseconds(100), probeInterval: .milliseconds(10)),
+            clock: clock,
+            now: { clock.currentDate }
         )
 
-        await controller.start(duration: .continuous)
-        try await Task.sleep(for: .milliseconds(45))
+        await controller.start(duration: .continuous, at: clock.baseDate)
+        try await clock.waitForSleepers(atLeast: 1)
+        clock.advance(by: .milliseconds(10))
+        try await clock.waitForSleepers(atLeast: 1)
 
         let snapshot = await controller.snapshot()
         XCTAssertEqual(snapshot.session?.duration, .continuous)
-        XCTAssertEqual(snapshot.session?.phase(), .live)
-        XCTAssertGreaterThanOrEqual(snapshot.series.samples.count, 2)
+        XCTAssertEqual(snapshot.session?.phase(at: clock.currentDate), .live)
+        XCTAssertEqual(snapshot.series.samples.count, 2)
     }
 
     func testControllerEndsWhenBackgroundRuntimeExpiresBeforeSelectedDuration() async throws {
@@ -154,21 +277,36 @@ final class LiveMonitorSessionControllerTests: XCTestCase {
         let probe = RecordingProbe(results: [
             .success(hostID: host.id, latency: .milliseconds(18))
         ])
+        let clock = ManualClock()
         let controller = LiveMonitorSessionController(
             host: host,
             probeFactory: StaticProbeFactory(probe: probe),
             policy: MonitorSessionPolicy(liveFreshness: .milliseconds(50), staleAfter: .milliseconds(100), probeInterval: .milliseconds(10)),
-            backgroundRuntimeLimit: .milliseconds(35)
+            backgroundRuntimeLimit: .milliseconds(35),
+            clock: clock,
+            now: { clock.currentDate }
         )
 
-        await controller.start(duration: .oneMinute)
-        try await Task.sleep(for: .milliseconds(80))
+        await controller.start(duration: .oneMinute, at: clock.baseDate)
+        try await clock.waitForSleepers(atLeast: 1)
+        // 10ms elapsed: still inside the 35ms budget, so a second probe runs.
+        clock.advance(by: .milliseconds(10))
+        try await clock.waitForSleepers(atLeast: 1)
+        // 40ms elapsed: past the budget, so the loop finishes instead of probing.
+        clock.advance(by: .milliseconds(30))
 
-        let snapshot = await controller.snapshot()
-        XCTAssertEqual(snapshot.session?.phase(), .ended)
+        var snapshot = await controller.snapshot()
+        var attempts = 0
+        while snapshot.session?.endReason == nil, attempts < 200 {
+            attempts += 1
+            try await Task.sleep(for: .milliseconds(5))
+            snapshot = await controller.snapshot()
+        }
+
+        XCTAssertEqual(snapshot.session?.phase(at: clock.currentDate), .ended)
         XCTAssertEqual(snapshot.session?.endReason, .backgroundRuntimeExpired)
         let measurementCount = await probe.measurementCount
-        XCTAssertGreaterThanOrEqual(measurementCount, 1)
+        XCTAssertEqual(measurementCount, 2)
     }
 
     func testIOSHostStorePersistsSelectedHost() {
@@ -424,6 +562,46 @@ private actor RecordingProbe: PingProbe {
 
 private struct StaticProbeFactory: ProbeFactory {
     let probe: RecordingProbe
+
+    func makeProbe(for method: PingMethod) async -> any PingProbe {
+        probe
+    }
+}
+
+private actor BlockingProbe: PingProbe {
+    private var continuations: [CheckedContinuation<PingResult, Never>] = []
+    private(set) var measurementCount = 0
+
+    func measure(_ host: HostConfig) async -> PingResult {
+        measurementCount += 1
+        let result = await withCheckedContinuation { continuation in
+            continuations.append(continuation)
+        }
+        return result.withHostMetadata(from: host)
+    }
+
+    func waitForMeasurements(atLeast expectedCount: Int) async throws {
+        let deadline = Date().addingTimeInterval(2)
+        while measurementCount < expectedCount {
+            if Date() > deadline {
+                XCTFail("timed out waiting for \(expectedCount) measurements")
+                return
+            }
+            try await Task.sleep(for: .milliseconds(5))
+        }
+    }
+
+    func releaseNext(_ result: PingResult) {
+        guard !continuations.isEmpty else {
+            XCTFail("no pending blocked probe measurement")
+            return
+        }
+        continuations.removeFirst().resume(returning: result)
+    }
+}
+
+private struct BlockingProbeFactory: ProbeFactory {
+    let probe: BlockingProbe
 
     func makeProbe(for method: PingMethod) async -> any PingProbe {
         probe

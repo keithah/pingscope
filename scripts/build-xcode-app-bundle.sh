@@ -13,6 +13,9 @@ set -euo pipefail
 #   CURRENT_PROJECT_VERSION=49
 #   SKIP_CODESIGN_AFTER_BUILD=1
 
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "${PROJECT_ROOT}/scripts/lib/codesign-macos.sh"
+
 CONFIGURATION_INPUT="${1:-debug}"
 OUTPUT_DIR="${2:-.build/xcode-install}"
 FLAVOR="${3:-developer-id}"
@@ -104,38 +107,10 @@ SIGN_COMMON=("--force" "--sign" "${SIGN_IDENTITY}")
 if [[ "${FLAVOR}" == "developer-id" && "${SIGN_IDENTITY}" != "-" ]]; then
   SIGN_COMMON+=("--options" "runtime" "--timestamp")
 fi
+CODESIGN_QUIET=1
 
-sign_framework_tree() {
-  local framework="$1"
-  while IFS= read -r executable; do
-    codesign "${SIGN_COMMON[@]}" "${executable}" >/dev/null
-  done < <(find "${framework}" -type f -perm -111 2>/dev/null | sort)
+codesign_sign_macos_bundle_contents "${DEST_APP}" "${PROJECT_ROOT}"
 
-  while IFS= read -r bundle; do
-    codesign "${SIGN_COMMON[@]}" "${bundle}" >/dev/null
-  done < <(find "${framework}" \( -name '*.xpc' -o -name '*.app' \) -type d 2>/dev/null | sort -r)
-
-  codesign "${SIGN_COMMON[@]}" "${framework}" >/dev/null
-}
-
-while IFS= read -r framework; do
-  sign_framework_tree "${framework}"
-done < <(find "${DEST_APP}/Contents/Frameworks" -name '*.framework' -type d 2>/dev/null | sort)
-
-while IFS= read -r dylib; do
-  codesign "${SIGN_COMMON[@]}" "${dylib}" >/dev/null
-done < <(find "${DEST_APP}/Contents/MacOS" -name '*.dylib' -type f 2>/dev/null | sort)
-
-while IFS= read -r appex; do
-  while IFS= read -r framework; do
-    sign_framework_tree "${framework}"
-  done < <(find "${appex}/Contents/Frameworks" -name '*.framework' -type d 2>/dev/null | sort)
-  while IFS= read -r dylib; do
-    codesign "${SIGN_COMMON[@]}" "${dylib}" >/dev/null
-  done < <(find "${appex}/Contents/MacOS" -name '*.dylib' -type f 2>/dev/null | sort)
-  codesign "${SIGN_COMMON[@]}" --entitlements "PingScopeWidget/PingScopeWidget.entitlements" "${appex}" >/dev/null
-done < <(find "${DEST_APP}/Contents/PlugIns" -name '*.appex' -type d 2>/dev/null)
-
-codesign "${SIGN_COMMON[@]}" --identifier "com.hadm.PingScope" --entitlements "${APP_ENTITLEMENTS}" "${DEST_APP}" >/dev/null
+codesign_run --identifier "com.hadm.PingScope" --entitlements "${APP_ENTITLEMENTS}" "${DEST_APP}"
 
 echo "${DEST_APP}"

@@ -23,8 +23,9 @@ public struct StarlinkHTTP2Transport: StarlinkGRPCTransport {
                             requestFrame: requestFrame,
                             continuation: continuation
                         )
-                        sessionBox.set(session)
-                        session.start()
+                        if sessionBox.set(session) {
+                            session.start()
+                        }
                     }
                 }
                 group.addTask {
@@ -54,16 +55,25 @@ public struct StarlinkHTTP2Transport: StarlinkGRPCTransport {
 private final class StarlinkHTTP2SessionBox: @unchecked Sendable {
     private let lock = NSLock()
     private var session: StarlinkHTTP2Session?
+    private var isCancelled = false
 
-    func set(_ session: StarlinkHTTP2Session) {
+    func set(_ session: StarlinkHTTP2Session) -> Bool {
         lock.lock()
+        if isCancelled {
+            lock.unlock()
+            session.cancel()
+            return false
+        }
         self.session = session
         lock.unlock()
+        return true
     }
 
     func cancel() {
         lock.lock()
+        isCancelled = true
         let session = session
+        self.session = nil
         lock.unlock()
         session?.cancel()
     }

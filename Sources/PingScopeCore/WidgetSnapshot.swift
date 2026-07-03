@@ -167,7 +167,15 @@ public struct WidgetSample: Codable, Equatable, Sendable {
 }
 
 public actor WidgetSnapshotStore {
+    /// macOS sandboxed apps use the classic team-prefixed app-group form; iOS
+    /// requires (and provisioning only accepts) a `group.`-prefixed identifier.
+    /// Keep `Provider.groupIdentifier` in the widget extension in sync -- the
+    /// widget does not link PingScopeCore.
+    #if os(macOS)
     public static let defaultSuiteName = "6R7S5GA944.group.com.hadm.PingScope"
+    #else
+    public static let defaultSuiteName = "group.com.hadm.PingScope"
+    #endif
     public static let defaultKey = "PingScopeWidgetSnapshot"
     public static let legacyKey = "widgetData"
 
@@ -189,9 +197,10 @@ public actor WidgetSnapshotStore {
     }
 
     public func save(_ snapshot: WidgetSnapshot) async {
-        guard let data = try? JSONEncoder.widgetSnapshotEncoder.encode(snapshot) else { return }
+        let encoder = JSONEncoder.widgetSnapshotEncoder
+        guard let data = try? encoder.encode(snapshot) else { return }
         defaults.set(data, forKey: key)
-        if let legacyData = try? JSONEncoder.widgetSnapshotEncoder.encode(LegacyWidgetData(snapshot: snapshot)) {
+        if let legacyData = try? encoder.encode(LegacyWidgetData(snapshot: snapshot)) {
             defaults.set(legacyData, forKey: Self.legacyKey)
         }
     }
@@ -214,8 +223,11 @@ private struct LegacyWidgetData: Codable, Equatable, Sendable {
     var lastUpdate: Date
 
     init(snapshot: WidgetSnapshot) {
-        let latestByHost = Dictionary(grouping: snapshot.recentSamples, by: \.hostID).compactMapValues { samples in
-            samples.max { $0.timestamp < $1.timestamp }
+        let latestByHost = snapshot.recentSamples.reduce(into: [UUID: WidgetSample]()) { latest, sample in
+            if let current = latest[sample.hostID], current.timestamp >= sample.timestamp {
+                return
+            }
+            latest[sample.hostID] = sample
         }
         let healthByHost = Dictionary(uniqueKeysWithValues: snapshot.health.map { ($0.hostID, $0) })
         self.hosts = snapshot.hosts.map {

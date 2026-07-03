@@ -59,9 +59,13 @@ struct OverlayView: View {
     @ViewBuilder
     private var overlayGraph: some View {
         if model.overlayShowsAllHosts {
-            MultiHostLatencyGraph(series: model.allHostGraphSeries, showsLegend: model.overlayShowsLegend)
+            MultiHostLatencyGraph(
+                series: model.displayPresentation.allHostGraphSeries,
+                graphData: model.displayPresentation.allHostsGraphData,
+                showsLegend: model.overlayShowsLegend
+            )
         } else {
-            LatencyGraph(samples: model.visibleSamples)
+            LatencyGraph(graphData: model.displayPresentation.primaryGraphData)
         }
     }
 

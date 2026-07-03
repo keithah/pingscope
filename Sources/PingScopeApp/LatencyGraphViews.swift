@@ -44,12 +44,19 @@ struct RecentSamplesView<Samples: Sequence<PingResult>>: View {
 }
 
 struct LatencyGraph: View {
-    let samples: [PingResult]
+    let graphData: LatencyGraphData
     var showsAxes = false
 
-    var body: some View {
-        let graphData = LatencyGraphData(samples: samples)
+    init(samples: [PingResult], showsAxes: Bool = false) {
+        self.init(graphData: LatencyGraphData(samples: samples), showsAxes: showsAxes)
+    }
 
+    init(graphData: LatencyGraphData, showsAxes: Bool = false) {
+        self.graphData = graphData
+        self.showsAxes = showsAxes
+    }
+
+    var body: some View {
         HStack(spacing: showsAxes ? 6 : 0) {
             if showsAxes {
                 LatencyGraphAxisLabels(scale: graphData.scale, hasData: graphData.hasLatencyData)
@@ -128,32 +135,34 @@ struct LatencyGraph: View {
 
 }
 
-struct HostLatencyGraphSeries: Identifiable {
-    let host: HostConfig
-    let samples: [PingResult]
-    let color: Color
-    let isPrimary: Bool
-
-    var id: UUID { host.id }
-
-    static let palette: [Color] = [
-        .blue,
-        .green,
-        .orange,
-        .purple,
-        .pink,
-        .cyan
-    ]
-}
-
 struct MultiHostLatencyGraph: View {
     let series: [HostLatencyGraphSeries]
+    let graphData: MultiHostLatencyGraphData
     var showsAxes = false
     var showsLegend = true
 
-    var body: some View {
-        let graphData = MultiHostLatencyGraphData(series: series)
+    init(series: [HostLatencyGraphSeries], showsAxes: Bool = false, showsLegend: Bool = true) {
+        self.init(
+            series: series,
+            graphData: MultiHostLatencyGraphData(series: series),
+            showsAxes: showsAxes,
+            showsLegend: showsLegend
+        )
+    }
 
+    init(
+        series: [HostLatencyGraphSeries],
+        graphData: MultiHostLatencyGraphData,
+        showsAxes: Bool = false,
+        showsLegend: Bool = true
+    ) {
+        self.series = series
+        self.graphData = graphData
+        self.showsAxes = showsAxes
+        self.showsLegend = showsLegend
+    }
+
+    var body: some View {
         HStack(spacing: showsAxes ? 6 : 0) {
             if showsAxes {
                 LatencyGraphAxisLabels(scale: graphData.scale, hasData: graphData.hasLatencyData)
@@ -264,88 +273,6 @@ struct MultiHostLatencyGraph: View {
         )
     }
 
-}
-
-private struct LatencyGraphPoint {
-    let index: Int
-    let latencyMilliseconds: Double?
-}
-
-private struct LatencyGraphData {
-    let points: [LatencyGraphPoint]
-    let scale: LatencyGraphScale
-    private let latencyCount: Int
-
-    init(samples: [PingResult]) {
-        var latencies: [Double] = []
-        latencies.reserveCapacity(samples.count)
-        var points: [LatencyGraphPoint] = []
-        points.reserveCapacity(samples.count)
-        for (index, sample) in samples.enumerated() {
-            let latency = sample.latency?.milliseconds
-            if let latency {
-                latencies.append(latency)
-            }
-            points.append(LatencyGraphPoint(index: index, latencyMilliseconds: latency))
-        }
-        self.points = points
-        self.latencyCount = latencies.count
-        scale = LatencyGraphScale(latencies: latencies)
-    }
-
-    var isEmpty: Bool {
-        points.isEmpty
-    }
-
-    var hasLatencyData: Bool {
-        latencyCount > 0
-    }
-}
-
-private struct DrawableHostLatencyGraphSeries {
-    let source: HostLatencyGraphSeries
-    let points: [LatencyGraphPoint]
-}
-
-private struct MultiHostLatencyGraphData {
-    let drawableSeries: [DrawableHostLatencyGraphSeries]
-    let scale: LatencyGraphScale
-    private let latencyCount: Int
-
-    init(series: [HostLatencyGraphSeries]) {
-        var latencies: [Double] = []
-        var drawableSeries: [DrawableHostLatencyGraphSeries] = []
-        for hostSeries in series {
-            var points: [LatencyGraphPoint] = []
-            points.reserveCapacity(hostSeries.samples.count)
-            var hostLatencyCount = 0
-            for (index, sample) in hostSeries.samples.enumerated() {
-                let latency = sample.latency?.milliseconds
-                if let latency {
-                    latencies.append(latency)
-                    hostLatencyCount += 1
-                }
-                points.append(LatencyGraphPoint(index: index, latencyMilliseconds: latency))
-            }
-            // Fully-failed series must still be drawn: their line is a no-op but
-            // the primary host's failure marks are exactly what an outage looks
-            // like. Only a series with no samples at all has nothing to render.
-            if !points.isEmpty {
-                drawableSeries.append(DrawableHostLatencyGraphSeries(source: hostSeries, points: points))
-            }
-        }
-        self.drawableSeries = drawableSeries
-        self.latencyCount = latencies.count
-        scale = LatencyGraphScale(latencies: latencies)
-    }
-
-    var isEmpty: Bool {
-        drawableSeries.isEmpty
-    }
-
-    var hasLatencyData: Bool {
-        latencyCount > 0
-    }
 }
 
 private struct LatencyGraphAxisLabels: View {

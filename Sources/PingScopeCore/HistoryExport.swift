@@ -135,10 +135,23 @@ public enum HistoryExporter {
                 try handle.writeLine(csvRow(sample: sample, host: host, formatter: formatter))
             }
         case .json:
-            try handle.write(contentsOf: JSONEncoder.historyEncoder.encode(HistoryExportDocument(host: host, samples: samples)))
+            try writeJSON(samples: samples, host: host, to: handle)
         case .text:
             try writeText(samples: samples, host: host, to: handle)
         }
+    }
+
+    private static func writeJSON(samples: [PingResult], host: HostConfig, to handle: FileHandle) throws {
+        var writer = HistoryJSONStreamWriter(handle: handle, encoder: .historyEncoder)
+        try writer.beginObject()
+        try writer.writeField("generatedAt", Date())
+        try writer.writeField("host", host)
+        try writer.beginArrayField("samples")
+        for sample in samples {
+            try writer.writeArrayElement(sample)
+        }
+        try writer.endArray()
+        try writer.endObject()
     }
 
     private static func writeText(samples: [PingResult], host: HostConfig, to handle: FileHandle) throws {
@@ -188,6 +201,64 @@ public enum HistoryExporter {
 
 }
 
+private struct HistoryJSONStreamWriter {
+    private let handle: FileHandle
+    private let encoder: JSONEncoder
+    private var objectFieldCount = 0
+    private var arrayElementCount = 0
+
+    init(handle: FileHandle, encoder: JSONEncoder) {
+        self.handle = handle
+        self.encoder = encoder
+    }
+
+    mutating func beginObject() throws {
+        try handle.writeLine("{")
+    }
+
+    mutating func writeField<Value: Encodable>(_ name: String, _ value: Value) throws {
+        if objectFieldCount > 0 {
+            try handle.writeLine(",")
+        }
+        try handle.write(contentsOf: Data("  ".utf8))
+        try handle.write(contentsOf: JSONEncoder.fieldNameEncoder.encode(name))
+        try handle.write(contentsOf: Data(" : ".utf8))
+        try handle.write(contentsOf: try encoder.encode(value))
+        objectFieldCount += 1
+    }
+
+    mutating func beginArrayField(_ name: String) throws {
+        if objectFieldCount > 0 {
+            try handle.writeLine(",")
+        }
+        try handle.write(contentsOf: Data("  ".utf8))
+        try handle.write(contentsOf: JSONEncoder.fieldNameEncoder.encode(name))
+        try handle.writeLine(" : [")
+        objectFieldCount += 1
+        arrayElementCount = 0
+    }
+
+    mutating func writeArrayElement<Value: Encodable>(_ value: Value) throws {
+        if arrayElementCount > 0 {
+            try handle.writeLine(",")
+        }
+        try handle.write(contentsOf: try encoder.encode(value))
+        arrayElementCount += 1
+    }
+
+    mutating func endArray() throws {
+        if arrayElementCount > 0 {
+            try handle.writeLine("")
+        }
+        try handle.write(contentsOf: Data("  ]".utf8))
+    }
+
+    mutating func endObject() throws {
+        try handle.writeLine("")
+        try handle.writeLine("}")
+    }
+}
+
 private struct HistoryExportDocument: Encodable {
     var generatedAt = Date()
     var host: HostConfig
@@ -200,6 +271,10 @@ private extension JSONEncoder {
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         encoder.dateEncodingStrategy = .iso8601
         return encoder
+    }
+
+    static var fieldNameEncoder: JSONEncoder {
+        JSONEncoder()
     }
 }
 

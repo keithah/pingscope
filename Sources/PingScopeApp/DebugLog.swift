@@ -14,6 +14,7 @@ enum DebugLog {
     private static let rotatedFileURL = fileURL.deletingLastPathComponent().appendingPathComponent("pingscope-debug.1.log")
     private nonisolated(unsafe) static var handle: FileHandle?
     private nonisolated(unsafe) static var currentFileSize: UInt64?
+    private nonisolated(unsafe) static var directoryReady = false
 
     nonisolated static func write(_ message: String) {
         queue.async {
@@ -31,17 +32,24 @@ enum DebugLog {
         guard let data = line.data(using: .utf8) else { return }
 
         do {
-            try FileManager.default.createDirectory(
-                at: fileURL.deletingLastPathComponent(),
-                withIntermediateDirectories: true
-            )
-            rotateIfNeeded(incomingByteCount: UInt64(data.count))
+            try ensureDirectory()
+            try rotateIfNeeded(incomingByteCount: UInt64(data.count))
             let output = try fileHandle()
             try output.write(contentsOf: data)
             currentFileSize = (currentFileSize ?? 0) + UInt64(data.count)
         } catch {
+            reportInternalFailure("write failed: \(error.localizedDescription)")
             try? FileHandle.standardError.write(contentsOf: data)
         }
+    }
+
+    private nonisolated static func ensureDirectory() throws {
+        guard !directoryReady else { return }
+        try FileManager.default.createDirectory(
+            at: fileURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        directoryReady = true
     }
 
     private nonisolated static func fileHandle() throws -> FileHandle {
@@ -58,7 +66,7 @@ enum DebugLog {
         return opened
     }
 
-    private nonisolated static func rotateIfNeeded(incomingByteCount: UInt64) {
+    private nonisolated static func rotateIfNeeded(incomingByteCount: UInt64) throws {
         let fileManager = FileManager.default
         let knownSize = currentFileSize
             ?? ((try? fileManager.attributesOfItem(atPath: fileURL.path)[.size] as? UInt64) ?? 0)
@@ -66,11 +74,29 @@ enum DebugLog {
             currentFileSize = knownSize
             return
         }
-        try? handle?.close()
-        handle = nil
-        try? fileManager.removeItem(at: rotatedFileURL)
-        try? fileManager.moveItem(at: fileURL, to: rotatedFileURL)
-        currentFileSize = 0
+        do {
+            try handle?.close()
+            handle = nil
+            if fileManager.fileExists(atPath: rotatedFileURL.path) {
+                try fileManager.removeItem(at: rotatedFileURL)
+            }
+            if fileManager.fileExists(atPath: fileURL.path) {
+                try fileManager.moveItem(at: fileURL, to: rotatedFileURL)
+            }
+            currentFileSize = 0
+        } catch {
+            handle = nil
+            currentFileSize = (try? fileManager.attributesOfItem(atPath: fileURL.path)[.size] as? UInt64) ?? knownSize
+            reportInternalFailure("rotation failed: \(error.localizedDescription)")
+            throw error
+        }
+    }
+
+    private nonisolated static func reportInternalFailure(_ message: String) {
+        let line = "PingScope debug log \(message)\n"
+        if let data = line.data(using: .utf8) {
+            try? FileHandle.standardError.write(contentsOf: data)
+        }
     }
 
     nonisolated static func redacted(_ value: String?) -> String {
@@ -87,14 +113,13 @@ enum DebugLog {
                     at: fileURL.deletingLastPathComponent(),
                     withIntermediateDirectories: true
                 )
+                directoryReady = true
                 try Data().write(to: fileURL)
                 try? FileManager.default.removeItem(at: rotatedFileURL)
                 currentFileSize = 0
             } catch {
-                let line = "PingScope debug log clear failed: \(error.localizedDescription)\n"
-                if let data = line.data(using: .utf8) {
-                    try? FileHandle.standardError.write(contentsOf: data)
-                }
+                directoryReady = false
+                reportInternalFailure("clear failed: \(error.localizedDescription)")
             }
         }
     }

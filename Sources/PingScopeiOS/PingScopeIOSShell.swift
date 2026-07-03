@@ -12,7 +12,7 @@ public struct PingScopeIOSRootView: View {
     public var session: MonitorSessionState?
     public var health: HostHealth
     public var samples: [PingResult]
-    public var graphSamples: [PingResult]
+    public var graphPresentation: PingScopeIOSGraphPresentation
     public var historySamples: [PingResult]
     public var selectedGraphRange: TimeRange
     public var gatewayDetectionText: String?
@@ -35,7 +35,7 @@ public struct PingScopeIOSRootView: View {
         session: MonitorSessionState? = nil,
         health: HostHealth = HostHealth(hostID: HostConfig.defaultInternet.id, thresholds: HostConfig.defaultInternet.thresholds),
         samples: [PingResult] = [],
-        graphSamples: [PingResult] = [],
+        graphPresentation: PingScopeIOSGraphPresentation? = nil,
         historySamples: [PingResult] = [],
         selectedGraphRange: TimeRange = .fiveMinutes,
         gatewayDetectionText: String? = nil,
@@ -57,7 +57,7 @@ public struct PingScopeIOSRootView: View {
         self.session = session
         self.health = health
         self.samples = samples
-        self.graphSamples = graphSamples.isEmpty ? samples : graphSamples
+        self.graphPresentation = graphPresentation ?? PingScopeIOSGraphPresentation(samples: samples, range: selectedGraphRange)
         self.historySamples = historySamples
         self.selectedGraphRange = selectedGraphRange
         self.gatewayDetectionText = gatewayDetectionText
@@ -117,7 +117,7 @@ public struct PingScopeIOSRootView: View {
                 .fixedSize(horizontal: false, vertical: true)
             graphRangePicker
                 .fixedSize(horizontal: false, vertical: true)
-            PingScopeIOSLatencyGraph(samples: graphSamples, range: selectedGraphRange)
+            PingScopeIOSLatencyGraph(renderData: graphPresentation.renderData, range: selectedGraphRange)
                 .frame(height: 170)
                 .fixedSize(horizontal: false, vertical: true)
             controls
@@ -281,7 +281,7 @@ public struct PingScopeIOSRootView: View {
     }
 
     private var stats: some View {
-        let stats = SampleStats(samples: graphSamples)
+        let stats = graphPresentation.stats
         return Grid(alignment: .leading, horizontalSpacing: 24, verticalSpacing: 8) {
             GridRow {
                 statCell("TX", "\(stats.transmitted)")
@@ -515,15 +515,13 @@ private struct PingScopeIOSHostEditor: View {
 }
 
 private struct PingScopeIOSLatencyGraph: View {
-    let samples: [PingResult]
+    let renderData: PingScopeIOSLatencyGraphData
     let range: TimeRange
 
     private let yAxisWidth: CGFloat = 48
     private let xAxisHeight: CGFloat = 22
 
     var body: some View {
-        let renderData = PingScopeIOSLatencyGraphData(samples: samples, range: range)
-
         VStack(spacing: 4) {
             HStack(spacing: 8) {
                 yAxisLabels(renderData: renderData)
@@ -594,29 +592,4 @@ private struct PingScopeIOSLatencyGraph: View {
     }
 }
 
-private struct PingScopeIOSLatencyGraphPoint {
-    let timestamp: Date
-    let latencyMilliseconds: Double
-}
-
-private struct PingScopeIOSLatencyGraphData {
-    let startDate: Date
-    let endDate: Date
-    let scale: LatencyGraphScale
-    let points: [PingScopeIOSLatencyGraphPoint]
-
-    init(samples: [PingResult], range: TimeRange) {
-        endDate = Date()
-        startDate = endDate.addingTimeInterval(-range.duration)
-        var latencies: [Double] = []
-        var points: [PingScopeIOSLatencyGraphPoint] = []
-        for sample in samples where sample.timestamp >= startDate && sample.timestamp <= endDate {
-            guard let latency = sample.latency?.milliseconds else { continue }
-            latencies.append(latency)
-            points.append(PingScopeIOSLatencyGraphPoint(timestamp: sample.timestamp, latencyMilliseconds: latency))
-        }
-        self.points = points
-        self.scale = LatencyGraphScale(latencies: latencies)
-    }
-}
 #endif

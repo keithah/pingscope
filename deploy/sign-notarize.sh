@@ -81,6 +81,7 @@ fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+source "${PROJECT_ROOT}/scripts/lib/codesign-macos.sh"
 ARTIFACT_DIR="/private/tmp/artifacts/PingScope-v${VERSION}"
 case "${ARTIFACT_DIR}" in
   /private/tmp/artifacts/PingScope-v*) ;;
@@ -104,38 +105,9 @@ cd "${ARTIFACT_DIR}"
 echo "Signing app: ${SIGN_APP_IDENTITY}"
 SIGN_COMMON=("--force" "--options" "runtime" "--timestamp" "--sign" "${SIGN_APP_IDENTITY}")
 
-sign_framework_tree() {
-  local framework="$1"
-  while IFS= read -r executable; do
-    codesign "${SIGN_COMMON[@]}" "${executable}"
-  done < <(find "${framework}" -type f -perm -111 2>/dev/null | sort)
+codesign_sign_macos_bundle_contents "PingScope.app" "${PROJECT_ROOT}"
 
-  while IFS= read -r bundle; do
-    codesign "${SIGN_COMMON[@]}" "${bundle}"
-  done < <(find "${framework}" \( -name '*.xpc' -o -name '*.app' \) -type d 2>/dev/null | sort -r)
-
-  codesign "${SIGN_COMMON[@]}" "${framework}"
-}
-
-while IFS= read -r framework; do
-  sign_framework_tree "${framework}"
-done < <(find "PingScope.app/Contents/Frameworks" -name '*.framework' -type d 2>/dev/null | sort)
-
-while IFS= read -r dylib; do
-  codesign "${SIGN_COMMON[@]}" "${dylib}"
-done < <(find "PingScope.app/Contents/MacOS" -name '*.dylib' -type f 2>/dev/null | sort)
-
-while IFS= read -r appex; do
-  while IFS= read -r framework; do
-    sign_framework_tree "${framework}"
-  done < <(find "${appex}/Contents/Frameworks" -name '*.framework' -type d 2>/dev/null | sort)
-  while IFS= read -r dylib; do
-    codesign "${SIGN_COMMON[@]}" "${dylib}"
-  done < <(find "${appex}/Contents/MacOS" -name '*.dylib' -type f 2>/dev/null | sort)
-  codesign "${SIGN_COMMON[@]}" --entitlements "${PROJECT_ROOT}/PingScopeWidget/PingScopeWidget.entitlements" "${appex}"
-done < <(find "PingScope.app/Contents/PlugIns" -name '*.appex' -type d 2>/dev/null | sort)
-
-codesign "${SIGN_COMMON[@]}" --identifier "com.hadm.PingScope" --entitlements "${PROJECT_ROOT}/Configuration/PingScope-DeveloperID.entitlements" "PingScope.app"
+codesign_run --identifier "com.hadm.PingScope" --entitlements "${PROJECT_ROOT}/Configuration/PingScope-DeveloperID.entitlements" "PingScope.app"
 
 echo "Verifying signature..."
 codesign --verify --deep --strict --verbose=2 "PingScope.app"

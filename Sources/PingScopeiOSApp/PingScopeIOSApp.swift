@@ -21,7 +21,7 @@ struct PingScopeIOSApp: App {
                 session: model.snapshot.session,
                 health: model.snapshot.health,
                 samples: model.snapshot.series.samples,
-                graphSamples: model.graphSamples,
+                graphPresentation: model.graphPresentation,
                 historySamples: model.historySamples,
                 selectedGraphRange: model.selectedGraphRange,
                 gatewayDetectionText: model.gatewayDetectionText,
@@ -71,7 +71,7 @@ private final class PingScopeIOSAppModel: ObservableObject {
     @Published var hosts: [HostConfig]
     @Published var snapshot: LiveMonitorSessionSnapshot
     @Published var historySamples: [PingResult] = []
-    @Published var graphSamples: [PingResult] = []
+    @Published var graphPresentation = PingScopeIOSGraphPresentation(samples: [], range: .fiveMinutes)
     @Published var selectedGraphRange: TimeRange = .fiveMinutes {
         didSet {
             rebuildGraphSamples()
@@ -122,7 +122,7 @@ private final class PingScopeIOSAppModel: ObservableObject {
             session: nil,
             health: HostHealth(hostID: host.id, thresholds: host.thresholds)
         )
-        self.graphSamples = snapshot.series.samples
+        self.graphPresentation = PingScopeIOSGraphPresentation(samples: snapshot.series.samples, range: selectedGraphRange)
         Task {
             await refreshHistory(force: true)
         }
@@ -418,10 +418,15 @@ private final class PingScopeIOSAppModel: ObservableObject {
     }
 
     private func rebuildGraphSamples() {
-        graphSamples = presenter.mergedSamples(
+        let graphSamples = presenter.mergedSamples(
             history: historySamples,
             live: snapshot.series.samples,
             range: selectedGraphRange
+        )
+        graphPresentation = PingScopeIOSGraphPresentation(
+            samples: graphSamples,
+            range: selectedGraphRange,
+            endDate: Date()
         )
     }
 

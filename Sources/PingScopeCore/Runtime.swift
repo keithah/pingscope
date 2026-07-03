@@ -269,7 +269,9 @@ public actor MeasurementScheduler {
         let measurableHosts = hosts.filter { host in
             host.isEnabled && (allowsLocalNetworkProbes || !host.requiresLocalNetworkPermission)
         }
-        logger?("scheduler start generation=\(runGeneration) hosts=\(hosts.map(\.diagnosticDescription).joined(separator: "; ")) allowsLocal=\(allowsLocalNetworkProbes) measurable=\(measurableHosts.map(\.diagnosticDescription).joined(separator: "; "))")
+        let disabledCount = hosts.filter { !$0.isEnabled }.count
+        let localSuppressedCount = hosts.count - disabledCount - measurableHosts.count
+        logger?("scheduler start generation=\(runGeneration) hosts=\(hosts.count) measurable=\(measurableHosts.count) disabled=\(disabledCount) localSuppressed=\(localSuppressedCount) allowsLocal=\(allowsLocalNetworkProbes)")
 
         for (offset, host) in measurableHosts.enumerated() {
             let task = Task { [weak self] in
@@ -307,18 +309,18 @@ public actor MeasurementScheduler {
     }
 
     private func runLoop(for host: HostConfig, generation: Int) async {
-        logger?("scheduler runLoop begin generation=\(generation) host=\(host.diagnosticDescription)")
+        logger?("scheduler runLoop begin generation=\(generation) hostID=\(host.id.uuidString) method=\(host.method.rawValue)")
         while !Task.isCancelled {
             let probe = await probeFactory.makeProbe(for: host.method)
             let result = await probe.measure(host)
             guard !Task.isCancelled, generation == self.generation else { return }
             if shouldLogFailure(result) {
-                logger?("scheduler result host=\(host.displayName) failure=\(String(describing: result.failureReason))")
+                logger?("scheduler result hostID=\(host.id.uuidString) failure=\(String(describing: result.failureReason))")
             }
             continuation?.yield(result)
             try? await Task.sleep(for: host.interval)
         }
-        logger?("scheduler runLoop end generation=\(generation) host=\(host.diagnosticDescription)")
+        logger?("scheduler runLoop end generation=\(generation) hostID=\(host.id.uuidString)")
     }
 
     private func shouldLogFailure(_ result: PingResult) -> Bool {
@@ -334,12 +336,6 @@ public actor MeasurementScheduler {
         }
         lastFailureLogByHost[result.hostID] = (failureReason, result.timestamp)
         return true
-    }
-}
-
-private extension HostConfig {
-    var diagnosticDescription: String {
-        "\(displayName)|\(address)|\(method.rawValue)|\(port.map(String.init) ?? "-")|enabled=\(isEnabled)|local=\(requiresLocalNetworkPermission)"
     }
 }
 
@@ -655,7 +651,7 @@ private actor HistoryWriteBuffer {
     private let store: any PingHistoryStore
     private let maxBatchSize: Int
     private let flushDelay: Duration
-    private var pending: [PingResult] = []
+    private var pending: BoundedBuffer<PingResult>
     private var flushTask: Task<Void, Never>?
     private var isDiscarding = false
     private var generation = 0
@@ -663,10 +659,12 @@ private actor HistoryWriteBuffer {
     init(
         store: any PingHistoryStore,
         maxBatchSize: Int = 32,
+        maxPendingResults: Int = 2048,
         flushDelay: Duration = .milliseconds(250)
     ) {
         self.store = store
         self.maxBatchSize = max(1, maxBatchSize)
+        self.pending = BoundedBuffer(capacity: max(self.maxBatchSize, maxPendingResults))
         self.flushDelay = flushDelay
     }
 
@@ -747,8 +745,7 @@ private actor HistoryWriteBuffer {
 
     private func drainPending() async {
         guard !pending.isEmpty else { return }
-        let batch = pending
-        pending.removeAll()
+        let batch = pending.popPrefix(maxBatchSize)
         await store.append(batch)
     }
 

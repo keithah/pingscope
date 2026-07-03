@@ -5,12 +5,21 @@ public struct BoundedBuffer<Element: Codable & Equatable & Sendable>: Codable, E
     private var storage: [Element]
     private var startIndex: Int
     private var storedCount: Int
+    public private(set) var droppedCount: Int
 
     public var elements: [Element] {
         guard storedCount > 0 else { return [] }
         return (0..<storedCount).map { offset in
             storage[(startIndex + offset) % storage.count]
         }
+    }
+
+    public var count: Int {
+        storedCount
+    }
+
+    public var isEmpty: Bool {
+        storedCount == 0
     }
 
     public func suffix(_ maxLength: Int) -> [Element] {
@@ -40,6 +49,7 @@ public struct BoundedBuffer<Element: Codable & Equatable & Sendable>: Codable, E
         self.storage = []
         self.startIndex = 0
         self.storedCount = 0
+        self.droppedCount = 0
     }
 
     public init(elements: [Element], capacity: Int) {
@@ -47,19 +57,40 @@ public struct BoundedBuffer<Element: Codable & Equatable & Sendable>: Codable, E
         self.storage = Array(elements.suffix(self.capacity))
         self.startIndex = 0
         self.storedCount = storage.count
+        self.droppedCount = 0
     }
 
-    public mutating func append(_ element: Element) {
+    @discardableResult
+    public mutating func append(_ element: Element) -> Int {
         normalizeCapacityIfNeeded()
 
         if storage.count < capacity {
             storage.append(element)
             storedCount += 1
-            return
+            return 0
         }
 
         storage[startIndex] = element
         startIndex = (startIndex + 1) % storage.count
+        droppedCount += 1
+        return 1
+    }
+
+    public mutating func removeAll() {
+        storage.removeAll()
+        startIndex = 0
+        storedCount = 0
+    }
+
+    public mutating func popPrefix(_ requestedCount: Int) -> [Element] {
+        let prefixCount = min(max(0, requestedCount), storedCount)
+        guard prefixCount > 0 else { return [] }
+        let currentElements = elements
+        let batch = Array(currentElements.prefix(prefixCount))
+        storage = Array(currentElements.dropFirst(prefixCount))
+        startIndex = 0
+        storedCount = storage.count
+        return batch
     }
 
     public mutating func setCapacity(_ newCapacity: Int) {
@@ -70,6 +101,7 @@ public struct BoundedBuffer<Element: Codable & Equatable & Sendable>: Codable, E
     private enum CodingKeys: String, CodingKey {
         case capacity
         case elements
+        case droppedCount
     }
 
     public init(from decoder: any Decoder) throws {
@@ -77,16 +109,18 @@ public struct BoundedBuffer<Element: Codable & Equatable & Sendable>: Codable, E
         let decodedCapacity = try container.decode(Int.self, forKey: .capacity)
         let decodedElements = try container.decode([Element].self, forKey: .elements)
         self.init(elements: decodedElements, capacity: decodedCapacity)
+        self.droppedCount = try container.decodeIfPresent(Int.self, forKey: .droppedCount) ?? 0
     }
 
     public func encode(to encoder: any Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(capacity, forKey: .capacity)
         try container.encode(elements, forKey: .elements)
+        try container.encode(droppedCount, forKey: .droppedCount)
     }
 
     public static func == (lhs: BoundedBuffer<Element>, rhs: BoundedBuffer<Element>) -> Bool {
-        lhs.capacity == rhs.capacity && lhs.elements == rhs.elements
+        lhs.capacity == rhs.capacity && lhs.elements == rhs.elements && lhs.droppedCount == rhs.droppedCount
     }
 
     private mutating func normalizeCapacityIfNeeded() {

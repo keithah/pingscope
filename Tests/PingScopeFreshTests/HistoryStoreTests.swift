@@ -117,6 +117,49 @@ final class HistoryStoreTests: XCTestCase {
         XCTAssertEqual(try XCTUnwrap(recorded.first?.latency).milliseconds, 19, accuracy: 0.01)
     }
 
+    func testBoundedBufferDropsOldestAndCountsOverflow() {
+        var buffer = BoundedBuffer<Int>(capacity: 3)
+
+        XCTAssertEqual(buffer.append(1), 0)
+        XCTAssertEqual(buffer.append(2), 0)
+        XCTAssertEqual(buffer.append(3), 0)
+        XCTAssertEqual(buffer.append(4), 1)
+        XCTAssertEqual(buffer.append(5), 1)
+
+        XCTAssertEqual(buffer.count, 3)
+        XCTAssertEqual(buffer.droppedCount, 2)
+        XCTAssertEqual(buffer.popPrefix(2), [3, 4])
+        XCTAssertEqual(buffer.popPrefix(10), [5])
+        XCTAssertTrue(buffer.isEmpty)
+    }
+
+    func testBoundedBufferCodableAndEqualityIncludeDroppedCount() throws {
+        var dropped = BoundedBuffer<Int>(capacity: 2)
+        dropped.append(1)
+        dropped.append(2)
+        dropped.append(3)
+
+        var sameElementsWithoutDrop = BoundedBuffer(elements: [2, 3], capacity: 2)
+        XCTAssertNotEqual(dropped, sameElementsWithoutDrop)
+        sameElementsWithoutDrop.append(4)
+        XCTAssertEqual(sameElementsWithoutDrop.droppedCount, 1)
+
+        let encoded = try JSONEncoder().encode(dropped)
+        let decoded = try JSONDecoder().decode(BoundedBuffer<Int>.self, from: encoded)
+
+        XCTAssertEqual(decoded, dropped)
+        XCTAssertEqual(decoded.droppedCount, 1)
+    }
+
+    func testBoundedBufferDecodesLegacyPayloadWithoutDroppedCount() throws {
+        let data = Data(#"{"capacity":2,"elements":[1,2]}"#.utf8)
+
+        let decoded = try JSONDecoder().decode(BoundedBuffer<Int>.self, from: data)
+
+        XCTAssertEqual(decoded.elements, [1, 2])
+        XCTAssertEqual(decoded.droppedCount, 0)
+    }
+
     func testHistoryExporterFormatsCSVJSONAndText() throws {
         let host = HostConfig(displayName: "Comma, Host", address: "example.com")
         let samples = [

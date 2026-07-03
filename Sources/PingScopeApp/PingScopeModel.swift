@@ -11,7 +11,7 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
     @Published private(set) var snapshot = RuntimeSnapshot(hosts: [.defaultInternet], primaryHostID: HostConfig.defaultInternet.id, healthByHost: [:], samplesByHost: [:])
     @Published var selectedRange: TimeRange = .fiveMinutes {
         didSet {
-            recomputeVisibleSamples()
+            recomputeDisplayPresentation()
             refreshVisibleHistory()
         }
     }
@@ -66,13 +66,13 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
     @Published var overlayShowsAllHosts: Bool {
         didSet {
             UserDefaults.standard.overlayShowsAllHosts = overlayShowsAllHosts
-            recomputeVisibleSamples()
+            recomputeDisplayPresentation()
         }
     }
     @Published var popoverShowsAllHosts: Bool {
         didSet {
             UserDefaults.standard.popoverShowsAllHosts = popoverShowsAllHosts
-            recomputeVisibleSamples()
+            recomputeDisplayPresentation()
         }
     }
     @Published var overlayShowsLegend: Bool {
@@ -113,10 +113,7 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
     @Published private(set) var currentNetworkStatus: NetworkConnectivityStatus = .connected
     @Published private(set) var notificationPermissionState: NotificationPermissionState = .unknown
     @Published private(set) var notificationRequestMessage: String?
-    @Published private(set) var visibleHistorySamples: [PingResult] = []
-    @Published private(set) var visibleSamples: [PingResult] = []
-    @Published private(set) var allHostGraphSeries: [HostLatencyGraphSeries] = []
-    @Published private(set) var primaryStats = SampleStats(samples: [])
+    @Published private(set) var displayPresentation = PingScopeDisplayPresentation()
     @Published var historyExportHostID: UUID?
     @Published var historyExportRange: TimeRange = .oneHour
     @Published private(set) var historyExportMessage: String?
@@ -211,10 +208,6 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
         return HostHealth(hostID: primaryHost?.id ?? UUID())
     }
 
-    var primarySeries: SampleSeries? {
-        snapshot.primarySeries
-    }
-
     var menuBarState: MenuBarState {
         presenter.menuBarState(for: primaryHost, health: snapshot.primaryHealth)
     }
@@ -258,7 +251,7 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
         widgetsEnabled ? "Shared data enabled" : "Disabled"
     }
     var recentDiagnosticFailures: [PingResult] {
-        newestFailures(limit: 8, in: visibleSamples)
+        newestFailures(limit: 8, in: displayPresentation.visibleSamples)
     }
 
     private func newestFailures(limit: Int, in samples: [PingResult]) -> [PingResult] {
@@ -310,7 +303,7 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
             for await snapshot in snapshots {
                 await MainActor.run {
                     self?.snapshot = snapshot
-                    self?.recomputeVisibleSamples()
+                    self?.recomputeDisplayPresentation()
                     self?.persistHostState(snapshot)
                     if let state = self?.menuBarState {
                         self?.onMenuStateChanged?(state)
@@ -628,8 +621,7 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
 
     private func refreshVisibleHistoryIfNeeded() {
         guard let hostID = primaryHost?.id else {
-            visibleHistorySamples = []
-            recomputeVisibleSamples()
+            recomputeDisplayPresentation(visibleHistorySamples: [])
             lastHistoryKey = nil
             return
         }
@@ -642,8 +634,7 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
 
     private func refreshVisibleHistory() {
         guard let hostID = primaryHost?.id else {
-            visibleHistorySamples = []
-            recomputeVisibleSamples()
+            recomputeDisplayPresentation(visibleHistorySamples: [])
             lastHistoryKey = nil
             return
         }
@@ -651,8 +642,7 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
         let range = selectedRange
         let key = "\(hostID.uuidString)-\(range.rawValue)"
         lastHistoryKey = key
-        visibleHistorySamples = []
-        recomputeVisibleSamples()
+        recomputeDisplayPresentation(visibleHistorySamples: [])
         historyTask?.cancel()
         historyTask = Task { [runtime] in
             let samples = await runtime.historySamples(
@@ -662,35 +652,19 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
             )
             await MainActor.run {
                 guard self.lastHistoryKey == key else { return }
-                self.visibleHistorySamples = samples
-                self.recomputeVisibleSamples()
+                self.recomputeDisplayPresentation(visibleHistorySamples: samples)
             }
         }
     }
 
-    private func recomputeVisibleSamples() {
-        let samples = presenter.mergedSamples(
-            history: visibleHistorySamples,
-            live: presenter.visibleSamples(in: primarySeries, range: selectedRange),
-            range: selectedRange
+    private func recomputeDisplayPresentation(visibleHistorySamples: [PingResult]? = nil) {
+        displayPresentation = PingScopeDisplayPresentation(
+            snapshot: snapshot,
+            selectedRange: selectedRange,
+            visibleHistorySamples: visibleHistorySamples ?? displayPresentation.visibleHistorySamples,
+            includesAllHosts: overlayShowsAllHosts || popoverShowsAllHosts,
+            presenter: presenter
         )
-        visibleSamples = samples
-        primaryStats = SampleStats(samples: samples)
-        allHostGraphSeries = overlayShowsAllHosts || popoverShowsAllHosts ? makeAllHostGraphSeries() : []
-    }
-
-    private func makeAllHostGraphSeries() -> [HostLatencyGraphSeries] {
-        let cutoff = Date().addingTimeInterval(-selectedRange.duration)
-        return snapshot.hosts.enumerated().compactMap { index, host in
-            guard host.isEnabled else { return nil }
-            let samples = snapshot.samplesByHost[host.id]?.samples(since: cutoff) ?? []
-            return HostLatencyGraphSeries(
-                host: host,
-                samples: samples,
-                color: HostLatencyGraphSeries.palette[index % HostLatencyGraphSeries.palette.count],
-                isPrimary: host.id == primaryHost?.id
-            )
-        }
     }
 
     private func persistOverlayFrame(_ notification: Notification) {

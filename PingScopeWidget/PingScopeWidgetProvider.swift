@@ -2,7 +2,14 @@ import WidgetKit
 import SwiftUI
 
 struct Provider: TimelineProvider {
-    private let groupIdentifier = "6R7S5GA944.group.com.hadm.PingScope"  // Use same from Plan 01
+    // Must match WidgetSnapshotStore.defaultSuiteName in PingScopeCore (the
+    // widget does not link the package). macOS uses the classic team-prefixed
+    // app-group form; iOS provisioning only accepts group.-prefixed IDs.
+    #if os(macOS)
+    private let groupIdentifier = "6R7S5GA944.group.com.hadm.PingScope"
+    #else
+    private let groupIdentifier = "group.com.hadm.PingScope"
+    #endif
 
     func placeholder(in context: Context) -> WidgetEntry {
         WidgetEntry(date: Date(), data: .placeholder, snapshot: nil)

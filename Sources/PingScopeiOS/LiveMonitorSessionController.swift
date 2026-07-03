@@ -22,17 +22,24 @@ public actor LiveMonitorSessionController {
     private let backgroundRuntimeLimit: Duration?
     private let historyStore: (any PingHistoryStore)?
     private let historyWriter: LiveHistoryWriteBuffer?
+    private let clock: any Clock<Duration>
+    private let now: @Sendable () -> Date
     private var session: MonitorSessionState?
     private var health: HostHealth
     private var series: SampleSeries
     private var loopTask: Task<Void, Never>?
+    private var loopGeneration = 0
 
+    /// `clock` paces the probe loop and `now` supplies its wall-clock reads, so
+    /// tests can drive the loop deterministically instead of racing real sleeps.
     public init(
         host: HostConfig,
         probeFactory: any ProbeFactory = DefaultProbeFactory(flavor: .appStore),
         policy: MonitorSessionPolicy = MonitorSessionPolicy(),
         backgroundRuntimeLimit: Duration? = nil,
-        historyStore: (any PingHistoryStore)? = nil
+        historyStore: (any PingHistoryStore)? = nil,
+        clock: any Clock<Duration> = ContinuousClock(),
+        now: @escaping @Sendable () -> Date = { Date() }
     ) {
         self.host = BuildFlavor.appStore.normalizedHost(host)
         self.probeFactory = probeFactory
@@ -40,12 +47,18 @@ public actor LiveMonitorSessionController {
         self.backgroundRuntimeLimit = backgroundRuntimeLimit
         self.historyStore = historyStore
         self.historyWriter = historyStore.map { LiveHistoryWriteBuffer(store: $0) }
+        self.clock = clock
+        self.now = now
         self.health = HostHealth(hostID: self.host.id, thresholds: self.host.thresholds)
         self.series = SampleSeries(hostID: self.host.id)
     }
 
-    public func start(duration: MonitorSessionDuration, at date: Date = Date()) async {
-        loopTask?.cancel()
+    public func start(duration: MonitorSessionDuration) async {
+        await start(duration: duration, at: now())
+    }
+
+    public func start(duration: MonitorSessionDuration, at date: Date) async {
+        cancelLoop()
         await historyWriter?.flushNow()
         let newSession = MonitorSessionState(
             hostID: host.id,
@@ -56,23 +69,18 @@ public actor LiveMonitorSessionController {
         session = newSession
         health = HostHealth(hostID: host.id, thresholds: host.thresholds)
         series = SampleSeries(hostID: host.id)
+        let generation = loopGeneration
         loopTask = Task {
-            await runLoop(startedAt: date)
+            await runLoop(startedAt: date, generation: generation)
         }
     }
 
-    public func stop(reason: MonitorSessionEndReason = .userStopped, at date: Date = Date()) {
-        loopTask?.cancel()
-        loopTask = nil
-        finish(reason: reason, at: date)
-        Task {
-            await historyWriter?.flushNow()
-        }
+    public func stop(reason: MonitorSessionEndReason = .userStopped) async {
+        await stop(reason: reason, at: now())
     }
 
-    public func stop(reason: MonitorSessionEndReason = .userStopped, at date: Date = Date()) async {
-        loopTask?.cancel()
-        loopTask = nil
+    public func stop(reason: MonitorSessionEndReason, at date: Date) async {
+        cancelLoop()
         finish(reason: reason, at: date)
         await historyWriter?.flushNow()
     }
@@ -81,9 +89,17 @@ public actor LiveMonitorSessionController {
         LiveMonitorSessionSnapshot(host: host, session: session, health: health, series: series)
     }
 
-    private func runLoop(startedAt: Date) async {
+    private func cancelLoop() {
+        loopGeneration += 1
+        guard let task = loopTask else { return }
+        loopTask = nil
+        task.cancel()
+    }
+
+    private func runLoop(startedAt: Date, generation: Int) async {
         while !Task.isCancelled {
-            let now = Date()
+            guard generation == loopGeneration else { break }
+            let now = now()
             if shouldEndForSelectedDuration(at: now) {
                 finish(reason: .completed, at: now)
                 break
@@ -95,10 +111,11 @@ public actor LiveMonitorSessionController {
 
             let probe = await probeFactory.makeProbe(for: host.method)
             let result = await probe.measure(host)
+            guard !Task.isCancelled, generation == loopGeneration else { break }
             await ingest(result)
 
             do {
-                try await Task.sleep(for: policy.probeInterval)
+                try await clock.sleep(for: policy.probeInterval)
             } catch {
                 break
             }
@@ -132,12 +149,18 @@ private actor LiveHistoryWriteBuffer {
     private let store: any PingHistoryStore
     private let maxBatchSize: Int
     private let flushDelay: Duration
-    private var pending: [PingResult] = []
+    private var pending: BoundedBuffer<PingResult>
     private var flushTask: Task<Void, Never>?
 
-    init(store: any PingHistoryStore, maxBatchSize: Int = 16, flushDelay: Duration = .seconds(2)) {
+    init(
+        store: any PingHistoryStore,
+        maxBatchSize: Int = 16,
+        maxPendingResults: Int = 512,
+        flushDelay: Duration = .seconds(2)
+    ) {
         self.store = store
         self.maxBatchSize = max(1, maxBatchSize)
+        self.pending = BoundedBuffer(capacity: max(self.maxBatchSize, maxPendingResults))
         self.flushDelay = flushDelay
     }
 
@@ -194,8 +217,7 @@ private actor LiveHistoryWriteBuffer {
 
     private func drainOneBatch() async {
         guard !pending.isEmpty else { return }
-        let batch = pending
-        pending.removeAll()
+        let batch = pending.popPrefix(maxBatchSize)
         await store.append(batch)
     }
 
