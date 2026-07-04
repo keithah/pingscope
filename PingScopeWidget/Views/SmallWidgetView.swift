@@ -8,9 +8,10 @@ struct SmallWidgetView: View {
         VStack(alignment: .leading, spacing: 8) {
             if let snapshot = entry.snapshot,
                let host = snapshot.primaryHost {
+                let primaryHealth = snapshot.primaryHealth
                 HStack(spacing: 7) {
                     Circle()
-                        .fill(WidgetStatusStyle.color(for: snapshot.primaryHealth))
+                        .fill(WidgetStatusStyle.color(for: primaryHealth))
                         .frame(width: 10, height: 10)
 
                     Text(host.displayName)
@@ -18,13 +19,13 @@ struct SmallWidgetView: View {
                         .lineLimit(1)
                 }
 
-                if let latency = snapshot.primaryHealth?.latencyMilliseconds {
+                if let latency = primaryHealth?.latencyMilliseconds {
                     Text("\(Int(latency.rounded()))ms")
                         .font(.system(.title2, design: .rounded))
                         .fontWeight(.semibold)
                         .monospacedDigit()
                 } else {
-                    Text(snapshot.primaryHealth?.failureReason ?? "No sample")
+                    Text(primaryHealth?.failureReason ?? "No sample")
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
@@ -70,14 +71,10 @@ struct SmallWidgetView: View {
                 }
             }
         }
-        .opacity(isStale ? 0.6 : 1.0)
+        .opacity(entry.isStale ? 0.6 : 1.0)
         .containerBackground(for: .widget) {
             WidgetStatusStyle.backgroundColor
         }
         .widgetURL(URL(string: "pingscope://open"))
-    }
-
-    private var isStale: Bool {
-        entry.snapshot?.isStale ?? entry.data?.isStale ?? false
     }
 }

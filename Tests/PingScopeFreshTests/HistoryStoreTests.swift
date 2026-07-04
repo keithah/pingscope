@@ -61,6 +61,38 @@ final class HistoryStoreTests: XCTestCase {
         XCTAssertEqual(samples[0].metadata.starlink?.activeAlerts, ["obstructed"])
     }
 
+    func testSQLiteHistoryStoreStoresJSONOnlyForStructuredMetadata() async throws {
+        let url = temporaryHistoryURL()
+        let host = HostConfig(displayName: "Example", address: "example.com")
+        let starlinkHost = HostConfig.defaultStarlinkDish
+        let store = SQLiteHistoryStore(url: url)
+        await store.append(.success(
+            hostID: host.id,
+            latency: .milliseconds(17),
+            timestamp: Date(timeIntervalSince1970: 1_600),
+            metadata: ProbeMetadata(note: "note-only")
+        ).withHostMetadata(from: host))
+        await store.append(.success(
+            hostID: starlinkHost.id,
+            latency: .milliseconds(38),
+            timestamp: Date(timeIntervalSince1970: 1_601),
+            metadata: ProbeMetadata(
+                note: "state=CONNECTED",
+                starlink: StarlinkTelemetry(state: "CONNECTED")
+            )
+        ).withHostMetadata(from: starlinkHost))
+
+        var db: OpaquePointer?
+        XCTAssertEqual(sqlite3_open_v2(url.path, &db, SQLITE_OPEN_READONLY, nil), SQLITE_OK)
+        defer { sqlite3_close(db) }
+
+        let noteOnlyJSON = try metadataJSON(hostID: host.id, db: db)
+        let starlinkJSON = try metadataJSON(hostID: starlinkHost.id, db: db)
+
+        XCTAssertNil(noteOnlyJSON)
+        XCTAssertNotNil(starlinkJSON)
+    }
+
     func testSQLiteHistoryStorePrunesByRetention() async throws {
         let url = temporaryHistoryURL()
         let hostID = UUID()
@@ -74,6 +106,32 @@ final class HistoryStoreTests: XCTestCase {
         let samples = await store.samples(hostID: hostID, since: base.addingTimeInterval(-10), limit: 10)
 
         XCTAssertEqual(samples.map { Int($0.latency?.milliseconds ?? 0) }, [20])
+    }
+
+    func testSQLiteHistoryStoreReturnsLatestSamplesDescending() async throws {
+        let url = temporaryHistoryURL()
+        let host = HostConfig(displayName: "Example", address: "example.com")
+        let other = HostConfig(displayName: "Other", address: "other.example.com")
+        let base = Date(timeIntervalSince1970: 10_000)
+        let store = SQLiteHistoryStore(url: url)
+
+        for index in 0..<5 {
+            await store.append(.success(
+                hostID: host.id,
+                latency: .milliseconds(Double(index)),
+                timestamp: base.addingTimeInterval(Double(index))
+            ).withHostMetadata(from: host))
+        }
+        await store.append(.success(
+            hostID: other.id,
+            latency: .milliseconds(99),
+            timestamp: base.addingTimeInterval(99)
+        ).withHostMetadata(from: other))
+
+        let latest = await store.latestSamples(hostID: host.id, since: base, limit: 3)
+
+        XCTAssertEqual(latest.map { Int($0.timestamp.timeIntervalSince1970) }, [10_004, 10_003, 10_002])
+        XCTAssertEqual(latest.map(\.hostID), Array(repeating: host.id, count: 3))
     }
 
     func testSQLiteHistoryStoreCreatesTimestampPruneIndex() async throws {
@@ -131,6 +189,22 @@ final class HistoryStoreTests: XCTestCase {
         XCTAssertEqual(buffer.popPrefix(2), [3, 4])
         XCTAssertEqual(buffer.popPrefix(10), [5])
         XCTAssertTrue(buffer.isEmpty)
+    }
+
+    func testBoundedBufferPopPrefixPreservesWrappedRemainderOrder() {
+        var buffer = BoundedBuffer<Int>(capacity: 4)
+        for value in 1...6 {
+            buffer.append(value)
+        }
+
+        XCTAssertEqual(buffer.elements, [3, 4, 5, 6])
+        XCTAssertEqual(buffer.popPrefix(2), [3, 4])
+        XCTAssertEqual(buffer.elements, [5, 6])
+        XCTAssertEqual(buffer.append(7), 0)
+        XCTAssertEqual(buffer.append(8), 0)
+        XCTAssertEqual(buffer.append(9), 1)
+        XCTAssertEqual(buffer.elements, [6, 7, 8, 9])
+        XCTAssertEqual(buffer.droppedCount, 3)
     }
 
     func testBoundedBufferCodableAndEqualityIncludeDroppedCount() throws {
@@ -464,7 +538,22 @@ final class HistoryStoreTests: XCTestCase {
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         return directory.appendingPathComponent("History.sqlite")
     }
+
+    private func metadataJSON(hostID: UUID, db: OpaquePointer?) throws -> String? {
+        var statement: OpaquePointer?
+        XCTAssertEqual(
+            sqlite3_prepare_v2(db, "SELECT metadata_json FROM ping_samples WHERE host_id = ?;", -1, &statement, nil),
+            SQLITE_OK
+        )
+        defer { sqlite3_finalize(statement) }
+        sqlite3_bind_text(statement, 1, hostID.uuidString, -1, sqliteTransientForTests)
+        XCTAssertEqual(sqlite3_step(statement), SQLITE_ROW)
+        guard let text = sqlite3_column_text(statement, 0) else { return nil }
+        return String(cString: text)
+    }
 }
+
+private let sqliteTransientForTests = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
 
 private struct NoopProbeFactory: ProbeFactory {
     func makeProbe(for method: PingMethod) async -> any PingProbe {
@@ -487,6 +576,13 @@ private actor RecordingHistoryStore: PingHistoryStore {
 
     func samples(hostID: UUID, since: Date, limit: Int) async -> [PingResult] {
         Array(stored.filter { $0.hostID == hostID && $0.timestamp >= since }.prefix(limit))
+    }
+
+    func latestSamples(hostID: UUID, since: Date, limit: Int) async -> [PingResult] {
+        Array(stored
+            .filter { $0.hostID == hostID && $0.timestamp >= since }
+            .sorted { $0.timestamp > $1.timestamp }
+            .prefix(max(1, limit)))
     }
 
     func prune(olderThan cutoff: Date) async {

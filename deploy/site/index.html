@@ -4,73 +4,161 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>PingScope</title>
-    <meta name="description" content="PingScope is a native macOS menu-bar latency monitor.">
+    <meta name="description" content="PingScope is a native macOS menu-bar latency monitor for seeing what failed, where, and when.">
     <link rel="icon" href="assets/app-icon.png">
     <style>
       :root {
         color-scheme: dark;
-        --bg: #101315;
-        --panel: #1f2528;
-        --panel-strong: #2b3338;
-        --text: #f4f6f7;
-        --muted: #a9b4bb;
-        --line: #3b464d;
-        --blue: #4f85ff;
-        --green: #6fd679;
-        --yellow: #ffd95a;
-        --orange: #ee9147;
-        --red: #e25f63;
+        --bg: #090a0b;
+        --ink: #f7f3ea;
+        --muted: #b8b0a3;
+        --dim: #827b70;
+        --panel: #171817;
+        --panel-2: #20221f;
+        --line: #34352f;
+        --blue: #2f86ff;
+        --green: #59db68;
+        --orange: #ff9c3f;
+        --red: #ff625b;
+        --cream: #f1dcc0;
+        --shadow: rgba(0, 0, 0, 0.54);
       }
 
       * {
         box-sizing: border-box;
       }
 
+      html {
+        scroll-behavior: smooth;
+      }
+
       body {
         margin: 0;
         min-height: 100vh;
-        font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", sans-serif;
-        color: var(--text);
+        font-family: ui-rounded, "SF Pro Rounded", "Avenir Next", "Segoe UI", sans-serif;
+        color: var(--ink);
         background:
-          radial-gradient(circle at 18% 18%, rgba(79, 133, 255, 0.18), transparent 28rem),
-          radial-gradient(circle at 78% 8%, rgba(111, 214, 121, 0.18), transparent 24rem),
+          linear-gradient(120deg, rgba(47, 134, 255, 0.16), transparent 34rem),
+          linear-gradient(220deg, rgba(255, 156, 63, 0.12), transparent 30rem),
+          repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.025) 0 1px, transparent 1px 82px),
           var(--bg);
       }
 
-      main {
-        width: min(1080px, calc(100% - 40px));
+      body::before {
+        content: "";
+        position: fixed;
+        inset: 0;
+        pointer-events: none;
+        opacity: 0.28;
+        background-image: radial-gradient(rgba(255, 255, 255, 0.14) 0.7px, transparent 0.7px);
+        background-size: 13px 13px;
+        mask-image: linear-gradient(to bottom, #000, transparent 78%);
+      }
+
+      a {
+        color: inherit;
+      }
+
+      .shell {
+        width: min(1180px, calc(100% - 36px));
         margin: 0 auto;
-        padding: 56px 0;
+      }
+
+      header {
+        position: sticky;
+        top: 0;
+        z-index: 10;
+        backdrop-filter: blur(18px);
+        background: rgba(9, 10, 11, 0.78);
+        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      }
+
+      nav {
+        min-height: 68px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 22px;
+      }
+
+      .brand {
+        display: inline-flex;
+        align-items: center;
+        gap: 12px;
+        text-decoration: none;
+        font-weight: 850;
+      }
+
+      .brand img {
+        width: 34px;
+        height: 34px;
+        border-radius: 8px;
+      }
+
+      .nav-links {
+        display: flex;
+        align-items: center;
+        gap: 18px;
+        color: var(--muted);
+        font-size: 14px;
+        font-weight: 750;
+      }
+
+      .nav-links a {
+        text-decoration: none;
+      }
+
+      .nav-links a:hover {
+        color: var(--ink);
+      }
+
+      main {
+        overflow: hidden;
       }
 
       .hero {
+        min-height: calc(100svh - 68px);
         display: grid;
-        grid-template-columns: 1.05fr 0.95fr;
-        gap: 42px;
+        grid-template-columns: 0.82fr 1.18fr;
+        gap: 44px;
         align-items: center;
+        padding: 54px 0 34px;
       }
 
       .eyebrow {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
         color: var(--green);
-        font-size: 14px;
-        font-weight: 700;
-        letter-spacing: 0;
-        margin: 0 0 12px;
+        font-size: 13px;
+        font-weight: 850;
+        margin: 0 0 18px;
+        text-transform: uppercase;
+      }
+
+      .eyebrow::before {
+        content: "";
+        width: 10px;
+        height: 10px;
+        border-radius: 999px;
+        background: var(--green);
+        box-shadow: 0 0 22px rgba(89, 219, 104, 0.8);
       }
 
       h1 {
         margin: 0;
-        font-size: clamp(44px, 7vw, 82px);
-        line-height: 0.92;
+        font-size: clamp(52px, 8vw, 116px);
+        line-height: 0.86;
         letter-spacing: 0;
+        max-width: 8ch;
       }
 
       .lede {
-        color: var(--muted);
-        margin: 22px 0 0;
-        font-size: 20px;
-        line-height: 1.45;
         max-width: 620px;
+        margin: 24px 0 0;
+        color: var(--muted);
+        font-size: clamp(18px, 2.2vw, 24px);
+        line-height: 1.38;
       }
 
       .actions {
@@ -80,380 +168,558 @@
         margin-top: 30px;
       }
 
-      a.button {
+      .button {
         display: inline-flex;
         align-items: center;
         justify-content: center;
-        min-height: 44px;
+        min-height: 46px;
         padding: 0 18px;
         border-radius: 8px;
-        color: var(--text);
-        background: var(--blue);
-        font-weight: 700;
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        background: var(--ink);
+        color: #10100f;
+        font-weight: 850;
         text-decoration: none;
+        box-shadow: 0 14px 34px rgba(0, 0, 0, 0.3);
       }
 
-      a.button.secondary {
-        background: var(--panel-strong);
-        color: var(--text);
-        border: 1px solid var(--line);
+      .button.secondary {
+        color: var(--ink);
+        background: rgba(255, 255, 255, 0.08);
       }
 
-      .availability {
+      .button.ghost {
         color: var(--muted);
-        margin-top: 12px;
+        background: transparent;
+        box-shadow: none;
+      }
+
+      .release-note {
+        margin: 14px 0 0;
+        color: var(--dim);
         font-size: 13px;
-        font-weight: 700;
+        font-weight: 750;
       }
 
-      .preview {
-        border: 1px solid var(--line);
-        border-radius: 20px;
-        background: rgba(31, 37, 40, 0.86);
-        box-shadow: 0 24px 80px rgba(0, 0, 0, 0.42);
-        overflow: hidden;
-      }
-
-      .menu {
-        height: 48px;
+      .device-stage {
+        position: relative;
+        min-height: 620px;
         display: flex;
         align-items: center;
-        justify-content: space-between;
-        gap: 10px;
-        padding: 0 18px;
-        background: #3f7fb2;
+        justify-content: center;
       }
 
-      .brand {
-        display: flex;
-        align-items: center;
-        gap: 10px;
-        min-width: 0;
-        font-weight: 800;
+      .screen-shot {
+        position: relative;
+        z-index: 2;
+        width: min(100%, 560px);
+        transform: rotate(-1.5deg);
+        border-radius: 38px;
+        box-shadow: 0 30px 90px var(--shadow);
       }
 
-      .brand img {
-        width: 30px;
-        height: 30px;
-        border-radius: 7px;
+      .status-chip {
+        position: absolute;
+        z-index: 3;
+        right: 2%;
+        top: 13%;
+        width: 214px;
+        padding: 14px 16px;
+        border: 1px solid rgba(255, 255, 255, 0.13);
+        border-radius: 8px;
+        background: rgba(23, 24, 23, 0.92);
+        box-shadow: 0 18px 54px var(--shadow);
       }
 
-      .menubar-signal {
-        display: grid;
-        justify-items: center;
-        gap: 2px;
-        width: 42px;
-        color: #ffffff;
-        font-weight: 700;
-        font-size: 13px;
+      .status-chip strong {
+        display: block;
+        font-size: 28px;
         line-height: 1;
-        white-space: nowrap;
       }
 
-      .dot {
-        width: 13px;
-        height: 13px;
-        border-radius: 50%;
+      .status-chip span {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        margin-top: 8px;
+        color: var(--green);
+        font-weight: 850;
+      }
+
+      .status-chip span::before {
+        content: "";
+        width: 11px;
+        height: 11px;
+        border-radius: 999px;
         background: var(--green);
       }
 
-      .popover {
-        padding: 24px;
+      .mini-card {
+        position: absolute;
+        z-index: 3;
+        left: 1%;
+        bottom: 9%;
+        width: 260px;
+        padding: 16px;
+        border: 1px solid rgba(255, 255, 255, 0.13);
+        border-radius: 8px;
+        background: rgba(23, 24, 23, 0.93);
+        box-shadow: 0 18px 54px var(--shadow);
       }
 
-      .topline {
-        display: flex;
-        align-items: flex-start;
-        justify-content: space-between;
-        gap: 18px;
-        margin-bottom: 20px;
-      }
-
-      .host {
-        font-size: 24px;
-        line-height: 1.1;
-        font-weight: 800;
-      }
-
-      .endpoint {
+      .mini-card p {
+        margin: 0;
         color: var(--muted);
-        margin-top: 6px;
-        font-size: 15px;
+        line-height: 1.35;
         font-weight: 700;
       }
 
-      .status {
-        display: grid;
-        justify-items: end;
-        gap: 6px;
-        white-space: nowrap;
-      }
-
-      .latency {
-        font-size: 30px;
-        line-height: 1;
-        font-weight: 800;
-      }
-
-      .healthy {
-        display: flex;
-        align-items: center;
-        gap: 9px;
-        color: var(--green);
-        font-weight: 800;
-      }
-
-      .range {
-        display: flex;
-        align-items: center;
-        gap: 12px;
-        margin: 0 0 18px;
-        font-size: 16px;
-        font-weight: 800;
-      }
-
-      .segmented {
-        display: inline-flex;
-        overflow: hidden;
-        border-radius: 9px;
-        background: #282d30;
-      }
-
-      .segmented span {
-        padding: 8px 15px;
-        color: #d9dee1;
-      }
-
-      .segmented .selected {
-        background: var(--blue);
-        color: #fff;
-      }
-
-      .chart {
-        height: 220px;
-        border-bottom: 1px solid var(--line);
-        position: relative;
-        margin-bottom: 18px;
-        background:
-          linear-gradient(to bottom, transparent 32%, rgba(255, 255, 255, 0.08) 32%, rgba(255, 255, 255, 0.08) calc(32% + 1px), transparent calc(32% + 1px)),
-          linear-gradient(to bottom, transparent 66%, rgba(255, 255, 255, 0.08) 66%, rgba(255, 255, 255, 0.08) calc(66% + 1px), transparent calc(66% + 1px));
-      }
-
-      .axis {
-        position: absolute;
-        left: 0;
-        color: var(--muted);
-        font-size: 13px;
-        font-weight: 800;
-      }
-
-      .axis.top {
-        top: 4px;
-      }
-
-      .axis.mid {
-        top: 48%;
-      }
-
-      .axis.bottom {
-        bottom: 6px;
-      }
-
-      .line {
-        position: absolute;
-        inset: 18px 0 10px 62px;
-      }
-
-      .line::before {
-        content: "";
+      .mini-card b {
         display: block;
-        width: 100%;
-        height: 100%;
-        background: var(--blue);
-        clip-path: polygon(0% 82%, 4% 74%, 6% 88%, 9% 33%, 10% 83%, 16% 80%, 18% 84%, 20% 36%, 21% 78%, 27% 80%, 29% 76%, 32% 84%, 34% 45%, 35% 80%, 46% 81%, 48% 74%, 51% 76%, 53% 20%, 54% 82%, 64% 78%, 66% 70%, 68% 76%, 73% 79%, 76% 30%, 77% 80%, 82% 78%, 85% 84%, 89% 26%, 90% 83%, 94% 80%, 97% 36%, 98% 78%, 100% 76%, 100% 100%, 0% 100%);
-        filter: drop-shadow(0 0 8px rgba(79, 133, 255, 0.34));
-      }
-
-      .stats {
-        display: grid;
-        grid-template-columns: repeat(3, 1fr);
-        gap: 14px;
-        max-width: 340px;
-      }
-
-      .stat label {
-        display: block;
-        color: var(--muted);
-        font-size: 13px;
-        font-weight: 800;
-        margin-bottom: 4px;
-      }
-
-      .stat strong {
-        display: block;
-        font-size: 22px;
-      }
-
-      .sections {
-        display: grid;
-        grid-template-columns: repeat(3, 1fr);
-        gap: 14px;
-        margin-top: 34px;
+        margin-bottom: 8px;
+        color: var(--ink);
+        font-size: 15px;
       }
 
       .section {
-        border: 1px solid var(--line);
-        border-radius: 12px;
-        padding: 18px;
-        background: rgba(31, 37, 40, 0.74);
+        padding: 74px 0;
+      }
+
+      .section-head {
+        display: grid;
+        grid-template-columns: 0.82fr 1.18fr;
+        gap: 28px;
+        align-items: end;
+        margin-bottom: 26px;
       }
 
       h2 {
-        margin: 0 0 8px;
-        font-size: 18px;
+        margin: 0;
+        font-size: clamp(34px, 5vw, 62px);
+        line-height: 0.98;
         letter-spacing: 0;
       }
 
-      .section p {
+      .section-head p {
         margin: 0;
         color: var(--muted);
-        line-height: 1.4;
+        font-size: 18px;
+        line-height: 1.45;
+      }
+
+      .feature-grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 14px;
+      }
+
+      .feature {
+        min-height: 224px;
+        padding: 22px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: linear-gradient(160deg, rgba(255, 255, 255, 0.075), rgba(255, 255, 255, 0.02));
+      }
+
+      .feature .icon {
+        width: 38px;
+        height: 38px;
+        display: grid;
+        place-items: center;
+        border-radius: 8px;
+        background: var(--panel-2);
+        color: var(--green);
+        font-size: 21px;
+        font-weight: 900;
+      }
+
+      .feature h3 {
+        margin: 34px 0 8px;
+        font-size: 22px;
+        letter-spacing: 0;
+      }
+
+      .feature p {
+        margin: 0;
+        color: var(--muted);
+        line-height: 1.45;
+      }
+
+      .download-panel {
+        display: grid;
+        grid-template-columns: 1fr 0.9fr;
+        gap: 18px;
+        align-items: stretch;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--panel);
+        overflow: hidden;
+      }
+
+      .download-copy {
+        padding: 28px;
+      }
+
+      .download-copy p {
+        color: var(--muted);
+        line-height: 1.45;
+        margin: 14px 0 0;
+      }
+
+      .release-box {
+        padding: 28px;
+        background:
+          linear-gradient(145deg, rgba(47, 134, 255, 0.2), rgba(89, 219, 104, 0.08)),
+          var(--panel-2);
+      }
+
+      .release-box dl {
+        display: grid;
+        grid-template-columns: auto 1fr;
+        gap: 8px 18px;
+        margin: 0 0 24px;
+      }
+
+      .release-box dt {
+        color: var(--dim);
+        font-weight: 850;
+      }
+
+      .release-box dd {
+        margin: 0;
+        color: var(--ink);
+        font-weight: 850;
+      }
+
+      .support-panel {
+        display: grid;
+        grid-template-columns: 0.8fr 1.2fr;
+        gap: 18px;
+        align-items: start;
+      }
+
+      form {
+        display: grid;
+        gap: 12px;
+        padding: 22px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: rgba(23, 24, 23, 0.82);
+      }
+
+      label {
+        display: grid;
+        gap: 7px;
+        color: var(--muted);
+        font-size: 13px;
+        font-weight: 850;
+      }
+
+      input,
+      select,
+      textarea {
+        width: 100%;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #0f100f;
+        color: var(--ink);
+        font: inherit;
+        font-weight: 700;
+        padding: 12px 13px;
+      }
+
+      textarea {
+        min-height: 132px;
+        resize: vertical;
+      }
+
+      .form-row {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
       }
 
       footer {
-        color: var(--muted);
-        margin-top: 36px;
+        padding: 32px 0 44px;
+        color: var(--dim);
         font-size: 14px;
+        font-weight: 700;
+      }
+
+      footer .shell {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: space-between;
+        gap: 14px;
+        border-top: 1px solid var(--line);
+        padding-top: 20px;
       }
 
       footer a {
-        color: var(--text);
+        color: var(--muted);
+        text-decoration: none;
       }
 
-      @media (max-width: 860px) {
-        main {
-          width: min(100% - 28px, 620px);
-          padding: 32px 0;
-        }
-
+      @media (max-width: 920px) {
         .hero,
-        .sections {
+        .section-head,
+        .download-panel,
+        .support-panel {
           grid-template-columns: 1fr;
         }
 
-        .lede {
-          font-size: 18px;
+        .hero {
+          padding-top: 34px;
         }
 
-        .chart {
-          height: 180px;
+        .device-stage {
+          min-height: auto;
+          padding: 16px 0 30px;
+        }
+
+        .screen-shot {
+          width: min(100%, 480px);
+          transform: none;
+        }
+
+        .status-chip,
+        .mini-card {
+          display: none;
+        }
+
+        .feature-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      @media (max-width: 620px) {
+        .shell {
+          width: min(100% - 26px, 520px);
+        }
+
+        nav {
+          align-items: flex-start;
+          flex-direction: column;
+          padding: 14px 0;
+          gap: 12px;
+        }
+
+        .nav-links {
+          width: 100%;
+          justify-content: space-between;
+          gap: 8px;
+        }
+
+        .actions,
+        .button {
+          width: 100%;
+        }
+
+        .form-row {
+          grid-template-columns: 1fr;
         }
       }
     </style>
   </head>
   <body>
-    <main>
-      <section class="hero" aria-labelledby="title">
+    <header>
+      <nav class="shell" aria-label="Primary">
+        <a class="brand" href="#top">
+          <img src="assets/app-icon.png" alt="">
+          <span>PingScope</span>
+        </a>
+        <div class="nav-links">
+          <a href="#features">Features</a>
+          <a href="#download">Download</a>
+          <a href="#support">Support</a>
+          <a href="https://github.com/keithah/pingscope">GitHub</a>
+        </div>
+      </nav>
+    </header>
+
+    <main id="top">
+      <section class="hero shell" aria-labelledby="title">
         <div>
-          <p class="eyebrow">macOS menu-bar latency monitor</p>
+          <p class="eyebrow">Native macOS network visibility</p>
           <h1 id="title">PingScope</h1>
-          <p class="lede">A native network monitor that keeps a quiet latency signal in your menu bar, opens a live graph on click, and adds a compact always-on-top overlay when you need to watch a connection closely.</p>
+          <p class="lede">A menu-bar latency monitor that tells you whether the problem is local, upstream, or the destination before you start guessing.</p>
           <div class="actions">
-            <a class="button" href="https://apps.apple.com/us/app/pingscope-keep-connected/id6759278369?mt=12">View on the Mac App Store</a>
-            <a class="button secondary" href="PingScope-v0.1.2.dmg">Download 0.1.2</a>
-            <a class="button secondary" href="https://github.com/keithah/pingscope">GitHub</a>
+            <a class="button" href="https://apps.apple.com/us/app/pingscope-keep-connected/id6759278369?mt=12">Mac App Store</a>
+            <a class="button secondary" id="download-button" href="https://github.com/keithah/pingscope/releases/download/v0.3.0/PingScope-v0.3.0.dmg">Download 0.3.0</a>
+            <a class="button ghost" href="#support">Get Support</a>
           </div>
-          <p class="availability">Now available as PingScope - Keep Connected! on the Mac App Store.</p>
+          <p class="release-note" id="release-note">Latest Developer ID release: v0.3.0. The button updates from GitHub when a newer DMG is published.</p>
         </div>
 
-        <div class="preview" aria-label="PingScope menu-bar preview">
-          <div class="menu">
-            <div class="brand">
-              <img src="assets/app-icon.png" alt="">
-              <span>PingScope</span>
-            </div>
-            <div class="menubar-signal" aria-label="16 milliseconds healthy">
-              <span class="dot"></span>
-              <span>16ms</span>
-            </div>
+        <div class="device-stage" aria-label="PingScope app preview">
+          <img class="screen-shot" src="assets/pingscope-popover-current.png" alt="PingScope popover showing all hosts, current latency, graph, and recent samples.">
+          <div class="status-chip" aria-hidden="true">
+            <strong>4ms</strong>
+            <span>Healthy</span>
           </div>
-          <div class="popover">
-            <div class="topline">
-              <div>
-                <div class="host">Cloudflare DNS</div>
-                <div class="endpoint">TCP 1.1.1.1:443</div>
-              </div>
-              <div class="status">
-                <div class="latency">16ms</div>
-                <div class="healthy"><span class="dot"></span>Healthy</div>
-              </div>
-            </div>
-
-            <div class="range">
-              <span>Range</span>
-              <div class="segmented" aria-hidden="true">
-                <span>1m</span>
-                <span class="selected">5m</span>
-                <span>10m</span>
-                <span>1h</span>
-              </div>
-            </div>
-
-            <div class="chart" aria-label="Latency graph preview">
-              <span class="axis top">80ms</span>
-              <span class="axis mid">40ms</span>
-              <span class="axis bottom">0ms</span>
-              <div class="line"></div>
-            </div>
-
-            <div class="stats" aria-label="Ping statistics preview">
-              <div class="stat">
-                <label>TX</label>
-                <strong>144</strong>
-              </div>
-              <div class="stat">
-                <label>RX</label>
-                <strong>144</strong>
-              </div>
-              <div class="stat">
-                <label>Loss</label>
-                <strong>0%</strong>
-              </div>
-              <div class="stat">
-                <label>Min</label>
-                <strong>4ms</strong>
-              </div>
-              <div class="stat">
-                <label>Avg</label>
-                <strong>13ms</strong>
-              </div>
-              <div class="stat">
-                <label>Max</label>
-                <strong>71ms</strong>
-              </div>
-            </div>
+          <div class="mini-card" aria-hidden="true">
+            <b>Three enabled hosts</b>
+            <p>Cloudflare, Google, and the default gateway are shown together so local and upstream failures separate quickly.</p>
           </div>
         </div>
       </section>
 
-      <section class="sections" aria-label="Features">
-        <div class="section">
-          <h2>Menu-bar first</h2>
-          <p>Watch a stable iStat-style dot and latency readout without keeping a full network dashboard open.</p>
+      <section class="section shell" id="features" aria-labelledby="features-title">
+        <div class="section-head">
+          <h2 id="features-title">Built for the moment the network feels wrong.</h2>
+          <p>PingScope stays quiet in the menu bar until you need detail. Open the popover for live history, switch between hosts, or pin the overlay during calls, uploads, and debugging sessions.</p>
         </div>
-        <div class="section">
-          <h2>Know what failed</h2>
-          <p>Monitor your gateway, upstream route, and remote hosts together to quickly separate local, ISP, and destination failures.</p>
-        </div>
-        <div class="section">
-          <h2>Native updates</h2>
-          <p>Developer ID builds support Sparkle updates, TCP and UDP probes, and ICMP where macOS permits it.</p>
+        <div class="feature-grid">
+          <article class="feature">
+            <div class="icon">1</div>
+            <h3>Always visible</h3>
+            <p>A compact status dot and latency readout live in the menu bar, with a floating overlay when a connection needs closer watching.</p>
+          </article>
+          <article class="feature">
+            <div class="icon">2</div>
+            <h3>Failure context</h3>
+            <p>Monitor gateway and remote hosts together to tell the difference between Wi-Fi, router, ISP, and destination trouble.</p>
+          </article>
+          <article class="feature">
+            <div class="icon">3</div>
+            <h3>Local first</h3>
+            <p>Settings, retained history, exports, and widget snapshots stay on your Mac. Developer ID builds support Sparkle updates.</p>
+          </article>
         </div>
       </section>
 
-      <footer>
-        Mac App Store: <a href="https://apps.apple.com/us/app/pingscope-keep-connected/id6759278369?mt=12">PingScope - Keep Connected!</a> · Sparkle appcast: <a href="appcast.xml">appcast.xml</a>
-      </footer>
+      <section class="section shell" id="download" aria-labelledby="download-title">
+        <div class="download-panel">
+          <div class="download-copy">
+            <h2 id="download-title">Download the current macOS build.</h2>
+            <p>The App Store build is the simplest install path. The Developer ID DMG is pulled from the latest public GitHub release and updates automatically on this page.</p>
+            <div class="actions">
+              <a class="button" href="https://apps.apple.com/us/app/pingscope-keep-connected/id6759278369?mt=12">Open App Store</a>
+              <a class="button secondary" id="download-button-secondary" href="https://github.com/keithah/pingscope/releases/download/v0.3.0/PingScope-v0.3.0.dmg">Download 0.3.0 DMG</a>
+            </div>
+          </div>
+          <div class="release-box" aria-live="polite">
+            <dl>
+              <dt>Version</dt>
+              <dd id="release-version">v0.3.0</dd>
+              <dt>Published</dt>
+              <dd id="release-date">July 3, 2026</dd>
+              <dt>Package</dt>
+              <dd id="release-asset">PingScope-v0.3.0.dmg</dd>
+            </dl>
+            <a class="button secondary" id="release-link" href="https://github.com/keithah/pingscope/releases/tag/v0.3.0">Release notes</a>
+          </div>
+        </div>
+      </section>
+
+      <section class="section shell" id="support" aria-labelledby="support-title">
+        <div class="support-panel">
+          <div>
+            <h2 id="support-title">Support that starts with the useful details.</h2>
+            <p class="lede">Send a bug report or request to <a href="mailto:keith+pingscope@hadm.net">keith+pingscope@hadm.net</a>. The form opens your email app with the important fields filled in.</p>
+          </div>
+          <form id="support-form">
+            <div class="form-row">
+              <label>
+                Name
+                <input name="name" autocomplete="name" placeholder="Your name">
+              </label>
+              <label>
+                Email
+                <input name="email" type="email" autocomplete="email" placeholder="you@example.com">
+              </label>
+            </div>
+            <div class="form-row">
+              <label>
+                Topic
+                <select name="topic">
+                  <option>Bug report</option>
+                  <option>Feature request</option>
+                  <option>Install or update help</option>
+                  <option>Other</option>
+                </select>
+              </label>
+              <label>
+                Version
+                <input name="version" placeholder="PingScope version, if known">
+              </label>
+            </div>
+            <label>
+              What happened?
+              <textarea name="message" placeholder="Include macOS version, network type, and what you were doing when it happened."></textarea>
+            </label>
+            <button class="button" type="submit">Email Support</button>
+          </form>
+        </div>
+      </section>
     </main>
+
+    <footer>
+      <div class="shell">
+        <span>PingScope for macOS 14 and later.</span>
+        <span><a href="PRIVACY.html">Privacy</a> · <a href="appcast.xml">Sparkle appcast</a> · <a href="https://github.com/keithah/pingscope">Source</a></span>
+      </div>
+    </footer>
+
+    <script>
+      const releaseAPI = "https://api.github.com/repos/keithah/pingscope/releases/latest";
+      const downloadButtons = [
+        document.getElementById("download-button"),
+        document.getElementById("download-button-secondary")
+      ];
+
+      function versionText(tagName) {
+        return tagName.replace(/^v/i, "");
+      }
+
+      function formatReleaseDate(value) {
+        return new Intl.DateTimeFormat("en-US", {
+          month: "long",
+          day: "numeric",
+          year: "numeric"
+        }).format(new Date(value));
+      }
+
+      fetch(releaseAPI, { headers: { Accept: "application/vnd.github+json" } })
+        .then((response) => {
+          if (!response.ok) throw new Error("release lookup failed");
+          return response.json();
+        })
+        .then((release) => {
+          const dmg = release.assets.find((asset) => asset.name.endsWith(".dmg"));
+          if (!dmg) return;
+
+          const version = versionText(release.tag_name);
+          downloadButtons.forEach((button) => {
+            button.href = dmg.browser_download_url;
+          });
+          downloadButtons[0].textContent = `Download ${version}`;
+          downloadButtons[1].textContent = `Download ${version} DMG`;
+          document.getElementById("release-note").textContent = `Latest Developer ID release: ${release.tag_name}. Download information loaded from GitHub.`;
+          document.getElementById("release-version").textContent = release.tag_name;
+          document.getElementById("release-date").textContent = formatReleaseDate(release.published_at);
+          document.getElementById("release-asset").textContent = dmg.name;
+          document.getElementById("release-link").href = release.html_url;
+        })
+        .catch(() => {
+          document.getElementById("release-note").textContent = "Latest Developer ID release: v0.3.0. GitHub release lookup is temporarily unavailable.";
+        });
+
+      document.getElementById("support-form").addEventListener("submit", (event) => {
+        event.preventDefault();
+        const data = new FormData(event.currentTarget);
+        const topic = data.get("topic") || "Support";
+        const body = [
+          `Name: ${data.get("name") || ""}`,
+          `Email: ${data.get("email") || ""}`,
+          `Version: ${data.get("version") || ""}`,
+          "",
+          data.get("message") || ""
+        ].join("\n");
+        const subject = `PingScope support: ${topic}`;
+        const url = `mailto:keith+pingscope@hadm.net?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+        window.location.href = url;
+      });
+    </script>
   </body>
 </html>

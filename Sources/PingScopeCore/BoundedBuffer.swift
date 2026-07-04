@@ -64,7 +64,14 @@ public struct BoundedBuffer<Element: Codable & Equatable & Sendable>: Codable, E
     public mutating func append(_ element: Element) -> Int {
         normalizeCapacityIfNeeded()
 
-        if storage.count < capacity {
+        if storedCount < capacity {
+            if storage.count == capacity {
+                let insertionIndex = (startIndex + storedCount) % storage.count
+                storage[insertionIndex] = element
+                storedCount += 1
+                return 0
+            }
+
             storage.append(element)
             storedCount += 1
             return 0
@@ -85,11 +92,20 @@ public struct BoundedBuffer<Element: Codable & Equatable & Sendable>: Codable, E
     public mutating func popPrefix(_ requestedCount: Int) -> [Element] {
         let prefixCount = min(max(0, requestedCount), storedCount)
         guard prefixCount > 0 else { return [] }
-        let currentElements = elements
-        let batch = Array(currentElements.prefix(prefixCount))
-        storage = Array(currentElements.dropFirst(prefixCount))
-        startIndex = 0
-        storedCount = storage.count
+        var batch: [Element] = []
+        batch.reserveCapacity(prefixCount)
+        for offset in 0..<prefixCount {
+            batch.append(storage[(startIndex + offset) % storage.count])
+        }
+
+        storedCount -= prefixCount
+        if storedCount == 0 {
+            storage.removeAll()
+            startIndex = 0
+            return batch
+        }
+
+        startIndex = (startIndex + prefixCount) % storage.count
         return batch
     }
 

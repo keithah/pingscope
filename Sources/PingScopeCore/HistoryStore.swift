@@ -5,6 +5,7 @@ public protocol PingHistoryStore: Sendable {
     func append(_ result: PingResult) async
     func append(_ results: [PingResult]) async
     func samples(hostID: UUID, since: Date, limit: Int) async -> [PingResult]
+    func latestSamples(hostID: UUID, since: Date, limit: Int) async -> [PingResult]
     func prune(olderThan cutoff: Date) async
     func deleteAll() async
 }
@@ -74,6 +75,18 @@ public actor SQLiteHistoryStore: PingHistoryStore {
             }
         } catch {
             logger?("history query failed: \(error)")
+            return []
+        }
+    }
+
+    public func latestSamples(hostID: UUID, since: Date, limit: Int) async -> [PingResult] {
+        do {
+            return try await withSQLiteRetry {
+                try openIfNeeded()
+                return try queryLatest(hostID: hostID, since: since, limit: max(1, limit))
+            }
+        } catch {
+            logger?("history latest query failed: \(error)")
             return []
         }
     }
@@ -234,7 +247,8 @@ public actor SQLiteHistoryStore: PingHistoryStore {
         } else {
             sqlite3_bind_null(statement, 9)
         }
-        if let metadataData = try? metadataEncoder.encode(result.metadata),
+        if result.metadata.starlink != nil,
+           let metadataData = try? metadataEncoder.encode(result.metadata),
            let metadataText = String(data: metadataData, encoding: .utf8) {
             bindText(metadataText, to: 10, in: statement)
         } else {
@@ -254,7 +268,35 @@ public actor SQLiteHistoryStore: PingHistoryStore {
         try withStatement(sql) { statement in
             bindText(hostID.uuidString, to: 1, in: statement)
             sqlite3_bind_double(statement, 2, since.timeIntervalSince1970)
-            sqlite3_bind_int(statement, 3, Int32(limit))
+            sqlite3_bind_int64(statement, 3, Int64(limit))
+
+            var stepResult = sqlite3_step(statement)
+            while stepResult == SQLITE_ROW {
+                if let result = result(from: statement) {
+                    results.append(result)
+                }
+                stepResult = sqlite3_step(statement)
+            }
+            guard stepResult == SQLITE_DONE else {
+                throw sqliteError(.stepFailed, code: stepResult)
+            }
+        }
+        return results
+    }
+
+    private func queryLatest(hostID: UUID, since: Date, limit: Int) throws -> [PingResult] {
+        let sql = """
+        SELECT id, host_id, address, method, port, timestamp, latency_ms, failure_reason, metadata_note, metadata_json
+        FROM ping_samples
+        WHERE host_id = ? AND timestamp >= ?
+        ORDER BY timestamp DESC
+        LIMIT ?;
+        """
+        var results: [PingResult] = []
+        try withStatement(sql) { statement in
+            bindText(hostID.uuidString, to: 1, in: statement)
+            sqlite3_bind_double(statement, 2, since.timeIntervalSince1970)
+            sqlite3_bind_int64(statement, 3, Int64(limit))
 
             var stepResult = sqlite3_step(statement)
             while stepResult == SQLITE_ROW {

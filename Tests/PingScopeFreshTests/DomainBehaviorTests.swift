@@ -2,6 +2,18 @@ import XCTest
 @testable import PingScopeCore
 
 final class DomainBehaviorTests: XCTestCase {
+    func testHistoryExportRangePresetsIncludeMaxAndDefaultToOneHour() {
+        XCTAssertEqual(HistoryExportRangePreset.default, .oneHour)
+        XCTAssertEqual(HistoryExportRangePreset.allCases.map(\.rawValue), ["1m", "5m", "10m", "1h", "Max", "Custom"])
+        XCTAssertEqual(HistoryExportRangePreset.max.resolvedDuration(customValue: "99", customUnit: .days), 604_800)
+        XCTAssertNil(HistoryExportRangePreset.custom.resolvedDuration(customValue: "abc", customUnit: .hours))
+        XCTAssertEqual(HistoryExportRangePreset.custom.resolvedDuration(customValue: "2", customUnit: .hours), 7_200)
+        XCTAssertEqual(HistoryExportRangePreset.custom.resolvedDuration(customValue: "1.5", customUnit: .days), 129_600)
+        XCTAssertEqual(HistoryExportRangePreset.custom.resolvedDuration(customValue: "99", customUnit: .days), 604_800)
+        XCTAssertEqual(HistoryExportRangePreset.custom.filenameComponent(customValue: "2", customUnit: .hours), "2h")
+        XCTAssertEqual(HistoryExportRangePreset.max.filenameComponent(customValue: "2", customUnit: .hours), "max")
+    }
+
     func testHostConfigValidationRequiresUsableNameAndAddress() {
         let invalid = HostConfig(displayName: "  ", address: "\n")
         let expectedErrors: [HostValidationError] = [.missingDisplayName, .missingAddress]

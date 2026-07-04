@@ -15,6 +15,38 @@ PAGES_APPCAST_PATH="${PING_SCOPE_PAGES_APPCAST_PATH:-appcast.xml}"
 PAGES_BASE_URL="${PING_SCOPE_PAGES_BASE_URL:-https://keithah.github.io/pingscope}"
 PAGES_SITE_DIR="${PING_SCOPE_PAGES_SITE_DIR:-deploy/site}"
 
+retry() {
+  local attempts="$1"
+  local delay="$2"
+  shift 2
+  local attempt=1
+  while true; do
+    if "$@"; then
+      return 0
+    fi
+    if [[ "${attempt}" -ge "${attempts}" ]]; then
+      return 1
+    fi
+    sleep "${delay}"
+    attempt=$((attempt + 1))
+    delay=$((delay * 2))
+  done
+}
+
+validate_relative_release_path() {
+  local path="$1"
+  if [[ -z "${path}" || "${path}" = /* ]]; then
+    echo "Invalid Pages appcast path: ${path}" >&2
+    return 1
+  fi
+  case "${path}" in
+    "."|".."|*"/../"*|../*|*".."|*"/./"*|*"//"*)
+      echo "Invalid Pages appcast path: ${path}" >&2
+      return 1
+      ;;
+  esac
+}
+
 usage() {
   cat <<'USAGE'
 Usage:
@@ -52,6 +84,8 @@ publish_pages_updates() {
   fi
 
   pages_dir=$(mktemp -d "${TMPDIR:-/tmp}/pingscope-pages.XXXXXX")
+  trap 'rm -rf "${pages_dir}"' RETURN
+  validate_relative_release_path "${PAGES_APPCAST_PATH}"
   if git ls-remote --exit-code --heads origin "${PAGES_BRANCH}" >/dev/null 2>&1; then
     git clone --depth 1 --branch "${PAGES_BRANCH}" "${remote_url}" "${pages_dir}" >/dev/null
   else
@@ -72,7 +106,7 @@ publish_pages_updates() {
     echo "GitHub Pages updates are already current."
   else
     git -C "${pages_dir}" commit -m "Publish PingScope ${version} appcast" >/dev/null
-    git -C "${pages_dir}" push origin "${PAGES_BRANCH}" >/dev/null
+    retry 3 2 git -C "${pages_dir}" push origin "${PAGES_BRANCH}" >/dev/null
     echo "Published GitHub Pages updates to ${PAGES_BRANCH}."
   fi
 
@@ -237,7 +271,7 @@ if git rev-parse "${TAG}" >/dev/null 2>&1; then
 fi
 
 git tag "${TAG}"
-git push origin "${TAG}"
+retry 3 2 git push origin "${TAG}"
 
 # appcast.sh only writes the standalone notes asset when --release-notes was
 # supplied, and it keeps that file's extension. Referencing the hard-coded .md
@@ -251,12 +285,21 @@ if [[ -n "${RELEASE_NOTES}" ]]; then
   fi
 fi
 
-gh release create "${TAG}" \
-  "${RELEASE_ASSETS[@]}" \
-  --title "PingScope ${VERSION}" \
-  --notes-file "${RELEASE_NOTES:-/dev/stdin}" <<EOF
+if gh release view "${TAG}" >/dev/null 2>&1; then
+  echo "GitHub release already exists for ${TAG}; skipping create."
+else
+  if ! retry 3 2 gh release create "${TAG}" \
+    "${RELEASE_ASSETS[@]}" \
+    --title "PingScope ${VERSION}" \
+    --notes-file "${RELEASE_NOTES:-/dev/stdin}" <<EOF
 PingScope ${VERSION}
 EOF
+  then
+    echo "Git tag ${TAG} was pushed, but GitHub release creation failed." >&2
+    echo "Recovery: re-run this script, or inspect with: gh release view ${TAG}" >&2
+    exit 1
+  fi
+fi
 
 publish_pages_updates "${UPDATE_DIR}" "${VERSION}"
 

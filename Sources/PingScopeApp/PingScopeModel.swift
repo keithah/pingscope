@@ -115,7 +115,9 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
     @Published private(set) var notificationRequestMessage: String?
     @Published private(set) var displayPresentation = PingScopeDisplayPresentation()
     @Published var historyExportHostID: UUID?
-    @Published var historyExportRange: TimeRange = .oneHour
+    @Published var historyExportRange: HistoryExportRangePreset = .default
+    @Published var historyExportCustomValue = "1"
+    @Published var historyExportCustomUnit: HistoryExportRangeUnit = .hours
     @Published private(set) var historyExportMessage: String?
     @Published private(set) var isExportingHistory = false
     @Published private(set) var diagnosticsMessage: String?
@@ -136,14 +138,15 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
     private var networkTask: Task<Void, Never>?
     private var endpointRefreshTask: Task<Void, Never>?
     private var historyTask: Task<Void, Never>?
+    private var overlayFramePersistTask: Task<Void, Never>?
     var notificationRulesTask: Task<Void, Never>?
     var localNetworkProbeTask: Task<Void, Never>?
     private var draftTestTask: Task<Void, Never>?
     private var draftTestGeneration = 0
     private var isApplyingStartAtLoginChange = false
     private var lastHistoryKey: String?
-    private var lastPersistedHostState: PersistedHostState?
     private var lastPublishedWidgetSnapshot: WidgetSnapshot?
+    private let hostConfigPersistence: HostConfigPersistence
     private let widgetSnapshotHeartbeatInterval: TimeInterval = 5 * 60
     private var lastObservedGateway: String?
     private var lastNetworkPathSignature: String?
@@ -151,9 +154,11 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
     var onOverlayGraphClicked: (() -> Void)?
 
     override init() {
-        let savedHosts = HostConfigMigrator().migrate(UserDefaults.standard.hostConfigs)
-        let hosts = savedHosts.isEmpty ? [HostConfig.defaultInternet] : BuildFlavor.current.normalizedHosts(savedHosts)
-        let hostStore = HostStore(defaultHosts: hosts, primaryHostID: UserDefaults.standard.primaryHostID)
+        let hostConfigPersistence = HostConfigPersistence()
+        let loadedHosts = hostConfigPersistence.loadInitialConfiguration { message in
+            DebugLog.write(message)
+        }
+        let hostStore = HostStore(defaultHosts: loadedHosts.hosts, primaryHostID: loadedHosts.primaryHostID)
         let probeFactory = DefaultProbeFactory()
         let historyStore: SQLiteHistoryStore?
         do {
@@ -176,6 +181,7 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
             allowsLocalNetworkProbes: allowsLocalNetworkProbes,
             notificationRules: notificationRules
         )
+        self.hostConfigPersistence = hostConfigPersistence
         self.hostTester = HostTester(probeFactory: probeFactory)
         self.notificationRules = notificationRules
         self.enabledNetworkStatusAlerts = UserDefaults.standard.enabledNetworkStatusAlerts
@@ -343,6 +349,7 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
         networkTask?.cancel()
         endpointRefreshTask?.cancel()
         historyTask?.cancel()
+        overlayFramePersistTask?.cancel()
         notificationRulesTask?.cancel()
         localNetworkProbeTask?.cancel()
         draftTestTask?.cancel()
@@ -361,7 +368,9 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
     }
 
     func selectHost(_ id: UUID) {
-        Task { await runtime.selectPrimaryHost(id) }
+        performUserHostMutation { runtime in
+            await runtime.selectPrimaryHost(id)
+        }
         lastHistoryKey = nil
     }
 
@@ -380,8 +389,11 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
         guard host.validationErrors.isEmpty else { return }
         host.displayName = host.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
         host.address = host.address.trimmingCharacters(in: .whitespacesAndNewlines)
+        let savedHost = host
         clearDraftHost()
-        Task { await runtime.upsertHost(host) }
+        performUserHostMutation { runtime in
+            await runtime.upsertHost(savedHost)
+        }
     }
 
     func clearDraftHost() {
@@ -442,13 +454,17 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
     }
 
     func deleteHost(_ id: UUID) {
-        Task { await runtime.deleteHost(id) }
+        performUserHostMutation { runtime in
+            await runtime.deleteHost(id)
+        }
     }
 
     func resetToDefaults() {
         notificationRules = NotificationRuleSet()
         enabledNetworkStatusAlerts = NetworkConnectivityStatus.defaultAlertStatuses
-        Task { await runtime.reset() }
+        performUserHostMutation { runtime in
+            await runtime.reset()
+        }
     }
 
     func setPrimaryHost(_ id: UUID) {
@@ -508,25 +524,13 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
         NSWorkspace.shared.open(url)
     }
 
-    func revealDiagnosticsLog() {
-        if !FileManager.default.fileExists(atPath: diagnosticsLogURL.path) {
-            DebugLog.write("diagnostics log created from settings")
-            DebugLog.flush()
-        }
-        NSWorkspace.shared.activateFileViewerSelecting([diagnosticsLogURL])
-        diagnosticsMessage = "Opened log in Finder"
-    }
-
-    func copyDiagnosticsSummary() {
-        let summary = diagnosticsSummary()
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(summary, forType: .string)
-        diagnosticsMessage = "Copied diagnostics summary"
-    }
-
     func clearDiagnosticsLog() {
         DebugLog.clear()
         diagnosticsMessage = "Cleared debug log"
+    }
+
+    func setDiagnosticsMessage(_ message: String?) {
+        diagnosticsMessage = message
     }
 
     func exportHistory(format: HistoryExportFormat) {
@@ -534,22 +538,32 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
             historyExportMessage = "No host selected"
             return
         }
+        guard let duration = historyExportRange.resolvedDuration(
+            customValue: historyExportCustomValue,
+            customUnit: historyExportCustomUnit
+        ) else {
+            historyExportMessage = "Enter a valid export range"
+            return
+        }
 
         let panel = NSSavePanel()
         panel.title = "Export PingScope History"
-        panel.nameFieldStringValue = "\(Self.safeFilename(host.displayName))-\(historyExportRange.rawValue).\(format.fileExtension)"
+        let rangeName = historyExportRange.filenameComponent(
+            customValue: historyExportCustomValue,
+            customUnit: historyExportCustomUnit
+        )
+        panel.nameFieldStringValue = "\(Self.safeFilename(host.displayName))-\(rangeName).\(format.fileExtension)"
         panel.allowedContentTypes = [format.contentType]
         panel.canCreateDirectories = true
         guard panel.runModal() == .OK, let url = panel.url else { return }
 
         isExportingHistory = true
         historyExportMessage = "Exporting..."
-        let range = historyExportRange
         Task {
             let samples = await runtime.historySamples(
                 hostID: host.id,
-                since: Date().addingTimeInterval(-range.duration),
-                limit: 100_000
+                since: Date().addingTimeInterval(-duration),
+                limit: Int.max
             )
             do {
                 try await Task.detached(priority: .utility) {
@@ -594,9 +608,10 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
                 self.allowsLocalNetworkProbes = true
                 self.gatewayDetectionText = "\(gatewayHost.address) monitoring enabled"
                 self.loadDraft(from: gatewayHost)
-                Task {
-                    await self.runtime.upsertHost(gatewayHost)
-                    await self.runtime.selectPrimaryHost(gatewayHost.id)
+                let savedGatewayHost = gatewayHost
+                self.performUserHostMutation { runtime in
+                    await runtime.upsertHost(savedGatewayHost)
+                    await runtime.selectPrimaryHost(savedGatewayHost.id)
                 }
             }
         }
@@ -673,15 +688,26 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
         // window's move teleports the overlay (potentially off-screen).
         guard let window = notification.object as? NSWindow, window is OverlayWindow else { return }
         overlayFrame = window.frame
-        UserDefaults.standard.overlayFrame = window.frame
+        let frame = window.frame
+        overlayFramePersistTask?.cancel()
+        overlayFramePersistTask = Task {
+            try? await Task.sleep(for: .milliseconds(250))
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                UserDefaults.standard.overlayFrame = frame
+            }
+        }
     }
 
     private func persistHostState(_ snapshot: RuntimeSnapshot) {
-        let hostState = PersistedHostState(hosts: snapshot.hosts, primaryHostID: snapshot.primaryHostID)
-        guard hostState != lastPersistedHostState else { return }
-        lastPersistedHostState = hostState
-        UserDefaults.standard.hostConfigs = snapshot.hosts
-        UserDefaults.standard.primaryHostID = snapshot.primaryHostID
+        hostConfigPersistence.persist(snapshot)
+    }
+
+    private func performUserHostMutation(_ mutation: @escaping @Sendable (PingRuntime) async -> Void) {
+        hostConfigPersistence.allowUserManagedPersistence()
+        Task { [runtime] in
+            await mutation(runtime)
+        }
     }
 
     private func configureStartAtLogin(_ isEnabled: Bool) {

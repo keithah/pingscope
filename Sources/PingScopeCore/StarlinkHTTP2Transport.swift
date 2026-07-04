@@ -168,7 +168,11 @@ private final class StarlinkHTTP2Session: @unchecked Sendable {
             for frame in frames {
                 switch frame.type {
                 case .settings where frame.flags & HTTP2FrameFlags.ack == 0:
-                    connection.send(content: StarlinkHTTP2RequestBuilder.settingsAckFrame(), completion: .contentProcessed { _ in })
+                    connection.send(content: StarlinkHTTP2RequestBuilder.settingsAckFrame(), completion: .contentProcessed { [weak self] error in
+                        if error != nil {
+                            self?.finish(.failure(StarlinkStatusFetchError.unavailable))
+                        }
+                    })
                 case .data where frame.streamID == 1:
                     guard responseData.count + frame.payload.count <= Self.maxResponseBytes else {
                         finish(.failure(StarlinkStatusFetchError.responseTooLarge))

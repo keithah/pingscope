@@ -619,6 +619,13 @@ private actor RecordingLiveMonitorHistoryStore: PingHistoryStore {
         Array(stored.filter { $0.hostID == hostID && $0.timestamp >= since }.prefix(limit))
     }
 
+    func latestSamples(hostID: UUID, since: Date, limit: Int) async -> [PingResult] {
+        Array(stored
+            .filter { $0.hostID == hostID && $0.timestamp >= since }
+            .sorted { $0.timestamp > $1.timestamp }
+            .prefix(max(1, limit)))
+    }
+
     func prune(olderThan cutoff: Date) async {
         stored.removeAll { $0.timestamp < cutoff }
     }

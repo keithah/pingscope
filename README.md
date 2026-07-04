@@ -146,7 +146,7 @@ Sparkle uses the Keychain account `pingscope-ed25519`. The public key is already
 Release command:
 
 ```bash
-scripts/release-github.sh --version 0.2.1 --release-notes RELEASE_NOTES.md
+scripts/release-github.sh --version 0.3.0 --release-notes RELEASE_NOTES.md
 ```
 
 ## Xcode Cloud

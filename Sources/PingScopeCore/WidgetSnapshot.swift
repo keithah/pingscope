@@ -181,33 +181,54 @@ public actor WidgetSnapshotStore {
 
     private let defaults: UserDefaults
     private let key: String
+    private let logger: (@Sendable (String) -> Void)?
 
-    public init(suiteName: String? = defaultSuiteName, key: String = defaultKey) {
+    public init(
+        suiteName: String? = defaultSuiteName,
+        key: String = defaultKey,
+        logger: (@Sendable (String) -> Void)? = nil
+    ) {
         if let suiteName, let suite = UserDefaults(suiteName: suiteName) {
             self.defaults = suite
         } else {
             self.defaults = .standard
         }
         self.key = key
+        self.logger = logger
     }
 
-    public init(defaults: UserDefaults, key: String = defaultKey) {
+    public init(defaults: UserDefaults, key: String = defaultKey, logger: (@Sendable (String) -> Void)? = nil) {
         self.defaults = defaults
         self.key = key
+        self.logger = logger
     }
 
     public func save(_ snapshot: WidgetSnapshot) async {
         let encoder = JSONEncoder.widgetSnapshotEncoder
-        guard let data = try? encoder.encode(snapshot) else { return }
+        let data: Data
+        do {
+            data = try encoder.encode(snapshot)
+        } catch {
+            logger?("widget snapshot encode failed: \(error)")
+            return
+        }
         defaults.set(data, forKey: key)
-        if let legacyData = try? encoder.encode(LegacyWidgetData(snapshot: snapshot)) {
+        do {
+            let legacyData = try encoder.encode(LegacyWidgetData(snapshot: snapshot))
             defaults.set(legacyData, forKey: Self.legacyKey)
+        } catch {
+            logger?("legacy widget snapshot encode failed: \(error)")
         }
     }
 
     public func load() async -> WidgetSnapshot? {
         guard let data = defaults.data(forKey: key) else { return nil }
-        return try? JSONDecoder.widgetSnapshotDecoder.decode(WidgetSnapshot.self, from: data)
+        do {
+            return try JSONDecoder.widgetSnapshotDecoder.decode(WidgetSnapshot.self, from: data)
+        } catch {
+            logger?("widget snapshot decode failed: \(error)")
+            return nil
+        }
     }
 
     public func delete() async {

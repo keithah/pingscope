@@ -355,7 +355,9 @@ public struct AlertDecisionEngine: Sendable {
         else {
             return nil
         }
-        let failedCount = results.filter { !$0.isSuccess }.count
+        let failedCount = results.reduce(0) { count, result in
+            count + (result.isSuccess ? 0 : 1)
+        }
         let failureRatio = Double(failedCount) / Double(results.count)
         guard failureRatio >= rules.internetLossFailureRatio else { return nil }
         guard shouldSend(.internetLoss, at: date) else { return nil }

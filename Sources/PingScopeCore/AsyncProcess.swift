@@ -106,7 +106,7 @@ private extension Process {
                 let timeoutTask = Task {
                     try? await Task.sleep(for: timeout)
                     guard gate.claim() else { return }
-                    box.terminate()
+                    box.terminateDetached()
                     continuation.resume(throwing: AsyncProcessError.timedOut)
                 }
                 let resumeSuccess: @Sendable () -> Void = {
@@ -184,6 +184,13 @@ private final class FileHandleReader: @unchecked Sendable {
             let remaining = max(0, maxBytes - data.count)
             if remaining > 0 {
                 data.append(chunk.prefix(remaining))
+                if data.count >= maxBytes {
+                    try? handle.close()
+                    return data
+                }
+            } else {
+                try? handle.close()
+                return data
             }
         }
     }

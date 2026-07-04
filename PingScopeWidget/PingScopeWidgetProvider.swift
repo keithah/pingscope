@@ -16,12 +16,14 @@ struct Provider: TimelineProvider {
     }
 
     func getSnapshot(in context: Context, completion: @escaping (WidgetEntry) -> Void) {
-        let entry = WidgetEntry(date: Date(), data: loadLegacyData(), snapshot: loadSnapshotData())
+        let snapshot = loadSnapshotData()
+        let entry = WidgetEntry(date: Date(), data: snapshot == nil ? loadLegacyData() : nil, snapshot: snapshot)
         completion(entry)
     }
 
     func getTimeline(in context: Context, completion: @escaping (Timeline<WidgetEntry>) -> Void) {
-        let entry = WidgetEntry(date: Date(), data: loadLegacyData(), snapshot: loadSnapshotData())
+        let snapshot = loadSnapshotData()
+        let entry = WidgetEntry(date: Date(), data: snapshot == nil ? loadLegacyData() : nil, snapshot: snapshot)
 
         // Next update in 10 minutes (respects 40-70/day budget)
         let nextUpdate = Calendar.current.date(byAdding: .minute, value: 10, to: Date())!

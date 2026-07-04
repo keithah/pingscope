@@ -51,6 +51,7 @@ struct PingScopeDisplayPresentation {
         now: Date
     ) -> [HostLatencyGraphSeries] {
         let cutoff = now.addingTimeInterval(-selectedRange.duration)
+        let primaryHostID = snapshot.primaryHost?.id
         return snapshot.hosts.enumerated().compactMap { index, host in
             guard host.isEnabled else { return nil }
             let samples = snapshot.samplesByHost[host.id]?.samples(since: cutoff) ?? []
@@ -58,7 +59,7 @@ struct PingScopeDisplayPresentation {
                 host: host,
                 samples: samples,
                 color: HostLatencyGraphSeries.palette[index % HostLatencyGraphSeries.palette.count],
-                isPrimary: host.id == snapshot.primaryHost?.id
+                isPrimary: host.id == primaryHostID
             )
         }
     }

@@ -189,8 +189,8 @@ private enum SettingsTab: String, CaseIterable, Identifiable {
         case .notifications: "Control alert types, network status colors, and notification permission."
         case .history: "Export retained samples and review local storage behavior."
         case .diagnostics: "Inspect current state, failures, and debug log actions."
-        case .advanced: "Configure local network probing, widgets, login, and update status."
-        case .about: "Version, licensing, setup checklist, and project links."
+        case .advanced: "Configure local network probing, widgets, and login."
+        case .about: "Version, updates, licensing, privacy, and product links."
         }
     }
 
@@ -206,4 +206,3 @@ private enum SettingsTab: String, CaseIterable, Identifiable {
         }
     }
 }
-

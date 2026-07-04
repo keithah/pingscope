@@ -132,6 +132,25 @@ final class RuntimeBehaviorTests: XCTestCase {
         await scheduler.stop()
     }
 
+    func testMeasurementSchedulerLimitsConcurrentProbeMeasurements() async throws {
+        let hosts = (0..<5).map { index in
+            HostConfig(displayName: "Host \(index)", address: "host-\(index).example", interval: .seconds(60))
+        }
+        let tracker = ConcurrentProbeTracker()
+        let scheduler = MeasurementScheduler(
+            probeFactory: ConcurrentProbeFactory(delay: .milliseconds(700), tracker: tracker),
+            maxConcurrentProbes: 2
+        )
+        _ = await scheduler.start(hosts: hosts)
+
+        try await Task.sleep(for: .seconds(2))
+        await scheduler.stop()
+
+        let maxConcurrentMeasurements = await tracker.maxConcurrentMeasurements
+        XCTAssertGreaterThan(maxConcurrentMeasurements, 0)
+        XCTAssertLessThanOrEqual(maxConcurrentMeasurements, 2)
+    }
+
     func testRuntimePublishesOneShotAlertEventsOnDedicatedStream() async throws {
         let host = HostConfig(
             displayName: "Example",
@@ -613,6 +632,46 @@ private struct HangingProbeFactory: ProbeFactory {
     }
 }
 
+private struct ConcurrentProbeFactory: ProbeFactory {
+    let delay: Duration
+    let tracker: ConcurrentProbeTracker
+
+    func makeProbe(for method: PingMethod) async -> any PingProbe {
+        ConcurrentProbe(delay: delay, tracker: tracker)
+    }
+}
+
+private struct ConcurrentProbe: PingProbe {
+    private let delay: Duration
+    private let tracker: ConcurrentProbeTracker
+
+    init(delay: Duration, tracker: ConcurrentProbeTracker) {
+        self.delay = delay
+        self.tracker = tracker
+    }
+
+    func measure(_ host: HostConfig) async -> PingResult {
+        await tracker.started()
+        try? await Task.sleep(for: delay)
+        await tracker.finished()
+        return .success(hostID: host.id, latency: .milliseconds(5)).withHostMetadata(from: host)
+    }
+}
+
+private actor ConcurrentProbeTracker {
+    private var activeMeasurements = 0
+    private(set) var maxConcurrentMeasurements = 0
+
+    func started() {
+        activeMeasurements += 1
+        maxConcurrentMeasurements = max(maxConcurrentMeasurements, activeMeasurements)
+    }
+
+    func finished() {
+        activeMeasurements -= 1
+    }
+}
+
 /// Returns an instant success for the first `limit` measurements of each host,
 /// then hangs, so a test can bound exactly how many results a scheduler run
 /// produces per host.
@@ -674,6 +733,13 @@ private actor DelayedHistoryStore: PingHistoryStore {
         Array(stored.filter { $0.hostID == hostID && $0.timestamp >= since }.prefix(limit))
     }
 
+    func latestSamples(hostID: UUID, since: Date, limit: Int) async -> [PingResult] {
+        Array(stored
+            .filter { $0.hostID == hostID && $0.timestamp >= since }
+            .sorted { $0.timestamp > $1.timestamp }
+            .prefix(max(1, limit)))
+    }
+
     func prune(olderThan cutoff: Date) async {
         stored.removeAll { $0.timestamp < cutoff }
     }
@@ -708,6 +774,13 @@ private actor ControlledHistoryStore: PingHistoryStore {
 
     func samples(hostID: UUID, since: Date, limit: Int) async -> [PingResult] {
         Array(stored.filter { $0.hostID == hostID && $0.timestamp >= since }.prefix(limit))
+    }
+
+    func latestSamples(hostID: UUID, since: Date, limit: Int) async -> [PingResult] {
+        Array(stored
+            .filter { $0.hostID == hostID && $0.timestamp >= since }
+            .sorted { $0.timestamp > $1.timestamp }
+            .prefix(max(1, limit)))
     }
 
     func prune(olderThan cutoff: Date) async {

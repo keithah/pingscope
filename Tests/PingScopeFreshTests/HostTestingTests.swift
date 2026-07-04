@@ -52,8 +52,16 @@ final class HostTestingTests: XCTestCase {
         XCTAssertEqual(outcome, .detected(.defaultStarlinkDish))
     }
 
-    func testStarlinkDishDetectorReportsFailureSeparatelyFromConfirmedMiss() async {
-        let detector = StarlinkDishDetector(statusClient: FailingStarlinkStatusClient())
+    func testStarlinkDishDetectorTreatsUnavailableCandidatesAsNotFound() async {
+        let detector = StarlinkDishDetector(statusClient: UnavailableStarlinkStatusClient())
+
+        let outcome = await detector.detectionOutcome(timeout: .milliseconds(100))
+
+        XCTAssertEqual(outcome, .notFound)
+    }
+
+    func testStarlinkDishDetectorReportsUnexpectedFailureSeparatelyFromConfirmedMiss() async {
+        let detector = StarlinkDishDetector(statusClient: InvalidStarlinkStatusClient())
 
         let outcome = await detector.detectionOutcome(timeout: .milliseconds(100))
 
@@ -131,9 +139,15 @@ private struct FakeStarlinkStatusClient: StarlinkStatusFetching {
     }
 }
 
-private struct FailingStarlinkStatusClient: StarlinkStatusFetching {
+private struct UnavailableStarlinkStatusClient: StarlinkStatusFetching {
     func fetchStatus(host: HostConfig) async throws -> StarlinkStatus {
         throw StarlinkStatusFetchError.unavailable
+    }
+}
+
+private struct InvalidStarlinkStatusClient: StarlinkStatusFetching {
+    func fetchStatus(host: HostConfig) async throws -> StarlinkStatus {
+        throw StarlinkStatusFetchError.invalidStatus
     }
 }
 

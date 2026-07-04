@@ -126,23 +126,30 @@ public enum HistoryExporter {
             throw CocoaError(.fileWriteUnknown, userInfo: [NSFilePathErrorKey: url.path])
         }
         let handle = try FileHandle(forWritingTo: url)
-        defer { try? handle.close() }
-        switch format {
-        case .csv:
-            let formatter = ISO8601DateFormatter()
-            try handle.writeLine(csvHeader)
-            for sample in samples {
-                try handle.writeLine(csvRow(sample: sample, host: host, formatter: formatter))
+        do {
+            let writer = BufferedFileWriter(handle: handle)
+            switch format {
+            case .csv:
+                let formatter = ISO8601DateFormatter()
+                try writer.writeLine(csvHeader)
+                for sample in samples {
+                    try writer.writeLine(csvRow(sample: sample, host: host, formatter: formatter))
+                }
+            case .json:
+                try writeJSON(samples: samples, host: host, to: writer)
+            case .text:
+                try writeText(samples: samples, host: host, to: writer)
             }
-        case .json:
-            try writeJSON(samples: samples, host: host, to: handle)
-        case .text:
-            try writeText(samples: samples, host: host, to: handle)
+            try writer.flush()
+            try handle.close()
+        } catch {
+            try? handle.close()
+            throw error
         }
     }
 
-    private static func writeJSON(samples: [PingResult], host: HostConfig, to handle: FileHandle) throws {
-        var writer = HistoryJSONStreamWriter(handle: handle, encoder: .historyEncoder)
+    private static func writeJSON(samples: [PingResult], host: HostConfig, to output: BufferedFileWriter) throws {
+        var writer = HistoryJSONStreamWriter(output: output, encoder: .historyEncoder)
         try writer.beginObject()
         try writer.writeField("generatedAt", Date())
         try writer.writeField("host", host)
@@ -154,21 +161,21 @@ public enum HistoryExporter {
         try writer.endObject()
     }
 
-    private static func writeText(samples: [PingResult], host: HostConfig, to handle: FileHandle) throws {
+    private static func writeText(samples: [PingResult], host: HostConfig, to writer: BufferedFileWriter) throws {
         let formatter = ISO8601DateFormatter()
-        try handle.writeLine("PingScope History")
-        try handle.writeLine("Host: \(host.displayName)")
-        try handle.writeLine("Address: \(host.address)")
-        try handle.writeLine("Method: \(host.method.rawValue.uppercased())")
-        try handle.writeLine("Samples: \(samples.count)")
-        try handle.writeLine("")
+        try writer.writeLine("PingScope History")
+        try writer.writeLine("Host: \(host.displayName)")
+        try writer.writeLine("Address: \(host.address)")
+        try writer.writeLine("Method: \(host.method.rawValue.uppercased())")
+        try writer.writeLine("Samples: \(samples.count)")
+        try writer.writeLine("")
         for sample in samples {
             let timestamp = formatter.string(from: sample.timestamp)
             let starlinkSuffix = sample.metadata.starlink.map { "  \($0.noteSummary)" } ?? ""
             if let latency = sample.latency {
-                try handle.writeLine("\(timestamp)  \(Int(latency.milliseconds.rounded()))ms  OK\(starlinkSuffix)")
+                try writer.writeLine("\(timestamp)  \(Int(latency.milliseconds.rounded()))ms  OK\(starlinkSuffix)")
             } else {
-                try handle.writeLine("\(timestamp)  \(sample.failureReason?.userMessage ?? "Failed")  Failed\(starlinkSuffix)")
+                try writer.writeLine("\(timestamp)  \(sample.failureReason?.userMessage ?? "Failed")  Failed\(starlinkSuffix)")
             }
         }
     }
@@ -201,61 +208,91 @@ public enum HistoryExporter {
 
 }
 
-private struct HistoryJSONStreamWriter {
+private final class BufferedFileWriter {
     private let handle: FileHandle
+    private let flushThreshold: Int
+    private var buffer = Data()
+
+    init(handle: FileHandle, flushThreshold: Int = 64 * 1024) {
+        self.handle = handle
+        self.flushThreshold = flushThreshold
+        buffer.reserveCapacity(flushThreshold)
+    }
+
+    func write(contentsOf data: Data) throws {
+        buffer.append(data)
+        if buffer.count >= flushThreshold {
+            try flush()
+        }
+    }
+
+    func writeLine(_ line: String) throws {
+        try write(contentsOf: Data(line.utf8))
+        try write(contentsOf: Data("\n".utf8))
+    }
+
+    func flush() throws {
+        guard !buffer.isEmpty else { return }
+        try handle.write(contentsOf: buffer)
+        buffer.removeAll(keepingCapacity: true)
+    }
+}
+
+private struct HistoryJSONStreamWriter {
+    private let output: BufferedFileWriter
     private let encoder: JSONEncoder
     private var objectFieldCount = 0
     private var arrayElementCount = 0
 
-    init(handle: FileHandle, encoder: JSONEncoder) {
-        self.handle = handle
+    init(output: BufferedFileWriter, encoder: JSONEncoder) {
+        self.output = output
         self.encoder = encoder
     }
 
     mutating func beginObject() throws {
-        try handle.writeLine("{")
+        try output.writeLine("{")
     }
 
     mutating func writeField<Value: Encodable>(_ name: String, _ value: Value) throws {
         if objectFieldCount > 0 {
-            try handle.writeLine(",")
+            try output.writeLine(",")
         }
-        try handle.write(contentsOf: Data("  ".utf8))
-        try handle.write(contentsOf: JSONEncoder.fieldNameEncoder.encode(name))
-        try handle.write(contentsOf: Data(" : ".utf8))
-        try handle.write(contentsOf: try encoder.encode(value))
+        try output.write(contentsOf: Data("  ".utf8))
+        try output.write(contentsOf: JSONEncoder.fieldNameEncoder.encode(name))
+        try output.write(contentsOf: Data(" : ".utf8))
+        try output.write(contentsOf: try encoder.encode(value))
         objectFieldCount += 1
     }
 
     mutating func beginArrayField(_ name: String) throws {
         if objectFieldCount > 0 {
-            try handle.writeLine(",")
+            try output.writeLine(",")
         }
-        try handle.write(contentsOf: Data("  ".utf8))
-        try handle.write(contentsOf: JSONEncoder.fieldNameEncoder.encode(name))
-        try handle.writeLine(" : [")
+        try output.write(contentsOf: Data("  ".utf8))
+        try output.write(contentsOf: JSONEncoder.fieldNameEncoder.encode(name))
+        try output.writeLine(" : [")
         objectFieldCount += 1
         arrayElementCount = 0
     }
 
     mutating func writeArrayElement<Value: Encodable>(_ value: Value) throws {
         if arrayElementCount > 0 {
-            try handle.writeLine(",")
+            try output.writeLine(",")
         }
-        try handle.write(contentsOf: try encoder.encode(value))
+        try output.write(contentsOf: try encoder.encode(value))
         arrayElementCount += 1
     }
 
     mutating func endArray() throws {
         if arrayElementCount > 0 {
-            try handle.writeLine("")
+            try output.writeLine("")
         }
-        try handle.write(contentsOf: Data("  ]".utf8))
+        try output.write(contentsOf: Data("  ]".utf8))
     }
 
     mutating func endObject() throws {
-        try handle.writeLine("")
-        try handle.writeLine("}")
+        try output.writeLine("")
+        try output.writeLine("}")
     }
 }
 
@@ -275,13 +312,5 @@ private extension JSONEncoder {
 
     static var fieldNameEncoder: JSONEncoder {
         JSONEncoder()
-    }
-}
-
-private extension FileHandle {
-    func writeLine(_ line: String) throws {
-        if let data = "\(line)\n".data(using: .utf8) {
-            try write(contentsOf: data)
-        }
     }
 }

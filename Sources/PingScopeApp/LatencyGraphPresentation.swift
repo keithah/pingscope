@@ -22,11 +22,16 @@ struct HostLatencyGraphSeries: Identifiable {
 struct LatencyGraphPoint {
     let index: Int
     let latencyMilliseconds: Double?
+
+    func xPosition(sampleCount: Int, width: CGFloat) -> CGFloat {
+        width * CGFloat(index) / CGFloat(max(sampleCount - 1, 1))
+    }
 }
 
 struct LatencyGraphData {
     let points: [LatencyGraphPoint]
     let scale: LatencyGraphScale
+    let sampleCount: Int
     private let latencyCount: Int
 
     init(samples: [PingResult]) {
@@ -42,6 +47,7 @@ struct LatencyGraphData {
             points.append(LatencyGraphPoint(index: index, latencyMilliseconds: latency))
         }
         self.points = points
+        self.sampleCount = samples.count
         self.latencyCount = latencies.count
         scale = LatencyGraphScale(latencies: latencies)
     }
@@ -53,11 +59,20 @@ struct LatencyGraphData {
     var hasLatencyData: Bool {
         latencyCount > 0
     }
+
+    func renderPoints(pixelWidth: CGFloat) -> [LatencyGraphPoint] {
+        points.downsampled(toPixelWidth: pixelWidth, sampleCount: sampleCount)
+    }
 }
 
 struct DrawableHostLatencyGraphSeries {
     let source: HostLatencyGraphSeries
     let points: [LatencyGraphPoint]
+    let sampleCount: Int
+
+    func renderPoints(pixelWidth: CGFloat) -> [LatencyGraphPoint] {
+        points.downsampled(toPixelWidth: pixelWidth, sampleCount: sampleCount)
+    }
 }
 
 struct MultiHostLatencyGraphData {
@@ -82,7 +97,7 @@ struct MultiHostLatencyGraphData {
             // the primary host's failure marks are exactly what an outage looks
             // like. Only a series with no samples at all has nothing to render.
             if !points.isEmpty {
-                drawableSeries.append(DrawableHostLatencyGraphSeries(source: hostSeries, points: points))
+                drawableSeries.append(DrawableHostLatencyGraphSeries(source: hostSeries, points: points, sampleCount: hostSeries.samples.count))
             }
         }
         self.drawableSeries = drawableSeries
@@ -96,5 +111,60 @@ struct MultiHostLatencyGraphData {
 
     var hasLatencyData: Bool {
         latencyCount > 0
+    }
+}
+
+private struct LatencyGraphPointBucket {
+    private var minLatencyPoint: LatencyGraphPoint?
+    private var maxLatencyPoint: LatencyGraphPoint?
+    private var latestLatencyPoint: LatencyGraphPoint?
+    private var latestFailurePoint: LatencyGraphPoint?
+
+    mutating func append(_ point: LatencyGraphPoint) {
+        guard let latency = point.latencyMilliseconds else {
+            latestFailurePoint = point
+            return
+        }
+        if minLatencyPoint?.latencyMilliseconds.map({ latency < $0 }) ?? true {
+            minLatencyPoint = point
+        }
+        if maxLatencyPoint?.latencyMilliseconds.map({ latency > $0 }) ?? true {
+            maxLatencyPoint = point
+        }
+        latestLatencyPoint = point
+    }
+
+    var points: [LatencyGraphPoint] {
+        var selected: [LatencyGraphPoint] = []
+        selected.reserveCapacity(4)
+        append(latestFailurePoint, to: &selected)
+        append(minLatencyPoint, to: &selected)
+        append(maxLatencyPoint, to: &selected)
+        append(latestLatencyPoint, to: &selected)
+        selected.sort { $0.index < $1.index }
+        return selected
+    }
+
+    private func append(_ point: LatencyGraphPoint?, to selected: inout [LatencyGraphPoint]) {
+        guard let point, !selected.contains(where: { $0.index == point.index }) else { return }
+        selected.append(point)
+    }
+}
+
+private extension Array where Element == LatencyGraphPoint {
+    func downsampled(toPixelWidth width: CGFloat, sampleCount: Int) -> [LatencyGraphPoint] {
+        let pixelColumns = Swift.max(Int(width.rounded(.up)), 1)
+        guard count > pixelColumns * 2, sampleCount > 1 else { return self }
+
+        var buckets = Swift.Array(repeating: LatencyGraphPointBucket(), count: pixelColumns)
+        for point in self {
+            let normalized = CGFloat(point.index) / CGFloat(Swift.max(sampleCount - 1, 1))
+            let bucketIndex = Swift.min(
+                Swift.max(Int((normalized * CGFloat(pixelColumns - 1)).rounded(.down)), 0),
+                pixelColumns - 1
+            )
+            buckets[bucketIndex].append(point)
+        }
+        return buckets.flatMap { $0.points }
     }
 }

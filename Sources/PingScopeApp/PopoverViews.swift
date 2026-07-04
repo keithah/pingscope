@@ -11,7 +11,7 @@ struct StatusPopoverView: View {
             header
             HStack(spacing: 12) {
                 Picker("Range", selection: $model.selectedRange) {
-                    ForEach(TimeRange.allCases) { range in
+                    ForEach(TimeRange.displayCases) { range in
                         Text(range.rawValue).tag(range)
                     }
                 }
@@ -29,7 +29,7 @@ struct StatusPopoverView: View {
                 CompactDiagnosisReasonRow(diagnosis: degradationReason)
             }
 
-            RecentSamplesView(samples: Array(model.displayPresentation.visibleSamples.suffix(8)).reversed(), range: model.selectedRange)
+            RecentSamplesView(samples: Array(model.displayPresentation.visibleSamples.suffix(8).reversed()), range: model.selectedRange)
         }
         .padding(16)
         .frame(width: 430, height: 540, alignment: .top)

@@ -8,7 +8,7 @@ extension SettingsRootView {
             SettingsSection("Menu Bar") {
                 SettingsRow(systemImage: "chart.xyaxis.line", tint: .blue, title: "Graph range") {
                     Picker("Menu bar range", selection: $model.selectedRange) {
-                        ForEach(TimeRange.allCases) { range in
+                        ForEach(TimeRange.displayCases) { range in
                             Text(range.rawValue).tag(range)
                         }
                     }

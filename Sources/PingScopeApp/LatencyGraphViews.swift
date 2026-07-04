@@ -1,15 +1,13 @@
 import PingScopeCore
 import SwiftUI
 
-struct RecentSamplesView<Samples: Sequence<PingResult>>: View {
-    let samples: Samples
+struct RecentSamplesView: View {
+    let samples: [PingResult]
     var range: TimeRange? = nil
 
     var body: some View {
-        let sampleArray = Array(samples)
-
         ZStack {
-            Table(sampleArray) {
+            Table(samples) {
                 TableColumn("Time") { result in
                     Text(result.timestamp, style: .time)
                 }
@@ -26,7 +24,7 @@ struct RecentSamplesView<Samples: Sequence<PingResult>>: View {
                 }
             }
 
-            if sampleArray.isEmpty {
+            if samples.isEmpty {
                 Text(emptyMessage)
                     .font(.callout)
                     .foregroundStyle(.secondary)
@@ -104,8 +102,9 @@ struct LatencyGraph: View {
                 let plotBottom: CGFloat = showsAxes ? 6 : 0
                 let plotHeight = max(size.height - plotTop - plotBottom, 1)
 
-                for pointValue in graphData.points {
-                    let x = size.width * CGFloat(pointValue.index) / CGFloat(max(graphData.points.count - 1, 1))
+                let renderPoints = graphData.renderPoints(pixelWidth: size.width)
+                for pointValue in renderPoints {
+                    let x = pointValue.xPosition(sampleCount: graphData.sampleCount, width: size.width)
                     guard let value = pointValue.latencyMilliseconds else {
                         let failureMark = Path { mark in
                             mark.move(to: CGPoint(x: x, y: plotTop + plotHeight * 0.2))
@@ -241,8 +240,9 @@ struct MultiHostLatencyGraph: View {
         var path = Path()
         var isDrawingSegment = false
 
-        for pointValue in hostSeries.points {
-            let x = size.width * CGFloat(pointValue.index) / CGFloat(max(hostSeries.points.count - 1, 1))
+        let renderPoints = hostSeries.renderPoints(pixelWidth: size.width)
+        for pointValue in renderPoints {
+            let x = pointValue.xPosition(sampleCount: hostSeries.sampleCount, width: size.width)
             guard let value = pointValue.latencyMilliseconds else {
                 if hostSeries.source.isPrimary {
                     let failureMark = Path { mark in

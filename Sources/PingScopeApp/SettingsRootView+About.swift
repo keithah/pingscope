@@ -4,7 +4,9 @@ import SwiftUI
 
 extension SettingsRootView {
     var about: some View {
-        SettingsPane {
+        let attentionItems = aboutAttentionItems
+
+        return SettingsPane {
             SettingsSection("PingScope") {
                 HStack(alignment: .center, spacing: 14) {
                     Image(nsImage: NSApp.applicationIconImage)
@@ -39,25 +41,53 @@ extension SettingsRootView {
                 }
             }
 
-            SettingsSection("First Run Checklist") {
-                VStack(spacing: 8) {
-                    ForEach(model.setupChecklistItems) { item in
-                        SetupChecklistRow(item: item)
-                    }
-                }
-            }
-
             SettingsSection("Links") {
-                SettingsRow(systemImage: "globe", tint: .blue, title: "GitHub") {
-                    Button("Open Repository") {
-                        NSWorkspace.shared.open(URL(string: "https://github.com/keithah/pingscope")!)
+                SettingsRow(systemImage: "globe", tint: .blue, title: "Website") {
+                    Button("Open Product Page") {
+                        NSWorkspace.shared.open(URL(string: "https://keithah.com/products/pingscope")!)
                     }
                 }
+                #if !APPSTORE
+                    if BuildFlavor.current != .appStore {
+                        SettingsRow(systemImage: "arrow.triangle.2.circlepath", tint: .blue, title: "Software updates") {
+                            HStack(spacing: 10) {
+                                Text(softwareUpdateController.statusMessage)
+                                    .foregroundStyle(.secondary)
+                                Button("Check Now") {
+                                    softwareUpdateController.checkForUpdates()
+                                }
+                                .disabled(!softwareUpdateController.canCheckForUpdates)
+                            }
+                        }
+                    }
+                #endif
                 SettingsRow(systemImage: "lock.shield", tint: .green, title: "Privacy") {
                     Text("Settings, history, exports, and widget snapshots stay local.")
                         .foregroundStyle(.secondary)
                 }
+                if !attentionItems.isEmpty {
+                    Divider()
+                    Text("Needs attention")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    VStack(spacing: 8) {
+                        ForEach(attentionItems) { item in
+                            SetupChecklistRow(item: item)
+                        }
+                    }
+                }
             }
+        }
+    }
+
+    private var aboutAttentionItems: [SetupChecklistItem] {
+        let requiredSetupTitles: Set<String> = [
+            "Primary host",
+            "Notifications",
+            "Local network"
+        ]
+        return model.setupChecklistItems.filter { item in
+            requiredSetupTitles.contains(item.title) && !item.isComplete
         }
     }
 

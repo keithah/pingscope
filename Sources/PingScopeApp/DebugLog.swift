@@ -22,8 +22,12 @@ enum DebugLog {
         }
     }
 
-    nonisolated static func flush() {
-        queue.sync {}
+    nonisolated static func flush() async {
+        await withCheckedContinuation { continuation in
+            queue.async {
+                continuation.resume()
+            }
+        }
     }
 
     private nonisolated static func writeLine(_ message: String) {

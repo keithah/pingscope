@@ -134,6 +134,8 @@ public struct StarlinkDishDetector: Sendable {
                         return .detected(host)
                     } catch is CancellationError {
                         return .cancelled
+                    } catch StarlinkStatusFetchError.unavailable, StarlinkStatusFetchError.timedOut {
+                        return .miss
                     } catch {
                         return .failed
                     }
@@ -235,14 +237,20 @@ public actor HostStore {
 public actor MeasurementScheduler {
     private let probeFactory: any ProbeFactory
     private let logger: (@Sendable (String) -> Void)?
+    private let probePermits: AsyncPermitPool
     private var tasks: [Task<Void, Never>] = []
     private var continuation: AsyncStream<PingResult>.Continuation?
     private var generation = 0
     private var lastFailureLogByHost: [UUID: (reason: FailureReason, date: Date)] = [:]
 
-    public init(probeFactory: any ProbeFactory, logger: (@Sendable (String) -> Void)? = nil) {
+    public init(
+        probeFactory: any ProbeFactory,
+        logger: (@Sendable (String) -> Void)? = nil,
+        maxConcurrentProbes: Int = 8
+    ) {
         self.probeFactory = probeFactory
         self.logger = logger
+        self.probePermits = AsyncPermitPool(permits: max(1, maxConcurrentProbes))
     }
 
     public func start(hosts: [HostConfig], allowsLocalNetworkProbes: Bool = true) async -> AsyncStream<PingResult> {
@@ -266,11 +274,18 @@ public actor MeasurementScheduler {
             }
         }
 
-        let measurableHosts = hosts.filter { host in
-            host.isEnabled && (allowsLocalNetworkProbes || !host.requiresLocalNetworkPermission)
+        var measurableHosts: [HostConfig] = []
+        var disabledCount = 0
+        var localSuppressedCount = 0
+        for host in hosts {
+            if !host.isEnabled {
+                disabledCount += 1
+            } else if !allowsLocalNetworkProbes, host.requiresLocalNetworkPermission {
+                localSuppressedCount += 1
+            } else {
+                measurableHosts.append(host)
+            }
         }
-        let disabledCount = hosts.filter { !$0.isEnabled }.count
-        let localSuppressedCount = hosts.count - disabledCount - measurableHosts.count
         logger?("scheduler start generation=\(runGeneration) hosts=\(hosts.count) measurable=\(measurableHosts.count) disabled=\(disabledCount) localSuppressed=\(localSuppressedCount) allowsLocal=\(allowsLocalNetworkProbes)")
 
         for (offset, host) in measurableHosts.enumerated() {
@@ -308,19 +323,26 @@ public actor MeasurementScheduler {
         }
     }
 
-    private func runLoop(for host: HostConfig, generation: Int) async {
+    private nonisolated func runLoop(for host: HostConfig, generation: Int) async {
         logger?("scheduler runLoop begin generation=\(generation) hostID=\(host.id.uuidString) method=\(host.method.rawValue)")
         while !Task.isCancelled {
             let probe = await probeFactory.makeProbe(for: host.method)
+            await probePermits.acquire()
             let result = await probe.measure(host)
-            guard !Task.isCancelled, generation == self.generation else { return }
-            if shouldLogFailure(result) {
-                logger?("scheduler result hostID=\(host.id.uuidString) failure=\(String(describing: result.failureReason))")
-            }
-            continuation?.yield(result)
+            await probePermits.release()
+            guard !Task.isCancelled, await publish(result, for: host, generation: generation) else { return }
             try? await Task.sleep(for: host.interval)
         }
         logger?("scheduler runLoop end generation=\(generation) hostID=\(host.id.uuidString)")
+    }
+
+    private func publish(_ result: PingResult, for host: HostConfig, generation: Int) -> Bool {
+        guard generation == self.generation else { return false }
+        if shouldLogFailure(result) {
+            logger?("scheduler result hostID=\(host.id.uuidString) failure=\(String(describing: result.failureReason))")
+        }
+        continuation?.yield(result)
+        return true
     }
 
     private func shouldLogFailure(_ result: PingResult) -> Bool {
@@ -336,6 +358,33 @@ public actor MeasurementScheduler {
         }
         lastFailureLogByHost[result.hostID] = (failureReason, result.timestamp)
         return true
+    }
+}
+
+private actor AsyncPermitPool {
+    private var availablePermits: Int
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    init(permits: Int) {
+        self.availablePermits = permits
+    }
+
+    func acquire() async {
+        if availablePermits > 0 {
+            availablePermits -= 1
+            return
+        }
+        await withCheckedContinuation { continuation in
+            waiters.append(continuation)
+        }
+    }
+
+    func release() {
+        if waiters.isEmpty {
+            availablePermits += 1
+        } else {
+            waiters.removeFirst().resume()
+        }
     }
 }
 

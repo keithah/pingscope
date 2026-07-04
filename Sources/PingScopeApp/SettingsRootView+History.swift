@@ -22,13 +22,42 @@ extension SettingsRootView {
                 }
 
                 SettingsRow(systemImage: "clock", tint: .purple, title: "Range") {
-                    Picker("Range", selection: $model.historyExportRange) {
-                        ForEach(TimeRange.allCases) { range in
-                            Text(range.rawValue).tag(range)
+                    VStack(alignment: .leading, spacing: 8) {
+                        Picker("Range", selection: $model.historyExportRange) {
+                            ForEach(HistoryExportRangePreset.allCases) { range in
+                                Text(range.rawValue).tag(range)
+                            }
+                        }
+                        .labelsHidden()
+                        .frame(width: 130)
+
+                        if model.historyExportRange == .custom {
+                            HStack(spacing: 8) {
+                                TextField("Amount", text: $model.historyExportCustomValue)
+                                    .labelsHidden()
+                                    .frame(width: 70)
+                                Picker("Unit", selection: $model.historyExportCustomUnit) {
+                                    ForEach(HistoryExportRangeUnit.allCases) { unit in
+                                        Text(unit.displayName).tag(unit)
+                                    }
+                                }
+                                .labelsHidden()
+                                .frame(width: 100)
+                            }
                         }
                     }
-                    .labelsHidden()
-                    .frame(width: 110)
+                }
+
+                if model.historyExportRange == .max {
+                    Text("Max exports the full retained history for the selected host, up to 7 days.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .padding(.leading, 30)
+                } else if model.historyExportRange == .custom {
+                    Text("Custom ranges are capped at the retained 7-day history window.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .padding(.leading, 30)
                 }
 
                 SettingsRow(systemImage: "square.and.arrow.down", tint: .green, title: "Export") {
@@ -55,7 +84,7 @@ extension SettingsRootView {
                     Text("7 days")
                         .foregroundStyle(.secondary)
                 }
-                Text("History is stored locally and pruned automatically. Export uses the selected host and range.")
+                Text("History is stored locally and pruned automatically. Use Max to export the full retained window.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .padding(.leading, 30)

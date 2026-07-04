@@ -119,6 +119,38 @@ cp -R "PingScope.app" dmg_staging/
 ln -s /Applications dmg_staging/Applications
 
 DMG_NAME="PingScope-v${VERSION}.dmg"
+NOTARY_TIMEOUT_SECONDS="${PING_SCOPE_NOTARY_TIMEOUT_SECONDS:-1800}"
+
+retry() {
+  local attempts="$1"
+  local delay="$2"
+  shift 2
+  local attempt=1
+  while true; do
+    if "$@"; then
+      return 0
+    fi
+    if [[ "${attempt}" -ge "${attempts}" ]]; then
+      return 1
+    fi
+    sleep "${delay}"
+    attempt=$((attempt + 1))
+    delay=$((delay * 2))
+  done
+}
+
+run_with_timeout() {
+  local timeout_seconds="$1"
+  shift
+  perl -e 'alarm shift @ARGV; exec @ARGV' "${timeout_seconds}" "$@"
+}
+
+notarize_artifact() {
+  local artifact="$1"
+  retry 3 10 run_with_timeout "${NOTARY_TIMEOUT_SECONDS}" xcrun notarytool submit "${artifact}" "${NOTARY_ARGS[@]}" --wait
+  retry 3 5 xcrun stapler staple "${artifact}"
+}
+
 hdiutil create -volname "PingScope v${VERSION}" \
   -srcfolder dmg_staging \
   -ov -format UDZO \
@@ -143,13 +175,11 @@ if [[ -n "${SIGN_INSTALLER_IDENTITY}" ]]; then
 fi
 
 echo "Submitting DMG for notarization..."
-xcrun notarytool submit "${DMG_NAME}" "${NOTARY_ARGS[@]}" --wait
-xcrun stapler staple "${DMG_NAME}"
+notarize_artifact "${DMG_NAME}"
 
 if [[ -n "${PKG_NAME}" ]]; then
   echo "Submitting PKG for notarization..."
-  xcrun notarytool submit "${PKG_NAME}" "${NOTARY_ARGS[@]}" --wait
-  xcrun stapler staple "${PKG_NAME}"
+  notarize_artifact "${PKG_NAME}"
 fi
 
 echo "Verifying with spctl..."

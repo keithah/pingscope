@@ -92,12 +92,88 @@ public enum TimeRange: String, CaseIterable, Identifiable, Sendable {
 
     public var id: String { rawValue }
 
+    public static var displayCases: [TimeRange] {
+        [.oneMinute, .fiveMinutes, .tenMinutes, .oneHour]
+    }
+
     public var duration: TimeInterval {
         switch self {
         case .oneMinute: 60
         case .fiveMinutes: 300
         case .tenMinutes: 600
         case .oneHour: 3_600
+        }
+    }
+}
+
+public enum HistoryExportRangeUnit: String, CaseIterable, Identifiable, Sendable {
+    case hours = "h"
+    case days = "d"
+
+    public var id: String { rawValue }
+
+    public var displayName: String {
+        switch self {
+        case .hours: "hours"
+        case .days: "days"
+        }
+    }
+
+    fileprivate var secondsMultiplier: TimeInterval {
+        switch self {
+        case .hours: 3_600
+        case .days: 86_400
+        }
+    }
+}
+
+public enum HistoryExportRangePreset: String, CaseIterable, Identifiable, Sendable {
+    case oneMinute = "1m"
+    case fiveMinutes = "5m"
+    case tenMinutes = "10m"
+    case oneHour = "1h"
+    case max = "Max"
+    case custom = "Custom"
+
+    public static let maximumDuration: TimeInterval = 604_800
+    public static let `default`: Self = .oneHour
+
+    public var id: String { rawValue }
+
+    public func resolvedDuration(customValue: String, customUnit: HistoryExportRangeUnit) -> TimeInterval? {
+        switch self {
+        case .oneMinute:
+            return TimeRange.oneMinute.duration
+        case .fiveMinutes:
+            return TimeRange.fiveMinutes.duration
+        case .tenMinutes:
+            return TimeRange.tenMinutes.duration
+        case .oneHour:
+            return TimeRange.oneHour.duration
+        case .max:
+            return Self.maximumDuration
+        case .custom:
+            let trimmed = customValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard let value = Double(trimmed), value.isFinite, value > 0 else {
+                return nil
+            }
+            return min(value * customUnit.secondsMultiplier, Self.maximumDuration)
+        }
+    }
+
+    public func filenameComponent(customValue: String, customUnit: HistoryExportRangeUnit) -> String {
+        switch self {
+        case .oneMinute, .fiveMinutes, .tenMinutes, .oneHour:
+            return rawValue
+        case .max:
+            return "max"
+        case .custom:
+            let trimmed = customValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { return "custom" }
+            let safeValue = trimmed
+                .replacingOccurrences(of: ".", with: "p")
+                .filter { $0.isNumber || $0 == "p" }
+            return safeValue.isEmpty ? "custom" : "\(safeValue)\(customUnit.rawValue)"
         }
     }
 }

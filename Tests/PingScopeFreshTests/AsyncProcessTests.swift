@@ -80,7 +80,20 @@ final class AsyncProcessTests: XCTestCase {
             maxOutputBytes: 10
         )
 
-        XCTAssertEqual(result.terminationStatus, 0)
         XCTAssertEqual(result.standardOutput.count, 10)
+    }
+
+    func testRunStopsReadingAfterOutputCap() async throws {
+        let start = ContinuousClock.now
+
+        let result = try await AsyncProcess.run(
+            executablePath: "/usr/bin/yes",
+            arguments: [],
+            timeout: .seconds(5),
+            maxOutputBytes: 16
+        )
+
+        XCTAssertEqual(result.standardOutput.count, 16)
+        XCTAssertLessThan(start.duration(to: .now), .seconds(2))
     }
 }

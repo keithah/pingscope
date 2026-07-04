@@ -20,7 +20,11 @@ struct WidgetEntry: TimelineEntry {
         let hasIssues = data.results.contains { !$0.isSuccess }
         return TimelineEntryRelevance(
             score: hasIssues ? 100 : 50,
-            duration: 15 * 60  // 15 minutes
+            duration: WidgetFreshness.staleInterval
         )
+    }
+
+    var isStale: Bool {
+        snapshot?.isStale ?? data?.isStale ?? false
     }
 }

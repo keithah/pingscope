@@ -33,6 +33,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem?
     private var statusItemView: MenuBarStatusView?
     private var popover: NSPopover?
+    private var uiTestWindow: NSWindow?   // PINGSCOPE_UITEST only
     private var overlayController: NSWindowController?
     private var settingsWindowController: NSWindowController?
     private var lastExpandedOverlayFrame: NSRect?
@@ -51,6 +52,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.accessory)
         installStatusItem()
         model.start()
+        // UI-test hook: PINGSCOPE_UITEST_OPEN opens the menu-bar content window
+        // at launch so an automation harness can capture it via `see --app`
+        // with no menu-bar interaction at all (the reliable primary path).
+        if ProcessInfo.processInfo.environment["PINGSCOPE_UITEST_OPEN"] == "1" {
+            DispatchQueue.main.async { [weak self] in self?.toggleTestWindow() }
+        }
         model.onMenuStateChanged = { [weak self] state in
             self?.renderMenuState(state)
         }
@@ -286,8 +293,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         button.title = ""
         button.image = nil
         button.toolTip = "PingScope"
+        // The custom MenuBarStatusView draws the glyph, leaving the button with
+        // no title/image and therefore no accessibility handle — which makes the
+        // status item invisible to AX enumeration and un-pressable by automation
+        // (e.g. the menubar-ux-tester harness). Give the button an explicit AX
+        // label + identifier so it can be found and opened programmatically.
+        button.setAccessibilityLabel("PingScope")
+        button.setAccessibilityIdentifier("pingscope.statusItem")
+        // Wire the button's accessibility action to the popover toggle. Real
+        // mouse clicks are handled by MenuBarStatusView below; this makes the
+        // item respond to an AXPress (how automation and assistive tech open
+        // it) instead of routing solely through raw mouse events.
+        button.target = self
+        button.action = #selector(togglePopover)
         let view = MenuBarStatusView(frame: NSRect(x: 0, y: 0, width: defaultContent.itemWidth, height: NSStatusBar.system.thickness))
         view.autoresizingMask = [.width, .height]
+        // Don't let the decorative glyph view shadow the button's AX metadata.
+        view.setAccessibilityElement(false)
         view.onPrimaryClick = { [weak self] in
             self?.togglePopover()
         }
@@ -317,6 +339,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
+        // UI-test hook: peekaboo/ScreenCaptureKit can't reliably capture the
+        // transient NSPopover panel, so under PINGSCOPE_UITEST the same content
+        // is shown in a normal (layer-0) window a harness can `see --app`.
+        if ProcessInfo.processInfo.environment["PINGSCOPE_UITEST"] == "1" {
+            toggleTestWindow()
+            return
+        }
+
         if popover?.isShown == true {
             popover?.performClose(nil)
             return
@@ -330,20 +360,46 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         showPopover(relativeTo: anchorView)
     }
 
-    private func showPopover(relativeTo anchorView: NSView) {
-        let popover = NSPopover()
-        popover.behavior = .transient
-        popover.contentSize = NSSize(width: 430, height: 540)
-        popover.contentViewController = NSHostingController(
+    /// Builds the shared menu-bar content view controller used by both the
+    /// popover and the UI-test window, so both exercise identical UI.
+    private func makeStatusContentController() -> NSViewController {
+        NSHostingController(
             rootView: StatusPopoverView(
                 model: model,
                 onSettings: { [weak self] in
                     self?.popover?.performClose(nil)
+                    self?.uiTestWindow?.close()
                     self?.openSettings()
                 }
             )
-                .environmentObject(softwareUpdateController)
+            .environmentObject(softwareUpdateController)
         )
+    }
+
+    /// UI-test only: toggle a normal window hosting the menu-bar content.
+    private func toggleTestWindow() {
+        if let win = uiTestWindow, win.isVisible {
+            win.close()
+            uiTestWindow = nil
+            return
+        }
+        let controller = makeStatusContentController()
+        let win = NSWindow(contentViewController: controller)
+        win.title = "PingScope"
+        win.setContentSize(NSSize(width: 430, height: 540))
+        win.styleMask = [.titled, .closable]
+        win.isReleasedWhenClosed = false
+        win.center()
+        win.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        uiTestWindow = win
+    }
+
+    private func showPopover(relativeTo anchorView: NSView) {
+        let popover = NSPopover()
+        popover.behavior = .transient
+        popover.contentSize = NSSize(width: 430, height: 540)
+        popover.contentViewController = makeStatusContentController()
         popover.show(relativeTo: anchorView.bounds, of: anchorView, preferredEdge: .minY)
         self.popover = popover
         applyWindowOpacity()

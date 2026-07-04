@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import PingScopeCore
 
@@ -30,5 +31,25 @@ extension PingScopeModel {
         Recent failures:
         \(failures.isEmpty ? "None in the selected range." : failures)
         """
+    }
+
+    func revealDiagnosticsLog() {
+        if !FileManager.default.fileExists(atPath: diagnosticsLogURL.path) {
+            DebugLog.write("diagnostics log created from settings")
+            Task {
+                await DebugLog.flush()
+                NSWorkspace.shared.activateFileViewerSelecting([diagnosticsLogURL])
+            }
+        } else {
+            NSWorkspace.shared.activateFileViewerSelecting([diagnosticsLogURL])
+        }
+        setDiagnosticsMessage("Opened log in Finder")
+    }
+
+    func copyDiagnosticsSummary() {
+        let summary = diagnosticsSummary()
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(summary, forType: .string)
+        setDiagnosticsMessage("Copied diagnostics summary")
     }
 }

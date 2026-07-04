@@ -78,14 +78,10 @@ struct LargeWidgetView: View {
 
             Spacer()
         }
-        .opacity(isStale ? 0.6 : 1.0)
+        .opacity(entry.isStale ? 0.6 : 1.0)
         .containerBackground(for: .widget) {
             WidgetStatusStyle.backgroundColor
         }
         .widgetURL(URL(string: "pingscope://open"))
-    }
-
-    private var isStale: Bool {
-        entry.snapshot?.isStale ?? entry.data?.isStale ?? false
     }
 }

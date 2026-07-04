@@ -106,6 +106,7 @@ private final class PingScopeIOSAppModel: ObservableObject {
         do {
             self.historyStore = try SQLiteHistoryStore(url: SQLiteHistoryStore.defaultURL(appName: "PingScope-iOS"))
         } catch {
+            NSLog("PingScope iOS history store unavailable: \(String(describing: error))")
             #if DEBUG
             print("PingScope iOS history store unavailable: \(error)")
             #endif
@@ -407,8 +408,7 @@ private final class PingScopeIOSAppModel: ObservableObject {
             return
         }
         let cutoff = Date().addingTimeInterval(-24 * 60 * 60)
-        let samples = await historyStore.samples(hostID: snapshot.host.id, since: cutoff, limit: 10_000)
-        historySamples = Array(samples.suffix(100)).sorted { $0.timestamp > $1.timestamp }
+        historySamples = await historyStore.latestSamples(hostID: snapshot.host.id, since: cutoff, limit: 100)
         rebuildGraphSamples()
         await publishWidgetSnapshot()
     }

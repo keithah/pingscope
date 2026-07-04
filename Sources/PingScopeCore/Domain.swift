@@ -750,25 +750,20 @@ public struct NetworkPerspectiveDiagnoser: Sendable {
     private struct TierSummary {
         var tier: NetworkTier
         var observed: [ObservedHost]
+        var down: [ObservedHost]
+        var degraded: [ObservedHost]
+        var healthy: [ObservedHost]
+        var downRatio: Double
+        var degradedRatio: Double
 
-        var down: [ObservedHost] {
-            observed.filter { $0.health.status == .down }
-        }
-
-        var degraded: [ObservedHost] {
-            observed.filter { $0.health.status == .degraded }
-        }
-
-        var healthy: [ObservedHost] {
-            observed.filter { $0.health.status == .healthy }
-        }
-
-        var downRatio: Double {
-            observed.isEmpty ? 0 : Double(down.count) / Double(observed.count)
-        }
-
-        var degradedRatio: Double {
-            observed.isEmpty ? 0 : Double(degraded.count) / Double(observed.count)
+        init(tier: NetworkTier, observed: [ObservedHost]) {
+            self.tier = tier
+            self.observed = observed
+            self.down = observed.filter { $0.health.status == .down }
+            self.degraded = observed.filter { $0.health.status == .degraded }
+            self.healthy = observed.filter { $0.health.status == .healthy }
+            self.downRatio = observed.isEmpty ? 0 : Double(down.count) / Double(observed.count)
+            self.degradedRatio = observed.isEmpty ? 0 : Double(degraded.count) / Double(observed.count)
         }
 
         var hasDown: Bool {
@@ -818,10 +813,13 @@ public struct NetworkPerspectiveDiagnoser: Sendable {
             )
         }
 
+        let observedByTier = Dictionary(grouping: observed, by: \.tier)
         let summaries = NetworkTier.allCases
-            .map { tier in TierSummary(tier: tier, observed: observed.filter { $0.tier == tier }) }
-            .filter { !$0.observed.isEmpty }
-            .sorted { $0.tier.depth < $1.tier.depth }
+            .sorted { $0.depth < $1.depth }
+            .compactMap { tier -> TierSummary? in
+                guard let tierObserved = observedByTier[tier], !tierObserved.isEmpty else { return nil }
+                return TierSummary(tier: tier, observed: tierObserved)
+            }
         let tierEvidence = evidenceChain(from: summaries)
 
         let downSummaries = summaries.filter(\.hasDown)
@@ -839,7 +837,7 @@ public struct NetworkPerspectiveDiagnoser: Sendable {
                     tierEvidence: tierEvidence
                 )
             }
-            let summary = degradedSummaries.sorted { $0.tier.depth < $1.tier.depth }.first!
+            let summary = degradedSummaries.min { $0.tier.depth < $1.tier.depth }!
             return NetworkPerspectiveDiagnosis(
                 scope: .partialDegradation,
                 title: "\(summary.tier.displayName) degraded",
@@ -853,7 +851,7 @@ public struct NetworkPerspectiveDiagnoser: Sendable {
             )
         }
 
-        let fault = downSummaries.sorted { $0.tier.depth < $1.tier.depth }.first!
+        let fault = downSummaries.min { $0.tier.depth < $1.tier.depth }!
         let affected = fault.down.map(\.host.id)
         let confidence = confidence(for: fault, innerSummaries: innerSummaries(before: fault.tier, in: summaries))
         let evidence = evidence(for: fault, status: "down")
@@ -982,11 +980,5 @@ public struct NetworkPerspectiveDiagnoser: Sendable {
         let names = hostHealth.prefix(3).map(\.host.displayName).joined(separator: ", ")
         let extraCount = hostHealth.count - 3
         return extraCount > 0 ? "\(names), +\(extraCount) more" : names
-    }
-}
-
-private extension HostConfig {
-    var isLocalNetworkAnchor: Bool {
-        requiresLocalNetworkPermission || displayName.localizedCaseInsensitiveContains("gateway")
     }
 }

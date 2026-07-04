@@ -1,5 +1,9 @@
 import Foundation
 
+enum WidgetFreshness {
+    static let staleInterval: TimeInterval = 15 * 60
+}
+
 struct WidgetData: Codable, Equatable, Sendable {
     var version: Int
     var results: [SimplifiedPingResult]
@@ -38,7 +42,7 @@ struct WidgetData: Codable, Equatable, Sendable {
     )
 
     var isStale: Bool {
-        Date().timeIntervalSince(lastUpdate) > 15 * 60
+        Date().timeIntervalSince(lastUpdate) > WidgetFreshness.staleInterval
     }
 }
 
@@ -91,7 +95,7 @@ struct WidgetSnapshotData: Codable, Equatable, Sendable {
     }
 
     var isStale: Bool {
-        Date().timeIntervalSince(generatedAt) > 15 * 60
+        Date().timeIntervalSince(generatedAt) > WidgetFreshness.staleInterval
     }
 
     var statusLabel: String {

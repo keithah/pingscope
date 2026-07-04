@@ -12,11 +12,6 @@ struct SetupChecklistItem: Identifiable {
     let action: (() -> Void)?
 }
 
-struct PersistedHostState: Equatable {
-    var hosts: [HostConfig]
-    var primaryHostID: UUID?
-}
-
 extension PingScopeModel {
     var canAddDraftHost: Bool {
         draftHost.validationErrors.isEmpty
@@ -78,12 +73,25 @@ extension UserDefaults {
 
     var hostConfigs: [HostConfig] {
         get {
-            guard let data = data(forKey: "hostConfigs") else { return [] }
-            return (try? JSONDecoder().decode([HostConfig].self, from: data)) ?? []
+            switch storedHostConfigs() {
+            case .decoded(let hosts):
+                return hosts
+            case .missing, .decodeFailed:
+                return []
+            }
         }
         set {
             let data = try? JSONEncoder().encode(newValue)
             set(data, forKey: "hostConfigs")
+        }
+    }
+
+    func storedHostConfigs() -> StoredHostConfigs {
+        guard let data = data(forKey: "hostConfigs") else { return .missing }
+        do {
+            return .decoded(try JSONDecoder().decode([HostConfig].self, from: data))
+        } catch {
+            return .decodeFailed(error)
         }
     }
 
