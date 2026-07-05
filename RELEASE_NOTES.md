@@ -1,6 +1,6 @@
-# PingScope 0.3.0
+# PingScope 0.3.1
 
-PingScope 0.3.0 is a macOS-focused release that tightens the monitoring UI, fixes stale Starlink discovery behavior, expands history export, and prepares the App Store/TestFlight path for the next round of review.
+PingScope 0.3.1 is a macOS-focused release that tightens the monitoring UI, fixes stale Starlink discovery behavior, expands history export, and prepares the App Store/TestFlight path for the next round of review.
 
 ## What's New
 
@@ -16,6 +16,7 @@ PingScope 0.3.0 is a macOS-focused release that tightens the monitoring UI, fixe
 - Preserved host persistence after primary-host selection, including after a decode failure recovery path.
 - Reduced background work in graph, widget, history, and diagnostics paths.
 - Hardened history export streaming and validation for larger retained-history exports.
+- Fixed a launch/restart race where the selected host could stop receiving fresh samples after the measurement stream was restarted.
 - Improved release, notarization, Xcode build, simulator smoke, and GitHub Pages publishing scripts.
 
 ## Distribution
@@ -23,5 +24,5 @@ PingScope 0.3.0 is a macOS-focused release that tightens the monitoring UI, fixe
 - Developer ID builds are signed, notarized, stapled, and published through GitHub Releases with a Sparkle appcast.
 - App Store builds use the sandboxed `PingScope-AppStore` scheme and remain Sparkle-free.
 - Xcode Cloud should archive `PingScope-AppStore` for TestFlight and App Store submission from this versioned commit.
-- Version: 0.3.0
-- Build: 64
+- Version: 0.3.1
+- Build: 66
