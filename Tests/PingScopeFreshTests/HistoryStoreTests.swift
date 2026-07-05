@@ -175,6 +175,28 @@ final class HistoryStoreTests: XCTestCase {
         XCTAssertEqual(try XCTUnwrap(recorded.first?.latency).milliseconds, 19, accuracy: 0.01)
     }
 
+    func testHistoryWriteBufferFlushNowReturnsAfterPersistentFailure() async {
+        let host = HostConfig(displayName: "Example", address: "example.com")
+        let history = FailingHistoryStore()
+        let buffer = HistoryWriteBuffer(
+            store: history,
+            maxBatchSize: 10,
+            flushDelay: .seconds(60)
+        )
+        await buffer.append(.success(hostID: host.id, latency: .milliseconds(19)).withHostMetadata(from: host))
+
+        let flushed = expectation(description: "Forced history flush returned")
+        Task {
+            await buffer.flushNow()
+            flushed.fulfill()
+        }
+
+        await fulfillment(of: [flushed], timeout: 1.0)
+        let appendAttemptCount = await history.appendAttemptCount
+        XCTAssertEqual(appendAttemptCount, 1)
+        await buffer.discardPending()
+    }
+
     func testBoundedBufferDropsOldestAndCountsOverflow() {
         var buffer = BoundedBuffer<Int>(capacity: 3)
 
@@ -205,6 +227,55 @@ final class HistoryStoreTests: XCTestCase {
         XCTAssertEqual(buffer.append(9), 1)
         XCTAssertEqual(buffer.elements, [6, 7, 8, 9])
         XCTAssertEqual(buffer.droppedCount, 3)
+    }
+
+    func testBoundedBufferSuffixWhileReturnsContiguousTailInOrder() {
+        var buffer = BoundedBuffer<Int>(capacity: 5)
+        for value in 1...5 {
+            buffer.append(value)
+        }
+
+        XCTAssertEqual(buffer.suffix { $0 >= 3 }, [3, 4, 5])
+        XCTAssertEqual(buffer.suffix { $0 >= 4 }, [4, 5])
+        XCTAssertEqual(buffer.suffix { $0 > 5 }, [])
+    }
+
+    func testBoundedBufferSuffixWhileHandlesWrappedStorage() {
+        var buffer = BoundedBuffer<Int>(capacity: 4)
+        for value in 1...7 {
+            buffer.append(value)
+        }
+
+        XCTAssertEqual(buffer.elements, [4, 5, 6, 7])
+        XCTAssertEqual(buffer.suffix { $0 >= 5 }, [5, 6, 7])
+        XCTAssertEqual(buffer.suffix { $0 >= 4 }, [4, 5, 6, 7])
+        XCTAssertEqual(buffer.suffix { $0 >= 6 }, [6, 7])
+    }
+
+    func testBoundedBufferPrependRestoresWrappedPrefixWithoutReordering() {
+        var buffer = BoundedBuffer<Int>(capacity: 4)
+        for value in 1...6 {
+            buffer.append(value)
+        }
+        XCTAssertEqual(buffer.popPrefix(2), [3, 4])
+
+        buffer.prepend(contentsOf: [3, 4])
+
+        XCTAssertEqual(buffer.elements, [3, 4, 5, 6])
+        XCTAssertEqual(buffer.droppedCount, 2)
+    }
+
+    func testBoundedBufferPrependDropsTailWhenOverCapacity() {
+        var buffer = BoundedBuffer<Int>(capacity: 4)
+        for value in 1...6 {
+            buffer.append(value)
+        }
+        XCTAssertEqual(buffer.popPrefix(1), [3])
+
+        buffer.prepend(contentsOf: [1, 2, 3])
+
+        XCTAssertEqual(buffer.elements, [1, 2, 3, 4])
+        XCTAssertEqual(buffer.droppedCount, 4)
     }
 
     func testBoundedBufferCodableAndEqualityIncludeDroppedCount() throws {
@@ -282,6 +353,21 @@ final class HistoryStoreTests: XCTestCase {
         XCTAssertTrue(text.contains("PingScope History"))
         XCTAssertTrue(text.contains("18ms  OK"))
         XCTAssertTrue(text.contains("Timed out  Failed"))
+    }
+
+    func testHistoryExporterEscapesCSVFormulaCells() {
+        let host = HostConfig(displayName: "=HYPERLINK(\"https://example.com\")", address: "example.com")
+        let sample = PingResult.success(
+            hostID: host.id,
+            latency: .milliseconds(18),
+            timestamp: Date(timeIntervalSince1970: 1_000),
+            metadata: ProbeMetadata(note: "@cmd")
+        ).withHostMetadata(from: host)
+
+        let csv = HistoryExporter.csv(samples: [sample], host: host)
+
+        XCTAssertTrue(csv.contains("\"'=HYPERLINK(\"\"https://example.com\"\")\""))
+        XCTAssertTrue(csv.contains(",'@cmd,"))
     }
 
     func testHistoryExporterWriteMatchesInMemoryFormats() throws {
@@ -453,6 +539,84 @@ final class HistoryStoreTests: XCTestCase {
         XCTAssertTrue(first.hasSameContent(as: second))
     }
 
+    func testWidgetSnapshotPublishPolicyReloadsInitialSnapshot() {
+        let policy = WidgetSnapshotPublishPolicy(heartbeatInterval: 300, timelineReloadInterval: 300)
+        let snapshot = WidgetSnapshot.empty
+
+        let decision = policy.decision(for: snapshot, previousSnapshot: nil, lastTimelineReloadAt: nil)
+
+        XCTAssertTrue(decision.shouldSave)
+        XCTAssertTrue(decision.shouldReloadTimeline)
+    }
+
+    func testWidgetSnapshotPublishPolicySkipsUnchangedFreshSnapshot() {
+        let policy = WidgetSnapshotPublishPolicy(heartbeatInterval: 300, timelineReloadInterval: 300)
+        let previous = WidgetSnapshot.empty
+        var current = previous
+        current.generatedAt = previous.generatedAt.addingTimeInterval(60)
+
+        let decision = policy.decision(for: current, previousSnapshot: previous, lastTimelineReloadAt: previous.generatedAt)
+
+        XCTAssertFalse(decision.shouldSave)
+        XCTAssertFalse(decision.shouldReloadTimeline)
+    }
+
+    func testWidgetSnapshotPublishPolicySavesHeartbeatWithoutReloadingTimeline() {
+        let policy = WidgetSnapshotPublishPolicy(heartbeatInterval: 300, timelineReloadInterval: 300)
+        let previous = WidgetSnapshot.empty
+        var current = previous
+        current.generatedAt = previous.generatedAt.addingTimeInterval(301)
+
+        let decision = policy.decision(for: current, previousSnapshot: previous, lastTimelineReloadAt: previous.generatedAt)
+
+        XCTAssertTrue(decision.shouldSave)
+        XCTAssertFalse(decision.shouldReloadTimeline)
+    }
+
+    func testWidgetSnapshotPublishPolicyThrottlesSampleOnlyChanges() {
+        let policy = WidgetSnapshotPublishPolicy(heartbeatInterval: 300, timelineReloadInterval: 300)
+        var previous = WidgetSnapshot.empty
+        previous.generatedAt = Date(timeIntervalSince1970: 1_000)
+        var current = previous
+        current.generatedAt = previous.generatedAt.addingTimeInterval(60)
+        current.recentSamples = [
+            WidgetSample(result: PingResult(
+                id: UUID(),
+                hostID: UUID(),
+                timestamp: current.generatedAt,
+                latency: .milliseconds(20),
+                failureReason: nil
+            ))
+        ]
+
+        let decision = policy.decision(for: current, previousSnapshot: previous, lastTimelineReloadAt: previous.generatedAt)
+
+        XCTAssertFalse(decision.shouldSave)
+        XCTAssertFalse(decision.shouldReloadTimeline)
+    }
+
+    func testWidgetSnapshotPublishPolicySavesAndReloadsCoalescedSampleChanges() {
+        let policy = WidgetSnapshotPublishPolicy(heartbeatInterval: 300, timelineReloadInterval: 300)
+        var previous = WidgetSnapshot.empty
+        previous.generatedAt = Date(timeIntervalSince1970: 1_000)
+        var current = previous
+        current.generatedAt = previous.generatedAt.addingTimeInterval(301)
+        current.recentSamples = [
+            WidgetSample(result: PingResult(
+                id: UUID(),
+                hostID: UUID(),
+                timestamp: current.generatedAt,
+                latency: .milliseconds(20),
+                failureReason: nil
+            ))
+        ]
+
+        let decision = policy.decision(for: current, previousSnapshot: previous, lastTimelineReloadAt: previous.generatedAt)
+
+        XCTAssertTrue(decision.shouldSave)
+        XCTAssertTrue(decision.shouldReloadTimeline)
+    }
+
     func testWidgetSnapshotStorePersistsEncodedSnapshot() async throws {
         let suiteName = "pingscope-widget-tests-\(UUID().uuidString)"
         let store = WidgetSnapshotStore(suiteName: suiteName, key: "snapshot")
@@ -602,6 +766,35 @@ private actor RecordingHistoryStore: PingHistoryStore {
         }
         return stored
     }
+}
+
+private actor FailingHistoryStore: PingHistoryStore {
+    private(set) var appendAttemptCount = 0
+
+    enum Failure: Error {
+        case unavailable
+    }
+
+    func append(_ result: PingResult) async {
+        appendAttemptCount += 1
+    }
+
+    func appendAndWait(_ results: [PingResult]) async throws {
+        appendAttemptCount += 1
+        throw Failure.unavailable
+    }
+
+    func samples(hostID: UUID, since: Date, limit: Int) async -> [PingResult] {
+        []
+    }
+
+    func latestSamples(hostID: UUID, since: Date, limit: Int) async -> [PingResult] {
+        []
+    }
+
+    func prune(olderThan cutoff: Date) async {}
+
+    func deleteAll() async {}
 }
 
 private struct HistoryExportDocumentProbe: Decodable {

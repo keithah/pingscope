@@ -247,6 +247,15 @@ public struct AlertDecisionEngine: Sendable {
         self.rules = rules
     }
 
+    public mutating func prune(activeHostIDs: Set<UUID>) {
+        lastSentAt = lastSentAt.filter { key, _ in
+            key.hostID.map(activeHostIDs.contains) ?? true
+        }
+        consecutiveHighLatencyCounts = consecutiveHighLatencyCounts.filter { hostID, _ in
+            activeHostIDs.contains(hostID)
+        }
+    }
+
     /// A per-host transition alert that passed every gate except delivery.
     /// Produced by ``transitionAlertCandidate(result:previousStatus:currentStatus:)``,
     /// which performs the streak bookkeeping without touching cooldown state;

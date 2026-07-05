@@ -41,8 +41,59 @@ final class HostTestingTests: XCTestCase {
         XCTAssertTrue(host.requiresLocalNetworkPermission)
     }
 
+    func testGatewayEndpointResolverFallsBackToUDPWhenTCPAndHTTPSDoNotRespond() async {
+        let factory = CandidateProbeFactory(successfulCandidate: .init(method: .udp, port: 53))
+        let resolver = DefaultGatewayEndpointResolver(probeFactory: factory)
+
+        let host = await resolver.resolve(address: "192.168.1.1")
+
+        XCTAssertEqual(host.displayName, "Default Gateway")
+        XCTAssertEqual(host.address, "192.168.1.1")
+        XCTAssertEqual(host.tier, .localGateway)
+        XCTAssertEqual(host.method, .udp)
+        XCTAssertEqual(host.port, 53)
+        let measuredCandidates = await factory.measuredCandidates
+        XCTAssertEqual(Set(measuredCandidates), [
+            .init(method: .tcp, port: 80),
+            .init(method: .tcp, port: 443),
+            .init(method: .https, port: 443),
+            .init(method: .udp, port: 53)
+        ])
+        XCTAssertEqual(measuredCandidates.count, 4)
+    }
+
+    func testGatewayEndpointResolverUsesFirstResponsiveCandidate() async {
+        let factory = CandidateProbeFactory(successfulCandidate: .init(method: .tcp, port: 443))
+        let resolver = DefaultGatewayEndpointResolver(probeFactory: factory)
+
+        let host = await resolver.resolve(address: "192.168.1.1")
+
+        XCTAssertEqual(host.method, .tcp)
+        XCTAssertEqual(host.port, 443)
+        let measuredCandidates = await factory.measuredCandidates
+        XCTAssertTrue(measuredCandidates.contains(.init(method: .tcp, port: 443)))
+    }
+
+    func testGatewayEndpointResolverFallsBackToTCP80WhenNothingResponds() async {
+        let factory = CandidateProbeFactory(successfulCandidate: nil)
+        let resolver = DefaultGatewayEndpointResolver(probeFactory: factory)
+
+        let host = await resolver.resolve(address: "192.168.1.1")
+
+        XCTAssertEqual(host.method, .tcp)
+        XCTAssertEqual(host.port, 80)
+        let measuredCandidates = await factory.measuredCandidates
+        XCTAssertEqual(Set(measuredCandidates), [
+            .init(method: .tcp, port: 80),
+            .init(method: .tcp, port: 443),
+            .init(method: .https, port: 443),
+            .init(method: .udp, port: 53)
+        ])
+        XCTAssertEqual(measuredCandidates.count, 4)
+    }
+
     func testStarlinkDishDetectorReturnsDefaultDishWhenStatusSucceeds() async {
-        let detector = StarlinkDishDetector(statusClient: FakeStarlinkStatusClient(status: StarlinkStatus(
+        let detector = StarlinkDishDetector(statusClient: StubStarlinkStatusClient(status: StarlinkStatus(
             popPingLatencyMilliseconds: 42,
             telemetry: StarlinkTelemetry(state: "CONNECTED")
         )), hosts: [.defaultStarlinkDish])
@@ -131,11 +182,33 @@ private struct SingleProbe: PingProbe {
     }
 }
 
-private struct FakeStarlinkStatusClient: StarlinkStatusFetching {
-    let status: StarlinkStatus
+private actor CandidateProbeFactory: ProbeFactory {
+    let successfulCandidate: DefaultGatewayEndpointResolver.Candidate?
+    private(set) var measuredCandidates: [DefaultGatewayEndpointResolver.Candidate] = []
 
-    func fetchStatus(host: HostConfig) async throws -> StarlinkStatus {
-        status
+    init(successfulCandidate: DefaultGatewayEndpointResolver.Candidate?) {
+        self.successfulCandidate = successfulCandidate
+    }
+
+    func makeProbe(for method: PingMethod) async -> any PingProbe {
+        CandidateProbe(factory: self)
+    }
+
+    func record(_ host: HostConfig) -> Bool {
+        let candidate = DefaultGatewayEndpointResolver.Candidate(method: host.method, port: host.port)
+        measuredCandidates.append(candidate)
+        return candidate == successfulCandidate
+    }
+}
+
+private struct CandidateProbe: PingProbe {
+    let factory: CandidateProbeFactory
+
+    func measure(_ host: HostConfig) async -> PingResult {
+        if await factory.record(host) {
+            return .success(hostID: host.id, latency: .milliseconds(5)).withHostMetadata(from: host)
+        }
+        return .failure(hostID: host.id, reason: .timeout).withHostMetadata(from: host)
     }
 }
 

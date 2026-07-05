@@ -20,6 +20,62 @@ final class RuntimeBehaviorTests: XCTestCase {
         XCTAssertEqual(enabledHostNames, ["Cloudflare DNS", "Router"])
     }
 
+    func testHostStoreCoalescesDefaultGatewayUpsertsByName() async {
+        let existingGateway = HostConfig(
+            id: UUID(),
+            displayName: "Default Gateway",
+            address: "192.168.42.1",
+            tier: .localGateway,
+            method: .tcp,
+            port: 80
+        )
+        let store = HostStore(defaultHosts: [.defaultInternet, existingGateway], primaryHostID: existingGateway.id)
+        let rediscoveredGateway = HostConfig(
+            id: UUID(),
+            displayName: "Default Gateway",
+            address: "192.168.42.1",
+            tier: .localGateway,
+            method: .udp,
+            port: 53
+        )
+
+        await store.upsert(rediscoveredGateway)
+
+        let hosts = await store.hosts()
+        let primaryHostID = await store.primaryHostID()
+        XCTAssertEqual(hosts.map(\.displayName), ["Cloudflare DNS", "Default Gateway"])
+        XCTAssertEqual(hosts.last?.id, rediscoveredGateway.id)
+        XCTAssertEqual(hosts.last?.method, .udp)
+        XCTAssertEqual(primaryHostID, rediscoveredGateway.id)
+    }
+
+    func testHostStoreNormalizesPersistedDefaultGatewayDuplicates() async {
+        let firstGateway = HostConfig(
+            id: UUID(),
+            displayName: "Default Gateway",
+            address: "192.168.42.1",
+            tier: .localGateway,
+            method: .tcp,
+            port: 80
+        )
+        let duplicateGateway = HostConfig(
+            id: UUID(),
+            displayName: "Default Gateway",
+            address: "192.168.42.1",
+            tier: .localGateway,
+            method: .tcp,
+            port: 80
+        )
+        let store = HostStore(defaultHosts: [.defaultInternet, firstGateway, duplicateGateway], primaryHostID: duplicateGateway.id)
+
+        let hosts = await store.hosts()
+        let primaryHostID = await store.primaryHostID()
+
+        XCTAssertEqual(hosts.map(\.displayName), ["Cloudflare DNS", "Default Gateway"])
+        XCTAssertEqual(hosts.last?.id, firstGateway.id)
+        XCTAssertEqual(primaryHostID, firstGateway.id)
+    }
+
     func testMeasurementSchedulerUsesFreshProbePerMeasurement() async throws {
         let host = HostConfig(displayName: "Example", address: "example.com", interval: .milliseconds(20))
         let factory = CountingProbeFactory(result: .success(hostID: host.id, latency: .milliseconds(7)))
@@ -556,6 +612,51 @@ final class RuntimeBehaviorTests: XCTestCase {
         XCTAssertEqual(content.textBaselineY, 0)
         XCTAssertEqual(content.color, .green)
         XCTAssertTrue(content.accessibilityLabel.contains("22ms"))
+    }
+
+    func testHostStatusSummariesIncludeEndpointLatencyAndStatus() {
+        let gateway = HostConfig(
+            displayName: "Default Gateway",
+            address: "192.168.42.1",
+            tier: .localGateway,
+            method: .tcp,
+            port: 80
+        )
+        var health = HostHealth(hostID: gateway.id, thresholds: gateway.thresholds)
+        health.ingest(.success(hostID: gateway.id, latency: .milliseconds(5.4)).withHostMetadata(from: gateway))
+        let snapshot = RuntimeSnapshot(
+            hosts: [gateway],
+            primaryHostID: gateway.id,
+            healthByHost: [gateway.id: health],
+            samplesByHost: [:]
+        )
+
+        let summaries = DisplayStatePresenter().hostStatusSummaries(in: snapshot)
+
+        XCTAssertEqual(summaries.map(\.name), ["Default Gateway"])
+        XCTAssertEqual(summaries.map(\.endpoint), ["TCP 192.168.42.1:80"])
+        XCTAssertEqual(summaries.map(\.statusText), ["Healthy"])
+        XCTAssertEqual(summaries.map(\.latencyText), ["5ms"])
+        XCTAssertEqual(summaries.map(\.color), [.green])
+        XCTAssertTrue(summaries.first?.accessibilityLabel.contains("Default Gateway TCP 192.168.42.1:80 Healthy 5ms") == true)
+    }
+
+    func testHostStatusSummariesKeepHostsWithoutMeasurementsVisible() {
+        let gateway = HostConfig(displayName: "Default Gateway", address: "192.168.42.1", tier: .localGateway, method: .tcp, port: 80)
+        let internet = HostConfig(displayName: "Cloudflare DNS", address: "1.1.1.1", tier: .upstream, method: .https, port: 443)
+        let snapshot = RuntimeSnapshot(
+            hosts: [gateway, internet],
+            primaryHostID: gateway.id,
+            healthByHost: [:],
+            samplesByHost: [:]
+        )
+
+        let summaries = DisplayStatePresenter().hostStatusSummaries(in: snapshot)
+
+        XCTAssertEqual(summaries.map(\.name), ["Default Gateway", "Cloudflare DNS"])
+        XCTAssertEqual(summaries.map(\.statusText), ["No Data", "No Data"])
+        XCTAssertEqual(summaries.map(\.latencyText), ["--", "--"])
+        XCTAssertEqual(summaries.map(\.color), [.gray, .gray])
     }
 }
 

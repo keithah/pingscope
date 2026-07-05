@@ -28,12 +28,16 @@ public struct StarlinkProtobufCodec: Sendable {
     }
 
     public func decodeStatus(fromGRPCFrame frame: Data) throws -> StarlinkStatus {
-        try decodeStatus(fromResponseMessage: decodeGRPCMessage(from: frame))
+        try decodeStatus(fromResponseBytes: decodeGRPCMessage(from: frame))
     }
 
     public func decodeStatus(fromResponseMessage response: Data) throws -> StarlinkStatus {
+        try decodeStatus(fromResponseBytes: response[...])
+    }
+
+    private func decodeStatus(fromResponseBytes response: Data.SubSequence) throws -> StarlinkStatus {
         var reader = ProtobufReader(data: response)
-        var dishStatus: Data?
+        var dishStatus: Data.SubSequence?
 
         while let field = try reader.nextField() {
             if field.number == Self.dishGetStatusField, case let .lengthDelimited(data) = field.value {
@@ -47,7 +51,7 @@ public struct StarlinkProtobufCodec: Sendable {
         return try decodeDishStatus(dishStatus)
     }
 
-    private func decodeGRPCMessage(from frame: Data) throws -> Data {
+    private func decodeGRPCMessage(from frame: Data) throws -> Data.SubSequence {
         guard frame.count >= 5 else {
             throw StarlinkStatusFetchError.invalidStatus
         }
@@ -63,10 +67,10 @@ public struct StarlinkProtobufCodec: Sendable {
         }
         let payloadStart = frame.index(frame.startIndex, offsetBy: 5)
         let payloadEnd = frame.index(payloadStart, offsetBy: length)
-        return Data(frame[payloadStart..<payloadEnd])
+        return frame[payloadStart..<payloadEnd]
     }
 
-    private func decodeDishStatus(_ data: Data) throws -> StarlinkStatus {
+    private func decodeDishStatus(_ data: Data.SubSequence) throws -> StarlinkStatus {
         var reader = ProtobufReader(data: data)
         var telemetry = StarlinkTelemetry()
         var latencyMilliseconds: Double?
@@ -113,7 +117,7 @@ public struct StarlinkProtobufCodec: Sendable {
         return StarlinkStatus(popPingLatencyMilliseconds: latencyMilliseconds, telemetry: telemetry)
     }
 
-    private func decodeDeviceInfo(_ data: Data) throws -> (hardwareVersion: String?, softwareVersion: String?, countryCode: String?) {
+    private func decodeDeviceInfo(_ data: Data.SubSequence) throws -> (hardwareVersion: String?, softwareVersion: String?, countryCode: String?) {
         var reader = ProtobufReader(data: data)
         var hardwareVersion: String?
         var softwareVersion: String?
@@ -122,11 +126,11 @@ public struct StarlinkProtobufCodec: Sendable {
         while let field = try reader.nextField() {
             switch (field.number, field.value) {
             case (2, .lengthDelimited(let value)):
-                hardwareVersion = String(data: value, encoding: .utf8)
+                hardwareVersion = String(bytes: value, encoding: .utf8)
             case (3, .lengthDelimited(let value)):
-                softwareVersion = String(data: value, encoding: .utf8)
+                softwareVersion = String(bytes: value, encoding: .utf8)
             case (4, .lengthDelimited(let value)):
-                countryCode = String(data: value, encoding: .utf8)
+                countryCode = String(bytes: value, encoding: .utf8)
             default:
                 break
             }
@@ -134,7 +138,7 @@ public struct StarlinkProtobufCodec: Sendable {
         return (hardwareVersion, softwareVersion, countryCode)
     }
 
-    private func decodeDeviceState(_ data: Data) throws -> Double? {
+    private func decodeDeviceState(_ data: Data.SubSequence) throws -> Double? {
         var reader = ProtobufReader(data: data)
         while let field = try reader.nextField() {
             if field.number == 1, case let .varint(value) = field.value {
@@ -144,7 +148,7 @@ public struct StarlinkProtobufCodec: Sendable {
         return nil
     }
 
-    private func decodeObstructionStats(_ data: Data) throws -> (fractionObstructed: Double?, obstructedSeconds: Double?, currentlyObstructed: Bool) {
+    private func decodeObstructionStats(_ data: Data.SubSequence) throws -> (fractionObstructed: Double?, obstructedSeconds: Double?, currentlyObstructed: Bool) {
         var reader = ProtobufReader(data: data)
         var fractionObstructed: Double?
         var obstructedSeconds: Double?
@@ -167,7 +171,7 @@ public struct StarlinkProtobufCodec: Sendable {
         return (fractionObstructed, obstructedSeconds, currentlyObstructed)
     }
 
-    private func decodeAlerts(_ data: Data) throws -> [String] {
+    private func decodeAlerts(_ data: Data.SubSequence) throws -> [String] {
         let names: [Int: String] = [
             1: "motors_stuck",
             2: "thermal_shutdown",
@@ -197,7 +201,7 @@ public struct StarlinkProtobufCodec: Sendable {
         return active
     }
 
-    private func decodeOutageCause(_ data: Data) throws -> String? {
+    private func decodeOutageCause(_ data: Data.SubSequence) throws -> String? {
         var reader = ProtobufReader(data: data)
         while let field = try reader.nextField() {
             if field.number == 1, case let .varint(value) = field.value {
@@ -293,19 +297,19 @@ struct ProtobufWriter {
     }
 }
 
-private struct ProtobufField {
+struct ProtobufField {
     var number: Int
     var value: ProtobufValue
 }
 
-private enum ProtobufValue {
+enum ProtobufValue {
     case varint(UInt64)
     case fixed32(UInt32)
     case fixed64(UInt64)
-    case lengthDelimited(Data)
+    case lengthDelimited(Data.SubSequence)
 }
 
-private struct ProtobufReader {
+struct ProtobufReader {
     private let data: Data
     private var offset = 0
 
@@ -344,7 +348,7 @@ private struct ProtobufReader {
             let length = Int(rawLength)
             let start = data.index(data.startIndex, offsetBy: offset)
             let end = data.index(start, offsetBy: length)
-            let value = Data(data[start..<end])
+            let value = data[start..<end]
             offset += length
             return ProtobufField(number: number, value: .lengthDelimited(value))
         case 5:

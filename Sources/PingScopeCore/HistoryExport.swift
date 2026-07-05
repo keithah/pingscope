@@ -26,6 +26,32 @@ public enum HistoryExportFormat: String, CaseIterable, Identifiable, Sendable {
 
 public enum HistoryExporter {
     public static func write(samples: [PingResult], host: HostConfig, format: HistoryExportFormat, to url: URL) throws {
+        try writeReplacingItem(at: url) { temporaryURL in
+            try writeTemporary(samples: samples, host: host, format: format, to: temporaryURL)
+        }
+    }
+
+    static func writeStreaming(
+        host: HostConfig,
+        format: HistoryExportFormat,
+        sampleCount: Int?,
+        to url: URL,
+        writeSamples: (HistoryExportSampleWriter) throws -> Int
+    ) throws -> Int {
+        var writtenCount = 0
+        try writeReplacingItem(at: url) { temporaryURL in
+            writtenCount = try writeTemporaryStreaming(
+                host: host,
+                format: format,
+                sampleCount: sampleCount,
+                to: temporaryURL,
+                writeSamples: writeSamples
+            )
+        }
+        return writtenCount
+    }
+
+    private static func writeReplacingItem(at url: URL, writeTemporaryFile: (URL) throws -> Void) throws {
         // The sandbox extension granted by NSSavePanel covers only the exact
         // path the user chose, so the streaming temp file must not be a sibling
         // of `url` -- the sandboxed App Store build is denied that create. An
@@ -40,7 +66,7 @@ public enum HistoryExporter {
         defer { try? FileManager.default.removeItem(at: stagingDirectory) }
 
         let temporaryURL = stagingDirectory.appendingPathComponent(url.lastPathComponent)
-        try writeTemporary(samples: samples, host: host, format: format, to: temporaryURL)
+        try writeTemporaryFile(temporaryURL)
         if FileManager.default.fileExists(atPath: url.path) {
             _ = try FileManager.default.replaceItemAt(
                 url,
@@ -53,7 +79,7 @@ public enum HistoryExporter {
         }
     }
 
-    public static func data(samples: [PingResult], host: HostConfig, format: HistoryExportFormat) throws -> Data {
+    static func data(samples: [PingResult], host: HostConfig, format: HistoryExportFormat) throws -> Data {
         switch format {
         case .csv:
             return csv(samples: samples, host: host).data(using: .utf8) ?? Data()
@@ -66,42 +92,61 @@ public enum HistoryExporter {
 
     public static func csv(samples: [PingResult], host: HostConfig) -> String {
         let formatter = ISO8601DateFormatter()
-        let header = csvHeader
-        let rows = samples.map { csvRow(sample: $0, host: host, formatter: formatter) }
-        return ([header] + rows).joined(separator: "\n") + "\n"
+        var output = csvHeader
+        output.reserveCapacity(csvHeader.count + samples.count * 96)
+        output.append("\n")
+        for sample in samples {
+            output.append(csvRow(sample: sample, host: host, formatter: formatter))
+            output.append("\n")
+        }
+        return output
     }
 
     public static func text(samples: [PingResult], host: HostConfig) -> String {
         let formatter = ISO8601DateFormatter()
-        var lines = [
-            "PingScope History",
-            "Host: \(host.displayName)",
-            "Address: \(host.address)",
-            "Method: \(host.method.rawValue.uppercased())",
-            "Samples: \(samples.count)",
-            ""
-        ]
-        lines += samples.map { sample in
+        var output = ""
+        output.reserveCapacity(128 + samples.count * 72)
+        output.append("PingScope History\n")
+        output.append("Host: \(host.displayName)\n")
+        output.append("Address: \(host.address)\n")
+        output.append("Method: \(host.method.rawValue.uppercased())\n")
+        output.append("Samples: \(samples.count)\n")
+        output.append("\n")
+        for sample in samples {
             let timestamp = formatter.string(from: sample.timestamp)
             let starlinkSuffix = sample.metadata.starlink.map { "  \($0.noteSummary)" } ?? ""
             if let latency = sample.latency {
-                return "\(timestamp)  \(Int(latency.milliseconds.rounded()))ms  OK\(starlinkSuffix)"
+                output.append("\(timestamp)  \(Int(latency.milliseconds.rounded()))ms  OK\(starlinkSuffix)\n")
+            } else {
+                output.append("\(timestamp)  \(sample.failureReason?.userMessage ?? "Failed")  Failed\(starlinkSuffix)\n")
             }
-            return "\(timestamp)  \(sample.failureReason?.userMessage ?? "Failed")  Failed\(starlinkSuffix)"
         }
-        return lines.joined(separator: "\n") + "\n"
+        return output
     }
 
     private static func csvEscape(_ value: String) -> String {
-        guard value.contains(",") || value.contains("\"") || value.contains("\n") else {
+        let escapedFormulaValue = csvFormulaEscaped(value)
+        guard escapedFormulaValue.contains(",")
+            || escapedFormulaValue.contains("\"")
+            || escapedFormulaValue.contains("\n")
+            || escapedFormulaValue.contains("\r") else {
+            return escapedFormulaValue
+        }
+        return "\"\(escapedFormulaValue.replacingOccurrences(of: "\"", with: "\"\""))\""
+    }
+
+    private static func csvFormulaEscaped(_ value: String) -> String {
+        guard let first = value.unicodeScalars.first,
+              ["=", "+", "-", "@", "\t", "\r"].contains(String(first)) else {
             return value
         }
-        return "\"\(value.replacingOccurrences(of: "\"", with: "\"\""))\""
+        return "'\(value)"
     }
 
     private static func csvRow(sample: PingResult, host: HostConfig, formatter: ISO8601DateFormatter) -> String {
         let starlink = sample.metadata.starlink
         var columns: [String] = []
+        columns.reserveCapacity(16)
         columns.append(formatter.string(from: sample.timestamp))
         columns.append(host.displayName)
         columns.append(sample.address)
@@ -148,8 +193,73 @@ public enum HistoryExporter {
         }
     }
 
+    private static func writeTemporaryStreaming(
+        host: HostConfig,
+        format: HistoryExportFormat,
+        sampleCount: Int?,
+        to url: URL,
+        writeSamples: (HistoryExportSampleWriter) throws -> Int
+    ) throws -> Int {
+        guard FileManager.default.createFile(atPath: url.path, contents: nil) else {
+            throw CocoaError(.fileWriteUnknown, userInfo: [NSFilePathErrorKey: url.path])
+        }
+        let handle = try FileHandle(forWritingTo: url)
+        do {
+            let output = BufferedFileWriter(handle: handle)
+            let writer: HistoryExportSampleWriter
+            var jsonWriter: HistoryJSONStreamWriter?
+            switch format {
+            case .csv:
+                let formatter = ISO8601DateFormatter()
+                try output.writeLine(csvHeader)
+                writer = HistoryExportSampleWriter { sample in
+                    try output.writeLine(csvRow(sample: sample, host: host, formatter: formatter))
+                }
+            case .json:
+                let streamingJSONWriter = HistoryJSONStreamWriter(output: output, encoder: .historyEncoder)
+                jsonWriter = streamingJSONWriter
+                try streamingJSONWriter.beginObject()
+                try streamingJSONWriter.writeField("generatedAt", Date())
+                try streamingJSONWriter.writeField("host", host)
+                try streamingJSONWriter.beginArrayField("samples")
+                writer = HistoryExportSampleWriter { sample in
+                    try streamingJSONWriter.writeArrayElement(sample)
+                }
+            case .text:
+                let formatter = ISO8601DateFormatter()
+                try output.writeLine("PingScope History")
+                try output.writeLine("Host: \(host.displayName)")
+                try output.writeLine("Address: \(host.address)")
+                try output.writeLine("Method: \(host.method.rawValue.uppercased())")
+                try output.writeLine("Samples: \(sampleCount.map(String.init) ?? "Unknown")")
+                try output.writeLine("")
+                writer = HistoryExportSampleWriter { sample in
+                    let timestamp = formatter.string(from: sample.timestamp)
+                    let starlinkSuffix = sample.metadata.starlink.map { "  \($0.noteSummary)" } ?? ""
+                    if let latency = sample.latency {
+                        try output.writeLine("\(timestamp)  \(Int(latency.milliseconds.rounded()))ms  OK\(starlinkSuffix)")
+                    } else {
+                        try output.writeLine("\(timestamp)  \(sample.failureReason?.userMessage ?? "Failed")  Failed\(starlinkSuffix)")
+                    }
+                }
+            }
+            let count = try writeSamples(writer)
+            if let jsonWriter {
+                try output.writeLine("")
+                try jsonWriter.endArray()
+                try jsonWriter.endObject()
+            }
+            try output.flush()
+            try handle.close()
+            return count
+        } catch {
+            try? handle.close()
+            throw error
+        }
+    }
+
     private static func writeJSON(samples: [PingResult], host: HostConfig, to output: BufferedFileWriter) throws {
-        var writer = HistoryJSONStreamWriter(output: output, encoder: .historyEncoder)
+        let writer = HistoryJSONStreamWriter(output: output, encoder: .historyEncoder)
         try writer.beginObject()
         try writer.writeField("generatedAt", Date())
         try writer.writeField("host", host)
@@ -208,6 +318,18 @@ public enum HistoryExporter {
 
 }
 
+struct HistoryExportSampleWriter {
+    private let writeSample: (PingResult) throws -> Void
+
+    init(writeSample: @escaping (PingResult) throws -> Void) {
+        self.writeSample = writeSample
+    }
+
+    func write(_ sample: PingResult) throws {
+        try writeSample(sample)
+    }
+}
+
 private final class BufferedFileWriter {
     private let handle: FileHandle
     private let flushThreshold: Int
@@ -238,7 +360,7 @@ private final class BufferedFileWriter {
     }
 }
 
-private struct HistoryJSONStreamWriter {
+private final class HistoryJSONStreamWriter {
     private let output: BufferedFileWriter
     private let encoder: JSONEncoder
     private var objectFieldCount = 0
@@ -249,11 +371,11 @@ private struct HistoryJSONStreamWriter {
         self.encoder = encoder
     }
 
-    mutating func beginObject() throws {
+    func beginObject() throws {
         try output.writeLine("{")
     }
 
-    mutating func writeField<Value: Encodable>(_ name: String, _ value: Value) throws {
+    func writeField<Value: Encodable>(_ name: String, _ value: Value) throws {
         if objectFieldCount > 0 {
             try output.writeLine(",")
         }
@@ -264,7 +386,7 @@ private struct HistoryJSONStreamWriter {
         objectFieldCount += 1
     }
 
-    mutating func beginArrayField(_ name: String) throws {
+    func beginArrayField(_ name: String) throws {
         if objectFieldCount > 0 {
             try output.writeLine(",")
         }
@@ -275,7 +397,7 @@ private struct HistoryJSONStreamWriter {
         arrayElementCount = 0
     }
 
-    mutating func writeArrayElement<Value: Encodable>(_ value: Value) throws {
+    func writeArrayElement<Value: Encodable>(_ value: Value) throws {
         if arrayElementCount > 0 {
             try output.writeLine(",")
         }
@@ -283,14 +405,14 @@ private struct HistoryJSONStreamWriter {
         arrayElementCount += 1
     }
 
-    mutating func endArray() throws {
+    func endArray() throws {
         if arrayElementCount > 0 {
             try output.writeLine("")
         }
         try output.write(contentsOf: Data("  ]".utf8))
     }
 
-    mutating func endObject() throws {
+    func endObject() throws {
         try output.writeLine("")
         try output.writeLine("}")
     }

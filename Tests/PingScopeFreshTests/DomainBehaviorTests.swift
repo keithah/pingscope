@@ -174,6 +174,19 @@ final class DomainBehaviorTests: XCTestCase {
         XCTAssertEqual(latencies, [20, 30, 40, 50, 60])
     }
 
+    func testSampleSeriesSamplesSinceKeepsOutOfOrderRecentSamples() {
+        let hostID = UUID()
+        let base = Date(timeIntervalSince1970: 10_000)
+        var series = SampleSeries(hostID: hostID, capacity: 5)
+
+        series.append(.success(hostID: hostID, latency: .milliseconds(10), timestamp: base.addingTimeInterval(10)))
+        series.append(.success(hostID: hostID, latency: .milliseconds(20), timestamp: base.addingTimeInterval(-30)))
+        series.append(.success(hostID: hostID, latency: .milliseconds(30), timestamp: base.addingTimeInterval(20)))
+
+        let latencies = series.samples(since: base).map { $0.latency?.milliseconds }
+        XCTAssertEqual(latencies, [10, 30])
+    }
+
     func testStarlinkDropRateContributesToSampleLoss() {
         let hostID = UUID()
         let samples = [

@@ -36,7 +36,7 @@ final class ProbeBehaviorTests: XCTestCase {
 
     func testStarlinkProbeMapsConnectedStatusToLatencyResult() async throws {
         let host = HostConfig.defaultStarlinkDish
-        let probe = StarlinkProbe(statusClient: FakeStarlinkStatusClient(status: StarlinkStatus(
+        let probe = StarlinkProbe(statusClient: StubStarlinkStatusClient(status: StarlinkStatus(
             popPingLatencyMilliseconds: 42.5,
             telemetry: StarlinkTelemetry(
                 state: "CONNECTED",
@@ -60,7 +60,7 @@ final class ProbeBehaviorTests: XCTestCase {
 
     func testStarlinkProbeMapsDisconnectedStatusToFailureWithTelemetry() async {
         let host = HostConfig.defaultStarlinkDish
-        let probe = StarlinkProbe(statusClient: FakeStarlinkStatusClient(status: StarlinkStatus(
+        let probe = StarlinkProbe(statusClient: StubStarlinkStatusClient(status: StarlinkStatus(
             popPingLatencyMilliseconds: nil,
             telemetry: StarlinkTelemetry(state: "SEARCHING", popPingDropRate: 1)
         )))
@@ -96,7 +96,7 @@ final class ProbeBehaviorTests: XCTestCase {
         let result = await probe.measure(host)
 
         XCTAssertEqual(result.failureReason, .timeout)
-        let wasCancelled = await slowProbe.wasCancelled
+        let wasCancelled = await slowProbe.waitForCancellation()
         XCTAssertTrue(wasCancelled)
     }
 
@@ -131,7 +131,7 @@ final class ProbeBehaviorTests: XCTestCase {
     func testStarlinkProbeRejectsNonFiniteLatency() async {
         // A non-finite Float from the dish passes `>= 0` (infinity) and would
         // trap in Duration.milliseconds; the payload is untrusted input.
-        let probe = StarlinkProbe(statusClient: FakeStarlinkStatusClient(status: StarlinkStatus(
+        let probe = StarlinkProbe(statusClient: StubStarlinkStatusClient(status: StarlinkStatus(
             popPingLatencyMilliseconds: .infinity,
             telemetry: StarlinkTelemetry(state: "CONNECTED")
         )))
@@ -234,6 +234,16 @@ private actor CancellableSlowProbe: PingProbe {
             return .failure(hostID: host.id, reason: .cancelled).withHostMetadata(from: host)
         }
     }
+
+    func waitForCancellation() async -> Bool {
+        for _ in 0..<20 {
+            if wasCancelled {
+                return true
+            }
+            try? await Task.sleep(for: .milliseconds(25))
+        }
+        return wasCancelled
+    }
 }
 
 private actor DelayedHTTPSFetcher: HTTPSRoundTripFetching {
@@ -249,14 +259,6 @@ private actor DelayedHTTPSFetcher: HTTPSRoundTripFetching {
         self.request = URLComponents(url: try XCTUnwrap(request.url), resolvingAgainstBaseURL: false)
         self.method = request.httpMethod
         try await Task.sleep(for: delay)
-    }
-}
-
-private struct FakeStarlinkStatusClient: StarlinkStatusFetching {
-    let status: StarlinkStatus
-
-    func fetchStatus(host: HostConfig) async throws -> StarlinkStatus {
-        status
     }
 }
 

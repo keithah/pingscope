@@ -16,7 +16,8 @@ public enum AsyncProcess {
         executablePath: String,
         arguments: [String],
         timeout: Duration? = nil,
-        maxOutputBytes: Int = 1_048_576
+        maxOutputBytes: Int = 1_048_576,
+        logger: (@Sendable (String) -> Void)? = nil
     ) async throws -> AsyncProcessResult {
 #if os(macOS)
         let process = Process()
@@ -30,7 +31,7 @@ public enum AsyncProcess {
 
         let outputReadHandle = output.fileHandleForReading
         let errorReadHandle = error.fileHandleForReading
-        let box = ProcessBox(process)
+        let box = ProcessBox(process, logger: logger)
         return try await withTaskCancellationHandler {
             try process.run()
 
@@ -60,9 +61,11 @@ public enum AsyncProcess {
 #if os(macOS)
 private final class ProcessBox: @unchecked Sendable {
     private let process: Process
+    private let logger: (@Sendable (String) -> Void)?
 
-    init(_ process: Process) {
+    init(_ process: Process, logger: (@Sendable (String) -> Void)?) {
         self.process = process
+        self.logger = logger
     }
 
     func terminate() {
@@ -94,7 +97,7 @@ private final class ProcessBox: @unchecked Sendable {
             try childKiller.run()
             childKiller.waitUntilExit()
         } catch {
-            return
+            logger?("async process child cleanup failed: \(error)")
         }
     }
 }
@@ -143,7 +146,7 @@ private extension Process {
                 }
             }
         } onCancel: {
-            ProcessBox(self).terminateDetached()
+            ProcessBox(self, logger: nil).terminateDetached()
         }
     }
 }

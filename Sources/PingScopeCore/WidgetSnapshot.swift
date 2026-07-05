@@ -91,11 +91,16 @@ public struct WidgetSnapshot: Codable, Equatable, Sendable {
 
     public func hasSameContent(as other: WidgetSnapshot?) -> Bool {
         guard let other else { return false }
+        return hasSameWidgetState(as: other)
+            && recentSamples == other.recentSamples
+    }
+
+    public func hasSameWidgetState(as other: WidgetSnapshot?) -> Bool {
+        guard let other else { return false }
         return version == other.version
             && primaryHostID == other.primaryHostID
             && hosts == other.hosts
             && health == other.health
-            && recentSamples == other.recentSamples
             && networkStatus == other.networkStatus
     }
 }
@@ -182,6 +187,7 @@ public actor WidgetSnapshotStore {
     private let defaults: UserDefaults
     private let key: String
     private let logger: (@Sendable (String) -> Void)?
+    private let isAvailable: Bool
 
     public init(
         suiteName: String? = defaultSuiteName,
@@ -190,8 +196,10 @@ public actor WidgetSnapshotStore {
     ) {
         if let suiteName, let suite = UserDefaults(suiteName: suiteName) {
             self.defaults = suite
+            self.isAvailable = true
         } else {
             self.defaults = .standard
+            self.isAvailable = suiteName == nil
         }
         self.key = key
         self.logger = logger
@@ -201,16 +209,22 @@ public actor WidgetSnapshotStore {
         self.defaults = defaults
         self.key = key
         self.logger = logger
+        self.isAvailable = true
     }
 
-    public func save(_ snapshot: WidgetSnapshot) async {
+    @discardableResult
+    public func save(_ snapshot: WidgetSnapshot) async -> Bool {
+        guard isAvailable else {
+            logger?("widget snapshot save skipped: app group unavailable")
+            return false
+        }
         let encoder = JSONEncoder.widgetSnapshotEncoder
         let data: Data
         do {
             data = try encoder.encode(snapshot)
         } catch {
             logger?("widget snapshot encode failed: \(error)")
-            return
+            return false
         }
         defaults.set(data, forKey: key)
         do {
@@ -219,6 +233,7 @@ public actor WidgetSnapshotStore {
         } catch {
             logger?("legacy widget snapshot encode failed: \(error)")
         }
+        return true
     }
 
     public func load() async -> WidgetSnapshot? {

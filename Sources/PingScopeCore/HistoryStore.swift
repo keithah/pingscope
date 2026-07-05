@@ -4,8 +4,10 @@ import SQLite3
 public protocol PingHistoryStore: Sendable {
     func append(_ result: PingResult) async
     func append(_ results: [PingResult]) async
+    func appendAndWait(_ results: [PingResult]) async throws
     func samples(hostID: UUID, since: Date, limit: Int) async -> [PingResult]
     func latestSamples(hostID: UUID, since: Date, limit: Int) async -> [PingResult]
+    func exportSamples(host: HostConfig, since: Date, format: HistoryExportFormat, to url: URL) async throws -> Int
     func prune(olderThan cutoff: Date) async
     func deleteAll() async
 }
@@ -16,22 +18,23 @@ public extension PingHistoryStore {
             await append(result)
         }
     }
+
+    func appendAndWait(_ results: [PingResult]) async throws {
+        await append(results)
+    }
+
+    func exportSamples(host: HostConfig, since: Date, format: HistoryExportFormat, to url: URL) async throws -> Int {
+        let exportedSamples = await samples(hostID: host.id, since: since, limit: 100_000)
+        try HistoryExporter.write(samples: exportedSamples, host: host, format: format, to: url)
+        return exportedSamples.count
+    }
 }
 
-public actor SQLiteHistoryStore: PingHistoryStore {
-    private let url: URL
-    private let retention: Duration
-    private let logger: (@Sendable (String) -> Void)?
-    private let connection = SQLiteConnection()
-    private let metadataEncoder = JSONEncoder()
-    private let metadataDecoder = JSONDecoder()
-    private let pruneInterval: TimeInterval = 60
-    private var lastPruneAttempt: Date?
+public final class SQLiteHistoryStore: PingHistoryStore, @unchecked Sendable {
+    private let worker: SQLiteHistoryWorker
 
     public init(url: URL, retention: Duration = .days(7), logger: (@Sendable (String) -> Void)? = nil) {
-        self.url = url
-        self.retention = retention
-        self.logger = logger
+        self.worker = SQLiteHistoryWorker(url: url, retention: retention, logger: logger)
     }
 
     public static func defaultURL(appName: String = "PingScope") throws -> URL {
@@ -47,31 +50,94 @@ public actor SQLiteHistoryStore: PingHistoryStore {
     }
 
     public func append(_ result: PingResult) async {
-        await append([result])
+        await worker.append(result)
     }
 
     public func append(_ results: [PingResult]) async {
-        guard !results.isEmpty else { return }
-        do {
-            try await withSQLiteRetry {
-                try openIfNeeded()
-                try insert(results)
-                if let newestTimestamp = results.map(\.timestamp).max(), shouldPrune(at: newestTimestamp) {
-                    try pruneSync(olderThan: newestTimestamp.addingTimeInterval(-retention.seconds))
-                    lastPruneAttempt = newestTimestamp
-                }
-            }
-        } catch {
-            logger?("history append failed: \(error)")
-            return
-        }
+        await worker.append(results)
+    }
+
+    public func appendAndWait(_ results: [PingResult]) async throws {
+        try await worker.appendAndWait(results)
     }
 
     public func samples(hostID: UUID, since: Date, limit: Int = 10_000) async -> [PingResult] {
+        await worker.samples(hostID: hostID, since: since, limit: limit)
+    }
+
+    public func latestSamples(hostID: UUID, since: Date, limit: Int) async -> [PingResult] {
+        await worker.latestSamples(hostID: hostID, since: since, limit: limit)
+    }
+
+    public func exportSamples(host: HostConfig, since: Date, format: HistoryExportFormat, to url: URL) async throws -> Int {
+        try await worker.exportSamples(host: host, since: since, format: format, to: url)
+    }
+
+    public func prune(olderThan cutoff: Date) async {
+        await worker.prune(olderThan: cutoff)
+    }
+
+    public func deleteAll() async {
+        await worker.deleteAll()
+    }
+}
+
+private final class SQLiteHistoryWorker: @unchecked Sendable {
+    private let queue: DispatchQueue
+    private let url: URL
+    private let retention: Duration
+    private let logger: (@Sendable (String) -> Void)?
+    private let connection = SQLiteConnection()
+    private let metadataEncoder = JSONEncoder()
+    private let metadataDecoder = JSONDecoder()
+    private let pruneInterval: TimeInterval = 60
+    private var lastPruneAttempt: Date?
+
+    init(url: URL, retention: Duration = .days(7), logger: (@Sendable (String) -> Void)? = nil) {
+        self.queue = DispatchQueue(label: "PingScope.SQLiteHistoryStore.\(UUID().uuidString)", qos: .utility)
+        self.url = url
+        self.retention = retention
+        self.logger = logger
+    }
+
+    func append(_ result: PingResult) async {
+        await append([result])
+    }
+
+    func append(_ results: [PingResult]) async {
         do {
-            return try await withSQLiteRetry {
-                try openIfNeeded()
-                return try query(hostID: hostID, since: since, limit: max(1, limit))
+            try await appendAndWait(results)
+        } catch {
+            logger?("history append failed: \(error)")
+        }
+    }
+
+    func appendAndWait(_ results: [PingResult]) async throws {
+        try await perform {
+            try self.appendAndWaitSync(results)
+        }
+    }
+
+    private func appendAndWaitSync(_ results: [PingResult]) throws {
+        guard !results.isEmpty else { return }
+        try withSQLiteRetry {
+            try openIfNeeded()
+            try insert(results)
+            if let newestTimestamp = results.max(by: { $0.timestamp < $1.timestamp })?.timestamp,
+               shouldPrune(at: newestTimestamp) {
+                try pruneSync(olderThan: newestTimestamp.addingTimeInterval(-retention.seconds))
+                lastPruneAttempt = newestTimestamp
+            }
+        }
+    }
+
+    func samples(hostID: UUID, since: Date, limit: Int = 10_000) async -> [PingResult] {
+        do {
+            return try await perform {
+                try self.withSQLiteRetry {
+                    try self.openIfNeeded()
+                    return try self.query(hostID: hostID, since: since, limit: max(1, limit))
+                }
             }
         } catch {
             logger?("history query failed: \(error)")
@@ -79,11 +145,13 @@ public actor SQLiteHistoryStore: PingHistoryStore {
         }
     }
 
-    public func latestSamples(hostID: UUID, since: Date, limit: Int) async -> [PingResult] {
+    func latestSamples(hostID: UUID, since: Date, limit: Int) async -> [PingResult] {
         do {
-            return try await withSQLiteRetry {
-                try openIfNeeded()
-                return try queryLatest(hostID: hostID, since: since, limit: max(1, limit))
+            return try await perform {
+                try self.withSQLiteRetry {
+                    try self.openIfNeeded()
+                    return try self.queryLatest(hostID: hostID, since: since, limit: max(1, limit))
+                }
             }
         } catch {
             logger?("history latest query failed: \(error)")
@@ -91,12 +159,36 @@ public actor SQLiteHistoryStore: PingHistoryStore {
         }
     }
 
-    public func prune(olderThan cutoff: Date) async {
+    func exportSamples(host: HostConfig, since: Date, format: HistoryExportFormat, to url: URL) async throws -> Int {
+        try await perform {
+            try self.withSQLiteRetry {
+                try self.openIfNeeded()
+                let sampleCount = try self.sampleCountIfNeeded(format: format, hostID: host.id, since: since)
+                return try HistoryExporter.writeStreaming(
+                    host: host,
+                    format: format,
+                    sampleCount: sampleCount,
+                    to: url
+                ) { writer in
+                    try self.streamSamples(hostID: host.id, since: since, to: writer)
+                }
+            }
+        }
+    }
+
+    private func sampleCountIfNeeded(format: HistoryExportFormat, hostID: UUID, since: Date) throws -> Int? {
+        guard format == .text else { return nil }
+        return try countSamples(hostID: hostID, since: since)
+    }
+
+    func prune(olderThan cutoff: Date) async {
         do {
-            try await withSQLiteRetry {
-                try openIfNeeded()
-                try pruneSync(olderThan: cutoff)
-                lastPruneAttempt = Date()
+            try await perform {
+                try self.withSQLiteRetry {
+                    try self.openIfNeeded()
+                    try self.pruneSync(olderThan: cutoff)
+                    self.lastPruneAttempt = Date()
+                }
             }
         } catch {
             logger?("history prune failed: \(error)")
@@ -104,11 +196,13 @@ public actor SQLiteHistoryStore: PingHistoryStore {
         }
     }
 
-    public func deleteAll() async {
+    func deleteAll() async {
         do {
-            try await withSQLiteRetry {
-                try openIfNeeded()
-                try execute("DELETE FROM ping_samples;")
+            try await perform {
+                try self.withSQLiteRetry {
+                    try self.openIfNeeded()
+                    try self.execute("DELETE FROM ping_samples;")
+                }
             }
         } catch {
             logger?("history delete failed: \(error)")
@@ -116,12 +210,24 @@ public actor SQLiteHistoryStore: PingHistoryStore {
         }
     }
 
+    private func perform<T: Sendable>(_ operation: @escaping @Sendable () throws -> T) async throws -> T {
+        try await withCheckedThrowingContinuation { continuation in
+            queue.async {
+                do {
+                    continuation.resume(returning: try operation())
+                } catch {
+                    continuation.resume(throwing: error)
+                }
+            }
+        }
+    }
+
     private func openIfNeeded() throws {
         guard connection.db == nil else { return }
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         var opened: OpaquePointer?
-        // NOMUTEX is safe because this handle is confined to the SQLiteHistoryStore actor.
-        // Do not share connection.db across threads without restoring SQLite serialization.
+        // NOMUTEX is safe because this handle is confined to SQLiteHistoryWorker's serial queue.
+        // Do not share connection.db across queues without restoring SQLite serialization.
         guard sqlite3_open_v2(url.path, &opened, SQLITE_OPEN_CREATE | SQLITE_OPEN_READWRITE | SQLITE_OPEN_NOMUTEX, nil) == SQLITE_OK,
               let handle = opened else {
             // SQLite returns a handle even on failure so the error message can be
@@ -169,7 +275,7 @@ public actor SQLiteHistoryStore: PingHistoryStore {
         return timestamp.timeIntervalSince(lastPruneAttempt) >= pruneInterval
     }
 
-    private func withSQLiteRetry<T>(_ operation: () throws -> T) async throws -> T {
+    private func withSQLiteRetry<T>(_ operation: () throws -> T) throws -> T {
         var lastError: Error?
         for attempt in 0..<3 {
             do {
@@ -177,7 +283,8 @@ public actor SQLiteHistoryStore: PingHistoryStore {
             } catch {
                 lastError = error
                 guard isTransientSQLiteError(error), attempt < 2 else { break }
-                try await Task.sleep(for: .milliseconds(Double(50 * (attempt + 1))))
+                let backoffMilliseconds = Double(50 * (1 << attempt)) + Double.random(in: 0...25)
+                Thread.sleep(forTimeInterval: backoffMilliseconds / 1_000)
             }
         }
         throw lastError ?? SQLiteHistoryError.openFailed(message: "unknown SQLite retry failure")
@@ -220,7 +327,6 @@ public actor SQLiteHistoryStore: PingHistoryStore {
             throw error
         }
     }
-
     private func bindInsert(_ result: PingResult, to statement: OpaquePointer) throws {
         bindText(result.id.uuidString, to: 1, in: statement)
         bindText(result.hostID.uuidString, to: 2, in: statement)
@@ -310,6 +416,52 @@ public actor SQLiteHistoryStore: PingHistoryStore {
             }
         }
         return results
+    }
+
+    private func countSamples(hostID: UUID, since: Date) throws -> Int {
+        let sql = """
+        SELECT COUNT(*)
+        FROM ping_samples
+        WHERE host_id = ? AND timestamp >= ?;
+        """
+        var count = 0
+        try withStatement(sql) { statement in
+            bindText(hostID.uuidString, to: 1, in: statement)
+            sqlite3_bind_double(statement, 2, since.timeIntervalSince1970)
+            let stepResult = sqlite3_step(statement)
+            guard stepResult == SQLITE_ROW else {
+                throw sqliteError(.stepFailed, code: stepResult)
+            }
+            count = Int(sqlite3_column_int64(statement, 0))
+        }
+        return count
+    }
+
+    private func streamSamples(hostID: UUID, since: Date, to writer: HistoryExportSampleWriter) throws -> Int {
+        let sql = """
+        SELECT id, host_id, address, method, port, timestamp, latency_ms, failure_reason, metadata_note, metadata_json
+        FROM ping_samples
+        WHERE host_id = ? AND timestamp >= ?
+        ORDER BY timestamp ASC;
+        """
+        var count = 0
+        try withStatement(sql) { statement in
+            bindText(hostID.uuidString, to: 1, in: statement)
+            sqlite3_bind_double(statement, 2, since.timeIntervalSince1970)
+
+            var stepResult = sqlite3_step(statement)
+            while stepResult == SQLITE_ROW {
+                if let result = result(from: statement) {
+                    try writer.write(result)
+                    count += 1
+                }
+                stepResult = sqlite3_step(statement)
+            }
+            guard stepResult == SQLITE_DONE else {
+                throw sqliteError(.stepFailed, code: stepResult)
+            }
+        }
+        return count
     }
 
     private func pruneSync(olderThan cutoff: Date) throws {

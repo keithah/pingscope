@@ -96,6 +96,67 @@ public struct DefaultGatewayDetector: Sendable {
     }
 }
 
+public struct DefaultGatewayEndpointResolver: Sendable {
+    public struct Candidate: Equatable, Hashable, Sendable {
+        public var method: PingMethod
+        public var port: UInt16?
+
+        public init(method: PingMethod, port: UInt16?) {
+            self.method = method
+            self.port = port
+        }
+    }
+
+    public static let defaultCandidates: [Candidate] = [
+        Candidate(method: .tcp, port: 80),
+        Candidate(method: .tcp, port: 443),
+        Candidate(method: .https, port: 443),
+        Candidate(method: .udp, port: 53)
+    ]
+
+    private let probeFactory: any ProbeFactory
+    private let candidates: [Candidate]
+
+    public init(
+        probeFactory: any ProbeFactory,
+        candidates: [Candidate] = Self.defaultCandidates
+    ) {
+        self.probeFactory = probeFactory
+        self.candidates = candidates.isEmpty ? Self.defaultCandidates : candidates
+    }
+
+    public func resolve(address: String) async -> HostConfig {
+        let fallback = host(address: address, candidate: candidates[0])
+        return await withTaskGroup(of: HostConfig?.self, returning: HostConfig.self) { group in
+            for candidate in candidates {
+                group.addTask {
+                    guard !Task.isCancelled else { return nil }
+                    let candidateHost = host(address: address, candidate: candidate)
+                    let probe = await probeFactory.makeProbe(for: candidate.method)
+                    let result = await probe.measure(candidateHost)
+                    guard !Task.isCancelled, result.isSuccess else { return nil }
+                    return candidateHost
+                }
+            }
+
+            for await host in group {
+                if let host {
+                    group.cancelAll()
+                    return host
+                }
+            }
+            return fallback
+        }
+    }
+
+    private func host(address: String, candidate: Candidate) -> HostConfig {
+        var host = DefaultGatewayDetector.gatewayHost(address: address)
+        host.method = candidate.method
+        host.port = candidate.port
+        return host
+    }
+}
+
 public struct StarlinkDishDetector: Sendable {
     public enum DetectionOutcome: Sendable, Equatable {
         case detected(HostConfig)
@@ -108,7 +169,6 @@ public struct StarlinkDishDetector: Sendable {
         case detected(HostConfig)
         case miss
         case failed
-        case timeout
         case cancelled
     }
 
@@ -120,10 +180,38 @@ public struct StarlinkDishDetector: Sendable {
         hosts: [HostConfig] = HostConfig.starlinkDiscoveryCandidates
     ) {
         self.statusClient = statusClient
-        self.hosts = hosts
+        self.hosts = Array(hosts.prefix(8))
     }
 
     public func detectionOutcome(timeout: Duration = .seconds(2)) async -> DetectionOutcome {
+        let race = AsyncFirstResult<DetectionOutcome>()
+        let detectionTask = Task {
+            await race.finish(await detectCandidateOutcome())
+        }
+        let timeoutTask = Task {
+            do {
+                try await Task.sleep(for: timeout)
+                await race.finish(.notFound)
+            } catch {
+                await race.finish(.cancelled)
+            }
+        }
+
+        let outcome = await withTaskCancellationHandler {
+            await race.value()
+        } onCancel: {
+            detectionTask.cancel()
+            timeoutTask.cancel()
+            Task {
+                await race.finish(.cancelled)
+            }
+        }
+        detectionTask.cancel()
+        timeoutTask.cancel()
+        return outcome
+    }
+
+    private func detectCandidateOutcome() async -> DetectionOutcome {
         await withTaskGroup(of: DetectionResult.self, returning: DetectionOutcome.self) { group in
             let statusClient = statusClient
             for host in hosts {
@@ -141,14 +229,6 @@ public struct StarlinkDishDetector: Sendable {
                     }
                 }
             }
-            group.addTask {
-                do {
-                    try await Task.sleep(for: timeout)
-                } catch {
-                    return .cancelled
-                }
-                return .timeout
-            }
 
             var pendingCandidates = hosts.count
             var sawFailure = false
@@ -157,9 +237,6 @@ public struct StarlinkDishDetector: Sendable {
                 case .detected(let detected):
                     group.cancelAll()
                     return .detected(detected)
-                case .timeout:
-                    group.cancelAll()
-                    return .notFound
                 case .cancelled:
                     group.cancelAll()
                     return .cancelled
@@ -184,8 +261,12 @@ public actor HostStore {
     private var primaryID: UUID?
 
     public init(defaultHosts: [HostConfig] = [.defaultInternet], primaryHostID: UUID? = nil) {
-        self.orderedHosts = defaultHosts
-        self.primaryID = primaryHostID ?? defaultHosts.first?.id
+        let normalized = Self.coalescingManagedDefaultGatewayHosts(
+            defaultHosts,
+            primaryID: primaryHostID ?? defaultHosts.first?.id
+        )
+        self.orderedHosts = normalized.hosts
+        self.primaryID = normalized.primaryID
     }
 
     public func hosts() -> [HostConfig] {
@@ -208,12 +289,19 @@ public actor HostStore {
     public func upsert(_ host: HostConfig) {
         if let index = orderedHosts.firstIndex(where: { $0.id == host.id }) {
             orderedHosts[index] = host
+        } else if let index = orderedHosts.firstIndex(where: { Self.isManagedDefaultGateway($0) && Self.isManagedDefaultGateway(host) }) {
+            let replacedID = orderedHosts[index].id
+            orderedHosts[index] = host
+            if primaryID == replacedID {
+                primaryID = host.id
+            }
         } else {
             orderedHosts.append(host)
         }
         if primaryID == nil {
             primaryID = host.id
         }
+        coalesceManagedDefaultGatewayHosts()
     }
 
     public func delete(_ id: UUID) {
@@ -231,6 +319,41 @@ public actor HostStore {
     public func reset(defaultHosts: [HostConfig] = [.defaultInternet]) {
         orderedHosts = defaultHosts
         primaryID = defaultHosts.first?.id
+        coalesceManagedDefaultGatewayHosts()
+    }
+
+    private static func isManagedDefaultGateway(_ host: HostConfig) -> Bool {
+        host.displayName == "Default Gateway"
+    }
+
+    private func coalesceManagedDefaultGatewayHosts() {
+        let normalized = Self.coalescingManagedDefaultGatewayHosts(orderedHosts, primaryID: primaryID)
+        orderedHosts = normalized.hosts
+        primaryID = normalized.primaryID
+    }
+
+    private static func coalescingManagedDefaultGatewayHosts(
+        _ hosts: [HostConfig],
+        primaryID: UUID?
+    ) -> (hosts: [HostConfig], primaryID: UUID?) {
+        guard let keptGatewayIndex = hosts.firstIndex(where: Self.isManagedDefaultGateway) else {
+            return (hosts, primaryID)
+        }
+        let keptGatewayID = hosts[keptGatewayIndex].id
+        var removedPrimary = false
+        var seenGateway = false
+        let normalizedHosts = hosts.filter { host in
+            guard Self.isManagedDefaultGateway(host) else { return true }
+            if !seenGateway {
+                seenGateway = true
+                return true
+            }
+            if primaryID == host.id {
+                removedPrimary = true
+            }
+            return false
+        }
+        return (normalizedHosts, removedPrimary ? keptGatewayID : primaryID)
     }
 }
 
@@ -327,9 +450,19 @@ public actor MeasurementScheduler {
         logger?("scheduler runLoop begin generation=\(generation) hostID=\(host.id.uuidString) method=\(host.method.rawValue)")
         while !Task.isCancelled {
             let probe = await probeFactory.makeProbe(for: host.method)
-            await probePermits.acquire()
-            let result = await probe.measure(host)
-            await probePermits.release()
+            do {
+                try await probePermits.acquire()
+            } catch {
+                return
+            }
+            let permitLease = AsyncPermitLease(pool: probePermits)
+            let result = await withTaskCancellationHandler {
+                let result = await probe.measure(host)
+                await permitLease.release()
+                return result
+            } onCancel: {
+                Task { await permitLease.release() }
+            }
             guard !Task.isCancelled, await publish(result, for: host, generation: generation) else { return }
             try? await Task.sleep(for: host.interval)
         }
@@ -361,33 +494,6 @@ public actor MeasurementScheduler {
     }
 }
 
-private actor AsyncPermitPool {
-    private var availablePermits: Int
-    private var waiters: [CheckedContinuation<Void, Never>] = []
-
-    init(permits: Int) {
-        self.availablePermits = permits
-    }
-
-    func acquire() async {
-        if availablePermits > 0 {
-            availablePermits -= 1
-            return
-        }
-        await withCheckedContinuation { continuation in
-            waiters.append(continuation)
-        }
-    }
-
-    func release() {
-        if waiters.isEmpty {
-            availablePermits += 1
-        } else {
-            waiters.removeFirst().resume()
-        }
-    }
-}
-
 public actor PingRuntime {
     public let hostStore: HostStore
     private let scheduler: MeasurementScheduler
@@ -404,6 +510,7 @@ public actor PingRuntime {
     private var alertContinuation: AsyncStream<RuntimeAlertEvent>.Continuation?
     private var alertContinuationToken: UUID?
     private var pendingAlertEvents: [RuntimeAlertEvent] = []
+    private var pendingAlertStartIndex = 0
     private var cachedHosts: [HostConfig] = []
     private var hostByID: [UUID: HostConfig] = [:]
     private var cachedPrimaryHostID: UUID?
@@ -413,12 +520,13 @@ public actor PingRuntime {
         scheduler: MeasurementScheduler,
         historyStore: (any PingHistoryStore)? = nil,
         allowsLocalNetworkProbes: Bool = true,
-        notificationRules: NotificationRuleSet = NotificationRuleSet()
+        notificationRules: NotificationRuleSet = NotificationRuleSet(),
+        logger: (@Sendable (String) -> Void)? = nil
     ) {
         self.hostStore = hostStore
         self.scheduler = scheduler
         self.historyStore = historyStore
-        self.historyWriter = historyStore.map { HistoryWriteBuffer(store: $0) }
+        self.historyWriter = historyStore.map { HistoryWriteBuffer(store: $0, logger: logger) }
         self.allowsLocalNetworkProbes = allowsLocalNetworkProbes
         self.alertEngine = AlertDecisionEngine(rules: notificationRules)
     }
@@ -442,12 +550,13 @@ public actor PingRuntime {
         }
     }
 
-    /// One-shot alert events. Unbounded: unlike snapshots, an alert dropped by a
-    /// conflating buffer is lost permanently (the decision engine has already
-    /// committed its cooldown and edge-transition state by the time it is yielded).
-    /// Alerts produced before any subscriber attached are held and replayed to
-    /// the next subscriber, so an outage present at launch is never lost to the
-    /// registration race with the scheduler's first results.
+    /// One-shot alert events. Alerts produced before any subscriber attached are
+    /// held and replayed to the next subscriber, so an outage present at launch is
+    /// not lost to the registration race with the scheduler's first results.
+    ///
+    /// Deliberately unbounded: these are edge transitions, not conflatable state.
+    /// Dropping an old "outage started" while keeping its later recovery can leave
+    /// consumers with an impossible alert timeline.
     public func alerts() -> AsyncStream<RuntimeAlertEvent> {
         let token = UUID()
         return AsyncStream(bufferingPolicy: .unbounded) { continuation in
@@ -459,10 +568,11 @@ public actor PingRuntime {
             continuation.onTermination = { [weak self] _ in
                 Task { await self?.clearAlertContinuation(token: token) }
             }
-            for event in self.pendingAlertEvents {
+            for event in self.pendingAlertEvents[self.pendingAlertStartIndex...] {
                 continuation.yield(event)
             }
             self.pendingAlertEvents.removeAll()
+            self.pendingAlertStartIndex = 0
         }
     }
 
@@ -470,9 +580,11 @@ public actor PingRuntime {
         await restartScheduler()
     }
 
-    public func restartScheduler() async {
+    public func restartScheduler(refreshCache: Bool = true) async {
         streamTask?.cancel()
-        await refreshHostCache()
+        if refreshCache {
+            await refreshHostCache()
+        }
         let resultStream = await scheduler.start(hosts: cachedHosts.filter(\.isEnabled), allowsLocalNetworkProbes: allowsLocalNetworkProbes)
         streamTask = Task { [weak self] in
             for await result in resultStream {
@@ -569,7 +681,7 @@ public actor PingRuntime {
         } else {
             healthByHost[host.id, default: HostHealth(hostID: host.id, thresholds: host.thresholds)].thresholds = host.thresholds
         }
-        await restartScheduler()
+        await restartScheduler(refreshCache: false)
     }
 
     public func deleteHost(_ id: UUID) async {
@@ -577,7 +689,7 @@ public actor PingRuntime {
         await refreshHostCache()
         healthByHost.removeValue(forKey: id)
         samplesByHost.removeValue(forKey: id)
-        await restartScheduler()
+        await restartScheduler(refreshCache: false)
     }
 
     public func removeStarlinkHosts() async -> [UUID] {
@@ -590,7 +702,7 @@ public actor PingRuntime {
             samplesByHost.removeValue(forKey: id)
         }
         await refreshHostCache()
-        await restartScheduler()
+        await restartScheduler(refreshCache: false)
         return ids
     }
 
@@ -603,7 +715,7 @@ public actor PingRuntime {
     public func setAllowsLocalNetworkProbes(_ isEnabled: Bool) async {
         guard allowsLocalNetworkProbes != isEnabled else { return }
         allowsLocalNetworkProbes = isEnabled
-        await restartScheduler()
+        await restartScheduler(refreshCache: false)
     }
 
     public func updateNotificationRules(_ rules: NotificationRuleSet) {
@@ -625,7 +737,7 @@ public actor PingRuntime {
         healthByHost.removeAll()
         samplesByHost.removeAll()
         await historyStore?.deleteAll()
-        await restartScheduler()
+        await restartScheduler(refreshCache: false)
     }
 
     public func historySamples(hostID: UUID, since: Date, limit: Int = 10_000) async -> [PingResult] {
@@ -633,10 +745,18 @@ public actor PingRuntime {
         return await historyStore?.samples(hostID: hostID, since: since, limit: limit) ?? []
     }
 
+    public func exportHistory(host: HostConfig, since: Date, format: HistoryExportFormat, to url: URL) async throws -> Int {
+        await historyWriter?.flushNow()
+        guard let historyStore else { return 0 }
+        return try await historyStore.exportSamples(host: host, since: since, format: format, to: url)
+    }
+
     private func refreshHostCache() async {
-        cachedHosts = await hostStore.hosts()
+        cachedHosts = HostConfig.sanitizedHosts(await hostStore.hosts())
         hostByID = Dictionary(uniqueKeysWithValues: cachedHosts.map { ($0.id, $0) })
-        cachedPrimaryHostID = await hostStore.primaryHostID()
+        let primaryID = await hostStore.primaryHostID()
+        cachedPrimaryHostID = cachedHosts.contains { $0.id == primaryID } ? primaryID : cachedHosts.first?.id
+        alertEngine.prune(activeHostIDs: Set(cachedHosts.map(\.id)))
     }
 
     private func publishSnapshot() {
@@ -657,12 +777,23 @@ public actor PingRuntime {
             // lost. Hold it for the next subscriber; capped so a runtime nobody
             // ever subscribes to cannot grow without bound.
             pendingAlertEvents.append(event)
-            if pendingAlertEvents.count > 64 {
-                pendingAlertEvents.removeFirst()
+            if pendingAlertEvents.count - pendingAlertStartIndex > 64 {
+                pendingAlertStartIndex += 1
             }
+            compactPendingAlertsIfNeeded()
             return
         }
         alertContinuation.yield(event)
+    }
+
+    private func compactPendingAlertsIfNeeded() {
+        if pendingAlertStartIndex == pendingAlertEvents.count {
+            pendingAlertEvents.removeAll(keepingCapacity: true)
+            pendingAlertStartIndex = 0
+        } else if pendingAlertStartIndex > 32, pendingAlertStartIndex * 2 > pendingAlertEvents.count {
+            pendingAlertEvents = Array(pendingAlertEvents[pendingAlertStartIndex...])
+            pendingAlertStartIndex = 0
+        }
     }
 
     private func clearContinuation(token: UUID) {
@@ -693,117 +824,6 @@ public actor PingRuntime {
 private extension HostConfig {
     var measurementEndpoint: String {
         "\(method.rawValue)|\(address)|\(port.map(String.init) ?? "")"
-    }
-}
-
-private actor HistoryWriteBuffer {
-    private let store: any PingHistoryStore
-    private let maxBatchSize: Int
-    private let flushDelay: Duration
-    private var pending: BoundedBuffer<PingResult>
-    private var flushTask: Task<Void, Never>?
-    private var isDiscarding = false
-    private var generation = 0
-
-    init(
-        store: any PingHistoryStore,
-        maxBatchSize: Int = 32,
-        maxPendingResults: Int = 2048,
-        flushDelay: Duration = .milliseconds(250)
-    ) {
-        self.store = store
-        self.maxBatchSize = max(1, maxBatchSize)
-        self.pending = BoundedBuffer(capacity: max(self.maxBatchSize, maxPendingResults))
-        self.flushDelay = flushDelay
-    }
-
-    func append(_ result: PingResult) {
-        pending.append(result)
-        guard !isDiscarding else { return }
-        if pending.count >= maxBatchSize {
-            guard flushTask == nil else { return }
-            scheduleImmediateFlush()
-            return
-        }
-        scheduleFlushIfNeeded()
-    }
-
-    func flushNow() async {
-        generation += 1
-        while true {
-            await cancelFlushTasks()
-            guard !pending.isEmpty else { return }
-            await drainAllPending()
-        }
-    }
-
-    func discardPending() async {
-        generation += 1
-        isDiscarding = true
-        while true {
-            pending.removeAll()
-            guard flushTask != nil else {
-                pending.removeAll()
-                isDiscarding = false
-                return
-            }
-            await cancelFlushTasks()
-        }
-    }
-
-    private func scheduleFlushIfNeeded() {
-        guard flushTask == nil, !pending.isEmpty else { return }
-        let scheduledGeneration = generation
-        flushTask = Task { [flushDelay] in
-            do {
-                try await Task.sleep(for: flushDelay)
-            } catch {
-                return
-            }
-            guard !Task.isCancelled else { return }
-            await autoFlush(generation: scheduledGeneration)
-        }
-    }
-
-    private func scheduleImmediateFlush() {
-        guard flushTask == nil else { return }
-        let scheduledGeneration = generation
-        flushTask = Task {
-            guard !Task.isCancelled else { return }
-            await autoFlush(generation: scheduledGeneration)
-        }
-    }
-
-    private func autoFlush(generation scheduledGeneration: Int) async {
-        guard scheduledGeneration == generation, !Task.isCancelled else { return }
-        await drainPending()
-        guard scheduledGeneration == generation, !Task.isCancelled else { return }
-        flushTask = nil
-        if pending.count >= maxBatchSize {
-            scheduleImmediateFlush()
-        } else {
-            scheduleFlushIfNeeded()
-        }
-    }
-
-    private func drainAllPending() async {
-        while !pending.isEmpty {
-            await drainPending()
-        }
-    }
-
-    private func drainPending() async {
-        guard !pending.isEmpty else { return }
-        let batch = pending.popPrefix(maxBatchSize)
-        await store.append(batch)
-    }
-
-    private func cancelFlushTasks() async {
-        while let task = flushTask {
-            flushTask = nil
-            task.cancel()
-            await task.value
-        }
     }
 }
 

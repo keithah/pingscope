@@ -345,22 +345,31 @@ public struct TimeoutProbe: PingProbe {
     }
 
     public func measure(_ host: HostConfig) async -> PingResult {
-        await withTaskGroup(of: PingResult.self, returning: PingResult.self) { group in
-            group.addTask {
-                await wrapped.measure(host)
-            }
-            group.addTask {
-                do {
-                    try await Task.sleep(for: host.timeout)
-                } catch {
-                    return .failure(hostID: host.id, reason: .cancelled).withHostMetadata(from: host)
-                }
-                return .failure(hostID: host.id, reason: .timeout).withHostMetadata(from: host)
-            }
-            let result = await group.next() ?? .failure(hostID: host.id, reason: .unknown).withHostMetadata(from: host)
-            group.cancelAll()
-            return result
+        let race = AsyncFirstResult<PingResult>()
+        let measurementTask = Task {
+            await race.finish(await wrapped.measure(host))
         }
+        let timeoutTask = Task {
+            do {
+                try await Task.sleep(for: host.timeout)
+                await race.finish(.failure(hostID: host.id, reason: .timeout).withHostMetadata(from: host))
+            } catch {
+                await race.finish(.failure(hostID: host.id, reason: .cancelled).withHostMetadata(from: host))
+            }
+        }
+
+        let result = await withTaskCancellationHandler {
+            await race.value()
+        } onCancel: {
+            measurementTask.cancel()
+            timeoutTask.cancel()
+            Task {
+                await race.finish(.failure(hostID: host.id, reason: .cancelled).withHostMetadata(from: host))
+            }
+        }
+        measurementTask.cancel()
+        timeoutTask.cancel()
+        return result
     }
 }
 
@@ -486,7 +495,7 @@ public struct ProcessICMPProbe: PingProbe {
             let result = try await AsyncProcess.run(
                 executablePath: "/sbin/ping",
                 // macOS `ping -W` is milliseconds, not seconds.
-                arguments: ["-c", "1", "-W", "\(max(1, Int(host.timeout.milliseconds.rounded())))", host.address],
+                arguments: ["-c", "1", "-W", "\(max(1, Int(host.timeout.milliseconds.rounded())))", "--", host.address],
                 timeout: host.timeout + .seconds(1)
             )
             if result.terminationStatus == 0 {

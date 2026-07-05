@@ -92,6 +92,20 @@ final class StarlinkProtobufTests: XCTestCase {
         XCTAssertThrowsError(try codec.decodeStatus(fromResponseMessage: hugeFieldNumber))
     }
 
+    func testLengthDelimitedFieldsExposeSlicesWithoutCopyingPayload() throws {
+        var writer = ProtobufWriter()
+        writer.writeString(field: 1, "hello")
+
+        var reader = ProtobufReader(data: writer.data)
+        let field = try XCTUnwrap(reader.nextField())
+
+        guard case let .lengthDelimited(payload) = field.value else {
+            return XCTFail("expected length-delimited payload")
+        }
+        XCTAssertTrue(type(of: payload) == Data.SubSequence.self)
+        XCTAssertEqual(String(decoding: payload, as: UTF8.self), "hello")
+    }
+
     private func makeResponse(
         latency: Float?,
         dropRate: Float?,

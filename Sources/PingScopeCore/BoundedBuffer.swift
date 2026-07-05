@@ -44,6 +44,17 @@ public struct BoundedBuffer<Element: Codable & Equatable & Sendable>: Codable, E
         return matches
     }
 
+    public func suffix(while isIncluded: (Element) -> Bool) -> [Element] {
+        guard storedCount > 0 else { return [] }
+        var matches: [Element] = []
+        for offset in (0..<storedCount).reversed() {
+            let element = storage[(startIndex + offset) % storage.count]
+            guard isIncluded(element) else { break }
+            matches.append(element)
+        }
+        return Array(matches.reversed())
+    }
+
     public init(capacity: Int) {
         self.capacity = max(1, capacity)
         self.storage = []
@@ -87,6 +98,37 @@ public struct BoundedBuffer<Element: Codable & Equatable & Sendable>: Codable, E
         storage.removeAll()
         startIndex = 0
         storedCount = 0
+    }
+
+    public mutating func prepend(contentsOf newElements: [Element]) {
+        guard !newElements.isEmpty else { return }
+        normalizeCapacityIfNeeded()
+
+        if newElements.count >= capacity {
+            droppedCount += storedCount + newElements.count - capacity
+            storage = Array(newElements.prefix(capacity))
+            startIndex = 0
+            storedCount = storage.count
+            return
+        }
+
+        guard storage.count == capacity else {
+            let combined = newElements + elements
+            let kept = Array(combined.prefix(capacity))
+            droppedCount += max(0, combined.count - kept.count)
+            storage = kept
+            startIndex = 0
+            storedCount = kept.count
+            return
+        }
+
+        let overwrittenCount = max(0, newElements.count - (capacity - storedCount))
+        droppedCount += overwrittenCount
+        storedCount = min(capacity, storedCount + newElements.count)
+        startIndex = (startIndex - newElements.count + storage.count) % storage.count
+        for (offset, element) in newElements.enumerated() {
+            storage[(startIndex + offset) % storage.count] = element
+        }
     }
 
     public mutating func popPrefix(_ requestedCount: Int) -> [Element] {

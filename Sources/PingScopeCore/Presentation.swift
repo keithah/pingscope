@@ -44,6 +44,34 @@ public struct MenuBarGlyphContent: Equatable, Sendable {
     }
 }
 
+public struct HostStatusSummary: Equatable, Sendable {
+    public var id: UUID
+    public var name: String
+    public var endpoint: String
+    public var statusText: String
+    public var latencyText: String
+    public var color: StatusColor
+    public var accessibilityLabel: String
+
+    public init(
+        id: UUID,
+        name: String,
+        endpoint: String,
+        statusText: String,
+        latencyText: String,
+        color: StatusColor,
+        accessibilityLabel: String
+    ) {
+        self.id = id
+        self.name = name
+        self.endpoint = endpoint
+        self.statusText = statusText
+        self.latencyText = latencyText
+        self.color = color
+        self.accessibilityLabel = accessibilityLabel
+    }
+}
+
 public struct LatencyGraphScale: Equatable, Sendable {
     public var maximumMilliseconds: Double
     public var axisMaximumMilliseconds: Double
@@ -240,6 +268,31 @@ public struct DisplayStatePresenter: Sendable {
         )
     }
 
+    public func hostStatusSummaries(in snapshot: RuntimeSnapshot) -> [HostStatusSummary] {
+        snapshot.hosts.map { host in
+            let health = snapshot.healthByHost[host.id]
+            let observedHealth = health?.latestResult == nil ? nil : health
+            let status = observedHealth?.status ?? .noData
+            let latencyText: String
+            if let milliseconds = observedHealth?.latestResult?.latency?.milliseconds {
+                latencyText = "\(Int(milliseconds.rounded()))ms"
+            } else {
+                latencyText = "--"
+            }
+            let endpoint = endpointText(for: host)
+            let statusText = statusDisplayName(status)
+            return HostStatusSummary(
+                id: host.id,
+                name: host.displayName,
+                endpoint: endpoint,
+                statusText: statusText,
+                latencyText: latencyText,
+                color: color(for: status),
+                accessibilityLabel: "\(host.displayName) \(endpoint) \(statusText) \(latencyText)"
+            )
+        }
+    }
+
     public func visibleSamples(in series: SampleSeries?, range: TimeRange, now: Date = Date()) -> [PingResult] {
         guard let series else { return [] }
         return series.samples(since: now.addingTimeInterval(-range.duration))
@@ -312,5 +365,21 @@ public struct DisplayStatePresenter: Sendable {
             return lhs.id.uuidString < rhs.id.uuidString
         }
         return lhs.timestamp < rhs.timestamp
+    }
+
+    private func endpointText(for host: HostConfig) -> String {
+        if let port = host.port {
+            return "\(host.method.displayName) \(host.address):\(port)"
+        }
+        return "\(host.method.displayName) \(host.address)"
+    }
+
+    private func statusDisplayName(_ status: HealthStatus) -> String {
+        switch status {
+        case .noData: "No Data"
+        case .healthy: "Healthy"
+        case .degraded: "Degraded"
+        case .down: "Down"
+        }
     }
 }
