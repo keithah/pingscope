@@ -233,11 +233,41 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
     }
 
     var selectedRangeState: MenuBarState {
-        presenter.rangeStatusState(for: primaryHost, health: snapshot.primaryHealth, range: selectedRange)
+        if let visibleSampleState {
+            return visibleSampleState
+        }
+        return presenter.rangeStatusState(for: primaryHost, health: snapshot.primaryHealth, range: selectedRange)
     }
 
     var selectedRangeStatusLabel: String {
-        presenter.rangeStatusLabel(for: snapshot.primaryHealth, range: selectedRange)
+        if let visibleSampleStatusLabel {
+            return visibleSampleStatusLabel
+        }
+        return presenter.rangeStatusLabel(for: snapshot.primaryHealth, range: selectedRange)
+    }
+
+    private var visibleSampleState: MenuBarState? {
+        guard let primaryHost,
+              !hasCurrentLiveRangeResult,
+              let latest = displayPresentation.visibleSamples.last else {
+            return nil
+        }
+        var visibleHealth = HostHealth(hostID: primaryHost.id, thresholds: primaryHost.thresholds)
+        visibleHealth.ingest(latest)
+        return presenter.menuBarState(for: primaryHost, health: visibleHealth)
+    }
+
+    private var visibleSampleStatusLabel: String? {
+        guard !hasCurrentLiveRangeResult,
+              let latest = displayPresentation.visibleSamples.last else {
+            return nil
+        }
+        return latest.isSuccess ? "Healthy" : "Failed"
+    }
+
+    private var hasCurrentLiveRangeResult: Bool {
+        guard let latestResult = snapshot.primaryHealth?.latestResult else { return false }
+        return latestResult.timestamp >= Date().addingTimeInterval(-selectedRange.duration)
     }
 
     var menuBarGlyphContent: MenuBarGlyphContent {

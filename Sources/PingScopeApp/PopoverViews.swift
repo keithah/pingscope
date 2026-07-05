@@ -161,6 +161,7 @@ struct StatusPopoverView: View {
                     }
                 }
                 .pickerStyle(.segmented)
+                .labelsHidden()
                 .controlSize(.small)
                 .accessibilityLabel("Ping interval")
                 .help("Change how often PingScope checks this host")
