@@ -16,8 +16,19 @@ fi
 du -sh "${BUILD_DIR}" 2>/dev/null || true
 rm -rf \
   "${BUILD_DIR}"/archives \
+  "${BUILD_DIR}"/archive-dd \
+  "${BUILD_DIR}"/developerid-validation \
+  "${BUILD_DIR}"/index-build \
+  "${BUILD_DIR}"/ios-dd \
+  "${BUILD_DIR}"/ios-device-smoke \
+  "${BUILD_DIR}"/ios-generic-* \
+  "${BUILD_DIR}"/ios-smoke \
+  "${BUILD_DIR}"/ios-validation \
   "${BUILD_DIR}"/logs \
+  "${BUILD_DIR}"/macos-* \
+  "${BUILD_DIR}"/network-reconcile-qa \
   "${BUILD_DIR}"/release-github \
+  "${BUILD_DIR}"/screenshots \
   "${BUILD_DIR}"/xcode-* \
   "${BUILD_DIR}"/xcode-install \
   "${BUILD_DIR}"/xcode-verify-*

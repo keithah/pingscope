@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib/release-validation.sh
+source "${SCRIPT_DIR}/lib/release-validation.sh"
+# shellcheck source=lib/sparkle-tools.sh
+source "${SCRIPT_DIR}/lib/sparkle-tools.sh"
+
 VERSION=""
 NOTARY_PROFILE="NotarytoolProfile"
 NOTARY_KEY="${NOTARY_KEY:-}"
@@ -65,10 +71,6 @@ Required local credentials:
 The generated appcast is also published to GitHub Pages at:
   https://keithah.github.io/pingscope/appcast.xml
 USAGE
-}
-
-validate_version() {
-  [[ "$1" =~ ^[0-9]+[.][0-9]+[.][0-9]+([-.][0-9A-Za-z]+)*$ ]]
 }
 
 publish_pages_updates() {
@@ -178,38 +180,9 @@ else
   xcrun notarytool history --keychain-profile "${NOTARY_PROFILE}" >/dev/null
 fi
 
-# Prints the tool path, or nothing if it cannot be found. Always exits 0 so the
-# caller's diagnostic runs: under `set -e` a non-zero return from the command
-# substitution would abort the script before the "not found" message.
-find_sparkle_tool() {
-  local tool_name="$1"
-  local tool=""
-  local env_name="SPARKLE_$(printf '%s' "${tool_name}" | tr '[:lower:]' '[:upper:]')"
-  local env_value="${!env_name:-}"
-  if [[ -n "${env_value}" ]]; then
-    if [[ ! -x "${env_value}" ]]; then
-      # Name the bad override: the generic "build the Xcode project" advice
-      # below cannot help, because an explicit override suppresses the search.
-      echo "${env_name} is set but not executable: ${env_value}" >&2
-    fi
-    [[ -x "${env_value}" ]] && printf '%s' "${env_value}"
-    return 0
-  fi
-  for tool in \
-    ".build/artifacts/sparkle/Sparkle/bin/${tool_name}" \
-    ".build/checkouts/Sparkle/bin/${tool_name}" \
-    "${PWD}/DerivedData/SourcePackages/artifacts/sparkle/Sparkle/bin/${tool_name}"
-  do
-    [[ -x "${tool}" ]] && { printf '%s' "${tool}"; return 0; }
-  done
-  tool=$(find .build -path "*/SourcePackages/artifacts/sparkle/Sparkle/bin/${tool_name}" -type f -perm -111 -print -quit 2>/dev/null || true)
-  if [[ -n "${tool}" && -x "${tool}" ]]; then
-    printf '%s' "${tool}"
-  fi
-  return 0
-}
-
-GENERATE_KEYS=$(find_sparkle_tool generate_keys)
+# Prints the tool path, or nothing if it cannot be found. The `|| true` keeps
+# the friendly diagnostic below reachable under `set -e`.
+GENERATE_KEYS=$(find_sparkle_tool generate_keys || true)
 if [[ -z "${GENERATE_KEYS}" ]]; then
   echo "Sparkle generate_keys was not found. Build the Xcode project once to resolve Sparkle." >&2
   exit 69
@@ -266,12 +239,16 @@ fi
 
 TAG="v${VERSION}"
 if git rev-parse "${TAG}" >/dev/null 2>&1; then
-  echo "Tag already exists locally: ${TAG}" >&2
-  exit 65
+  echo "Tag already exists locally: ${TAG}; continuing release recovery."
+else
+  git tag "${TAG}"
 fi
 
-git tag "${TAG}"
-retry 3 2 git push origin "${TAG}"
+if git ls-remote --exit-code --tags origin "refs/tags/${TAG}" >/dev/null 2>&1; then
+  echo "Tag already exists on origin: ${TAG}; continuing release recovery."
+else
+  retry 3 2 git push origin "${TAG}"
+fi
 
 # appcast.sh only writes the standalone notes asset when --release-notes was
 # supplied, and it keeps that file's extension. Referencing the hard-coded .md
@@ -286,7 +263,8 @@ if [[ -n "${RELEASE_NOTES}" ]]; then
 fi
 
 if gh release view "${TAG}" >/dev/null 2>&1; then
-  echo "GitHub release already exists for ${TAG}; skipping create."
+  echo "GitHub release already exists for ${TAG}; uploading/replacing assets."
+  retry 3 2 gh release upload "${TAG}" "${RELEASE_ASSETS[@]}" --clobber
 else
   if ! retry 3 2 gh release create "${TAG}" \
     "${RELEASE_ASSETS[@]}" \

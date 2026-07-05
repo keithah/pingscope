@@ -4,6 +4,7 @@ set -euo pipefail
 DB_PATH="${1:-$HOME/Library/Application Support/PingScope/History.sqlite}"
 OUTPUT_DIR="${2:-}"
 RANGE_SECONDS="${PING_SCOPE_EXPORT_RANGE_SECONDS:-86400}"
+CLEAN_OUTPUT_DIR=0
 
 fail() {
   echo "FAIL: $*" >&2
@@ -27,6 +28,8 @@ validate_output_dir() {
 
 if [[ -z "${OUTPUT_DIR}" ]]; then
   OUTPUT_DIR="$(mktemp -d "${TMPDIR:-/tmp}/pingscope-export-smoke.XXXXXX")"
+  CLEAN_OUTPUT_DIR=1
+  trap '[[ "${CLEAN_OUTPUT_DIR}" == 1 ]] && rm -rf "${OUTPUT_DIR}"' EXIT
 else
   validate_output_dir "${OUTPUT_DIR}"
   rm -rf "${OUTPUT_DIR}"

@@ -70,23 +70,34 @@ APPLESCRIPT
 
 select_settings_tab() {
   local tab="$1"
+  local button_index
   case "$tab" in
-    Hosts)
-      swift -e 'import CoreGraphics; import Foundation
-let info = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
-guard let window = info.first(where: {
-    ($0[kCGWindowOwnerName as String] as? String) == "PingScope"
-    && (($0[kCGWindowName as String] as? String)?.contains("Settings") ?? false)
-}), let bounds = window[kCGWindowBounds as String] as? [String: Any],
-   let x = bounds["X"] as? Int,
-   let y = bounds["Y"] as? Int else { exit(0) }
-let point = CGPoint(x: x + 78, y: y + 130)
-CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown, mouseCursorPosition: point, mouseButton: .left)?.post(tap: .cghidEventTap)
-usleep(120000)
-CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp, mouseCursorPosition: point, mouseButton: .left)?.post(tap: .cghidEventTap)
-usleep(500000)'
-      ;;
+    Hosts) button_index=1 ;;
+    Display) button_index=2 ;;
+    Notifications) button_index=3 ;;
+    History) button_index=4 ;;
+    Diagnostics) button_index=5 ;;
+    Advanced) button_index=6 ;;
+    About) button_index=7 ;;
+    *) fail "unknown settings tab: ${tab}" ;;
   esac
+
+  for _ in {1..20}; do
+    if osascript -e 'tell application "System Events" to tell process "PingScope" to exists window "PingScope Settings"' | grep -q true; then
+      break
+    fi
+    sleep 0.2
+  done
+
+  osascript <<APPLESCRIPT
+tell application "System Events"
+  tell process "PingScope"
+    set frontmost to true
+    click button ${button_index} of group 1 of window "PingScope Settings"
+  end tell
+end tell
+APPLESCRIPT
+  sleep 0.5
 }
 
 post_click() {
@@ -165,7 +176,7 @@ require_settings_text "PingScope"
 require_settings_text "Monitored Hosts"
 require_settings_text "Cloudflare DNS"
 require_settings_text "PRIMARY"
-require_settings_text "TCP 1.1.1.1:443"
+require_settings_text "HTTPS 1.1.1.1:443"
 require_settings_text "Internet"
 
 echo "PASS: PingScope app smoke validation passed (${w}x${h} overlay at ${x},${y})"

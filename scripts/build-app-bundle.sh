@@ -59,11 +59,11 @@ fi
 LOG_DIR=".build/logs"
 BUILD_LOG="${LOG_DIR}/swift-${FLAVOR}-${CONFIGURATION}.log"
 mkdir -p "${LOG_DIR}"
+BIN_DIR="$(swift build --show-bin-path "${SWIFT_BUILD_ARGS[@]}")"
 swift build "${SWIFT_BUILD_ARGS[@]}" >"${BUILD_LOG}" 2>&1 || {
   cat "${BUILD_LOG}" >&2
   exit 1
 }
-BIN_DIR="$(swift build --show-bin-path "${SWIFT_BUILD_ARGS[@]}")"
 APP_DIR="${BIN_DIR}/PingScope.app"
 if [[ -n "${OUTPUT_DIR}" ]]; then
   mkdir -p "${OUTPUT_DIR}"

@@ -3,7 +3,7 @@ set -euo pipefail
 
 APP_PATH="${1:-/Applications/PingScope.app}"
 GROUP_ID="${PING_SCOPE_APP_GROUP:-6R7S5GA944.group.com.hadm.PingScope}"
-WIDGET_PATH="${APP_PATH}/Contents/PlugIns/widgetExtension.appex"
+WIDGET_PATH="${PING_SCOPE_WIDGET_PATH:-}"
 
 fail() {
   echo "FAIL: $*" >&2
@@ -24,6 +24,10 @@ require_entitlement() {
 }
 
 require_file "${APP_PATH}/Contents/Info.plist"
+if [[ -z "${WIDGET_PATH}" ]]; then
+  WIDGET_PATH="$(find "${APP_PATH}/Contents/PlugIns" -maxdepth 1 -name '*.appex' -type d 2>/dev/null | sort | head -n 1)"
+fi
+[[ -n "${WIDGET_PATH}" ]] || fail "missing widget extension in ${APP_PATH}/Contents/PlugIns"
 require_file "${WIDGET_PATH}/Contents/Info.plist"
 
 point_id="$(/usr/libexec/PlistBuddy -c 'Print :NSExtension:NSExtensionPointIdentifier' "${WIDGET_PATH}/Contents/Info.plist")"

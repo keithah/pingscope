@@ -68,6 +68,38 @@ if [[ ! -d "${APP_PATH}" ]]; then
   echo "App not found: ${APP_PATH}" >&2
   exit 2
 fi
+
+bundle_value() {
+  /usr/libexec/PlistBuddy -c "Print :$2" "$1/Contents/Info.plist" 2>/dev/null || true
+}
+
+validate_pingscope_app_bundle() {
+  local app="$1"
+  local bundle_id
+  local executable
+  bundle_id="$(bundle_value "${app}" "CFBundleIdentifier")"
+  executable="$(bundle_value "${app}" "CFBundleExecutable")"
+  if [[ "${bundle_id}" != "com.hadm.PingScope" || "${executable}" != "PingScope" ]]; then
+    echo "Refusing to sign unexpected app bundle: id=${bundle_id:-missing} executable=${executable:-missing}" >&2
+    exit 2
+  fi
+  if [[ ! -x "${app}/Contents/MacOS/PingScope" ]]; then
+    echo "Refusing to sign app without expected executable: ${app}/Contents/MacOS/PingScope" >&2
+    exit 2
+  fi
+  while IFS= read -r appex; do
+    local appex_id
+    appex_id="$(bundle_value "${appex}" "CFBundleIdentifier")"
+    case "${appex_id}" in
+      com.hadm.PingScope.widget) ;;
+      *)
+        echo "Refusing to sign unexpected app extension ${appex} id=${appex_id:-missing}" >&2
+        exit 2
+        ;;
+    esac
+  done < <(find "${app}/Contents/PlugIns" -name '*.appex' -type d 2>/dev/null | sort)
+}
+validate_pingscope_app_bundle "${APP_PATH}"
 if [[ -n "${NOTARY_KEY}${NOTARY_KEY_ID}${NOTARY_ISSUER}" ]]; then
   if [[ -z "${NOTARY_KEY}" || -z "${NOTARY_KEY_ID}" || -z "${NOTARY_ISSUER}" ]]; then
     echo "Notary API key auth requires --notary-key, --notary-key-id, and --notary-issuer." >&2

@@ -39,6 +39,13 @@ codesign_extension_entitlements() {
 codesign_sign_extension() {
   local appex="$1"
   local project_root="${2:-$(pwd)}"
+  case "$(basename "${appex}")" in
+    widgetExtension.appex|PingScopeWidget.appex) ;;
+    *)
+      echo "Refusing to sign unexpected app extension: ${appex}" >&2
+      return 2
+      ;;
+  esac
   while IFS= read -r framework; do
     codesign_sign_framework_tree "${framework}"
   done < <(find "${appex}/Contents/Frameworks" -name '*.framework' -type d 2>/dev/null | sort)

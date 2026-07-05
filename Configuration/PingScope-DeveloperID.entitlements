@@ -19,5 +19,9 @@
 	<array>
 		<string>6R7S5GA944.group.com.hadm.PingScope</string>
 	</array>
+
+	<!-- Network client for TCP/UDP/HTTPS probes -->
+	<key>com.apple.security.network.client</key>
+	<true/>
 </dict>
 </plist>

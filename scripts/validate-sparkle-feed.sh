@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib/release-validation.sh
+source "${SCRIPT_DIR}/lib/release-validation.sh"
+# shellcheck source=lib/sparkle-tools.sh
+source "${SCRIPT_DIR}/lib/sparkle-tools.sh"
+
 project_setting() {
   local key="$1"
   awk -F' = ' -v key="${key}" '$1 ~ ("^[[:space:]]*" key "$") { gsub(/;/, "", $2); print $2; exit }' PingScope.xcodeproj/project.pbxproj
@@ -14,39 +20,6 @@ WORK_DIR="${PING_SCOPE_SPARKLE_VALIDATE_DIR:-}"
 KEY_ACCOUNT="${SPARKLE_KEY_ACCOUNT:-pingscope-ed25519}"
 DOWNLOAD_DMG="${PING_SCOPE_DOWNLOAD_DMG:-1}"
 CURL=(curl --fail --location --show-error --silent --proto '=https' --proto-redir '=https' --connect-timeout 10 --max-time 120 --retry 3)
-
-validate_version() {
-  [[ "$1" =~ ^[0-9]+[.][0-9]+[.][0-9]+([-.][0-9A-Za-z]+)*$ ]]
-}
-
-validate_build_version() {
-  [[ "$1" =~ ^[0-9]+$ ]]
-}
-
-find_sign_update() {
-  if [[ -n "${SPARKLE_SIGN_UPDATE:-}" ]]; then
-    [[ -x "${SPARKLE_SIGN_UPDATE}" ]] && { printf '%s' "${SPARKLE_SIGN_UPDATE}"; return 0; }
-    return 1
-  fi
-
-  local tool
-  for tool in \
-    .build/artifacts/sparkle/Sparkle/bin/sign_update \
-    .build/checkouts/Sparkle/bin/sign_update \
-    "${PWD}/DerivedData/SourcePackages/artifacts/sparkle/Sparkle/bin/sign_update"
-  do
-    if [[ -x "${tool}" ]]; then
-      printf '%s' "${tool}"
-      return 0
-    fi
-  done
-  tool=$(find .build -path '*/SourcePackages/artifacts/sparkle/Sparkle/bin/sign_update' -type f -perm -111 -print -quit 2>/dev/null || true)
-  if [[ -n "${tool}" && -x "${tool}" ]]; then
-    printf '%s' "${tool}"
-    return 0
-  fi
-  return 1
-}
 
 fail() {
   echo "FAIL: $*" >&2
@@ -131,7 +104,7 @@ if [[ "${DOWNLOAD_DMG}" -eq 1 ]]; then
     [[ "${actual_sha}" == "${EXPECTED_SHA256}" ]] || fail "DMG sha256 mismatch: expected=${EXPECTED_SHA256}, actual=${actual_sha}"
   fi
 
-  SIGN_UPDATE=$(find_sign_update) || fail "Sparkle sign_update was not found. Build the Xcode project once to resolve Sparkle."
+  SIGN_UPDATE=$(find_sparkle_tool sign_update SPARKLE_SIGN_UPDATE) || fail "Sparkle sign_update was not found. Build the Xcode project once to resolve Sparkle."
   "${SIGN_UPDATE}" --account "${KEY_ACCOUNT}" --verify "${DMG}" "${DMG_SIGNATURE}"
 
   spctl --assess --type open --context context:primary-signature -v "${DMG}" >/dev/null

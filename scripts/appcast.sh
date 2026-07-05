@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib/sparkle-tools.sh
+source "${SCRIPT_DIR}/lib/sparkle-tools.sh"
+
 RELEASE_DIR=""
 DMG_PATH=""
 DOWNLOAD_URL_PREFIX=""
@@ -78,32 +82,7 @@ if [[ -n "${RELEASE_NOTES}" && ! -f "${RELEASE_NOTES}" ]]; then
   exit 66
 fi
 
-find_generate_appcast() {
-  if [[ -n "${GENERATE_APPCAST}" ]]; then
-    [[ -x "${GENERATE_APPCAST}" ]] && { printf '%s' "${GENERATE_APPCAST}"; return 0; }
-    return 1
-  fi
-
-  local tool
-  for tool in \
-    .build/artifacts/sparkle/Sparkle/bin/generate_appcast \
-    .build/checkouts/Sparkle/bin/generate_appcast \
-    "${PWD}/DerivedData/SourcePackages/artifacts/sparkle/Sparkle/bin/generate_appcast"
-  do
-    if [[ -x "${tool}" ]]; then
-      printf '%s' "${tool}"
-      return 0
-    fi
-  done
-  tool=$(find .build -path '*/SourcePackages/artifacts/sparkle/Sparkle/bin/generate_appcast' -type f -perm -111 -print -quit 2>/dev/null || true)
-  if [[ -n "${tool}" && -x "${tool}" ]]; then
-    printf '%s' "${tool}"
-    return 0
-  fi
-  return 1
-}
-
-TOOL=$(find_generate_appcast) || {
+TOOL=$(find_sparkle_tool generate_appcast SPARKLE_GENERATE_APPCAST) || {
   echo "Sparkle generate_appcast was not found. Resolve Xcode packages or pass --generate-appcast." >&2
   exit 69
 }
