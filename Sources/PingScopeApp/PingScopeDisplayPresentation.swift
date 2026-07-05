@@ -5,17 +5,23 @@ struct PingScopeDisplayPresentation {
     let visibleHistorySamples: [PingResult]
     let visibleSamples: [PingResult]
     let allHostGraphSeries: [HostLatencyGraphSeries]
+    let hostStatusSummaries: [HostStatusSummary]
     let primaryGraphData: LatencyGraphData
     let allHostsGraphData: MultiHostLatencyGraphData
     let primaryStats: SampleStats
+    let latestStarlinkTelemetry: StarlinkTelemetry?
+    let recentVisibleSamples: [PingResult]
 
     init() {
         self.visibleHistorySamples = []
         self.visibleSamples = []
         self.allHostGraphSeries = []
+        self.hostStatusSummaries = []
         self.primaryGraphData = LatencyGraphData(samples: [])
         self.allHostsGraphData = MultiHostLatencyGraphData(series: [])
         self.primaryStats = SampleStats(samples: [])
+        self.latestStarlinkTelemetry = nil
+        self.recentVisibleSamples = []
     }
 
     init(
@@ -40,9 +46,28 @@ struct PingScopeDisplayPresentation {
         self.visibleHistorySamples = visibleHistorySamples
         self.visibleSamples = visibleSamples
         self.allHostGraphSeries = allHostGraphSeries
+        self.hostStatusSummaries = presenter.hostStatusSummaries(in: snapshot)
         self.primaryGraphData = LatencyGraphData(samples: visibleSamples)
         self.allHostsGraphData = MultiHostLatencyGraphData(series: allHostGraphSeries)
         self.primaryStats = SampleStats(samples: visibleSamples)
+        self.latestStarlinkTelemetry = Self.latestStarlinkTelemetry(
+            in: visibleSamples,
+            primaryHost: snapshot.primaryHost,
+            includesAllHosts: includesAllHosts
+        )
+        self.recentVisibleSamples = Array(visibleSamples.suffix(8).reversed())
+    }
+
+    private static func latestStarlinkTelemetry(
+        in visibleSamples: [PingResult],
+        primaryHost: HostConfig?,
+        includesAllHosts: Bool
+    ) -> StarlinkTelemetry? {
+        guard !includesAllHosts,
+              primaryHost?.method == .starlink else {
+            return nil
+        }
+        return visibleSamples.reversed().lazy.compactMap(\.metadata.starlink).first
     }
 
     private static func makeAllHostGraphSeries(

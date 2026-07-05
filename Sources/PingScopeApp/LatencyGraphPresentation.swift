@@ -1,3 +1,4 @@
+import Foundation
 import PingScopeCore
 import SwiftUI
 
@@ -33,6 +34,7 @@ struct LatencyGraphData {
     let scale: LatencyGraphScale
     let sampleCount: Int
     private let latencyCount: Int
+    private let renderPointCache = LatencyGraphRenderPointCache()
 
     init(samples: [PingResult]) {
         var latencies: [Double] = []
@@ -61,7 +63,15 @@ struct LatencyGraphData {
     }
 
     func renderPoints(pixelWidth: CGFloat) -> [LatencyGraphPoint] {
-        points.downsampled(toPixelWidth: pixelWidth, sampleCount: sampleCount)
+        renderPointCache.renderPoints(points: points, pixelWidth: pixelWidth, sampleCount: sampleCount)
+    }
+
+    var renderPointCacheEntryCount: Int {
+        renderPointCache.entryCount
+    }
+
+    var renderPointCacheKeys: Set<Int> {
+        renderPointCache.keys
     }
 }
 
@@ -69,20 +79,32 @@ struct DrawableHostLatencyGraphSeries {
     let source: HostLatencyGraphSeries
     let points: [LatencyGraphPoint]
     let sampleCount: Int
+    private let renderPointCache = LatencyGraphRenderPointCache()
 
     func renderPoints(pixelWidth: CGFloat) -> [LatencyGraphPoint] {
-        points.downsampled(toPixelWidth: pixelWidth, sampleCount: sampleCount)
+        renderPointCache.renderPoints(points: points, pixelWidth: pixelWidth, sampleCount: sampleCount)
+    }
+
+    var renderPointCacheEntryCount: Int {
+        renderPointCache.entryCount
+    }
+
+    var renderPointCacheKeys: Set<Int> {
+        renderPointCache.keys
     }
 }
 
 struct MultiHostLatencyGraphData {
     let drawableSeries: [DrawableHostLatencyGraphSeries]
+    let visibleLegendSeries: [HostLatencyGraphSeries]
     let scale: LatencyGraphScale
     private let latencyCount: Int
 
     init(series: [HostLatencyGraphSeries]) {
         var latencies: [Double] = []
         var drawableSeries: [DrawableHostLatencyGraphSeries] = []
+        var visibleLegendSeries: [HostLatencyGraphSeries] = []
+        visibleLegendSeries.reserveCapacity(4)
         for hostSeries in series {
             var points: [LatencyGraphPoint] = []
             points.reserveCapacity(hostSeries.samples.count)
@@ -98,9 +120,13 @@ struct MultiHostLatencyGraphData {
             // like. Only a series with no samples at all has nothing to render.
             if !points.isEmpty {
                 drawableSeries.append(DrawableHostLatencyGraphSeries(source: hostSeries, points: points, sampleCount: hostSeries.samples.count))
+                if visibleLegendSeries.count < 4 {
+                    visibleLegendSeries.append(hostSeries)
+                }
             }
         }
         self.drawableSeries = drawableSeries
+        self.visibleLegendSeries = visibleLegendSeries
         self.latencyCount = latencies.count
         scale = LatencyGraphScale(latencies: latencies)
     }
@@ -151,9 +177,50 @@ private struct LatencyGraphPointBucket {
     }
 }
 
+private final class LatencyGraphRenderPointCache {
+    private let maximumEntryCount = 4
+    private let lock = NSLock()
+    private var cache: [Int: [LatencyGraphPoint]] = [:]
+    private var recentKeys: [Int] = []
+
+    var entryCount: Int {
+        lock.withLock { cache.count }
+    }
+
+    var keys: Set<Int> {
+        lock.withLock { Set(cache.keys) }
+    }
+
+    func renderPoints(points: [LatencyGraphPoint], pixelWidth: CGFloat, sampleCount: Int) -> [LatencyGraphPoint] {
+        lock.withLock {
+            let pixelColumns = Swift.max(Int(pixelWidth.rounded(.up)), 1)
+            if let cached = cache[pixelColumns] {
+                markRecentlyUsed(pixelColumns)
+                return cached
+            }
+            let renderPoints = points.downsampled(toPixelColumns: pixelColumns, sampleCount: sampleCount)
+            cache[pixelColumns] = renderPoints
+            markRecentlyUsed(pixelColumns)
+            evictIfNeeded()
+            return renderPoints
+        }
+    }
+
+    private func markRecentlyUsed(_ key: Int) {
+        recentKeys.removeAll { $0 == key }
+        recentKeys.append(key)
+    }
+
+    private func evictIfNeeded() {
+        while recentKeys.count > maximumEntryCount {
+            let evicted = recentKeys.removeFirst()
+            cache.removeValue(forKey: evicted)
+        }
+    }
+}
+
 private extension Array where Element == LatencyGraphPoint {
-    func downsampled(toPixelWidth width: CGFloat, sampleCount: Int) -> [LatencyGraphPoint] {
-        let pixelColumns = Swift.max(Int(width.rounded(.up)), 1)
+    func downsampled(toPixelColumns pixelColumns: Int, sampleCount: Int) -> [LatencyGraphPoint] {
         guard count > pixelColumns * 2, sampleCount > 1 else { return self }
 
         var buckets = Swift.Array(repeating: LatencyGraphPointBucket(), count: pixelColumns)

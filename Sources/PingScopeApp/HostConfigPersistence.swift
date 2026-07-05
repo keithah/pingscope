@@ -39,17 +39,28 @@ final class HostConfigPersistence {
             savedHosts = []
         }
 
-        let hosts = savedHosts.isEmpty ? [HostConfig.defaultInternet] : BuildFlavor.current.normalizedHosts(savedHosts)
+        let sanitizedHosts = HostConfig.sanitizedHosts(BuildFlavor.current.normalizedHosts(savedHosts))
+        if !savedHosts.isEmpty, sanitizedHosts.count != savedHosts.count {
+            logger("host config sanitized dropped=\(savedHosts.count - sanitizedHosts.count)")
+        }
+        let hosts = sanitizedHosts.isEmpty ? [HostConfig.defaultInternet] : sanitizedHosts
         return LoadedHostConfiguration(hosts: hosts, primaryHostID: defaults.primaryHostID)
     }
 
-    func persist(_ snapshot: RuntimeSnapshot) {
+    func persist(_ snapshot: RuntimeSnapshot, logger: (String) -> Void) {
         guard !preservesUndecodableData else { return }
-        let hostState = PersistedHostState(hosts: snapshot.hosts, primaryHostID: snapshot.primaryHostID)
+        let hosts = HostConfig.sanitizedHosts(snapshot.hosts)
+        let primaryHostID = hosts.contains { $0.id == snapshot.primaryHostID } ? snapshot.primaryHostID : hosts.first?.id
+        let hostState = PersistedHostState(hosts: hosts, primaryHostID: primaryHostID)
         guard hostState != lastPersistedHostState else { return }
+        do {
+            try defaults.setHostConfigs(hosts)
+        } catch {
+            logger("host config encode failed; leaving previous persisted state error=\(error.localizedDescription)")
+            return
+        }
         lastPersistedHostState = hostState
-        defaults.hostConfigs = snapshot.hosts
-        defaults.primaryHostID = snapshot.primaryHostID
+        defaults.primaryHostID = primaryHostID
     }
 
     func allowUserManagedPersistence() {

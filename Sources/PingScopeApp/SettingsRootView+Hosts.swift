@@ -1,3 +1,4 @@
+import AppKit
 import PingScopeCore
 import SwiftUI
 
@@ -146,7 +147,7 @@ extension SettingsRootView {
                         }
 
                         HStack(alignment: .top, spacing: 14) {
-                            SettingsField("Interval") {
+                            SettingsField("Ping interval") {
                                 UnitNumberField(value: $model.draftIntervalMilliseconds, unit: "ms", width: 78)
                             }
                             SettingsField("Timeout") {
@@ -177,6 +178,7 @@ extension SettingsRootView {
                 }
                 .disabled(!model.canAddDraftHost || model.isTestingDraftHost)
                 Button {
+                    NSApp.keyWindow?.makeFirstResponder(nil)
                     model.addDraftHost()
                 } label: {
                     Label(model.draftActionTitle, systemImage: model.editingHostID == nil ? "plus" : "checkmark")

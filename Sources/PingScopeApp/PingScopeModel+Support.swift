@@ -86,6 +86,11 @@ extension UserDefaults {
         }
     }
 
+    func setHostConfigs(_ hosts: [HostConfig]) throws {
+        let data = try JSONEncoder().encode(hosts)
+        set(data, forKey: "hostConfigs")
+    }
+
     func storedHostConfigs() -> StoredHostConfigs {
         guard let data = data(forKey: "hostConfigs") else { return .missing }
         do {

@@ -25,15 +25,17 @@ struct PingScopeApp: App {
 }
 
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     static weak var shared: AppDelegate?
 
     let model = PingScopeModel()
     let softwareUpdateController = SoftwareUpdateController()
+    private lazy var overlayViewModel = OverlayPresentationViewModel(model: model)
+    private lazy var statusPopoverViewModel = StatusPopoverPresentationViewModel(model: model)
     private var statusItem: NSStatusItem?
     private var statusItemView: MenuBarStatusView?
     private var popover: NSPopover?
-    private var uiTestWindow: NSWindow?   // PINGSCOPE_UITEST only
+    private var detachedPopoverWindow: NSWindow?
     private var overlayController: NSWindowController?
     private var settingsWindowController: NSWindowController?
     private var lastExpandedOverlayFrame: NSRect?
@@ -52,22 +54,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.accessory)
         installStatusItem()
         model.start()
-        // UI-test hook: PINGSCOPE_UITEST_OPEN opens the menu-bar content window
-        // at launch so an automation harness can capture it via `see --app`
-        // with no menu-bar interaction at all (the reliable primary path).
-        if ProcessInfo.processInfo.environment["PINGSCOPE_UITEST_OPEN"] == "1" {
-            DispatchQueue.main.async { [weak self] in self?.toggleTestWindow() }
-        }
         model.onMenuStateChanged = { [weak self] state in
             self?.renderMenuState(state)
         }
+        model.onPresentationChanged = { [weak self] in
+            self?.refreshPresentationViewModels()
+        }
         model.onOverlayGraphClicked = { [weak self] in
             self?.openPopoverFromOverlay()
+        }
+        if Self.launchesWindowed {
+            DispatchQueue.main.async { [weak self] in
+                self?.openWindowedStatusInterface()
+            }
         }
         if model.overlayVisible {
             showOverlay()
         }
         installPowerObservers()
+    }
+
+    private static var launchesWindowed: Bool {
+        CommandLine.arguments.contains("-windowed")
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -106,26 +114,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func showOverlay() {
         DebugLog.write("AppDelegate.showOverlay called overlayControllerNil=\(overlayController == nil)")
         if overlayController == nil {
-            let view = OverlayView(model: model)
+            let view = OverlayView(viewModel: overlayViewModel)
             let window = OverlayWindow(contentRect: model.overlayFrame)
             window.contentView = OverlayContainerView(
                 rootView: view,
-                isCompact: { [weak self] in self?.model.overlayCompactMode ?? false },
+                isCompact: { [weak self] in self?.overlayViewModel.presentation.compactMode ?? false },
                 hostOptions: { [weak self] in self?.overlayHostOptions() ?? [] },
                 onToggleCompact: { [weak self] in self?.toggleOverlayCompactMode() },
                 onDetails: { [weak self] in self?.openPopoverFromOverlay() },
                 onSettings: { [weak self] in self?.openSettings() },
                 onClose: { [weak self] in self?.hideOverlay() },
                 onSelectHost: { [weak self] id in
-                    self?.model.overlayShowsAllHosts = false
-                    self?.model.selectHost(id)
+                    self?.overlayViewModel.selectHost(id)
                 },
-                onSelectAllHosts: { [weak self] in self?.model.overlayShowsAllHosts = true },
-                showsAllHosts: { [weak self] in self?.model.overlayShowsAllHosts ?? false },
-                showsLegend: { [weak self] in self?.model.overlayShowsLegend ?? false },
+                onSelectAllHosts: { [weak self] in self?.overlayViewModel.selectAllHosts() },
+                showsAllHosts: { [weak self] in self?.overlayViewModel.presentation.showsAllHosts ?? false },
+                showsLegend: { [weak self] in self?.overlayViewModel.presentation.showsLegend ?? false },
                 onToggleLegend: { [weak self] in
-                    guard let self else { return }
-                    self.model.overlayShowsLegend.toggle()
+                    self?.overlayViewModel.toggleLegend()
                 }
             )
             window.delegate = model
@@ -254,32 +260,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func refreshOverlayContent() {
         overlayController?.window?.contentView = OverlayContainerView(
-            rootView: OverlayView(model: model),
-            isCompact: { [weak self] in self?.model.overlayCompactMode ?? false },
+            rootView: OverlayView(viewModel: overlayViewModel),
+            isCompact: { [weak self] in self?.overlayViewModel.presentation.compactMode ?? false },
             hostOptions: { [weak self] in self?.overlayHostOptions() ?? [] },
             onToggleCompact: { [weak self] in self?.toggleOverlayCompactMode() },
             onDetails: { [weak self] in self?.openPopoverFromOverlay() },
             onSettings: { [weak self] in self?.openSettings() },
             onClose: { [weak self] in self?.hideOverlay() },
             onSelectHost: { [weak self] id in
-                self?.model.overlayShowsAllHosts = false
-                self?.model.selectHost(id)
+                self?.overlayViewModel.selectHost(id)
             },
-            onSelectAllHosts: { [weak self] in self?.model.overlayShowsAllHosts = true },
-            showsAllHosts: { [weak self] in self?.model.overlayShowsAllHosts ?? false },
-            showsLegend: { [weak self] in self?.model.overlayShowsLegend ?? false },
+            onSelectAllHosts: { [weak self] in self?.overlayViewModel.selectAllHosts() },
+            showsAllHosts: { [weak self] in self?.overlayViewModel.presentation.showsAllHosts ?? false },
+            showsLegend: { [weak self] in self?.overlayViewModel.presentation.showsLegend ?? false },
             onToggleLegend: { [weak self] in
-                guard let self else { return }
-                self.model.overlayShowsLegend.toggle()
+                self?.overlayViewModel.toggleLegend()
             }
         )
         applyOverlayBehavior()
     }
 
     private func overlayHostOptions() -> [(UUID, String, Bool)] {
-        let primaryID = model.primaryHost?.id
-        return model.snapshot.hosts.map { host in
-            (host.id, host.displayName, !model.overlayShowsAllHosts && host.id == primaryID)
+        overlayViewModel.presentation.hostOptions.map { host in
+            (host.id, host.name, host.isSelected)
+        }
+    }
+
+    private func refreshPresentationViewModels() {
+        if overlayController?.window?.isVisible == true {
+            overlayViewModel.refresh()
+        }
+        if popover?.isShown == true || detachedPopoverWindow?.isVisible == true {
+            statusPopoverViewModel.refresh()
         }
     }
 
@@ -308,8 +320,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         button.action = #selector(togglePopover)
         let view = MenuBarStatusView(frame: NSRect(x: 0, y: 0, width: defaultContent.itemWidth, height: NSStatusBar.system.thickness))
         view.autoresizingMask = [.width, .height]
-        // Don't let the decorative glyph view shadow the button's AX metadata.
-        view.setAccessibilityElement(false)
         view.onPrimaryClick = { [weak self] in
             self?.togglePopover()
         }
@@ -325,8 +335,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func renderMenuState(_ state: MenuBarState) {
         let content = model.menuBarGlyphContent
-        statusItem?.length = CGFloat(content.itemWidth)
-        statusItemView?.frame.size.width = CGFloat(content.itemWidth)
+        guard statusItemView?.content != content else { return }
+        if statusItem?.length != CGFloat(content.itemWidth) {
+            statusItem?.length = CGFloat(content.itemWidth)
+            statusItemView?.frame.size.width = CGFloat(content.itemWidth)
+        }
         statusItemView?.content = content
     }
 
@@ -336,14 +349,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let event = NSApp.currentEvent
         if event?.type == .rightMouseUp {
             showContextMenu(from: anchorView)
-            return
-        }
-
-        // UI-test hook: peekaboo/ScreenCaptureKit can't reliably capture the
-        // transient NSPopover panel, so under PINGSCOPE_UITEST the same content
-        // is shown in a normal (layer-0) window a harness can `see --app`.
-        if ProcessInfo.processInfo.environment["PINGSCOPE_UITEST"] == "1" {
-            toggleTestWindow()
             return
         }
 
@@ -363,43 +368,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Builds the shared menu-bar content view controller used by both the
     /// popover and the UI-test window, so both exercise identical UI.
     private func makeStatusContentController() -> NSViewController {
-        NSHostingController(
+        let controller = NSHostingController(
             rootView: StatusPopoverView(
-                model: model,
+                viewModel: statusPopoverViewModel,
                 onSettings: { [weak self] in
-                    self?.popover?.performClose(nil)
-                    self?.uiTestWindow?.close()
-                    self?.openSettings()
+                    self?.openSettingsFromStatusContent()
                 }
             )
             .environmentObject(softwareUpdateController)
         )
+        controller.title = "PingScope"
+        if #available(macOS 13.0, *) {
+            controller.sizingOptions = []
+        }
+        controller.view.autoresizingMask = [.width, .height]
+        return controller
     }
 
-    /// UI-test only: toggle a normal window hosting the menu-bar content.
-    private func toggleTestWindow() {
-        if let win = uiTestWindow, win.isVisible {
-            win.close()
-            uiTestWindow = nil
-            return
+    private func openSettingsFromStatusContent() {
+        popover?.performClose(nil)
+        if detachedPopoverWindow?.isVisible == true {
+            detachedPopoverWindow?.close()
         }
-        let controller = makeStatusContentController()
-        let win = NSWindow(contentViewController: controller)
-        win.title = "PingScope"
-        win.setContentSize(NSSize(width: 430, height: 540))
-        win.styleMask = [.titled, .closable]
-        win.isReleasedWhenClosed = false
-        win.center()
-        win.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
-        uiTestWindow = win
+        openSettings()
     }
 
     private func showPopover(relativeTo anchorView: NSView) {
         let popover = NSPopover()
         popover.behavior = .transient
-        popover.contentSize = NSSize(width: 430, height: 540)
+        popover.contentSize = MenuBarPresentationMode.statusContentSize
         popover.contentViewController = makeStatusContentController()
+        popover.delegate = self
         popover.show(relativeTo: anchorView.bounds, of: anchorView, preferredEdge: .minY)
         self.popover = popover
         applyWindowOpacity()
@@ -407,6 +406,56 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard self?.popover === popover else { return }
             self?.applyWindowOpacity()
         }
+    }
+
+    func popoverShouldDetach(_ popover: NSPopover) -> Bool {
+        MenuBarPresentationMode.shouldAllowUserDetachForMenuPopover()
+    }
+
+    func popoverDidDetach(_ popover: NSPopover) {
+        DebugLog.write("menu popover detached to window")
+    }
+
+    func detachableWindow(for popover: NSPopover) -> NSWindow? {
+        let window = makeDetachedStatusWindow()
+        detachedPopoverWindow = window
+        return window
+    }
+
+    private func openWindowedStatusInterface() {
+        popover?.performClose(nil)
+        NSApp.setActivationPolicy(.regular)
+        NSApp.activate(ignoringOtherApps: true)
+        if let window = detachedPopoverWindow, window.isVisible {
+            window.makeKeyAndOrderFront(nil)
+            return
+        }
+        let window = makeDetachedStatusWindow()
+        detachedPopoverWindow = window
+        window.center()
+        window.makeKeyAndOrderFront(nil)
+    }
+
+    private func makeDetachedStatusWindow() -> NSWindow {
+        let window = NSWindow(
+            contentRect: NSRect(origin: .zero, size: MenuBarPresentationMode.statusContentSize),
+            styleMask: MenuBarPresentationMode.detachedPopoverWindowStyleMask,
+            backing: .buffered,
+            defer: false
+        )
+        window.title = "PingScope"
+        window.backgroundColor = .windowBackgroundColor
+        window.contentViewController = makeStatusContentController()
+        if let contentView = window.contentView {
+            window.contentViewController?.view.frame = contentView.bounds
+            window.contentViewController?.view.autoresizingMask = [.width, .height]
+        }
+        window.minSize = MenuBarPresentationMode.statusContentMinimumSize
+        window.isReleasedWhenClosed = false
+        DispatchQueue.main.async { [weak window] in
+            window?.setContentSize(MenuBarPresentationMode.statusContentSize)
+        }
+        return window
     }
 
     private func showContextMenu(from view: NSView) {
@@ -517,20 +566,26 @@ final class MenuBarStatusView: NSView {
     ) {
         didSet {
             toolTip = content.accessibilityLabel
-            setAccessibilityLabel(content.accessibilityLabel)
+            setAccessibilityHelp(content.accessibilityLabel)
+            cachedLatencyText = Self.makeLatencyText(for: content)
             needsDisplay = true
         }
     }
+    private var cachedLatencyText: NSAttributedString
 
     var onPrimaryClick: (() -> Void)?
     var onSecondaryClick: (() -> Void)?
 
     override init(frame frameRect: NSRect) {
+        cachedLatencyText = Self.makeLatencyText(for: content)
         super.init(frame: frameRect)
         wantsLayer = true
         toolTip = content.accessibilityLabel
+        setAccessibilityElement(true)
         setAccessibilityRole(.button)
-        setAccessibilityLabel(content.accessibilityLabel)
+        setAccessibilityLabel("PingScope")
+        setAccessibilityIdentifier("pingscope.statusItem")
+        setAccessibilityHelp(content.accessibilityLabel)
     }
 
     required init?(coder: NSCoder) {
@@ -550,15 +605,21 @@ final class MenuBarStatusView: NSView {
         NSColor(statusColor: content.color).setFill()
         NSBezierPath(ovalIn: dotRect).fill()
 
+        let textRect = NSRect(x: 0, y: CGFloat(content.textBaselineY), width: bounds.width, height: 12)
+        cachedLatencyText.draw(with: textRect, options: [.usesLineFragmentOrigin])
+    }
+
+    private static func makeLatencyText(for content: MenuBarGlyphContent) -> NSAttributedString {
         let paragraph = NSMutableParagraphStyle()
         paragraph.alignment = .center
-        let attributes: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: CGFloat(content.fontSize), weight: content.fontWeight.nsFontWeight),
-            .foregroundColor: NSColor.labelColor,
-            .paragraphStyle: paragraph
-        ]
-        let textRect = NSRect(x: 0, y: CGFloat(content.textBaselineY), width: bounds.width, height: 12)
-        content.latencyText.draw(with: textRect, options: [.usesLineFragmentOrigin], attributes: attributes)
+        return NSAttributedString(
+            string: content.latencyText,
+            attributes: [
+                .font: NSFont.systemFont(ofSize: CGFloat(content.fontSize), weight: content.fontWeight.nsFontWeight),
+                .foregroundColor: NSColor.labelColor,
+                .paragraphStyle: paragraph
+            ]
+        )
     }
 
     override func mouseDown(with event: NSEvent) {
@@ -567,6 +628,11 @@ final class MenuBarStatusView: NSView {
 
     override func rightMouseDown(with event: NSEvent) {
         onSecondaryClick?()
+    }
+
+    override func accessibilityPerformPress() -> Bool {
+        onPrimaryClick?()
+        return true
     }
 }
 
@@ -579,314 +645,7 @@ private extension MenuBarFontWeight {
     }
 }
 
-final class OverlayWindow: NSWindow {
-    init(contentRect: NSRect) {
-        super.init(
-            contentRect: contentRect,
-            styleMask: [.borderless, .resizable],
-            backing: .buffered,
-            defer: false
-        )
-        isOpaque = false
-        backgroundColor = .clear
-        level = .normal
-        collectionBehavior = [.fullScreenAuxiliary]
-        isMovableByWindowBackground = true
-        ignoresMouseEvents = false
-        hasShadow = true
-    }
-
-    override var canBecomeKey: Bool { false }
-
-    override func sendEvent(_ event: NSEvent) {
-        if event.type == .rightMouseDown,
-           let presenter = contentView as? OverlayContextMenuPresenting {
-            presenter.presentOverlayContextMenu(with: event)
-            return
-        }
-        super.sendEvent(event)
-    }
-}
-
-@MainActor
-private protocol OverlayContextMenuPresenting: AnyObject {
-    func presentOverlayContextMenu(with event: NSEvent)
-}
-
-final class OverlayContainerView: NSView {
-    private let hostingView: NSHostingView<AnyView>
-    private let isCompact: () -> Bool
-    private let hostOptions: () -> [(UUID, String, Bool)]
-    private let onToggleCompact: () -> Void
-    private let onDetails: () -> Void
-    private let onSettings: () -> Void
-    private let onClose: () -> Void
-    private let onSelectHost: (UUID) -> Void
-    private let onSelectAllHosts: () -> Void
-    private let showsAllHosts: () -> Bool
-    private let showsLegend: () -> Bool
-    private let onToggleLegend: () -> Void
-    private let graphClickView: OverlayGraphClickView
-    private var compactButton: NSButton?
-    private var settingsButton: NSButton?
-    private var closeButton: NSButton?
-
-    init(
-        rootView: some View,
-        isCompact: @escaping () -> Bool,
-        hostOptions: @escaping () -> [(UUID, String, Bool)],
-        onToggleCompact: @escaping () -> Void,
-        onDetails: @escaping () -> Void,
-        onSettings: @escaping () -> Void,
-        onClose: @escaping () -> Void,
-        onSelectHost: @escaping (UUID) -> Void,
-        onSelectAllHosts: @escaping () -> Void,
-        showsAllHosts: @escaping () -> Bool,
-        showsLegend: @escaping () -> Bool,
-        onToggleLegend: @escaping () -> Void
-    ) {
-        self.hostingView = NSHostingView(rootView: AnyView(rootView))
-        self.isCompact = isCompact
-        self.hostOptions = hostOptions
-        self.onToggleCompact = onToggleCompact
-        self.onDetails = onDetails
-        self.onSettings = onSettings
-        self.onClose = onClose
-        self.onSelectHost = onSelectHost
-        self.onSelectAllHosts = onSelectAllHosts
-        self.showsAllHosts = showsAllHosts
-        self.showsLegend = showsLegend
-        self.onToggleLegend = onToggleLegend
-        self.graphClickView = OverlayGraphClickView(onClick: onDetails)
-        super.init(frame: .zero)
-
-        wantsLayer = true
-        addSubview(hostingView)
-        hostingView.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            hostingView.leadingAnchor.constraint(equalTo: leadingAnchor),
-            hostingView.trailingAnchor.constraint(equalTo: trailingAnchor),
-            hostingView.topAnchor.constraint(equalTo: topAnchor),
-            hostingView.bottomAnchor.constraint(equalTo: bottomAnchor)
-        ])
-
-        addSubview(graphClickView)
-        graphClickView.translatesAutoresizingMaskIntoConstraints = false
-
-        NSLayoutConstraint.activate([
-            graphClickView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
-            graphClickView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
-            graphClickView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -8),
-            graphClickView.heightAnchor.constraint(equalTo: heightAnchor, multiplier: isCompact() ? 0.78 : 0.42)
-        ])
-
-        if !isCompact() {
-            let compactButton = makeButton(
-                symbolName: "arrow.up.left.and.arrow.down.right",
-                tooltip: "Compact graph mode",
-                action: #selector(toggleCompact)
-            )
-            let settingsButton = makeButton(symbolName: "gearshape", tooltip: "Open settings", action: #selector(openSettings))
-            let closeButton = makeButton(symbolName: "xmark", tooltip: "Close overlay", action: #selector(closeOverlay))
-            self.compactButton = compactButton
-            self.settingsButton = settingsButton
-            self.closeButton = closeButton
-            addSubview(compactButton)
-            addSubview(settingsButton)
-            addSubview(closeButton)
-
-            NSLayoutConstraint.activate([
-                closeButton.topAnchor.constraint(equalTo: topAnchor, constant: 4),
-                closeButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -4),
-                settingsButton.centerYAnchor.constraint(equalTo: closeButton.centerYAnchor),
-                settingsButton.trailingAnchor.constraint(equalTo: closeButton.leadingAnchor, constant: -1),
-                compactButton.centerYAnchor.constraint(equalTo: closeButton.centerYAnchor),
-                compactButton.trailingAnchor.constraint(equalTo: settingsButton.leadingAnchor, constant: -1)
-            ])
-        }
-    }
-
-    required init?(coder: NSCoder) {
-        nil
-    }
-
-    override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
-        true
-    }
-
-    override func rightMouseDown(with event: NSEvent) {
-        DebugLog.write("overlay context menu requested")
-        showContextMenu(with: event)
-    }
-
-    override func menu(for event: NSEvent) -> NSMenu? {
-        contextMenu()
-    }
-
-    private func showContextMenu(with event: NSEvent) {
-        NSMenu.popUpContextMenu(contextMenu(), with: event, for: self)
-    }
-
-    private func contextMenu() -> NSMenu {
-        let menu = NSMenu()
-        let compactTitle = isCompact() ? "Exit Compact Graph" : "Compact Graph"
-        menu.addItem(NSMenuItem(title: compactTitle, action: #selector(toggleCompact), keyEquivalent: ""))
-        let hosts = hostOptions()
-        if hosts.count > 1 {
-            let legendItem = NSMenuItem(title: showsLegend() ? "Hide Legend" : "Show Legend", action: #selector(toggleLegend), keyEquivalent: "")
-            legendItem.target = self
-            legendItem.isEnabled = showsAllHosts()
-            menu.addItem(legendItem)
-
-            let hostItem = NSMenuItem(title: "Host", action: nil, keyEquivalent: "")
-            let hostMenu = NSMenu()
-            let allItem = NSMenuItem(title: "All Hosts", action: #selector(selectAllHosts), keyEquivalent: "")
-            allItem.target = self
-            allItem.state = showsAllHosts() ? .on : .off
-            hostMenu.addItem(allItem)
-            hostMenu.addItem(.separator())
-            for (index, host) in hosts.enumerated() {
-                let item = NSMenuItem(title: host.1, action: #selector(selectHost(_:)), keyEquivalent: "")
-                item.target = self
-                item.representedObject = host.0
-                item.state = host.2 ? .on : .off
-                if showsAllHosts() {
-                    item.attributedTitle = NSAttributedString(
-                        string: host.1,
-                        attributes: [.foregroundColor: NSColor.graphPaletteColor(index: index)]
-                    )
-                }
-                hostMenu.addItem(item)
-            }
-            hostItem.submenu = hostMenu
-            menu.addItem(hostItem)
-        }
-        menu.addItem(NSMenuItem(title: "Open Popover", action: #selector(openDetails), keyEquivalent: ""))
-        menu.addItem(NSMenuItem(title: "Settings...", action: #selector(openSettings), keyEquivalent: ","))
-        menu.addItem(.separator())
-        menu.addItem(NSMenuItem(title: "Close Overlay", action: #selector(closeOverlay), keyEquivalent: ""))
-        menu.items.forEach { $0.target = self }
-        return menu
-    }
-
-    private func makeButton(symbolName: String, tooltip: String, action: Selector) -> NSButton {
-        let button = NSButton()
-        button.isBordered = false
-        button.bezelStyle = .regularSquare
-        button.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: tooltip)
-        button.imagePosition = .imageOnly
-        button.target = self
-        button.action = action
-        button.toolTip = tooltip
-        button.setAccessibilityLabel(tooltip)
-        button.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            button.widthAnchor.constraint(equalToConstant: 20),
-            button.heightAnchor.constraint(equalToConstant: 20)
-        ])
-        return button
-    }
-
-    @objc private func toggleCompact() {
-        DebugLog.write("overlay context compact fired")
-        onToggleCompact()
-    }
-
-    @objc private func openDetails() {
-        DebugLog.write("overlay context details fired")
-        onDetails()
-    }
-
-    @objc private func selectHost(_ sender: NSMenuItem) {
-        guard let id = sender.representedObject as? UUID else { return }
-        DebugLog.write("overlay context host selected id=\(id.uuidString)")
-        onSelectHost(id)
-    }
-
-    @objc private func selectAllHosts() {
-        DebugLog.write("overlay context all hosts selected")
-        onSelectAllHosts()
-    }
-
-    @objc private func toggleLegend() {
-        DebugLog.write("overlay context legend toggled")
-        onToggleLegend()
-    }
-
-    @objc private func openSettings() {
-        DebugLog.write("overlay context settings fired")
-        onSettings()
-    }
-
-    @objc private func closeOverlay() {
-        DebugLog.write("overlay context close fired")
-        onClose()
-    }
-}
-
-extension OverlayContainerView: OverlayContextMenuPresenting {
-    func presentOverlayContextMenu(with event: NSEvent) {
-        DebugLog.write("overlay context menu requested")
-        NSMenu.popUpContextMenu(contextMenu(), with: event, for: self)
-    }
-}
-
-final class OverlayGraphClickView: NSView {
-    private let onClick: () -> Void
-    private var mouseDownLocation: NSPoint?
-    private var hasHandledMouseUp = false
-
-    init(onClick: @escaping () -> Void) {
-        self.onClick = onClick
-        super.init(frame: .zero)
-    }
-
-    required init?(coder: NSCoder) {
-        nil
-    }
-
-    override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
-        true
-    }
-
-    override func mouseDown(with event: NSEvent) {
-        mouseDownLocation = event.locationInWindow
-        hasHandledMouseUp = false
-    }
-
-    override func mouseDragged(with event: NSEvent) {
-        window?.performDrag(with: event)
-    }
-
-    override func mouseUp(with event: NSEvent) {
-        guard !hasHandledMouseUp else { return }
-        hasHandledMouseUp = true
-        let start = mouseDownLocation ?? event.locationInWindow
-        let end = event.locationInWindow
-        let distance = hypot(end.x - start.x, end.y - start.y)
-        guard distance < 4 else { return }
-        DebugLog.write("overlay graph click fired")
-        onClick()
-    }
-
-    override func rightMouseDown(with event: NSEvent) {
-        nextResponder?.rightMouseDown(with: event)
-    }
-}
-
 private extension NSColor {
-    static func graphPaletteColor(index: Int) -> NSColor {
-        let palette: [NSColor] = [
-            .systemBlue,
-            .systemGreen,
-            .systemOrange,
-            .systemPurple,
-            .systemPink,
-            .systemCyan
-        ]
-        return palette[index % palette.count]
-    }
-
     convenience init(statusColor: StatusColor) {
         switch statusColor {
         case .gray: self.init(cgColor: NSColor.systemGray.cgColor)!

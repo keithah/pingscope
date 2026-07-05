@@ -257,15 +257,51 @@ struct UnitNumberField: View {
     @Binding var value: Double
     let unit: String
     let width: CGFloat
+    @State private var text: String
+
+    init(value: Binding<Double>, unit: String, width: CGFloat) {
+        self._value = value
+        self.unit = unit
+        self.width = width
+        self._text = State(initialValue: Self.text(for: value.wrappedValue))
+    }
 
     var body: some View {
         HStack(spacing: 6) {
-            TextField(unit, value: $value, format: .number)
+            TextField(unit, text: Binding(
+                get: { text },
+                set: { newValue in
+                    text = newValue
+                    commit(newValue)
+                }
+            ))
                 .frame(width: width)
                 .monospacedDigit()
             Text(unit)
                 .foregroundStyle(.secondary)
         }
+        .onChange(of: value) { _, newValue in
+            let formatted = Self.text(for: newValue)
+            if text != formatted, Self.number(from: text) != newValue {
+                text = formatted
+            }
+        }
+    }
+
+    private func commit(_ text: String) {
+        guard let number = Self.number(from: text) else { return }
+        value = number
+    }
+
+    private static func text(for value: Double) -> String {
+        "\(Int(value.rounded()))"
+    }
+
+    private static func number(from text: String) -> Double? {
+        let cleaned = text.replacingOccurrences(of: ",", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleaned.isEmpty else { return nil }
+        return Double(cleaned)
     }
 }
 

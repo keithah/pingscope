@@ -61,7 +61,7 @@ let package = Package(
         ),
         .testTarget(
             name: "PingScopeTests",
-            dependencies: ["PingScopeCore", "PingScopeiOS"],
+            dependencies: ["PingScopeCore", "PingScopeiOS", "PingScope"],
             path: "Tests/PingScopeFreshTests"
         )
     ]

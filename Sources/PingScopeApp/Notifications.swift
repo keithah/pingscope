@@ -37,27 +37,39 @@ final class MacNotificationDispatcher: NSObject, UNUserNotificationCenterDelegat
     }
 
     func deliver(_ decision: AlertDecision, hosts: [HostConfig]) async {
+        await deliver([decision], hosts: hosts)
+    }
+
+    func deliver(_ decisions: [AlertDecision], hosts: [HostConfig]) async {
+        guard !decisions.isEmpty else { return }
         guard await ensureAuthorization() else { return }
         guard let center = notificationCenterIfAvailable() else { return }
 
+        await withTaskGroup(of: Void.self) { group in
+            for decision in decisions {
+                group.addTask { [logger] in
+                    do {
+                        try await center.add(Self.notificationRequest(for: decision, hosts: hosts))
+                    } catch {
+                        logger?("notification delivery failed alert=\(decision) error=\(error.localizedDescription)")
+                    }
+                }
+            }
+        }
+    }
+
+    private static func notificationRequest(for decision: AlertDecision, hosts: [HostConfig]) -> UNNotificationRequest {
         let content = UNMutableNotificationContent()
         let message = NotificationMessage(decision: decision, hosts: hosts)
         content.title = message.title
         content.body = message.body
         content.sound = .default
 
-        let request = UNNotificationRequest(
+        return UNNotificationRequest(
             identifier: "pingscope-\(UUID().uuidString)",
             content: content,
             trigger: nil
         )
-
-        do {
-            try await center.add(request)
-        } catch {
-            logger?("notification delivery failed alert=\(decision) error=\(error.localizedDescription)")
-            return
-        }
     }
 
     func userNotificationCenter(

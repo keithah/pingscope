@@ -223,7 +223,10 @@ extension SettingsRootView {
         detail: String,
         rows: [(String, Binding<Bool>)]
     ) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
+        let selectedCount = rows.reduce(0) { count, row in
+            count + (row.1.wrappedValue ? 1 : 0)
+        }
+        return VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .firstTextBaseline) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(title)
@@ -233,7 +236,7 @@ extension SettingsRootView {
                         .foregroundStyle(.secondary)
                 }
                 Spacer(minLength: 12)
-                Text("\(rows.filter { $0.1.wrappedValue }.count)/\(rows.count)")
+                Text("\(selectedCount)/\(rows.count)")
                     .font(.caption.monospacedDigit().weight(.semibold))
                     .foregroundStyle(.secondary)
             }

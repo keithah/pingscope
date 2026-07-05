@@ -80,8 +80,7 @@ struct LatencyGraph: View {
     }
 
     private func graphCanvas(graphData: LatencyGraphData) -> some View {
-        GeometryReader { proxy in
-            Canvas { context, size in
+        Canvas { context, size in
                 // Bail out only when there is nothing at all to plot. During a
                 // total outage every sample is a failure: the line stroke is a
                 // no-op but the per-point loop must still stamp the red marks.
@@ -127,8 +126,6 @@ struct LatencyGraph: View {
                 }
                 context.stroke(path, with: .color(.accentColor), lineWidth: 2)
 
-            }
-            .frame(width: proxy.size.width, height: proxy.size.height)
         }
     }
 
@@ -191,10 +188,8 @@ struct MultiHostLatencyGraph: View {
     }
 
     private var legend: some View {
-        let visibleSeries = series.filter { !$0.samples.isEmpty }.prefix(4)
-
-        return HStack(spacing: 8) {
-            ForEach(Array(visibleSeries)) { hostSeries in
+        HStack(spacing: 8) {
+            ForEach(graphData.visibleLegendSeries) { hostSeries in
                 HStack(spacing: 4) {
                     Circle()
                         .fill(hostSeries.color)
@@ -212,8 +207,7 @@ struct MultiHostLatencyGraph: View {
     }
 
     private func graphCanvas(graphData: MultiHostLatencyGraphData) -> some View {
-        GeometryReader { proxy in
-            Canvas { context, size in
+        Canvas { context, size in
                 guard !graphData.isEmpty else {
                     let rect = CGRect(origin: .zero, size: size)
                     context.stroke(Path(roundedRect: rect, cornerRadius: 6), with: .color(.secondary.opacity(0.25)))
@@ -227,8 +221,6 @@ struct MultiHostLatencyGraph: View {
                 for hostSeries in graphData.drawableSeries {
                     draw(hostSeries, in: size, context: context, scale: graphData.scale)
                 }
-            }
-            .frame(width: proxy.size.width, height: proxy.size.height)
         }
     }
 

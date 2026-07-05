@@ -2,117 +2,192 @@ import PingScopeCore
 import SwiftUI
 
 struct StatusPopoverView: View {
-    @ObservedObject var model: PingScopeModel
+    @ObservedObject var viewModel: StatusPopoverPresentationViewModel
     var onSettings: () -> Void = {}
     @EnvironmentObject private var softwareUpdateController: SoftwareUpdateController
 
     var body: some View {
+        let presentation = viewModel.presentation
         VStack(alignment: .leading, spacing: 14) {
             header
-            HStack(spacing: 12) {
-                Picker("Range", selection: $model.selectedRange) {
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                Text("Graph range")
+                    .font(.headline)
+                Picker("Graph range", selection: Binding(
+                    get: { presentation.selectedRange },
+                    set: { viewModel.setSelectedRange($0) }
+                )) {
                     ForEach(TimeRange.displayCases) { range in
                         Text(range.rawValue).tag(range)
                     }
                 }
                 .pickerStyle(.segmented)
+                .accessibilityLabel("Graph range")
             }
 
             graph
-                .frame(height: 150)
+                .frame(
+                    minHeight: MenuBarPresentationMode.statusGraphMinimumHeight,
+                    idealHeight: MenuBarPresentationMode.statusGraphMinimumHeight,
+                    maxHeight: .infinity
+                )
+                .layoutPriority(1)
+
+            if presentation.popoverShowsAllHosts {
+                allHostStatusSummary
+            }
 
             stats
-            if let telemetry = latestStarlinkTelemetry {
+            if let telemetry = presentation.displayPresentation.latestStarlinkTelemetry {
                 StarlinkTelemetrySummary(telemetry: telemetry)
             }
             if let degradationReason {
                 CompactDiagnosisReasonRow(diagnosis: degradationReason)
             }
 
-            RecentSamplesView(samples: Array(model.displayPresentation.visibleSamples.suffix(8).reversed()), range: model.selectedRange)
+            RecentSamplesView(samples: presentation.displayPresentation.recentVisibleSamples, range: presentation.selectedRange)
         }
         .padding(16)
-        .frame(width: 430, height: 540, alignment: .top)
+        .frame(
+            minWidth: MenuBarPresentationMode.statusContentMinimumSize.width,
+            idealWidth: MenuBarPresentationMode.statusContentSize.width,
+            maxWidth: .infinity,
+            minHeight: MenuBarPresentationMode.statusContentMinimumSize.height,
+            idealHeight: MenuBarPresentationMode.statusContentSize.height,
+            maxHeight: .infinity,
+            alignment: .top
+        )
+        .background(Color(nsColor: .windowBackgroundColor))
     }
 
     private var header: some View {
-        HStack(alignment: .firstTextBaseline) {
-            VStack(alignment: .leading, spacing: 4) {
-                if model.snapshot.hosts.count > 1 {
-                    Picker("Host", selection: Binding(
-                        get: { model.popoverShowsAllHosts ? Self.allHostsSelectionID : (model.primaryHost?.id.uuidString ?? model.snapshot.hosts.first?.id.uuidString ?? "") },
-                        set: { selection in
-                            if selection == Self.allHostsSelectionID {
-                                model.popoverShowsAllHosts = true
-                            } else if let id = UUID(uuidString: selection) {
-                                model.popoverShowsAllHosts = false
-                                model.selectHost(id)
+        let presentation = viewModel.presentation
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 4) {
+                    if presentation.snapshot.hosts.count > 1 {
+                        Picker("Host", selection: Binding(
+                            get: { presentation.popoverShowsAllHosts ? Self.allHostsSelectionID : (presentation.primaryHost?.id.uuidString ?? presentation.snapshot.hosts.first?.id.uuidString ?? "") },
+                            set: { selection in
+                                if selection == Self.allHostsSelectionID {
+                                    viewModel.selectAllHosts()
+                                } else if let id = UUID(uuidString: selection) {
+                                    viewModel.selectHost(id)
+                                }
+                            }
+                        )) {
+                            Text("All Hosts").tag(Self.allHostsSelectionID)
+                            Divider()
+                            ForEach(presentation.snapshot.hosts) { host in
+                                Text(host.displayName).tag(host.id.uuidString)
                             }
                         }
-                    )) {
-                        Text("All Hosts").tag(Self.allHostsSelectionID)
-                        Divider()
-                        ForEach(model.snapshot.hosts) { host in
-                            Text(host.displayName).tag(host.id.uuidString)
-                        }
-                    }
-                    .labelsHidden()
-                    .pickerStyle(.menu)
-                    .font(.headline)
-                    .fixedSize()
-                } else {
-                    Text(model.primaryHost?.displayName ?? "No Host")
+                        .labelsHidden()
+                        .pickerStyle(.menu)
                         .font(.headline)
-                }
-                Text(hostSubtitle)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            Spacer()
-            HStack(alignment: .top, spacing: 14) {
-                VStack(alignment: .trailing, spacing: 4) {
-                    Text(model.selectedRangeState.text)
-                        .font(.system(.title2, design: .monospaced).weight(.semibold))
-                    Label(model.selectedRangeStatusLabel, systemImage: "circle.fill")
+                        .fixedSize()
+                        .accessibilityHint(monitoredHostsAccessibilitySummary)
+                    } else {
+                        Text(presentation.primaryHost?.displayName ?? "No Host")
+                            .font(.headline)
+                    }
+                    Text(hostSubtitle)
                         .font(.caption)
-                        .foregroundStyle(Color(statusColor: model.selectedRangeState.color))
+                        .foregroundStyle(.secondary)
                 }
-                Button {
-                    onSettings()
-                } label: {
-                    Image(systemName: "gearshape")
+                Spacer()
+                HStack(alignment: .top, spacing: 14) {
+                    VStack(alignment: .trailing, spacing: 4) {
+                        Text(presentation.selectedRangeState.text)
+                            .font(.system(.title2, design: .monospaced).weight(.semibold))
+                        Label(presentation.selectedRangeStatusLabel, systemImage: "circle.fill")
+                            .font(.caption)
+                            .foregroundStyle(Color(statusColor: presentation.selectedRangeState.color))
+                    }
+                    Button {
+                        onSettings()
+                    } label: {
+                        Image(systemName: "gearshape")
+                            .frame(
+                                width: MenuBarPresentationMode.statusControlHitSize,
+                                height: MenuBarPresentationMode.statusControlHitSize
+                            )
+                    }
+                    .buttonStyle(.borderless)
+                    .contentShape(Rectangle())
+                    .help("Open settings")
+                    .accessibilityLabel("Open settings")
                 }
-                .buttonStyle(.borderless)
-                .help("Open settings")
-                .accessibilityLabel("Open settings")
             }
+            pingIntervalControl
         }
     }
 
     private static let allHostsSelectionID = "__all_hosts__"
 
     private var hostSubtitle: String {
-        if model.popoverShowsAllHosts {
-            return "\(model.snapshot.hosts.filter(\.isEnabled).count) enabled hosts"
+        let presentation = viewModel.presentation
+        if presentation.popoverShowsAllHosts {
+            let enabledCount = presentation.snapshot.hosts.reduce(0) { count, host in
+                count + (host.isEnabled ? 1 : 0)
+            }
+            return "\(enabledCount) enabled hosts"
         }
-        return "\(model.primaryHost?.method.displayName ?? "TCP") \(model.primaryHost?.address ?? "")"
+        return "\(presentation.primaryHost?.method.displayName ?? "TCP") \(presentation.primaryHost?.address ?? "")"
+    }
+
+    private var monitoredHostsAccessibilitySummary: String {
+        let presentation = viewModel.presentation
+        guard presentation.displayPresentation.hostStatusSummaries.count > 1 else {
+            return hostSubtitle
+        }
+        return presentation.displayPresentation.hostStatusSummaries
+            .map(\.accessibilityLabel)
+            .joined(separator: ". ")
+    }
+
+    @ViewBuilder
+    private var pingIntervalControl: some View {
+        let presentation = viewModel.presentation
+        if !presentation.popoverShowsAllHosts, let host = presentation.primaryHost {
+            let selectedMilliseconds = PingIntervalPresentation.selection(for: host.interval)
+            HStack(spacing: 8) {
+                Text("Ping interval")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Picker("Ping interval", selection: Binding(
+                    get: { selectedMilliseconds },
+                    set: { milliseconds in viewModel.setPingInterval(milliseconds, for: host.id) }
+                )) {
+                    ForEach(PingIntervalPresentation.options(including: selectedMilliseconds)) { option in
+                        Text(option.label).tag(option.milliseconds)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .controlSize(.small)
+                .accessibilityLabel("Ping interval")
+                .help("Change how often PingScope checks this host")
+                Spacer(minLength: 0)
+            }
+        }
     }
 
     @ViewBuilder
     private var graph: some View {
-        if model.popoverShowsAllHosts {
+        let presentation = viewModel.presentation
+        if presentation.popoverShowsAllHosts {
             MultiHostLatencyGraph(
-                series: model.displayPresentation.allHostGraphSeries,
-                graphData: model.displayPresentation.allHostsGraphData,
+                series: presentation.displayPresentation.allHostGraphSeries,
+                graphData: presentation.displayPresentation.allHostsGraphData,
                 showsAxes: true
             )
         } else {
-            LatencyGraph(graphData: model.displayPresentation.primaryGraphData, showsAxes: true)
+            LatencyGraph(graphData: presentation.displayPresentation.primaryGraphData, showsAxes: true)
         }
     }
 
     private var stats: some View {
-        let stats = model.displayPresentation.primaryStats
+        let stats = viewModel.presentation.displayPresentation.primaryStats
         return Grid(alignment: .leading, horizontalSpacing: 18, verticalSpacing: 6) {
             GridRow {
                 stat("TX", "\(stats.transmitted)")
@@ -140,22 +215,60 @@ struct StatusPopoverView: View {
         return "\(Int(value.rounded()))ms"
     }
 
-    private var latestStarlinkTelemetry: StarlinkTelemetry? {
-        guard !model.popoverShowsAllHosts,
-              model.primaryHost?.method == .starlink else {
-            return nil
+    private var allHostStatusSummary: some View {
+        VStack(spacing: 6) {
+            ForEach(viewModel.presentation.displayPresentation.hostStatusSummaries, id: \.id) { summary in
+                AllHostStatusRow(summary: summary)
+            }
         }
-        return model.displayPresentation.visibleSamples.reversed().compactMap(\.metadata.starlink).first
     }
 
     private var degradationReason: NetworkPerspectiveDiagnosis? {
-        let diagnosis = model.networkDiagnosis
+        let diagnosis = viewModel.presentation.networkDiagnosis
         switch diagnosis.scope {
         case .localNetwork, .upstream, .remoteService, .partialDegradation:
             return diagnosis
         case .noData, .allReachable:
             return nil
         }
+    }
+}
+
+private struct AllHostStatusRow: View {
+    let summary: HostStatusSummary
+
+    var body: some View {
+        HStack(spacing: 9) {
+            Circle()
+                .fill(Color(statusColor: summary.color))
+                .frame(width: 8, height: 8)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(summary.name)
+                    .font(.caption.weight(.semibold))
+                    .lineLimit(1)
+                Text(summary.endpoint)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 8)
+            VStack(alignment: .trailing, spacing: 1) {
+                Text(summary.statusText)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(Color(statusColor: summary.color))
+                    .lineLimit(1)
+                Text(summary.latencyText)
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(Color(nsColor: .controlBackgroundColor).opacity(0.48), in: RoundedRectangle(cornerRadius: 6))
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(summary.accessibilityLabel)
+        .help(summary.accessibilityLabel)
     }
 }
 

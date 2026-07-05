@@ -1,18 +1,18 @@
-import AppKit
 import PingScopeCore
 import SwiftUI
 
 struct OverlayView: View {
-    @ObservedObject var model: PingScopeModel
+    @ObservedObject var viewModel: OverlayPresentationViewModel
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        VStack(alignment: .leading, spacing: model.overlayCompactMode ? 0 : 6) {
-            if !model.overlayCompactMode {
+        let presentation = viewModel.presentation
+        VStack(alignment: .leading, spacing: presentation.compactMode ? 0 : 6) {
+            if !presentation.compactMode {
                 HStack(alignment: .center, spacing: 7) {
-                    Text(model.menuBarState.text)
+                    Text(presentation.menuBarState.text)
                         .font(.system(size: 13, weight: .medium, design: .monospaced))
-                        .foregroundStyle(Color(statusColor: model.menuBarState.color))
+                        .foregroundStyle(Color(statusColor: presentation.menuBarState.color))
                         .lineLimit(1)
                         .fixedSize()
                     overlayHostSelector
@@ -24,27 +24,27 @@ struct OverlayView: View {
             overlayGraph
                 .contentShape(Rectangle())
                 .onTapGesture {
-                    model.openOverlayDetails()
+                    viewModel.openDetails()
                 }
         }
-        .padding(model.overlayCompactMode ? EdgeInsets(top: 6, leading: 6, bottom: 6, trailing: 6) : EdgeInsets(top: 4, leading: 12, bottom: 12, trailing: 12))
+        .padding(presentation.compactMode ? EdgeInsets(top: 6, leading: 6, bottom: 6, trailing: 6) : EdgeInsets(top: 4, leading: 12, bottom: 12, trailing: 12))
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
-        .frame(minWidth: model.overlayCompactMode ? 150 : 190, minHeight: model.overlayCompactMode ? 48 : 78)
+        .frame(minWidth: presentation.compactMode ? 150 : 190, minHeight: presentation.compactMode ? 48 : 78)
         .contextMenu {
-            Button(model.overlayCompactMode ? "Exit Compact Graph" : "Compact Graph") {
+            Button(presentation.compactMode ? "Exit Compact Graph" : "Compact Graph") {
                 AppDelegate.shared?.toggleOverlayCompactMode()
             }
-            if model.snapshot.hosts.count > 1 {
-                Button(model.overlayShowsAllHosts ? "Show Primary Host" : "Show All Hosts") {
-                    model.overlayShowsAllHosts.toggle()
+            if presentation.hostOptions.count > 1 {
+                Button(presentation.showsAllHosts ? "Show Primary Host" : "Show All Hosts") {
+                    viewModel.toggleAllHosts()
                 }
-                Button(model.overlayShowsLegend ? "Hide Legend" : "Show Legend") {
-                    model.overlayShowsLegend.toggle()
+                Button(presentation.showsLegend ? "Hide Legend" : "Show Legend") {
+                    viewModel.toggleLegend()
                 }
-                .disabled(!model.overlayShowsAllHosts)
+                .disabled(!presentation.showsAllHosts)
             }
             Button("Open Popover") {
-                model.openOverlayDetails()
+                viewModel.openDetails()
             }
             Button("Settings...") {
                 AppDelegate.shared?.openSettings()
@@ -58,34 +58,35 @@ struct OverlayView: View {
 
     @ViewBuilder
     private var overlayGraph: some View {
-        if model.overlayShowsAllHosts {
+        let presentation = viewModel.presentation
+        if presentation.showsAllHosts {
             MultiHostLatencyGraph(
-                series: model.displayPresentation.allHostGraphSeries,
-                graphData: model.displayPresentation.allHostsGraphData,
-                showsLegend: model.overlayShowsLegend
+                series: presentation.displayPresentation.allHostGraphSeries,
+                graphData: presentation.displayPresentation.allHostsGraphData,
+                showsLegend: presentation.showsLegend
             )
         } else {
-            LatencyGraph(graphData: model.displayPresentation.primaryGraphData)
+            LatencyGraph(graphData: presentation.displayPresentation.primaryGraphData)
         }
     }
 
     @ViewBuilder
     private var overlayHostSelector: some View {
-        if model.snapshot.hosts.count > 1 {
+        let presentation = viewModel.presentation
+        if presentation.hostOptions.count > 1 {
             Menu {
                 Button("All Hosts") {
-                    model.overlayShowsAllHosts = true
+                    viewModel.selectAllHosts()
                 }
                 Divider()
-                ForEach(model.snapshot.hosts) { host in
-                    Button(host.displayName) {
-                        model.overlayShowsAllHosts = false
-                        model.selectHost(host.id)
+                ForEach(presentation.hostOptions) { host in
+                    Button(host.name) {
+                        viewModel.selectHost(host.id)
                     }
                 }
             } label: {
                 HStack(spacing: 3) {
-                    Text(model.overlayShowsAllHosts ? "All Hosts" : (model.primaryHost?.displayName ?? "No Host"))
+                    Text(presentation.showsAllHosts ? "All Hosts" : presentation.primaryHostName)
                         .lineLimit(1)
                         .truncationMode(.tail)
                     Image(systemName: "chevron.down")
@@ -98,7 +99,7 @@ struct OverlayView: View {
             .buttonStyle(.plain)
             .fixedSize(horizontal: false, vertical: true)
         } else {
-            Text(model.primaryHost?.displayName ?? "No Host")
+            Text(presentation.primaryHostName)
                 .font(.system(size: 10.5, weight: .medium))
                 .foregroundStyle(.secondary)
                 .lineLimit(1)

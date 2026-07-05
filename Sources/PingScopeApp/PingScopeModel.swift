@@ -4,7 +4,7 @@ import Foundation
 @preconcurrency import Network
 import PingScopeCore
 import ServiceManagement
-import UniformTypeIdentifiers
+import WidgetKit
 
 @MainActor
 final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
@@ -61,6 +61,7 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
     @Published var overlayCompactMode: Bool {
         didSet {
             UserDefaults.standard.overlayCompactMode = overlayCompactMode
+            onPresentationChanged?()
         }
     }
     @Published var overlayShowsAllHosts: Bool {
@@ -78,6 +79,7 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
     @Published var overlayShowsLegend: Bool {
         didSet {
             UserDefaults.standard.overlayShowsLegend = overlayShowsLegend
+            onPresentationChanged?()
         }
     }
     @Published var allowsLocalNetworkProbes: Bool {
@@ -106,7 +108,11 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
                 let store = widgetSnapshotStore ?? WidgetSnapshotStore()
                 widgetSnapshotStore = nil
                 lastPublishedWidgetSnapshot = nil
-                Task { await store.delete() }
+                lastWidgetTimelineReloadAt = nil
+                Task {
+                    await store.delete()
+                    WidgetCenter.shared.reloadAllTimelines()
+                }
             }
         }
     }
@@ -127,31 +133,35 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
     private let networkDiagnoser = NetworkPerspectiveDiagnoser()
     let runtime: PingRuntime
     private let hostTester: HostTester
-    private let gatewayDetector = DefaultGatewayDetector()
-    private let starlinkDetector = StarlinkDishDetector()
+    let gatewayEndpointResolver: DefaultGatewayEndpointResolver
+    let gatewayDetector = DefaultGatewayDetector()
+    let starlinkDetector = StarlinkDishDetector()
     private let notificationDispatcher = MacNotificationDispatcher()
     private let pathMonitor = NWPathMonitor()
     private let pathMonitorQueue = DispatchQueue(label: "com.pingscope.network-path")
-    private var widgetSnapshotStore: WidgetSnapshotStore?
+    var widgetSnapshotStore: WidgetSnapshotStore?
     private var snapshotTask: Task<Void, Never>?
     private var alertTask: Task<Void, Never>?
     private var networkTask: Task<Void, Never>?
-    private var endpointRefreshTask: Task<Void, Never>?
+    var endpointRefreshTask: Task<Void, Never>?
     private var historyTask: Task<Void, Never>?
     private var overlayFramePersistTask: Task<Void, Never>?
+    var widgetSnapshotPublishTask: Task<Void, Never>?
     var notificationRulesTask: Task<Void, Never>?
     var localNetworkProbeTask: Task<Void, Never>?
     private var draftTestTask: Task<Void, Never>?
     private var draftTestGeneration = 0
     private var isApplyingStartAtLoginChange = false
     private var lastHistoryKey: String?
-    private var lastPublishedWidgetSnapshot: WidgetSnapshot?
+    var lastPublishedWidgetSnapshot: WidgetSnapshot?
+    var lastWidgetTimelineReloadAt: Date?
+    let widgetPublishPolicy = WidgetSnapshotPublishPolicy()
     private let hostConfigPersistence: HostConfigPersistence
-    private let widgetSnapshotHeartbeatInterval: TimeInterval = 5 * 60
     private var lastObservedGateway: String?
     private var lastNetworkPathSignature: String?
     var onMenuStateChanged: ((MenuBarState) -> Void)?
     var onOverlayGraphClicked: (() -> Void)?
+    var onPresentationChanged: (() -> Void)?
 
     override init() {
         let hostConfigPersistence = HostConfigPersistence()
@@ -179,10 +189,14 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
             }),
             historyStore: historyStore,
             allowsLocalNetworkProbes: allowsLocalNetworkProbes,
-            notificationRules: notificationRules
+            notificationRules: notificationRules,
+            logger: { message in
+                DebugLog.write(message)
+            }
         )
         self.hostConfigPersistence = hostConfigPersistence
         self.hostTester = HostTester(probeFactory: probeFactory)
+        self.gatewayEndpointResolver = DefaultGatewayEndpointResolver(probeFactory: probeFactory)
         self.notificationRules = notificationRules
         self.enabledNetworkStatusAlerts = UserDefaults.standard.enabledNetworkStatusAlerts
         self.overlayVisible = UserDefaults.standard.overlayVisible
@@ -264,15 +278,10 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
         guard limit > 0 else { return [] }
         var failures: [PingResult] = []
         failures.reserveCapacity(limit)
-        for sample in samples where sample.failureReason != nil {
-            let insertionIndex = failures.firstIndex { sample.timestamp > $0.timestamp } ?? failures.count
-            if insertionIndex < limit {
-                failures.insert(sample, at: insertionIndex)
-                if failures.count > limit {
-                    failures.removeLast()
-                }
-            } else if failures.count < limit {
-                failures.append(sample)
+        for sample in samples.reversed() where sample.failureReason != nil {
+            failures.append(sample)
+            if failures.count == limit {
+                break
             }
         }
         return failures
@@ -303,22 +312,20 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
 
     func start() {
         snapshotTask?.cancel()
-        let stream = Task { await runtime.snapshots() }
         snapshotTask = Task { [weak self] in
-            let snapshots = await stream.value
+            guard let self else { return }
+            let snapshots = await self.runtime.snapshots()
             for await snapshot in snapshots {
                 await MainActor.run {
-                    self?.snapshot = snapshot
-                    self?.recomputeDisplayPresentation()
-                    self?.persistHostState(snapshot)
-                    if let state = self?.menuBarState {
-                        self?.onMenuStateChanged?(state)
-                    }
-                    self?.evaluateInternetLoss(from: snapshot)
-                    self?.ensureLocalNetworkProbesForSelectedLocalHost(snapshot)
-                    self?.refreshVisibleHistoryIfNeeded()
-                    if self?.widgetsEnabled == true {
-                        self?.publishWidgetSnapshot(snapshot)
+                    self.snapshot = snapshot
+                    self.recomputeDisplayPresentation()
+                    self.persistHostState(snapshot)
+                    self.onMenuStateChanged?(self.menuBarState)
+                    self.evaluateInternetLoss(from: snapshot)
+                    self.ensureLocalNetworkProbesForSelectedLocalHost(snapshot)
+                    self.refreshVisibleHistoryIfNeeded()
+                    if self.widgetsEnabled == true {
+                        self.publishWidgetSnapshot(snapshot)
                     }
                 }
             }
@@ -327,19 +334,18 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
         // above deliberately drops intermediate states when the main actor is
         // busy, which would silently and permanently lose one-shot alerts.
         alertTask?.cancel()
-        let alertStream = Task { await runtime.alerts() }
         alertTask = Task { [weak self] in
-            let events = await alertStream.value
+            guard let self else { return }
+            let events = await self.runtime.alerts()
             for await event in events {
                 await MainActor.run {
-                    self?.deliverAlerts(event.decisions, hosts: event.hosts)
+                    self.deliverAlerts(event.decisions, hosts: event.hosts)
                 }
             }
         }
         Task { await runtime.start() }
         startNetworkMonitoring()
         startNetworkPathMonitoring()
-        refreshNetworkEndpoints(removeMissingStarlink: true)
         refreshNotificationPermission()
     }
 
@@ -379,6 +385,18 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
         loadDraft(from: host)
     }
 
+    func setPingInterval(_ interval: Duration, for hostID: UUID) {
+        guard interval >= .milliseconds(250),
+              var host = snapshot.hosts.first(where: { $0.id == hostID }) else {
+            return
+        }
+        host.interval = interval
+        let updatedHost = host
+        performUserHostMutation { runtime in
+            await runtime.upsertHost(updatedHost)
+        }
+    }
+
     func beginAddingHost() {
         clearDraftHost()
         isCreatingHost = true
@@ -390,6 +408,7 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
         host.displayName = host.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
         host.address = host.address.trimmingCharacters(in: .whitespacesAndNewlines)
         let savedHost = host
+        applyHostOptimistically(savedHost)
         clearDraftHost()
         performUserHostMutation { runtime in
             await runtime.upsertHost(savedHost)
@@ -560,26 +579,41 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
         isExportingHistory = true
         historyExportMessage = "Exporting..."
         Task {
-            let samples = await runtime.historySamples(
-                hostID: host.id,
-                since: Date().addingTimeInterval(-duration),
-                limit: Int.max
-            )
             do {
-                try await Task.detached(priority: .utility) {
-                    try HistoryExporter.write(samples: samples, host: host, format: format, to: url)
-                }.value
+                let sampleCount = try await runtime.exportHistory(
+                    host: host,
+                    since: Date().addingTimeInterval(-duration),
+                    format: format,
+                    to: url
+                )
                 await MainActor.run {
                     self.isExportingHistory = false
-                    self.historyExportMessage = "Exported \(samples.count) samples"
+                    self.historyExportMessage = "Exported \(sampleCount) samples"
                 }
             } catch {
+                DebugLog.write("history export failed error=\(error.localizedDescription)")
                 await MainActor.run {
                     self.isExportingHistory = false
-                    self.historyExportMessage = "Export failed"
+                    self.historyExportMessage = Self.historyExportFailureMessage(for: error)
                 }
             }
         }
+    }
+
+    private static func historyExportFailureMessage(for error: Error) -> String {
+        let nsError = error as NSError
+        if nsError.domain == NSCocoaErrorDomain {
+            switch nsError.code {
+            case NSFileWriteNoPermissionError, NSFileReadNoPermissionError:
+                return "Export failed: permission denied"
+            case NSFileWriteOutOfSpaceError:
+                return "Export failed: disk is full"
+            default:
+                break
+            }
+        }
+        let message = nsError.localizedDescription
+        return message.isEmpty ? "Export failed" : "Export failed: \(message)"
     }
 
     func setNetworkStatusAlert(_ status: NetworkConnectivityStatus, enabled: Bool) {
@@ -592,10 +626,15 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
 
     func addDefaultGatewayHost() {
         gatewayDetectionText = "Detecting..."
-        Task { [gatewayDetector] in
+        Task { [gatewayDetector, gatewayEndpointResolver] in
             let host = await gatewayDetector.detect()
+            let resolvedHost = if let host {
+                await gatewayEndpointResolver.resolve(address: host.address)
+            } else {
+                Optional<HostConfig>.none
+            }
             await MainActor.run {
-                guard let host else {
+                guard let host = resolvedHost else {
                     self.gatewayDetectionText = "No default gateway found"
                     return
                 }
@@ -641,7 +680,7 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
             return
         }
 
-        let key = "\(hostID.uuidString)-\(selectedRange.rawValue)"
+        let key = historyCacheKey(hostID: hostID, range: selectedRange)
         guard key != lastHistoryKey else { return }
         lastHistoryKey = key
         refreshVisibleHistory()
@@ -655,7 +694,7 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
         }
 
         let range = selectedRange
-        let key = "\(hostID.uuidString)-\(range.rawValue)"
+        let key = historyCacheKey(hostID: hostID, range: range)
         lastHistoryKey = key
         recomputeDisplayPresentation(visibleHistorySamples: [])
         historyTask?.cancel()
@@ -672,6 +711,11 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
         }
     }
 
+    private func historyCacheKey(hostID: UUID, range: TimeRange, now: Date = Date()) -> String {
+        let refreshBucket = Int(now.timeIntervalSince1970 / 30)
+        return "\(hostID.uuidString)-\(range.rawValue)-\(refreshBucket)"
+    }
+
     private func recomputeDisplayPresentation(visibleHistorySamples: [PingResult]? = nil) {
         displayPresentation = PingScopeDisplayPresentation(
             snapshot: snapshot,
@@ -680,6 +724,25 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
             includesAllHosts: overlayShowsAllHosts || popoverShowsAllHosts,
             presenter: presenter
         )
+        onPresentationChanged?()
+    }
+
+    private func applyHostOptimistically(_ host: HostConfig) {
+        var hosts = snapshot.hosts
+        if let index = hosts.firstIndex(where: { $0.id == host.id }) {
+            hosts[index] = host
+        } else {
+            hosts.append(host)
+        }
+        snapshot = RuntimeSnapshot(
+            hosts: hosts,
+            primaryHostID: snapshot.primaryHostID ?? host.id,
+            healthByHost: snapshot.healthByHost,
+            samplesByHost: snapshot.samplesByHost
+        )
+        recomputeDisplayPresentation()
+        persistHostState(snapshot)
+        onMenuStateChanged?(menuBarState)
     }
 
     private func persistOverlayFrame(_ notification: Notification) {
@@ -700,7 +763,7 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
     }
 
     private func persistHostState(_ snapshot: RuntimeSnapshot) {
-        hostConfigPersistence.persist(snapshot)
+        hostConfigPersistence.persist(snapshot, logger: DebugLog.write)
     }
 
     private func performUserHostMutation(_ mutation: @escaping @Sendable (PingRuntime) async -> Void) {
@@ -731,9 +794,7 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
     private func deliverAlerts(_ alerts: [AlertDecision], hosts: [HostConfig]) {
         guard notificationRules.isEnabled, !alerts.isEmpty else { return }
         Task { [notificationDispatcher] in
-            for alert in alerts {
-                await notificationDispatcher.deliver(alert, hosts: hosts)
-            }
+            await notificationDispatcher.deliver(alerts, hosts: hosts)
         }
     }
 
@@ -757,21 +818,9 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
 
     private func startNetworkMonitoring() {
         networkTask?.cancel()
-        networkTask = Task { [weak self, gatewayDetector, starlinkDetector] in
+        networkTask = Task { [weak self] in
             while !Task.isCancelled {
-                async let gatewayOutcome = gatewayDetector.detectionOutcome()
-                async let starlinkOutcome = starlinkDetector.detectionOutcome(timeout: .seconds(5))
-
-                let gateway = await gatewayOutcome
-                await MainActor.run {
-                    self?.handleGatewayObservation(gateway)
-                }
-
-                let outcome = await starlinkOutcome
-                await MainActor.run {
-                    guard !Task.isCancelled else { return }
-                    self?.reconcileStarlinkDetection(outcome, removeMissing: true)
-                }
+                await self?.performNetworkEndpointDetection(removeMissingStarlink: true)
                 try? await Task.sleep(for: .seconds(60))
             }
         }
@@ -798,12 +847,12 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
         refreshNetworkEndpoints(removeMissingStarlink: true, retryDelays: [.seconds(1), .seconds(3)])
     }
 
-    private func handleGatewayObservation(_ outcome: DefaultGatewayDetector.DetectionOutcome) {
+    func handleGatewayObservation(_ outcome: DefaultGatewayDetector.DetectionOutcome, resolvedHost: HostConfig?) {
         switch outcome {
         case let .detected(host):
-            handleGatewayObservation(host.address)
+            handleGatewayObservation(host.address, resolvedHost: resolvedHost)
         case .notFound:
-            handleGatewayObservation(nil)
+            handleGatewayObservation(nil, resolvedHost: nil)
         case .failed:
             DebugLog.write("gateway observation failed currentStatus=\(currentNetworkStatus.rawValue)")
         case .cancelled:
@@ -811,13 +860,13 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
         }
     }
 
-    private func handleGatewayObservation(_ gateway: String?) {
+    private func handleGatewayObservation(_ gateway: String?, resolvedHost: HostConfig?) {
         DebugLog.write("gateway observation gateway=\(DebugLog.redacted(gateway)) currentStatus=\(currentNetworkStatus.rawValue)")
         if gateway == nil, currentNetworkStatus == .connected {
             handleNetworkStatus(.noInternet)
         }
-        if let gateway {
-            syncDefaultGatewayHost(address: gateway)
+        if let resolvedHost {
+            syncDefaultGatewayHost(resolvedHost)
         }
         defer { lastObservedGateway = gateway }
         guard let previousGateway = lastObservedGateway, let gateway, previousGateway != gateway else { return }
@@ -834,6 +883,7 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
         DebugLog.write("network status handled status=\(status.rawValue) changedStatus=\(changedStatus) forceRestart=\(forceRestart)")
         if changedStatus {
             currentNetworkStatus = status
+            onPresentationChanged?()
             if widgetsEnabled {
                 publishWidgetSnapshot(snapshot)
             }
@@ -847,170 +897,6 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
         Task {
             await notificationDispatcher.deliver(.networkStatus(status), hosts: snapshot.hosts)
         }
-    }
-
-    private func publishWidgetSnapshot(_ snapshot: RuntimeSnapshot) {
-        guard widgetsEnabled else { return }
-        if widgetSnapshotStore == nil {
-            widgetSnapshotStore = WidgetSnapshotStore()
-        }
-        guard let widgetSnapshotStore else { return }
-        let widgetSnapshot = WidgetSnapshot.make(from: snapshot, networkStatus: currentNetworkStatus)
-        let shouldPublish = !widgetSnapshot.hasSameContent(as: lastPublishedWidgetSnapshot)
-            || widgetSnapshot.generatedAt.timeIntervalSince(lastPublishedWidgetSnapshot?.generatedAt ?? .distantPast) >= widgetSnapshotHeartbeatInterval
-        guard shouldPublish else { return }
-        lastPublishedWidgetSnapshot = widgetSnapshot
-        Task { [widgetSnapshotStore] in
-            await widgetSnapshotStore.save(widgetSnapshot)
-        }
-    }
-
-    private func refreshNetworkEndpoints(removeMissingStarlink: Bool, retryDelays: [Duration] = []) {
-        endpointRefreshTask?.cancel()
-        endpointRefreshTask = Task { [weak self, gatewayDetector, starlinkDetector] in
-            await Self.detectNetworkEndpoints(
-                gatewayDetector: gatewayDetector,
-                starlinkDetector: starlinkDetector,
-                removeMissingStarlink: removeMissingStarlink,
-                owner: self
-            )
-            for delay in retryDelays {
-                guard !Task.isCancelled else { return }
-                try? await Task.sleep(for: delay)
-                guard !Task.isCancelled else { return }
-                await Self.detectNetworkEndpoints(
-                    gatewayDetector: gatewayDetector,
-                    starlinkDetector: starlinkDetector,
-                    removeMissingStarlink: removeMissingStarlink,
-                    owner: self
-                )
-            }
-        }
-    }
-
-    private nonisolated static func detectNetworkEndpoints(
-        gatewayDetector: DefaultGatewayDetector,
-        starlinkDetector: StarlinkDishDetector,
-        removeMissingStarlink: Bool,
-        owner: PingScopeModel?
-    ) async {
-        DebugLog.write("network endpoint refresh started removeMissingStarlink=\(removeMissingStarlink)")
-        async let gatewayOutcome = gatewayDetector.detectionOutcome()
-        async let starlinkOutcome = starlinkDetector.detectionOutcome(timeout: .seconds(5))
-        let gateway = await gatewayOutcome
-        let outcome = await starlinkOutcome
-        await MainActor.run {
-            guard !Task.isCancelled else { return }
-            owner?.handleGatewayObservation(gateway)
-            owner?.reconcileStarlinkDetection(outcome, removeMissing: removeMissingStarlink)
-        }
-    }
-
-    private func reconcileStarlinkDetection(_ outcome: StarlinkDishDetector.DetectionOutcome, removeMissing: Bool) {
-        switch outcome {
-        case let .detected(host):
-            syncStarlinkHost(host)
-        case .notFound:
-            DebugLog.write("starlink discovery pass missed removeMissing=\(removeMissing)")
-            if removeMissing {
-                removeStaleStarlinkHosts()
-            }
-        case .failed:
-            DebugLog.write("starlink discovery failed removeMissing=\(removeMissing)")
-        case .cancelled:
-            DebugLog.write("starlink discovery cancelled removeMissing=\(removeMissing)")
-        }
-    }
-
-    private func syncStarlinkHost(_ host: HostConfig) {
-        var starlinkHost = host
-        let preferredPrimaryID = preferredPrimaryAfterStarlinkSync(starlinkHost)
-        if let existing = snapshot.hosts.first(where: {
-            $0.method == .starlink || $0.displayName == host.displayName || ($0.address == host.address && $0.port == host.port)
-        }) {
-            starlinkHost.id = existing.id
-            starlinkHost.isEnabled = existing.isEnabled
-            starlinkHost.notifications = existing.notifications
-        }
-
-        if !allowsLocalNetworkProbes {
-            allowsLocalNetworkProbes = true
-        }
-
-        let isExisting = snapshot.hosts.contains { $0.id == starlinkHost.id }
-        DebugLog.write("starlink dish detected address=\(DebugLog.redacted(starlinkHost.address)) existing=\(isExisting)")
-        if editingHostID == starlinkHost.id {
-            loadDraft(from: starlinkHost)
-        }
-        if let existing = snapshot.hosts.first(where: { $0.id == starlinkHost.id }), existing == starlinkHost {
-            return
-        }
-        Task {
-            await runtime.upsertHost(starlinkHost)
-            if let preferredPrimaryID {
-                await runtime.selectPrimaryHost(preferredPrimaryID)
-            }
-            DebugLog.write("starlink host upsert requested address=\(DebugLog.redacted(starlinkHost.address))")
-        }
-    }
-
-    private func preferredPrimaryAfterStarlinkSync(_ starlinkHost: HostConfig) -> UUID? {
-        let gatewayHost = snapshot.hosts.first { $0.displayName == "Default Gateway" }
-        if gatewayHost?.address == starlinkHost.address {
-            return nil
-        }
-        if let primary = snapshot.primaryHost, primary.method != .starlink {
-            return primary.id
-        }
-        return gatewayHost?.id ?? snapshot.hosts.first(where: { $0.method != .starlink })?.id
-    }
-
-    private func removeStaleStarlinkHosts() {
-        Task {
-            let removedIDs = await runtime.removeStarlinkHosts()
-            if let editingHostID, removedIDs.contains(editingHostID) {
-                clearDraftHost()
-            }
-            DebugLog.write("stale starlink removal completed count=\(removedIDs.count)")
-        }
-    }
-
-    private func syncDefaultGatewayHost(address gateway: String) {
-        guard let existing = snapshot.hosts.first(where: { $0.displayName == "Default Gateway" }) else {
-            return
-        }
-        if !allowsLocalNetworkProbes {
-            allowsLocalNetworkProbes = true
-        }
-        guard existing.address != gateway else {
-            return
-        }
-
-        var updated = existing
-        updated.address = gateway
-        updated.method = .tcp
-        updated.port = 80
-        allowsLocalNetworkProbes = true
-        DebugLog.write("default gateway host updated from \(DebugLog.redacted(existing.address)) to \(DebugLog.redacted(gateway))")
-        if editingHostID == existing.id {
-            loadDraft(from: updated)
-        }
-        let isPrimary = primaryHost?.id == existing.id
-        Task {
-            await runtime.upsertHost(updated)
-            if isPrimary {
-                await runtime.selectPrimaryHost(existing.id)
-            }
-        }
-    }
-
-    private func ensureLocalNetworkProbesForSelectedLocalHost(_ snapshot: RuntimeSnapshot) {
-        guard let primaryHost = snapshot.primaryHost,
-              primaryHost.requiresLocalNetworkPermission,
-              !allowsLocalNetworkProbes else {
-            return
-        }
-        allowsLocalNetworkProbes = true
     }
 
 }
