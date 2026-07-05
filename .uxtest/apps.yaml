@@ -1,0 +1,24 @@
+apps:
+  pingscope:
+    display_name: PingScope
+    scenario_app: Pingscope
+    surface: menubar
+    repo: ~/src/pingscope
+    build:
+      command: scripts/build-app-bundle.sh debug
+    launch:
+      app_path: .build/arm64-apple-macosx/debug/PingScope.app
+      settle_seconds: 6
+      args:
+        - -windowed
+    kill:
+      pattern: /PingScope\.app/Contents/MacOS/PingScope
+    scenario_defaults:
+      open: launched
+      surface_config:
+        fallback_hook: -windowed
+      menubar_match:
+        ax_identifier: pingscope.statusItem
+        label: PingScope
+      root_match:
+        label: Open settings

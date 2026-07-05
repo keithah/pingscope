@@ -1,0 +1,26 @@
+app: Pingscope
+mode: explore
+
+# Reliable adapter path: app-run launches the detached menu-bar content window.
+open: launched
+launch_args:
+  - -windowed
+
+persona: >
+  A user who just opened PingScope and wants quick reassurance that it is
+  actively monitoring their connection right now, not showing a stale snapshot.
+goal: >
+  Confirm the latency readout / graph is live — that the numbers actually
+  change over a few seconds rather than being frozen.
+success_criteria: >
+  A live latency readout shows changing values across repeated samples.
+step_budget: 6
+notes: >
+  Prefer the check_live_value tool on the current-latency readout to judge
+  liveness over several seconds; never conclude from a single frame.
+
+menubar_match:
+  ax_identifier: pingscope.statusItem
+  label: PingScope
+popover_root_match:
+  label: Open settings

@@ -1,0 +1,27 @@
+app: Pingscope
+mode: explore
+persona: >
+  A first-time user who has never seen this app. Mildly impatient,
+  will give up if a task feels confusing after a couple of tries.
+goal: >
+  Set a custom ping target (something other than the default) and
+  confirm the latency graph starts updating for that target.
+success_criteria: >
+  The custom target is visibly active AND the graph shows changing
+  values over time.
+step_budget: 25
+notes: >
+  Watch for: is the input for the target discoverable from the popover?
+  Is it obvious the change took effect?
+
+# Reliable adapter path: app-run launches the detached menu-bar content window.
+open: launched
+launch_args:
+  - -windowed
+menubar_match:
+  ax_identifier: pingscope.statusItem   # AX id added to the status button
+  label: PingScope                      # fallback (also the AXPress process name)
+popover_root_match:
+  any_of:
+    - label: Open settings         # a control present in the menu-bar content
+    - label: Settings              # settings window after following the gear

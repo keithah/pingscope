@@ -1,0 +1,21 @@
+# Regression example from spec §7. Regression loop is stubbed in Phase 1;
+# this file documents the schema so Phase 2 has a concrete target.
+app: Pingscope
+mode: regress
+menubar_match:
+  ax_identifier: null
+  label: Pingscope
+setup:
+  - launch
+  - open_menubar_item
+steps:
+  - action: assert_element
+    match: { ax_identifier: "targetField" }
+  - action: set_value
+    match: { ax_identifier: "targetField" }
+    value: "1.1.1.1"
+  - action: assert_value_changes      # uses live-content diffing guard
+    match: { ax_identifier: "latencyReadout" }
+    within_seconds: 5
+teardown:
+  - press: escape

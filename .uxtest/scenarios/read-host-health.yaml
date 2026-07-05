@@ -1,0 +1,30 @@
+app: Pingscope
+mode: explore
+
+# Reliable adapter path: app-run launches the detached menu-bar content window.
+open: launched
+launch_args:
+  - -windowed
+
+persona: >
+  A user whose internet feels flaky. They open PingScope to answer one
+  question fast: is the problem my local network, my ISP, or a specific site?
+goal: >
+  From the menu-bar view alone, determine which hosts PingScope is monitoring
+  and each one's current health/status, and identify whether any is unhealthy.
+success_criteria: >
+  The persona can name the monitored hosts and state each one's status, and can
+  say whether the current problem (if any) is local vs upstream — using only
+  what's visible in the menu-bar view.
+step_budget: 10
+notes: >
+  Judge discoverability and clarity: is the host list and per-host status
+  legible at a glance? Are the health labels (e.g. "Healthy", "Local network
+  down") understandable to a non-expert? Flag any jargon or ambiguity as
+  friction. Use check_live_value if you need to confirm a status/number is live.
+
+menubar_match:
+  ax_identifier: pingscope.statusItem
+  label: PingScope
+popover_root_match:
+  label: Open settings

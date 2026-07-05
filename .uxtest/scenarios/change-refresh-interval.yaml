@@ -1,0 +1,33 @@
+app: Pingscope
+mode: explore
+
+# Reliable adapter path: app-run launches the detached menu-bar content window.
+open: launched
+launch_args:
+  - -windowed
+
+persona: >
+  A returning user who knows the basics but has never touched settings.
+  Methodical; reads labels before clicking. Willing to open Settings if the
+  option clearly isn't in the main menu-bar view.
+goal: >
+  Change how often PingScope pings (the monitoring/refresh interval) to a
+  slower setting, and confirm the app reflects the new interval.
+success_criteria: >
+  The ping/refresh interval control shows the new value AND the app indicates
+  the new interval is active (e.g. sample cadence changes, or a clear label).
+step_budget: 16
+notes: >
+  Start in the menu-bar view. If the host picker says "All Hosts", choose an
+  individual host such as Cloudflare DNS first; the per-host Ping interval
+  segmented control should then appear in the menu-bar view. Use that control
+  before trying Settings. The "Graph range" 1m/5m/10m/1h control is only the
+  graph time window, NOT the ping interval.
+
+menubar_match:
+  ax_identifier: pingscope.statusItem
+  label: PingScope
+popover_root_match:
+  any_of:
+    - label: Open settings
+    - label: Settings
