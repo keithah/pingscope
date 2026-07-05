@@ -343,6 +343,25 @@ final class LiveMonitorSessionControllerTests: XCTestCase {
         XCTAssertEqual(state.selectedHost.id, hosts[0].id)
     }
 
+    func testIOSHostStoreFallsBackToDefaultsWhenSavedHostsAreInvalid() {
+        let suiteName = "PingScopeIOSHostStoreTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let defaultsHosts = [
+            HostConfig(id: UUID(), displayName: "Cloudflare", address: "1.1.1.1")
+        ]
+        let invalidHosts = [
+            HostConfig(id: UUID(), displayName: " ", address: " ")
+        ]
+        let store = PingScopeIOSHostStore(defaults: defaults, defaultHosts: defaultsHosts)
+
+        store.save(hosts: invalidHosts, selectedHostID: invalidHosts[0].id)
+        let state = store.load()
+
+        XCTAssertEqual(state.hosts, defaultsHosts)
+        XCTAssertEqual(state.selectedHost.id, defaultsHosts[0].id)
+    }
+
     func testIOSHostStoreLeavesUndecodableHostsBlobIntact() {
         let suiteName = "PingScopeIOSHostStoreTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!

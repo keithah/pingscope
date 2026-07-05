@@ -24,7 +24,8 @@ public final class PingScopeIOSHostStore: @unchecked Sendable {
 
     public init(defaults: UserDefaults = .standard, defaultHosts: [HostConfig] = PingScopeIOSHostStore.defaultHosts) {
         self.defaults = defaults
-        self.defaultHosts = defaultHosts.isEmpty ? [HostConfig.defaultInternet] : defaultHosts
+        let sanitizedDefaults = HostConfig.sanitizedHosts(defaultHosts)
+        self.defaultHosts = sanitizedDefaults.isEmpty ? [HostConfig.defaultInternet] : sanitizedDefaults
     }
 
     public func load() -> PingScopeIOSHostState {
@@ -37,11 +38,13 @@ public final class PingScopeIOSHostStore: @unchecked Sendable {
     }
 
     public func save(hosts: [HostConfig], selectedHostID: UUID) {
-        let normalizedHosts = hosts.isEmpty ? defaultHosts : hosts
+        let sanitizedHosts = HostConfig.sanitizedHosts(hosts.isEmpty ? defaultHosts : hosts)
+        let normalizedHosts = sanitizedHosts.isEmpty ? defaultHosts : sanitizedHosts
+        let selectedID = normalizedHosts.contains { $0.id == selectedHostID } ? selectedHostID : normalizedHosts[0].id
         if let data = try? JSONEncoder().encode(normalizedHosts) {
             defaults.set(data, forKey: hostsKey)
+            defaults.set(selectedID.uuidString, forKey: selectedHostIDKey)
         }
-        defaults.set(selectedHostID.uuidString, forKey: selectedHostIDKey)
     }
 
     private func loadHosts() -> [HostConfig] {

@@ -151,6 +151,8 @@ private actor LiveHistoryWriteBuffer {
     private let flushDelay: Duration
     private var pending: BoundedBuffer<PingResult>
     private var flushTask: Task<Void, Never>?
+    private var consecutiveFailureCount = 0
+    private var lastFailureLogAt: Date?
 
     init(
         store: any PingHistoryStore,
@@ -175,7 +177,11 @@ private actor LiveHistoryWriteBuffer {
 
     func flushNow() async {
         await cancelFlushTask()
-        await drainAll()
+        let pendingBeforeFlush = pending.count
+        let completed = await drainAll()
+        if !completed, pendingBeforeFlush > 0 {
+            NSLog("PingScope iOS history forced flush incomplete pending=\(pending.count)")
+        }
     }
 
     private func scheduleDelayedFlush() {
@@ -209,16 +215,48 @@ private actor LiveHistoryWriteBuffer {
         }
     }
 
-    private func drainAll() async {
+    @discardableResult
+    private func drainAll() async -> Bool {
         while !pending.isEmpty {
-            await drainOneBatch()
+            guard await drainOneBatch() else { return false }
+        }
+        return true
+    }
+
+    @discardableResult
+    private func drainOneBatch() async -> Bool {
+        guard !pending.isEmpty else { return true }
+        let batch = pending.popPrefix(maxBatchSize)
+        do {
+            try await store.appendAndWait(batch)
+            if consecutiveFailureCount > 0 {
+                NSLog("PingScope iOS history writes recovered pending=\(pending.count)")
+            }
+            consecutiveFailureCount = 0
+            lastFailureLogAt = nil
+            return true
+        } catch {
+            pending.prepend(contentsOf: batch)
+            consecutiveFailureCount += 1
+            logFailureIfNeeded(error)
+            await retryBackoff()
+            return false
         }
     }
 
-    private func drainOneBatch() async {
-        guard !pending.isEmpty else { return }
-        let batch = pending.popPrefix(maxBatchSize)
-        await store.append(batch)
+    private func logFailureIfNeeded(_ error: Error) {
+        let now = Date()
+        if let lastFailureLogAt, now.timeIntervalSince(lastFailureLogAt) < 60 {
+            return
+        }
+        lastFailureLogAt = now
+        NSLog("PingScope iOS history write failed failures=\(consecutiveFailureCount) pending=\(pending.count) dropped=\(pending.droppedCount) error=\(String(describing: error))")
+    }
+
+    private func retryBackoff() async {
+        let exponent = min(consecutiveFailureCount - 1, 5)
+        let milliseconds = 250 * (1 << exponent)
+        try? await Task.sleep(for: .milliseconds(Double(milliseconds)))
     }
 
     private func cancelFlushTask() async {

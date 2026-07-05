@@ -69,9 +69,9 @@ public struct PingScopeIOSGatewayDetector: Sendable {
             candidates.append((priority, gatewayAddress))
         }
 
-        return candidates.sorted { lhs, rhs in
+        return candidates.min { lhs, rhs in
             lhs.priority == rhs.priority ? lhs.address < rhs.address : lhs.priority < rhs.priority
-        }.first?.address
+        }?.address
         #else
         return nil
         #endif
