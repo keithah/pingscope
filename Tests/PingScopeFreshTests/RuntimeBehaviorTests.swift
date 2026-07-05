@@ -149,6 +149,31 @@ final class RuntimeBehaviorTests: XCTestCase {
         await scheduler.stop()
     }
 
+    func testMeasurementSchedulerRestartDoesNotWaitForHungPreviousProbe() async throws {
+        let oldHost = HostConfig(displayName: "Old", address: "old.example", interval: .milliseconds(20))
+        let newHost = HostConfig(displayName: "New", address: "new.example", interval: .milliseconds(20))
+        let scheduler = MeasurementScheduler(probeFactory: HostSensitiveProbeFactory(hangingAddress: oldHost.address))
+        let oldStream = await scheduler.start(hosts: [oldHost])
+
+        let replacementResult = try await withThrowingTaskGroup(of: PingResult?.self) { group in
+            group.addTask {
+                let newStream = await scheduler.start(hosts: [newHost])
+                return try await firstResult(from: newStream, timeout: .milliseconds(300))
+            }
+            group.addTask {
+                try await Task.sleep(for: .milliseconds(300))
+                throw TestTimeout()
+            }
+            let result = try await group.next() ?? nil
+            group.cancelAll()
+            return result
+        }
+
+        XCTAssertEqual(replacementResult?.hostID, newHost.id)
+        withExtendedLifetime(oldStream) {}
+        await scheduler.stop()
+    }
+
     func testSchedulerBuffersRealisticBurstWithoutDroppingResults() async throws {
         // The scheduler's result stream is bufferingNewest(1024): deep enough
         // that a realistic burst survives a stalled consumer intact -- the old
@@ -362,7 +387,7 @@ final class RuntimeBehaviorTests: XCTestCase {
         let host = HostConfig(displayName: "Default Gateway", address: "192.168.1.1", method: .tcp, port: 80)
         let runtime = PingRuntime(
             hostStore: HostStore(defaultHosts: [host]),
-            scheduler: MeasurementScheduler(probeFactory: CountingProbeFactory(result: .success(hostID: host.id, latency: .milliseconds(9))))
+            scheduler: MeasurementScheduler(probeFactory: HangingProbeFactory())
         )
         await runtime.ingest(.success(hostID: host.id, latency: .milliseconds(7)).withHostMetadata(from: host))
 
@@ -723,6 +748,26 @@ private struct DelayedProbe: PingProbe {
 
     func measure(_ host: HostConfig) async -> PingResult {
         try? await Task.sleep(for: delay)
+        return .success(hostID: host.id, latency: .milliseconds(12)).withHostMetadata(from: host)
+    }
+}
+
+private struct HostSensitiveProbeFactory: ProbeFactory {
+    let hangingAddress: String
+
+    func makeProbe(for method: PingMethod) async -> any PingProbe {
+        HostSensitiveProbe(hangingAddress: hangingAddress)
+    }
+}
+
+private struct HostSensitiveProbe: PingProbe {
+    let hangingAddress: String
+
+    func measure(_ host: HostConfig) async -> PingResult {
+        if host.address == hangingAddress {
+            try? await Task.sleep(for: .seconds(60))
+            return .failure(hostID: host.id, reason: .cancelled).withHostMetadata(from: host)
+        }
         return .success(hostID: host.id, latency: .milliseconds(12)).withHostMetadata(from: host)
     }
 }

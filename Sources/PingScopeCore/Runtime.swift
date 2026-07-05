@@ -377,7 +377,10 @@ public actor MeasurementScheduler {
     }
 
     public func start(hosts: [HostConfig], allowsLocalNetworkProbes: Bool = true) async -> AsyncStream<PingResult> {
-        await stopTasks()
+        if !tasks.isEmpty {
+            logger?("scheduler restart generation=\(generation) cancelingTasks=\(tasks.count)")
+        }
+        cancelRunningTasks()
         continuation?.finish()
         continuation = nil
         generation += 1
@@ -393,7 +396,7 @@ public actor MeasurementScheduler {
         let stream = AsyncStream<PingResult>(bufferingPolicy: .bufferingNewest(1024)) { streamContinuation in
             self.continuation = streamContinuation
             streamContinuation.onTermination = { [weak self] _ in
-                Task { await self?.stop(generation: runGeneration) }
+                Task { await self?.logResultStreamTermination(generation: runGeneration) }
             }
         }
 
@@ -414,8 +417,13 @@ public actor MeasurementScheduler {
         for (offset, host) in measurableHosts.enumerated() {
             let task = Task { [weak self] in
                 if offset > 0 {
-                    try? await Task.sleep(for: .milliseconds(offset * 250))
+                    do {
+                        try await Task.sleep(for: .milliseconds(offset * 250))
+                    } catch {
+                        return
+                    }
                 }
+                guard !Task.isCancelled else { return }
                 await self?.runLoop(for: host, generation: runGeneration)
             }
             tasks.append(task)
@@ -430,9 +438,16 @@ public actor MeasurementScheduler {
         continuation = nil
     }
 
-    private func stop(generation stoppedGeneration: Int) async {
-        guard stoppedGeneration == generation else { return }
-        await stop()
+    private func logResultStreamTermination(generation terminatedGeneration: Int) {
+        logger?("scheduler result stream terminated generation=\(terminatedGeneration) currentGeneration=\(generation)")
+    }
+
+    private func cancelRunningTasks() {
+        let runningTasks = tasks
+        tasks.removeAll()
+        for task in runningTasks {
+            task.cancel()
+        }
     }
 
     private func stopTasks() async {
@@ -464,7 +479,11 @@ public actor MeasurementScheduler {
                 Task { await permitLease.release() }
             }
             guard !Task.isCancelled, await publish(result, for: host, generation: generation) else { return }
-            try? await Task.sleep(for: host.interval)
+            do {
+                try await Task.sleep(for: host.interval)
+            } catch {
+                break
+            }
         }
         logger?("scheduler runLoop end generation=\(generation) hostID=\(host.id.uuidString)")
     }
@@ -586,9 +605,9 @@ public actor PingRuntime {
             await refreshHostCache()
         }
         let resultStream = await scheduler.start(hosts: cachedHosts.filter(\.isEnabled), allowsLocalNetworkProbes: allowsLocalNetworkProbes)
-        streamTask = Task { [weak self] in
+        streamTask = Task { [self] in
             for await result in resultStream {
-                await self?.ingest(result)
+                await ingest(result)
             }
         }
         publishSnapshot()
