@@ -22,6 +22,7 @@ struct StatusPopoverView: View {
                     }
                 }
                 .pickerStyle(.segmented)
+                .labelsHidden()
                 .accessibilityLabel("Graph range")
             }
 
@@ -32,10 +33,6 @@ struct StatusPopoverView: View {
                     maxHeight: .infinity
                 )
                 .layoutPriority(1)
-
-            if presentation.popoverShowsAllHosts {
-                allHostStatusSummary
-            }
 
             stats
             if let telemetry = presentation.displayPresentation.latestStarlinkTelemetry {
@@ -188,19 +185,16 @@ struct StatusPopoverView: View {
 
     private var stats: some View {
         let stats = viewModel.presentation.displayPresentation.primaryStats
-        return Grid(alignment: .leading, horizontalSpacing: 18, verticalSpacing: 6) {
-            GridRow {
-                stat("TX", "\(stats.transmitted)")
-                stat("RX", "\(stats.received)")
-                stat("Loss", "\(Int(stats.lossPercent.rounded()))%")
-            }
-            GridRow {
-                stat("Min", latency(stats.minimumMilliseconds))
-                stat("Avg", latency(stats.averageMilliseconds))
-                stat("Max", latency(stats.maximumMilliseconds))
-            }
+        return HStack(alignment: .top, spacing: 16) {
+            stat("TX", "\(stats.transmitted)")
+            stat("RX", "\(stats.received)")
+            stat("Loss", "\(Int(stats.lossPercent.rounded()))%")
+            stat("Min", latency(stats.minimumMilliseconds))
+            stat("Avg", latency(stats.averageMilliseconds))
+            stat("Max", latency(stats.maximumMilliseconds))
         }
         .font(.caption)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func stat(_ title: String, _ value: String) -> some View {
