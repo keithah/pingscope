@@ -4,12 +4,12 @@
         <title>PingScope</title>
         <item>
             <title>0.3.1</title>
-            <pubDate>Sun, 05 Jul 2026 15:21:55 -0700</pubDate>
-            <sparkle:version>66</sparkle:version>
+            <pubDate>Mon, 06 Jul 2026 00:17:11 -0700</pubDate>
+            <sparkle:version>79</sparkle:version>
             <sparkle:shortVersionString>0.3.1</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
             <sparkle:releaseNotesLink>https://keithah.github.io/pingscope/PingScope-v0.3.1.md</sparkle:releaseNotesLink>
-            <enclosure url="https://keithah.github.io/pingscope/PingScope-v0.3.1.dmg" length="4991454" type="application/octet-stream" sparkle:edSignature="55sSJdmH+f6A0acjaulMYUaP5HNBvIICbg+rhNC8BiOlfCpcievTy1Kh8c7n6gkKPjLfUcPGqFiqL1BHMwUACg=="/>
+            <enclosure url="https://keithah.github.io/pingscope/PingScope-v0.3.1.dmg" length="5148585" type="application/octet-stream" sparkle:edSignature="Nm919XWfyKw/jYxQSV2CVt0qmg60QQgma6fM+0ZrbZISJeICEbKWQ5G1Q3e0x0C8QnYo5WJfISMKYa+UfHXiBg=="/>
         </item>
     </channel>
 </rss>

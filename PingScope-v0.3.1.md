@@ -1,28 +1,24 @@
 # PingScope 0.3.1
 
-PingScope 0.3.1 is a macOS-focused release that tightens the monitoring UI, fixes stale Starlink discovery behavior, expands history export, and prepares the App Store/TestFlight path for the next round of review.
+PingScope 0.3.1 is a release polish update for the macOS menu bar latency monitor, with cleaner default monitoring, quieter network alerts, a shareable graph snapshot, and reliability fixes across history, widgets, and runtime persistence.
 
 ## What's New
 
-- Refreshed the About pane with the product page link, software update action, and privacy information in one place.
-- Removed the always-visible first-run checklist from About; only required setup issues are surfaced when they need attention.
-- History export now defaults to 1 hour, adds Max for the full retained 7-day history window, and supports custom hour/day ranges capped by retention.
-- Updated the product page assets and copy with current macOS screenshots, overlay imagery, dynamic GitHub download links, and support email flow.
-- Added iOS companion positioning on the product page while keeping the shipping app experience macOS-first.
+- Default monitoring now includes Cloudflare DNS, Google DNS, and the local default gateway for better internet-path diagnosis.
+- Existing installs with the old automatic Cloudflare/default-gateway set are migrated to include Google DNS without resurrecting defaults after user edits.
+- Added a share button in the status popover that can generate a graph-focused snapshot for sharing.
+- Kept the status popover compact, with the share action next to settings.
 
 ## Reliability & Fixes
 
-- Fixed stale Starlink hosts remaining visible on non-Starlink networks when discovery misses because the dish endpoint is unavailable.
-- Preserved host persistence after primary-host selection, including after a decode failure recovery path.
-- Reduced background work in graph, widget, history, and diagnostics paths.
-- Hardened history export streaming and validation for larger retained-history exports.
-- Fixed a launch/restart race where the selected host could stop receiving fresh samples after the measurement stream was restarted.
-- Improved release, notarization, Xcode build, simulator smoke, and GitHub Pages publishing scripts.
+- Reduced notification spam by coalescing broad internet outage/recovery alerts.
+- Improved host persistence and first-run default seeding behavior.
+- Hardened history, widget snapshot, graph presentation, and runtime buffering paths.
+- Added tests for default host tiers, App Store-safe method normalization, diagnosis confidence, alert coalescing, and legacy default migration.
 
 ## Distribution
 
 - Developer ID builds are signed, notarized, stapled, and published through GitHub Releases with a Sparkle appcast.
-- App Store builds use the sandboxed `PingScope-AppStore` scheme and remain Sparkle-free.
-- Xcode Cloud should archive `PingScope-AppStore` for TestFlight and App Store submission from this versioned commit.
+- App Store builds use the sandboxed `PingScope-AppStore` scheme and exclude ICMP where the App Store sandbox requires it.
 - Version: 0.3.1
-- Build: 66
+- Build: 79
