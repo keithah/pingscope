@@ -31,7 +31,7 @@ final class HostConfigPersistence {
         let savedHosts: [HostConfig]
         switch defaults.storedHostConfigs() {
         case .decoded(let hosts):
-            savedHosts = hosts.isEmpty ? seedDefaultsIfNeeded(logger: logger) : HostConfigMigrator().migrate(hosts)
+            savedHosts = hosts.isEmpty ? seedDefaultsIfNeeded(logger: logger) : migrateExistingHosts(hosts, logger: logger)
         case .missing:
             savedHosts = seedDefaultsIfNeeded(logger: logger)
         case .decodeFailed(let error):
@@ -67,6 +67,50 @@ final class HostConfigPersistence {
     func allowUserManagedPersistence() {
         preservesUndecodableData = false
         lastPersistedHostState = nil
+    }
+
+    private func migrateExistingHosts(_ hosts: [HostConfig], logger: (String) -> Void) -> [HostConfig] {
+        var migratedHosts = HostConfigMigrator().migrate(hosts)
+        if shouldAddGoogleDNSLegacyDefault(to: migratedHosts) {
+            let googleDNS = HostConfig.sanitizedHosts(
+                BuildFlavor.current.normalizedHosts([.defaultGoogleDNS])
+            )
+            if let googleDNS = googleDNS.first {
+                migratedHosts.insert(googleDNS, at: min(1, migratedHosts.count))
+                do {
+                    try defaults.setHostConfigs(migratedHosts)
+                    logger("added Google DNS to legacy default host set")
+                } catch {
+                    logger("legacy Google DNS default encode failed; using in-memory host error=\(error.localizedDescription)")
+                }
+            }
+        }
+        defaults.set(true, forKey: seededDefaultsKey)
+        return migratedHosts
+    }
+
+    private func shouldAddGoogleDNSLegacyDefault(to hosts: [HostConfig]) -> Bool {
+        guard !defaults.bool(forKey: seededDefaultsKey),
+              !hosts.contains(where: isGoogleDNSDefault),
+              (1...2).contains(hosts.count),
+              hosts.contains(where: isCloudflareDefault)
+        else {
+            return false
+        }
+        let nonCloudflareHosts = hosts.filter { !isCloudflareDefault($0) }
+        return nonCloudflareHosts.allSatisfy(isGatewayDefault)
+    }
+
+    private func isCloudflareDefault(_ host: HostConfig) -> Bool {
+        host.displayName == HostConfig.defaultInternet.displayName && host.address == HostConfig.defaultInternet.address
+    }
+
+    private func isGoogleDNSDefault(_ host: HostConfig) -> Bool {
+        host.displayName == HostConfig.defaultGoogleDNS.displayName || host.address == HostConfig.defaultGoogleDNS.address
+    }
+
+    private func isGatewayDefault(_ host: HostConfig) -> Bool {
+        host.displayName == HostConfig.defaultGateway.displayName && NetworkTierClassifier().tier(for: host) == .localGateway
     }
 
     private func seedDefaultsIfNeeded(logger: (String) -> Void) -> [HostConfig] {
