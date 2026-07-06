@@ -8,7 +8,12 @@ import WidgetKit
 
 @MainActor
 final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
-    @Published private(set) var snapshot = RuntimeSnapshot(hosts: [.defaultInternet], primaryHostID: HostConfig.defaultInternet.id, healthByHost: [:], samplesByHost: [:])
+    @Published private(set) var snapshot = RuntimeSnapshot(
+        hosts: HostConfig.defaultHosts(),
+        primaryHostID: HostConfig.defaultInternet.id,
+        healthByHost: [:],
+        samplesByHost: [:]
+    )
     @Published var selectedRange: TimeRange = .fiveMinutes {
         didSet {
             recomputeDisplayPresentation()
@@ -129,7 +134,7 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
     @Published private(set) var diagnosticsMessage: String?
     @Published var overlayFrame: NSRect
 
-    private let presenter = DisplayStatePresenter()
+    let presenter = DisplayStatePresenter()
     private let networkDiagnoser = NetworkPerspectiveDiagnoser()
     let runtime: PingRuntime
     private let hostTester: HostTester
@@ -351,7 +356,6 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
                     self.recomputeDisplayPresentation()
                     self.persistHostState(snapshot)
                     self.onMenuStateChanged?(self.menuBarState)
-                    self.evaluateInternetLoss(from: snapshot)
                     self.ensureLocalNetworkProbesForSelectedLocalHost(snapshot)
                     self.refreshVisibleHistoryIfNeeded()
                     if self.widgetsEnabled == true {
@@ -732,7 +736,7 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
             let samples = await runtime.historySamples(
                 hostID: hostID,
                 since: Date().addingTimeInterval(-range.duration),
-                limit: 10_000
+                limit: Self.visibleHistorySampleLimit(for: range)
             )
             await MainActor.run {
                 guard self.lastHistoryKey == key else { return }
@@ -744,6 +748,10 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
     private func historyCacheKey(hostID: UUID, range: TimeRange, now: Date = Date()) -> String {
         let refreshBucket = Int(now.timeIntervalSince1970 / 30)
         return "\(hostID.uuidString)-\(range.rawValue)-\(refreshBucket)"
+    }
+
+    static func visibleHistorySampleLimit(for range: TimeRange) -> Int {
+        max(300, min(4_000, Int(range.duration.rounded(.up)) + 300))
     }
 
     private func recomputeDisplayPresentation(visibleHistorySamples: [PingResult]? = nil) {
@@ -828,24 +836,6 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
         }
     }
 
-    private func evaluateInternetLoss(from snapshot: RuntimeSnapshot) {
-        guard notificationRules.isEnabled,
-              notificationRules.alertTypes.contains(.internetLoss),
-              enabledNetworkStatusAlerts.contains(.noInternet),
-              currentNetworkStatus != .noInternet else { return }
-        let enabledHostIDs = Set(snapshot.hosts.filter(\.isEnabled).map(\.id))
-        let latestResults = snapshot.healthByHost.values
-            .filter { enabledHostIDs.contains($0.hostID) }
-            .compactMap(\.latestResult)
-        guard !latestResults.isEmpty, latestResults.count == enabledHostIDs.count else { return }
-
-        Task {
-            if let alert = await runtime.evaluateInternetLoss(results: latestResults) {
-                await notificationDispatcher.deliver(alert, hosts: snapshot.hosts)
-            }
-        }
-    }
-
     private func startNetworkMonitoring() {
         networkTask?.cancel()
         networkTask = Task { [weak self] in
@@ -923,6 +913,7 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
         }
         Task { await runtime.restartScheduler() }
         guard changedStatus else { return }
+        guard status != .noInternet else { return }
         guard notificationRules.isEnabled, enabledNetworkStatusAlerts.contains(status) else { return }
         Task {
             await notificationDispatcher.deliver(.networkStatus(status), hosts: snapshot.hosts)

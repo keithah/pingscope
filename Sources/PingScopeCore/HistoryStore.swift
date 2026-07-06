@@ -92,12 +92,17 @@ private final class SQLiteHistoryWorker: @unchecked Sendable {
     private let metadataDecoder = JSONDecoder()
     private let pruneInterval: TimeInterval = 60
     private var lastPruneAttempt: Date?
+    private var statementCache: [String: OpaquePointer] = [:]
 
     init(url: URL, retention: Duration = .days(7), logger: (@Sendable (String) -> Void)? = nil) {
         self.queue = DispatchQueue(label: "PingScope.SQLiteHistoryStore.\(UUID().uuidString)", qos: .utility)
         self.url = url
         self.retention = retention
         self.logger = logger
+    }
+
+    deinit {
+        finalizeCachedStatements()
     }
 
     func append(_ result: PingResult) async {
@@ -113,31 +118,27 @@ private final class SQLiteHistoryWorker: @unchecked Sendable {
     }
 
     func appendAndWait(_ results: [PingResult]) async throws {
-        try await perform {
+        try await performWithSQLiteRetry {
             try self.appendAndWaitSync(results)
         }
     }
 
     private func appendAndWaitSync(_ results: [PingResult]) throws {
         guard !results.isEmpty else { return }
-        try withSQLiteRetry {
-            try openIfNeeded()
-            try insert(results)
-            if let newestTimestamp = results.max(by: { $0.timestamp < $1.timestamp })?.timestamp,
-               shouldPrune(at: newestTimestamp) {
-                try pruneSync(olderThan: newestTimestamp.addingTimeInterval(-retention.seconds))
-                lastPruneAttempt = newestTimestamp
-            }
+        try openIfNeeded()
+        try insert(results)
+        if let newestTimestamp = results.max(by: { $0.timestamp < $1.timestamp })?.timestamp,
+           shouldPrune(at: newestTimestamp) {
+            try pruneSync(olderThan: newestTimestamp.addingTimeInterval(-retention.seconds))
+            lastPruneAttempt = newestTimestamp
         }
     }
 
     func samples(hostID: UUID, since: Date, limit: Int = 10_000) async -> [PingResult] {
         do {
-            return try await perform {
-                try self.withSQLiteRetry {
-                    try self.openIfNeeded()
-                    return try self.query(hostID: hostID, since: since, limit: max(1, limit))
-                }
+            return try await performWithSQLiteRetry {
+                try self.openIfNeeded()
+                return try self.query(hostID: hostID, since: since, limit: max(1, limit))
             }
         } catch {
             logger?("history query failed: \(error)")
@@ -147,11 +148,9 @@ private final class SQLiteHistoryWorker: @unchecked Sendable {
 
     func latestSamples(hostID: UUID, since: Date, limit: Int) async -> [PingResult] {
         do {
-            return try await perform {
-                try self.withSQLiteRetry {
-                    try self.openIfNeeded()
-                    return try self.queryLatest(hostID: hostID, since: since, limit: max(1, limit))
-                }
+            return try await performWithSQLiteRetry {
+                try self.openIfNeeded()
+                return try self.queryLatest(hostID: hostID, since: since, limit: max(1, limit))
             }
         } catch {
             logger?("history latest query failed: \(error)")
@@ -160,35 +159,25 @@ private final class SQLiteHistoryWorker: @unchecked Sendable {
     }
 
     func exportSamples(host: HostConfig, since: Date, format: HistoryExportFormat, to url: URL) async throws -> Int {
-        try await perform {
-            try self.withSQLiteRetry {
-                try self.openIfNeeded()
-                let sampleCount = try self.sampleCountIfNeeded(format: format, hostID: host.id, since: since)
-                return try HistoryExporter.writeStreaming(
-                    host: host,
-                    format: format,
-                    sampleCount: sampleCount,
-                    to: url
-                ) { writer in
-                    try self.streamSamples(hostID: host.id, since: since, to: writer)
-                }
+        try await performWithSQLiteRetry {
+            try self.openIfNeeded()
+            return try HistoryExporter.writeStreaming(
+                host: host,
+                format: format,
+                sampleCount: nil,
+                to: url
+            ) { writer in
+                try self.streamSamples(hostID: host.id, since: since, to: writer)
             }
         }
     }
 
-    private func sampleCountIfNeeded(format: HistoryExportFormat, hostID: UUID, since: Date) throws -> Int? {
-        guard format == .text else { return nil }
-        return try countSamples(hostID: hostID, since: since)
-    }
-
     func prune(olderThan cutoff: Date) async {
         do {
-            try await perform {
-                try self.withSQLiteRetry {
-                    try self.openIfNeeded()
-                    try self.pruneSync(olderThan: cutoff)
-                    self.lastPruneAttempt = Date()
-                }
+            try await performWithSQLiteRetry {
+                try self.openIfNeeded()
+                try self.pruneSync(olderThan: cutoff)
+                self.lastPruneAttempt = Date()
             }
         } catch {
             logger?("history prune failed: \(error)")
@@ -198,11 +187,9 @@ private final class SQLiteHistoryWorker: @unchecked Sendable {
 
     func deleteAll() async {
         do {
-            try await perform {
-                try self.withSQLiteRetry {
-                    try self.openIfNeeded()
-                    try self.execute("DELETE FROM ping_samples;")
-                }
+            try await performWithSQLiteRetry {
+                try self.openIfNeeded()
+                try self.execute("DELETE FROM ping_samples;")
             }
         } catch {
             logger?("history delete failed: \(error)")
@@ -220,6 +207,23 @@ private final class SQLiteHistoryWorker: @unchecked Sendable {
                 }
             }
         }
+    }
+
+    private func performWithSQLiteRetry<T: Sendable>(
+        _ operation: @escaping @Sendable () throws -> T
+    ) async throws -> T {
+        var lastError: Error?
+        for attempt in 0..<3 {
+            do {
+                return try await perform(operation)
+            } catch {
+                lastError = error
+                guard isTransientSQLiteError(error), attempt < 2 else { break }
+                let backoffMilliseconds = Double(50 * (1 << attempt)) + Double.random(in: 0...25)
+                try await Task.sleep(nanoseconds: UInt64(backoffMilliseconds * 1_000_000))
+            }
+        }
+        throw lastError ?? SQLiteHistoryError.openFailed(message: "unknown SQLite retry failure")
     }
 
     private func openIfNeeded() throws {
@@ -264,6 +268,7 @@ private final class SQLiteHistoryWorker: @unchecked Sendable {
             // Never cache a half-initialized connection: openIfNeeded no-ops once
             // connection.db is set, which would make withSQLiteRetry retry against
             // a schema-less handle forever instead of reopening.
+            finalizeCachedStatements()
             sqlite3_close(handle)
             connection.db = nil
             throw error
@@ -273,21 +278,6 @@ private final class SQLiteHistoryWorker: @unchecked Sendable {
     private func shouldPrune(at timestamp: Date) -> Bool {
         guard let lastPruneAttempt else { return true }
         return timestamp.timeIntervalSince(lastPruneAttempt) >= pruneInterval
-    }
-
-    private func withSQLiteRetry<T>(_ operation: () throws -> T) throws -> T {
-        var lastError: Error?
-        for attempt in 0..<3 {
-            do {
-                return try operation()
-            } catch {
-                lastError = error
-                guard isTransientSQLiteError(error), attempt < 2 else { break }
-                let backoffMilliseconds = Double(50 * (1 << attempt)) + Double.random(in: 0...25)
-                Thread.sleep(forTimeInterval: backoffMilliseconds / 1_000)
-            }
-        }
-        throw lastError ?? SQLiteHistoryError.openFailed(message: "unknown SQLite retry failure")
     }
 
     private func isTransientSQLiteError(_ error: Error) -> Bool {
@@ -418,25 +408,6 @@ private final class SQLiteHistoryWorker: @unchecked Sendable {
         return results
     }
 
-    private func countSamples(hostID: UUID, since: Date) throws -> Int {
-        let sql = """
-        SELECT COUNT(*)
-        FROM ping_samples
-        WHERE host_id = ? AND timestamp >= ?;
-        """
-        var count = 0
-        try withStatement(sql) { statement in
-            bindText(hostID.uuidString, to: 1, in: statement)
-            sqlite3_bind_double(statement, 2, since.timeIntervalSince1970)
-            let stepResult = sqlite3_step(statement)
-            guard stepResult == SQLITE_ROW else {
-                throw sqliteError(.stepFailed, code: stepResult)
-            }
-            count = Int(sqlite3_column_int64(statement, 0))
-        }
-        return count
-    }
-
     private func streamSamples(hostID: UUID, since: Date, to writer: HistoryExportSampleWriter) throws -> Int {
         let sql = """
         SELECT id, host_id, address, method, port, timestamp, latency_ms, failure_reason, metadata_note, metadata_json
@@ -505,6 +476,18 @@ private final class SQLiteHistoryWorker: @unchecked Sendable {
     }
 
     private func withStatement(_ sql: String, _ body: (OpaquePointer) throws -> Void) throws {
+        let statement = try cachedStatement(sql)
+        defer {
+            sqlite3_reset(statement)
+            sqlite3_clear_bindings(statement)
+        }
+        try body(statement)
+    }
+
+    private func cachedStatement(_ sql: String) throws -> OpaquePointer {
+        if let statement = statementCache[sql] {
+            return statement
+        }
         guard let db = connection.db else { throw SQLiteHistoryError.openFailed(message: "database is not open") }
         var statement: OpaquePointer?
         let result = sqlite3_prepare_v2(db, sql, -1, &statement, nil)
@@ -512,8 +495,15 @@ private final class SQLiteHistoryWorker: @unchecked Sendable {
               let statement else {
             throw SQLiteHistoryError.prepareFailed(code: result, message: Self.errorMessage(db))
         }
-        defer { sqlite3_finalize(statement) }
-        try body(statement)
+        statementCache[sql] = statement
+        return statement
+    }
+
+    private func finalizeCachedStatements() {
+        for statement in statementCache.values {
+            sqlite3_finalize(statement)
+        }
+        statementCache.removeAll()
     }
 
     private func sqliteError(_ fallback: SQLiteHistoryError.Kind, code: Int32) -> SQLiteHistoryError {

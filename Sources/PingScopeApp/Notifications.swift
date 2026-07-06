@@ -101,6 +101,7 @@ final class MacNotificationDispatcher: NSObject, UNUserNotificationCenterDelegat
         do {
             return try await center.requestAuthorization(options: [.alert, .sound])
         } catch {
+            logger?("notification authorization failed error=\(error.localizedDescription)")
             return false
         }
     }

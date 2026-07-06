@@ -78,7 +78,11 @@ public struct LatencyGraphScale: Equatable, Sendable {
     public var tickMilliseconds: [Double]
 
     public init(latencies: [Double]) {
-        let maximum = max(latencies.max() ?? 0, 1)
+        self.init(maximumMilliseconds: latencies.max())
+    }
+
+    public init(maximumMilliseconds: Double?) {
+        let maximum = max(maximumMilliseconds ?? 0, 1)
         let axisMaximum = Self.roundedAxisMaximum(for: maximum)
         self.maximumMilliseconds = maximum
         self.axisMaximumMilliseconds = axisMaximum

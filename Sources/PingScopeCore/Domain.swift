@@ -95,7 +95,31 @@ public struct HostConfig: Identifiable, Codable, Equatable, Sendable {
         self.notifications = notifications
     }
 
-    public static let defaultInternet = HostConfig(displayName: "Cloudflare DNS", address: "1.1.1.1", method: .https, port: 443)
+    public static let defaultInternet = HostConfig(displayName: "Cloudflare DNS", address: "1.1.1.1", method: .icmp, port: nil)
+    public static let defaultGoogleDNS = HostConfig(displayName: "Google DNS", address: "8.8.8.8", method: .icmp, port: nil)
+    public static let fallbackDefaultGatewayAddress = "192.168.1.1"
+    public static let defaultGateway = defaultGatewayHost(address: fallbackDefaultGatewayAddress)
+
+    public static func defaultGatewayHost(address: String) -> HostConfig {
+        HostConfig(
+            displayName: "Default Gateway",
+            address: address,
+            tier: .localGateway,
+            method: .icmp,
+            port: nil,
+            interval: .seconds(2),
+            timeout: .seconds(1),
+            thresholds: LatencyThresholds(degradedMilliseconds: 20, downAfterFailures: 3)
+        )
+    }
+
+    public static func defaultHosts(gatewayAddress: String? = nil) -> [HostConfig] {
+        [
+            defaultInternet,
+            defaultGoogleDNS,
+            defaultGatewayHost(address: gatewayAddress ?? fallbackDefaultGatewayAddress)
+        ]
+    }
     public static let defaultStarlinkDish = HostConfig(
         displayName: "Starlink",
         address: "192.168.100.1",

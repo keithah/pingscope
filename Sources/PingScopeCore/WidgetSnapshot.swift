@@ -227,11 +227,13 @@ public actor WidgetSnapshotStore {
             return false
         }
         defaults.set(data, forKey: key)
-        do {
-            let legacyData = try encoder.encode(LegacyWidgetData(snapshot: snapshot))
-            defaults.set(legacyData, forKey: Self.legacyKey)
-        } catch {
-            logger?("legacy widget snapshot encode failed: \(error)")
+        if defaults.data(forKey: Self.legacyKey) == nil {
+            do {
+                let legacyData = try encoder.encode(LegacyWidgetData(snapshot: snapshot))
+                defaults.set(legacyData, forKey: Self.legacyKey)
+            } catch {
+                logger?("legacy widget snapshot encode failed: \(error)")
+            }
         }
         return true
     }

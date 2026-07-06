@@ -140,4 +140,16 @@ final class StatusPopoverPresentationViewModel: ObservableObject {
         model?.setPingInterval(.milliseconds(Double(milliseconds)), for: hostID)
         refresh()
     }
+
+    func defaultShareOptions() -> PingScopeShareGraphOptions {
+        PingScopeShareGraphOptions(
+            scope: .currentView,
+            range: presentation.selectedRange,
+            includesTable: false
+        )
+    }
+
+    func shareGraph(options: PingScopeShareGraphOptions) {
+        model?.shareGraph(options: options)
+    }
 }

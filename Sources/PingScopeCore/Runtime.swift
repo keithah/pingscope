@@ -83,16 +83,7 @@ public struct DefaultGatewayDetector: Sendable {
     }
 
     public static func gatewayHost(address: String) -> HostConfig {
-        HostConfig(
-            displayName: "Default Gateway",
-            address: address,
-            tier: .localGateway,
-            method: .tcp,
-            port: 80,
-            interval: .seconds(2),
-            timeout: .seconds(1),
-            thresholds: LatencyThresholds(degradedMilliseconds: 20, downAfterFailures: 3)
-        )
+        HostConfig.defaultGatewayHost(address: address)
     }
 }
 
@@ -260,7 +251,7 @@ public actor HostStore {
     private var orderedHosts: [HostConfig]
     private var primaryID: UUID?
 
-    public init(defaultHosts: [HostConfig] = [.defaultInternet], primaryHostID: UUID? = nil) {
+    public init(defaultHosts: [HostConfig] = HostConfig.defaultHosts(), primaryHostID: UUID? = nil) {
         let normalized = Self.coalescingManagedDefaultGatewayHosts(
             defaultHosts,
             primaryID: primaryHostID ?? defaultHosts.first?.id
@@ -316,7 +307,7 @@ public actor HostStore {
         primaryID = id
     }
 
-    public func reset(defaultHosts: [HostConfig] = [.defaultInternet]) {
+    public func reset(defaultHosts: [HostConfig] = HostConfig.defaultHosts()) {
         orderedHosts = defaultHosts
         primaryID = defaultHosts.first?.id
         coalesceManagedDefaultGatewayHosts()
@@ -533,6 +524,7 @@ public actor PingRuntime {
     private var cachedHosts: [HostConfig] = []
     private var hostByID: [UUID: HostConfig] = [:]
     private var cachedPrimaryHostID: UUID?
+    private var broadOutageCoordinator = BroadOutageAlertCoordinator()
 
     public init(
         hostStore: HostStore = HostStore(),
@@ -646,21 +638,41 @@ public actor PingRuntime {
 
         if host?.notifications != .muted {
             var alerts: [AlertDecision] = []
+            let aggregateAlert: AlertDecision?
+            switch broadOutageCoordinator.aggregateCandidate(
+                hosts: cachedHosts,
+                healthByHost: healthByHost,
+                rules: alertEngine.rules
+            ) {
+            case let .internetLoss(latestResults):
+                aggregateAlert = alertEngine.evaluateInternetLoss(results: latestResults, at: result.timestamp)
+            case .pathRecovered:
+                aggregateAlert = .pathRecovered
+            case nil:
+                aggregateAlert = nil
+            }
             // Commit the diagnosis engine's cooldown/signature state only once we
             // know the alert will actually be delivered; otherwise a suppressed
             // (all-muted) diagnosis would burn the cooldown of a later real one.
             let diagnosis = networkDiagnoser.diagnose(hosts: cachedHosts, healthByHost: healthByHost)
             var diagnosisAlert: AlertDecision?
-            if let candidate = alertEngine.diagnosisAlertCandidate(diagnosis, at: result.timestamp),
-               !shouldSuppressDiagnosisAlert(candidate.decision) {
+            if let aggregateAlert {
+                alerts.append(aggregateAlert)
+                broadOutageCoordinator.recordDelivered(aggregateAlert, hosts: cachedHosts, healthByHost: healthByHost)
+            } else if diagnosis.verdict == .allReachable,
+                      let recoveredAlert = broadOutageCoordinator.pathRecoveredAlertIfNeeded(rules: alertEngine.rules) {
+                alerts.append(recoveredAlert)
+            } else if !broadOutageCoordinator.isPathAlertActive,
+                      let candidate = alertEngine.diagnosisAlertCandidate(diagnosis, at: result.timestamp),
+                      !shouldSuppressDiagnosisAlert(candidate.decision) {
                 alertEngine.commit(candidate)
                 diagnosisAlert = candidate.decision
+                broadOutageCoordinator.recordDelivered(candidate.decision, hosts: cachedHosts, healthByHost: healthByHost)
             }
             // Always evaluate the per-host transition so edge detection and the
             // high-latency streak counters are never perturbed by unrelated
-            // diagnosis activity. A same-tick diagnosis alert already tells the
-            // user something went down, so only the redundant hostDown is elided;
-            // recovery and high-latency transitions are never swallowed.
+            // diagnosis activity. Broader network alerts own the user-visible
+            // outage/recovery edge, so redundant host transitions are elided.
             let transitionCandidate = alertEngine.transitionAlertCandidate(
                 result: result,
                 previousStatus: previousStatus,
@@ -670,8 +682,12 @@ public actor PingRuntime {
                 alerts.append(diagnosisAlert)
             }
             if let transitionCandidate {
-                if case .hostDown = transitionCandidate.decision, diagnosisAlert != nil {
-                    // Superseded by the root-cause diagnosis for this tick.
+                if broadOutageCoordinator.shouldSuppressTransition(
+                    transitionCandidate.decision,
+                    diagnosisAlert: diagnosisAlert,
+                    aggregateAlert: aggregateAlert
+                ) {
+                    // Superseded by a broader outage/recovery notification.
                     // Deliberately not committed: an elided alert must not burn
                     // the per-host cooldown, or a second outage inside the
                     // window would produce no notification at all.
@@ -755,6 +771,7 @@ public actor PingRuntime {
         await refreshHostCache()
         healthByHost.removeAll()
         samplesByHost.removeAll()
+        broadOutageCoordinator.reset()
         await historyStore?.deleteAll()
         await restartScheduler(refreshCache: false)
     }
@@ -838,6 +855,7 @@ public actor PingRuntime {
             return false
         }
     }
+
 }
 
 private extension HostConfig {

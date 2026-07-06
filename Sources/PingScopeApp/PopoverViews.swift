@@ -5,6 +5,8 @@ struct StatusPopoverView: View {
     @ObservedObject var viewModel: StatusPopoverPresentationViewModel
     var onSettings: () -> Void = {}
     @EnvironmentObject private var softwareUpdateController: SoftwareUpdateController
+    @State private var isShareOptionsPresented = false
+    @State private var shareOptions = PingScopeShareGraphOptions()
 
     var body: some View {
         let presentation = viewModel.presentation
@@ -48,13 +50,26 @@ struct StatusPopoverView: View {
         .frame(
             minWidth: MenuBarPresentationMode.statusContentMinimumSize.width,
             idealWidth: MenuBarPresentationMode.statusContentSize.width,
-            maxWidth: .infinity,
+            maxWidth: MenuBarPresentationMode.statusContentSize.width,
             minHeight: MenuBarPresentationMode.statusContentMinimumSize.height,
             idealHeight: MenuBarPresentationMode.statusContentSize.height,
             maxHeight: .infinity,
             alignment: .top
         )
         .background(Color(nsColor: .windowBackgroundColor))
+        .popover(isPresented: $isShareOptionsPresented, arrowEdge: .top) {
+            ShareGraphOptionsPopover(
+                options: $shareOptions,
+                hasMultipleHosts: presentation.snapshot.hosts.count > 1,
+                onShare: {
+                    isShareOptionsPresented = false
+                    viewModel.shareGraph(options: shareOptions)
+                },
+                onCancel: {
+                    isShareOptionsPresented = false
+                }
+            )
+        }
     }
 
     private var header: some View {
@@ -93,7 +108,7 @@ struct StatusPopoverView: View {
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
-                HStack(alignment: .top, spacing: 14) {
+                HStack(alignment: .top, spacing: 4) {
                     VStack(alignment: .trailing, spacing: 4) {
                         Text(presentation.selectedRangeState.text)
                             .font(.system(.title2, design: .monospaced).weight(.semibold))
@@ -101,16 +116,33 @@ struct StatusPopoverView: View {
                             .font(.caption)
                             .foregroundStyle(Color(statusColor: presentation.selectedRangeState.color))
                     }
+                    .padding(.trailing, 10)
+                    Button {
+                        shareOptions = viewModel.defaultShareOptions()
+                        isShareOptionsPresented = true
+                    } label: {
+                        Image(systemName: "square.and.arrow.up")
+                            .font(.system(size: 18, weight: .medium))
+                            .frame(
+                                width: MenuBarPresentationMode.statusCompactControlHitSize,
+                                height: MenuBarPresentationMode.statusCompactControlHitSize
+                            )
+                    }
+                    .buttonStyle(.plain)
+                    .contentShape(Rectangle())
+                    .help("Share graph")
+                    .accessibilityLabel("Share graph")
                     Button {
                         onSettings()
                     } label: {
                         Image(systemName: "gearshape")
+                            .font(.system(size: 18, weight: .medium))
                             .frame(
-                                width: MenuBarPresentationMode.statusControlHitSize,
-                                height: MenuBarPresentationMode.statusControlHitSize
+                                width: MenuBarPresentationMode.statusCompactControlHitSize,
+                                height: MenuBarPresentationMode.statusCompactControlHitSize
                             )
                     }
-                    .buttonStyle(.borderless)
+                    .buttonStyle(.plain)
                     .contentShape(Rectangle())
                     .help("Open settings")
                     .accessibilityLabel("Open settings")
@@ -208,6 +240,47 @@ struct StatusPopoverView: View {
     private func latency(_ value: Double?) -> String {
         guard let value else { return "--" }
         return "\(Int(value.rounded()))ms"
+    }
+
+    private struct ShareGraphOptionsPopover: View {
+        @Binding var options: PingScopeShareGraphOptions
+        let hasMultipleHosts: Bool
+        let onShare: () -> Void
+        let onCancel: () -> Void
+
+        var body: some View {
+            VStack(alignment: .leading, spacing: 14) {
+                Text("Share Graph")
+                    .font(.headline)
+
+                Picker("Hosts", selection: $options.scope) {
+                    Text(PingScopeShareGraphScope.currentView.displayName).tag(PingScopeShareGraphScope.currentView)
+                    Text(PingScopeShareGraphScope.singleHost.displayName).tag(PingScopeShareGraphScope.singleHost)
+                    if hasMultipleHosts {
+                        Text(PingScopeShareGraphScope.allHosts.displayName).tag(PingScopeShareGraphScope.allHosts)
+                    }
+                }
+                .pickerStyle(.segmented)
+
+                Picker("Range", selection: $options.range) {
+                    ForEach(TimeRange.displayCases) { range in
+                        Text(range.rawValue).tag(range)
+                    }
+                }
+                .pickerStyle(.segmented)
+
+                Toggle("Include sample table", isOn: $options.includesTable)
+
+                HStack {
+                    Spacer()
+                    Button("Cancel", action: onCancel)
+                    Button("Share", action: onShare)
+                        .buttonStyle(.borderedProminent)
+                }
+            }
+            .padding(16)
+            .frame(width: 340)
+        }
     }
 
     private var allHostStatusSummary: some View {

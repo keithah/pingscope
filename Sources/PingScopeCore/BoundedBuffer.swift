@@ -140,14 +140,20 @@ public struct BoundedBuffer<Element: Codable & Equatable & Sendable>: Codable, E
             batch.append(storage[(startIndex + offset) % storage.count])
         }
 
-        storedCount -= prefixCount
-        if storedCount == 0 {
-            storage.removeAll()
+        let remainingCount = storedCount - prefixCount
+        if remainingCount == 0 {
+            storage.removeAll(keepingCapacity: true)
             startIndex = 0
+            storedCount = 0
             return batch
         }
 
-        startIndex = (startIndex + prefixCount) % storage.count
+        storage = (prefixCount..<storedCount).map { offset in
+            storage[(startIndex + offset) % storage.count]
+        }
+        storage.reserveCapacity(capacity)
+        startIndex = 0
+        storedCount = remainingCount
         return batch
     }
 

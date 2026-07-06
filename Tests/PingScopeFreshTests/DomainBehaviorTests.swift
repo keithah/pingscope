@@ -77,11 +77,14 @@ final class DomainBehaviorTests: XCTestCase {
         XCTAssertEqual(host.port, 9200)
     }
 
-    func testDefaultInternetUsesHTTPSRoundTripProbe() {
-        XCTAssertEqual(HostConfig.defaultInternet.displayName, "Cloudflare DNS")
-        XCTAssertEqual(HostConfig.defaultInternet.address, "1.1.1.1")
-        XCTAssertEqual(HostConfig.defaultInternet.method, .https)
-        XCTAssertEqual(HostConfig.defaultInternet.port, 443)
+    func testDefaultHostsUseICMPAndExpectedNetworkTiers() {
+        let hosts = HostConfig.defaultHosts(gatewayAddress: "192.168.42.1")
+
+        XCTAssertEqual(hosts.map(\.displayName), ["Cloudflare DNS", "Google DNS", "Default Gateway"])
+        XCTAssertEqual(hosts.map(\.address), ["1.1.1.1", "8.8.8.8", "192.168.42.1"])
+        XCTAssertEqual(hosts.map(\.method), [.icmp, .icmp, .icmp])
+        XCTAssertEqual(hosts.map(\.port), [nil, nil, nil])
+        XCTAssertEqual(hosts.map(\.effectiveNetworkTier), [.upstream, .upstream, .localGateway])
     }
 
     func testHostConfigMigratorMigratesStockCloudflareTCPHostToHTTPS() {
@@ -961,6 +964,32 @@ final class DomainBehaviorTests: XCTestCase {
         )
     }
 
+    func testNetworkPerspectiveUsesHighConfidenceWhenBothUpstreamDefaultsAreDown() {
+        let gateway = HostConfig(id: UUID(), displayName: "Default Gateway", address: "192.168.1.1", thresholds: LatencyThresholds(downAfterFailures: 1))
+        let cloudflare = HostConfig(id: UUID(), displayName: "Cloudflare", address: "1.1.1.1", thresholds: LatencyThresholds(downAfterFailures: 1))
+        let google = HostConfig(id: UUID(), displayName: "Google", address: "8.8.8.8", thresholds: LatencyThresholds(downAfterFailures: 1))
+        let diagnosis = NetworkPerspectiveDiagnoser().diagnose(
+            hosts: [gateway, cloudflare, google],
+            healthByHost: [
+                gateway.id: health(for: gateway, statusAfter: [.success(hostID: gateway.id, latency: .milliseconds(3))]),
+                cloudflare.id: health(for: cloudflare, statusAfter: [.failure(hostID: cloudflare.id, reason: .timeout)]),
+                google.id: health(for: google, statusAfter: [.failure(hostID: google.id, reason: .timeout)])
+            ]
+        )
+
+        XCTAssertEqual(diagnosis.scope, .upstream)
+        XCTAssertEqual(diagnosis.title, "Upstream path down")
+        XCTAssertEqual(diagnosis.confidence, .high)
+        XCTAssertEqual(diagnosis.evidenceNote, "2/2 internet hosts down")
+        assertEvidence(
+            diagnosis.tierEvidence,
+            equals: [
+                (.localGateway, total: 1, healthy: 1, degraded: 0, down: 0),
+                (.upstream, total: 2, healthy: 0, degraded: 0, down: 2)
+            ]
+        )
+    }
+
     func testNetworkPerspectiveDoesNotTreatSingleTransientFailureAsDown() {
         let gateway = HostConfig(id: UUID(), displayName: "Default Gateway", address: "192.168.1.1")
         let cloudflare = HostConfig(id: UUID(), displayName: "Cloudflare", address: "1.1.1.1")
@@ -1041,6 +1070,13 @@ final class DomainBehaviorTests: XCTestCase {
         XCTAssertEqual(normalized.port, 443)
     }
 
+    func testAppStoreFlavorNormalizesDefaultHostMethods() {
+        let normalized = BuildFlavor.appStore.normalizedHosts(HostConfig.defaultHosts())
+
+        XCTAssertEqual(normalized.map(\.method), [.tcp, .tcp, .tcp])
+        XCTAssertTrue(normalized.allSatisfy { PingMethod.appStoreAvailableCases.contains($0.method) })
+    }
+
     func testDeveloperIDFlavorPreservesICMPHosts() {
         let host = HostConfig(
             displayName: "Router ICMP",
@@ -1050,6 +1086,7 @@ final class DomainBehaviorTests: XCTestCase {
         )
 
         XCTAssertEqual(BuildFlavor.developerID.normalizedHost(host), host)
+        XCTAssertEqual(BuildFlavor.developerID.normalizedHosts(HostConfig.defaultHosts()).map(\.method), [.icmp, .icmp, .icmp])
     }
 
     private func health(for host: HostConfig, statusAfter results: [PingResult]) -> HostHealth {

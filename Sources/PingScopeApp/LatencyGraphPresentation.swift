@@ -37,21 +37,22 @@ struct LatencyGraphData {
     private let renderPointCache = LatencyGraphRenderPointCache()
 
     init(samples: [PingResult]) {
-        var latencies: [Double] = []
-        latencies.reserveCapacity(samples.count)
+        var latencyCount = 0
+        var maximumLatency: Double?
         var points: [LatencyGraphPoint] = []
         points.reserveCapacity(samples.count)
         for (index, sample) in samples.enumerated() {
             let latency = sample.latency?.milliseconds
             if let latency {
-                latencies.append(latency)
+                latencyCount += 1
+                maximumLatency = maximumLatency.map { max($0, latency) } ?? latency
             }
             points.append(LatencyGraphPoint(index: index, latencyMilliseconds: latency))
         }
         self.points = points
         self.sampleCount = samples.count
-        self.latencyCount = latencies.count
-        scale = LatencyGraphScale(latencies: latencies)
+        self.latencyCount = latencyCount
+        scale = LatencyGraphScale(maximumMilliseconds: maximumLatency)
     }
 
     var isEmpty: Bool {
@@ -101,7 +102,8 @@ struct MultiHostLatencyGraphData {
     private let latencyCount: Int
 
     init(series: [HostLatencyGraphSeries]) {
-        var latencies: [Double] = []
+        var latencyCount = 0
+        var maximumLatency: Double?
         var drawableSeries: [DrawableHostLatencyGraphSeries] = []
         var visibleLegendSeries: [HostLatencyGraphSeries] = []
         visibleLegendSeries.reserveCapacity(4)
@@ -111,7 +113,8 @@ struct MultiHostLatencyGraphData {
             for (index, sample) in hostSeries.samples.enumerated() {
                 let latency = sample.latency?.milliseconds
                 if let latency {
-                    latencies.append(latency)
+                    latencyCount += 1
+                    maximumLatency = maximumLatency.map { max($0, latency) } ?? latency
                 }
                 points.append(LatencyGraphPoint(index: index, latencyMilliseconds: latency))
             }
@@ -127,8 +130,8 @@ struct MultiHostLatencyGraphData {
         }
         self.drawableSeries = drawableSeries
         self.visibleLegendSeries = visibleLegendSeries
-        self.latencyCount = latencies.count
-        scale = LatencyGraphScale(latencies: latencies)
+        self.latencyCount = latencyCount
+        scale = LatencyGraphScale(maximumMilliseconds: maximumLatency)
     }
 
     var isEmpty: Bool {

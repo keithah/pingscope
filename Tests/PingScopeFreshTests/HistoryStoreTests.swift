@@ -696,6 +696,35 @@ final class HistoryStoreTests: XCTestCase {
         )
     }
 
+    func testWidgetSnapshotStoreDoesNotRewriteExistingLegacyBlob() async throws {
+        let suiteName = "pingscope-widget-legacy-once-tests-\(UUID().uuidString)"
+        let store = WidgetSnapshotStore(suiteName: suiteName, key: "snapshot")
+        let inspectionDefaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { inspectionDefaults.removePersistentDomain(forName: suiteName) }
+        let hostID = UUID()
+
+        await store.save(WidgetSnapshot(
+            primaryHostID: hostID,
+            hosts: [WidgetHost(id: hostID, displayName: "H", address: "1.1.1.1", method: .https, port: 443, isPrimary: true)],
+            health: [WidgetHostHealth(hostID: hostID, status: .healthy, latencyMilliseconds: 7, consecutiveFailureCount: 0, failureReason: nil, latestResultAt: Date(timeIntervalSince1970: 6_000))],
+            recentSamples: [],
+            networkStatus: .connected,
+            generatedAt: Date(timeIntervalSince1970: 6_001)
+        ))
+        let firstLegacyBlob = try XCTUnwrap(inspectionDefaults.data(forKey: WidgetSnapshotStore.legacyKey))
+
+        await store.save(WidgetSnapshot(
+            primaryHostID: hostID,
+            hosts: [WidgetHost(id: hostID, displayName: "H", address: "1.1.1.1", method: .https, port: 443, isPrimary: true)],
+            health: [WidgetHostHealth(hostID: hostID, status: .healthy, latencyMilliseconds: 11, consecutiveFailureCount: 0, failureReason: nil, latestResultAt: Date(timeIntervalSince1970: 7_000))],
+            recentSamples: [],
+            networkStatus: .connected,
+            generatedAt: Date(timeIntervalSince1970: 7_001)
+        ))
+
+        XCTAssertEqual(inspectionDefaults.data(forKey: WidgetSnapshotStore.legacyKey), firstLegacyBlob)
+    }
+
     private func temporaryHistoryURL() -> URL {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("pingscope-history-tests-\(UUID().uuidString)", isDirectory: true)

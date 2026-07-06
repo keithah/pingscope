@@ -267,7 +267,7 @@ final class RuntimeBehaviorTests: XCTestCase {
         XCTAssertEqual(decisions, [])
     }
 
-    func testRuntimeDeliversRecoveryAlongsideSameTickDiagnosisAlert() async throws {
+    func testRuntimeSuppressesPartialHostRecoveryDuringBroadOutage() async throws {
         let thresholds = LatencyThresholds(degradedMilliseconds: 100, downAfterFailures: 1)
         let hostA = HostConfig(displayName: "A", address: "a.example", thresholds: thresholds)
         let hostB = HostConfig(displayName: "B", address: "b.example", thresholds: thresholds)
@@ -281,13 +281,14 @@ final class RuntimeBehaviorTests: XCTestCase {
 
         await runtime.ingest(.failure(hostID: hostA.id, reason: .timeout, timestamp: base))
         await runtime.ingest(.failure(hostID: hostB.id, reason: .timeout, timestamp: base.addingTimeInterval(1)))
-        // Host A recovers on the same tick that shifts the network diagnosis to
-        // "B only": the diagnosis alert must not swallow A's recovery transition.
+        // Host A recovers while Host B is still down. This used to create a
+        // host-level recovery notification in the middle of an internet outage.
         await runtime.ingest(.success(hostID: hostA.id, latency: .milliseconds(8), timestamp: base.addingTimeInterval(2)))
         await runtime.stop()
 
         let decisions = await collectDecisions(from: alertStream)
-        XCTAssertTrue(decisions.contains(.recovered(hostID: hostA.id)), "expected recovery in \(decisions)")
+        XCTAssertFalse(decisions.contains(.recovered(hostID: hostA.id)), "expected partial recovery to be coalesced in \(decisions)")
+        XCTAssertFalse(decisions.contains(.pathRecovered), "expected no path recovery until every outage host recovers in \(decisions)")
     }
 
     func testRuntimeElidedHostDownDoesNotConsumeItsCooldown() async throws {
@@ -315,6 +316,61 @@ final class RuntimeBehaviorTests: XCTestCase {
 
         let decisions = await collectDecisions(from: alertStream)
         XCTAssertTrue(decisions.contains(.hostDown(hostID: host.id)), "expected hostDown in \(decisions)")
+    }
+
+    func testRuntimeCoalescesAggregateInternetOutageAndRecoveryAlerts() async throws {
+        let thresholds = LatencyThresholds(degradedMilliseconds: 100, downAfterFailures: 1)
+        let hostA = HostConfig(displayName: "Cloudflare DNS", address: "1.1.1.1", thresholds: thresholds)
+        let hostB = HostConfig(displayName: "Default Gateway", address: "192.168.42.1", thresholds: thresholds)
+        let runtime = PingRuntime(
+            hostStore: HostStore(defaultHosts: [hostA, hostB]),
+            scheduler: MeasurementScheduler(probeFactory: HangingProbeFactory()),
+            notificationRules: NotificationRuleSet(cooldown: .seconds(0), diagnosisSensitivity: .sensitive)
+        )
+        let alertStream = await runtime.alerts()
+        let base = Date(timeIntervalSince1970: 11_000)
+
+        await runtime.ingest(.failure(hostID: hostA.id, reason: .timeout, timestamp: base))
+        await runtime.ingest(.failure(hostID: hostB.id, reason: .timeout, timestamp: base.addingTimeInterval(1)))
+        await runtime.ingest(.success(hostID: hostA.id, latency: .milliseconds(5), timestamp: base.addingTimeInterval(2)))
+        await runtime.ingest(.success(hostID: hostB.id, latency: .milliseconds(5), timestamp: base.addingTimeInterval(3)))
+        await runtime.stop()
+
+        let decisions = await collectDecisions(from: alertStream)
+        let broadDownCount = decisions.filter { decision in
+            [.internetLoss, .localNetworkDown, .ispPathDown, .upstreamDown].contains(decision)
+        }.count
+        XCTAssertEqual(broadDownCount, 1, "expected one broad outage alert in \(decisions)")
+        XCTAssertEqual(decisions.filter { $0 == .pathRecovered }.count, 1, "expected one path recovery alert in \(decisions)")
+        XCTAssertFalse(decisions.contains(.hostDown(hostID: hostB.id)), "expected gateway hostDown to be coalesced in \(decisions)")
+        XCTAssertFalse(decisions.contains(.recovered(hostID: hostA.id)), "expected first host recovery to be coalesced in \(decisions)")
+        XCTAssertFalse(decisions.contains(.recovered(hostID: hostB.id)), "expected second host recovery to be coalesced in \(decisions)")
+    }
+
+    func testRuntimeDoesNotSuppressHostTransitionsWhenBroadAlertTypeIsDisabled() async throws {
+        let thresholds = LatencyThresholds(degradedMilliseconds: 100, downAfterFailures: 1)
+        let hostA = HostConfig(displayName: "Cloudflare DNS", address: "1.1.1.1", thresholds: thresholds)
+        let hostB = HostConfig(displayName: "Google DNS", address: "8.8.8.8", thresholds: thresholds)
+        let runtime = PingRuntime(
+            hostStore: HostStore(defaultHosts: [hostA, hostB]),
+            scheduler: MeasurementScheduler(probeFactory: HangingProbeFactory()),
+            notificationRules: NotificationRuleSet(
+                cooldown: .seconds(0),
+                alertTypes: [.hostDown, .recovered],
+                diagnosisSensitivity: .sensitive
+            )
+        )
+        let alertStream = await runtime.alerts()
+        let base = Date(timeIntervalSince1970: 12_000)
+
+        await runtime.ingest(PingResult.failure(hostID: hostA.id, reason: .timeout, timestamp: base))
+        await runtime.ingest(PingResult.failure(hostID: hostB.id, reason: .timeout, timestamp: base.addingTimeInterval(1)))
+        await runtime.stop()
+
+        let decisions = await collectDecisions(from: alertStream)
+        XCTAssertTrue(decisions.contains(AlertDecision.hostDown(hostID: hostA.id)), "expected host A down alert in \(decisions)")
+        XCTAssertTrue(decisions.contains(AlertDecision.hostDown(hostID: hostB.id)), "expected host B down alert in \(decisions)")
+        XCTAssertFalse(decisions.contains(AlertDecision.internetLoss), "expected disabled broad alert type to stay silent in \(decisions)")
     }
 
     func testRuntimeHoldsAlertsProducedBeforeAnySubscriber() async throws {

@@ -21,6 +21,7 @@ final class HostConfigPersistence {
     private let defaults: UserDefaults
     private var lastPersistedHostState: PersistedHostState?
     private var preservesUndecodableData = false
+    private let seededDefaultsKey = "didSeedDefaultHosts"
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -30,9 +31,9 @@ final class HostConfigPersistence {
         let savedHosts: [HostConfig]
         switch defaults.storedHostConfigs() {
         case .decoded(let hosts):
-            savedHosts = HostConfigMigrator().migrate(hosts)
+            savedHosts = hosts.isEmpty ? seedDefaultsIfNeeded(logger: logger) : HostConfigMigrator().migrate(hosts)
         case .missing:
-            savedHosts = []
+            savedHosts = seedDefaultsIfNeeded(logger: logger)
         case .decodeFailed(let error):
             logger("host config decode failed; preserving stored data error=\(error.localizedDescription)")
             preservesUndecodableData = true
@@ -43,7 +44,7 @@ final class HostConfigPersistence {
         if !savedHosts.isEmpty, sanitizedHosts.count != savedHosts.count {
             logger("host config sanitized dropped=\(savedHosts.count - sanitizedHosts.count)")
         }
-        let hosts = sanitizedHosts.isEmpty ? [HostConfig.defaultInternet] : sanitizedHosts
+        let hosts = sanitizedHosts
         return LoadedHostConfiguration(hosts: hosts, primaryHostID: defaults.primaryHostID)
     }
 
@@ -66,5 +67,23 @@ final class HostConfigPersistence {
     func allowUserManagedPersistence() {
         preservesUndecodableData = false
         lastPersistedHostState = nil
+    }
+
+    private func seedDefaultsIfNeeded(logger: (String) -> Void) -> [HostConfig] {
+        guard !defaults.bool(forKey: seededDefaultsKey) else { return [] }
+        let hosts = HostConfig.sanitizedHosts(
+            BuildFlavor.current.normalizedHosts(
+                HostConfig.defaultHosts()
+            )
+        )
+        guard !hosts.isEmpty else { return [] }
+        do {
+            try defaults.setHostConfigs(hosts)
+            defaults.primaryHostID = hosts.first?.id
+            defaults.set(true, forKey: seededDefaultsKey)
+        } catch {
+            logger("default host seed encode failed; using in-memory defaults error=\(error.localizedDescription)")
+        }
+        return hosts
     }
 }

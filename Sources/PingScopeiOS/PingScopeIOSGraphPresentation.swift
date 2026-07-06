@@ -31,15 +31,15 @@ public struct PingScopeIOSLatencyGraphData: Sendable, Equatable {
     public init(samples: [PingResult], range: TimeRange, endDate: Date = Date()) {
         self.endDate = endDate
         startDate = endDate.addingTimeInterval(-range.duration)
-        var latencies: [Double] = []
+        var maximumLatency: Double?
         var points: [PingScopeIOSLatencyGraphPoint] = []
         for sample in samples where sample.timestamp >= startDate && sample.timestamp <= endDate {
             guard let latency = sample.latency?.milliseconds else { continue }
-            latencies.append(latency)
+            maximumLatency = maximumLatency.map { max($0, latency) } ?? latency
             points.append(PingScopeIOSLatencyGraphPoint(timestamp: sample.timestamp, latencyMilliseconds: latency))
         }
         self.points = points
-        self.scale = LatencyGraphScale(latencies: latencies)
+        self.scale = LatencyGraphScale(maximumMilliseconds: maximumLatency)
     }
 }
 #endif
