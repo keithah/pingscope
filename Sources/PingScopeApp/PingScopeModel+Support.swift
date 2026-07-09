@@ -155,7 +155,8 @@ extension UserDefaults {
 
     var overlayCompactMode: Bool {
         get {
-            bool(forKey: "overlayCompactMode")
+            guard object(forKey: "overlayCompactMode") != nil else { return true }
+            return bool(forKey: "overlayCompactMode")
         }
         set {
             set(newValue, forKey: "overlayCompactMode")

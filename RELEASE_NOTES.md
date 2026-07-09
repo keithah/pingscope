@@ -7,6 +7,8 @@ PingScope 0.3.1 is a macOS-focused release that tightens the monitoring UI, fixe
 - Refreshed the About pane with the product page link, software update action, and privacy information in one place.
 - Removed the always-visible first-run checklist from About; only required setup issues are surfaced when they need attention.
 - History export now defaults to 1 hour, adds Max for the full retained 7-day history window, and supports custom hour/day ranges capped by retention.
+- Shared graph exports can now be rendered with Current, Light, or Dark appearance.
+- The floating overlay now defaults to the new ring-compact mode on first launch or when no previous overlay mode was saved.
 - Updated the product page assets and copy with current macOS screenshots, overlay imagery, dynamic GitHub download links, and support email flow.
 - Added iOS companion positioning on the product page while keeping the shipping app experience macOS-first.
 

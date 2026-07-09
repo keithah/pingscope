@@ -7,8 +7,11 @@ struct OverlayView: View {
 
     var body: some View {
         let presentation = viewModel.presentation
-        VStack(alignment: .leading, spacing: presentation.compactMode ? 0 : 6) {
-            if !presentation.compactMode {
+        Group {
+            if presentation.compactMode {
+                ringCompact
+            } else {
+                VStack(alignment: .leading, spacing: 6) {
                 HStack(alignment: .center, spacing: 7) {
                     Text(presentation.menuBarState.text)
                         .font(.system(size: 13, weight: .medium, design: .monospaced))
@@ -20,18 +23,19 @@ struct OverlayView: View {
                 }
                 .frame(height: 20, alignment: .center)
                 .padding(.trailing, 68)
-            }
-            overlayGraph
-                .contentShape(Rectangle())
-                .onTapGesture {
-                    viewModel.openDetails()
+                    overlayGraph
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            viewModel.openDetails()
+                        }
                 }
+                .padding(EdgeInsets(top: 4, leading: 12, bottom: 12, trailing: 12))
+                .frame(minWidth: 190, minHeight: 78)
+            }
         }
-        .padding(presentation.compactMode ? EdgeInsets(top: 6, leading: 6, bottom: 6, trailing: 6) : EdgeInsets(top: 4, leading: 12, bottom: 12, trailing: 12))
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
-        .frame(minWidth: presentation.compactMode ? 150 : 190, minHeight: presentation.compactMode ? 48 : 78)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
         .contextMenu {
-            Button(presentation.compactMode ? "Exit Compact Graph" : "Compact Graph") {
+            Button(presentation.compactMode ? "Expanded Graph" : "Ring Compact") {
                 AppDelegate.shared?.toggleOverlayCompactMode()
             }
             if presentation.hostOptions.count > 1 {
@@ -53,6 +57,36 @@ struct OverlayView: View {
             Button("Close Overlay") {
                 AppDelegate.shared?.hideOverlay()
             }
+        }
+    }
+
+    private var ringCompact: some View {
+        let presentation = viewModel.presentation
+        return HStack(spacing: 10) {
+            PulseHealthRing(progress: ringProgress, color: Color(statusColor: presentation.menuBarState.color), lineWidth: 6)
+                .frame(width: 58, height: 58)
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(alignment: .firstTextBaseline, spacing: 2) {
+                    Text(latencyNumberText)
+                        .font(.system(size: 24, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(Color(statusColor: presentation.menuBarState.color))
+                    Text("ms")
+                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                }
+                Text(presentation.showsAllHosts ? "All Hosts" : presentation.primaryHostName)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .frame(width: 178, height: 76)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            viewModel.openDetails()
         }
     }
 
@@ -105,5 +139,22 @@ struct OverlayView: View {
                 .lineLimit(1)
                 .truncationMode(.tail)
         }
+    }
+
+    private var latencyNumberText: String {
+        let text = viewModel.presentation.menuBarState.text
+        if text.hasSuffix("ms") {
+            return String(text.dropLast(2))
+        }
+        return text
+    }
+
+    private var ringProgress: Double {
+        let presentation = viewModel.presentation
+        guard let latest = presentation.displayPresentation.visibleSamples.last?.latency?.milliseconds else {
+            return 0
+        }
+        let threshold = max(presentation.primaryDegradedThresholdMilliseconds, 1)
+        return min(max(latest / threshold, 0), 1)
     }
 }

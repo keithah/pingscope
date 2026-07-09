@@ -14,6 +14,7 @@ struct OverlayPresentation {
     var menuBarState: MenuBarState
     var hostOptions: [OverlayHostOption]
     var primaryHostName: String
+    var primaryDegradedThresholdMilliseconds: Double
     var showsAllHosts: Bool
     var showsLegend: Bool
     var displayPresentation: PingScopeDisplayPresentation
@@ -31,6 +32,7 @@ struct OverlayPresentation {
             )
         }
         primaryHostName = model.primaryHost?.displayName ?? "No Host"
+        primaryDegradedThresholdMilliseconds = model.primaryHost?.thresholds.degradedMilliseconds ?? LatencyThresholds.defaults.degradedMilliseconds
         showsAllHosts = model.overlayShowsAllHosts
         showsLegend = model.overlayShowsLegend
         displayPresentation = model.displayPresentation
@@ -145,6 +147,7 @@ final class StatusPopoverPresentationViewModel: ObservableObject {
         PingScopeShareGraphOptions(
             scope: .currentView,
             range: presentation.selectedRange,
+            appearance: .current,
             includesTable: false
         )
     }

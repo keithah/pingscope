@@ -3,6 +3,17 @@ import PingScopeCore
 import PingScopeiOS
 
 final class LiveMonitorSessionControllerTests: XCTestCase {
+    func testIOSRunControlSelectionMapsDurationsAndStop() {
+        XCTAssertEqual(PingScopeIOSRunControlAction.selectionChanged(to: .continuous), .start(.continuous))
+        XCTAssertEqual(PingScopeIOSRunControlAction.selectionChanged(to: .thirtySeconds), .start(.thirtySeconds))
+        XCTAssertEqual(PingScopeIOSRunControlAction.selectionChanged(to: .oneMinute), .start(.oneMinute))
+        XCTAssertEqual(PingScopeIOSRunControlAction.selectionChanged(to: nil), .stop)
+    }
+
+    func testIOSRunControlOneMinuteDoesNotMapToStop() {
+        XCTAssertNotEqual(PingScopeIOSRunControlAction.selectionChanged(to: .oneMinute), .stop)
+    }
+
     func testControllerStartsFiniteSessionAndPublishesProbeResult() async throws {
         let host = HostConfig(id: UUID(), displayName: "Cloudflare", address: "1.1.1.1")
         let probe = RecordingProbe(results: [
@@ -323,6 +334,25 @@ final class LiveMonitorSessionControllerTests: XCTestCase {
         let state = store.load()
 
         XCTAssertEqual(state.hosts, hosts)
+        XCTAssertEqual(state.selectedHost.id, hosts[1].id)
+    }
+
+    func testIOSHostOrderingReordersAndPreservesSelectedHostWhenPersisted() {
+        let suiteName = "PingScopeIOSHostStoreTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let hosts = [
+            HostConfig(id: UUID(), displayName: "Cloudflare", address: "1.1.1.1"),
+            HostConfig(id: UUID(), displayName: "Google", address: "8.8.8.8"),
+            HostConfig(id: UUID(), displayName: "Router", address: "192.168.1.1")
+        ]
+        let store = PingScopeIOSHostStore(defaults: defaults, defaultHosts: hosts)
+
+        let reordered = PingScopeIOSHostOrdering.reordered(hosts: hosts, fromOffsets: IndexSet(integer: 2), toOffset: 0)
+        store.save(hosts: reordered, selectedHostID: hosts[1].id)
+        let state = store.load()
+
+        XCTAssertEqual(state.hosts.map(\.id), [hosts[2].id, hosts[0].id, hosts[1].id])
         XCTAssertEqual(state.selectedHost.id, hosts[1].id)
     }
 

@@ -37,6 +37,9 @@ struct PingScopeIOSApp: App {
                 onDeleteHost: { hostID in
                     model.deleteHost(hostID)
                 },
+                onMoveHosts: { offsets, destination in
+                    model.moveHosts(fromOffsets: offsets, toOffset: destination)
+                },
                 onSelectGraphRange: { range in
                     model.selectedGraphRange = range
                 },
@@ -167,6 +170,11 @@ private final class PingScopeIOSAppModel: ObservableObject {
         let replacementID = hosts.first?.id ?? HostConfig.defaultInternet.id
         hostStore.save(hosts: hosts, selectedHostID: replacementID)
         selectHost(replacementID)
+    }
+
+    func moveHosts(fromOffsets offsets: IndexSet, toOffset destination: Int) {
+        hosts = PingScopeIOSHostOrdering.reordered(hosts: hosts, fromOffsets: offsets, toOffset: destination)
+        hostStore.save(hosts: hosts, selectedHostID: snapshot.host.id)
     }
 
     func addDefaultGatewayHost() {

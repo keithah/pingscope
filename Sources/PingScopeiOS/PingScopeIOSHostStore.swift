@@ -11,6 +11,24 @@ public struct PingScopeIOSHostState: Equatable, Sendable {
     }
 }
 
+public enum PingScopeIOSHostOrdering {
+    public static func reordered(hosts: [HostConfig], fromOffsets offsets: IndexSet, toOffset destination: Int) -> [HostConfig] {
+        let sortedOffsets = offsets.sorted()
+        guard !sortedOffsets.isEmpty else { return hosts }
+        var result = hosts
+        let movingHosts = sortedOffsets.compactMap { index in
+            hosts.indices.contains(index) ? hosts[index] : nil
+        }
+        for index in sortedOffsets.reversed() where result.indices.contains(index) {
+            result.remove(at: index)
+        }
+        let removedBeforeDestination = sortedOffsets.filter { $0 < destination }.count
+        let insertionIndex = min(max(destination - removedBeforeDestination, 0), result.count)
+        result.insert(contentsOf: movingHosts, at: insertionIndex)
+        return result
+    }
+}
+
 public final class PingScopeIOSHostStore: @unchecked Sendable {
     public static let defaultHosts: [HostConfig] = BuildFlavor.appStore.normalizedHosts(HostConfig.defaultHosts())
 

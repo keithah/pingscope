@@ -52,6 +52,41 @@ final class PingScopePresentationViewModelTests: XCTestCase {
         XCTAssertTrue(viewModel.presentation.popoverShowsAllHosts)
     }
 
+    func testShareGraphAppearanceResolvesForcedColorSchemes() {
+        XCTAssertEqual(PingScopeShareGraphAppearance.light.resolvedColorScheme, .light)
+        XCTAssertEqual(PingScopeShareGraphAppearance.dark.resolvedColorScheme, .dark)
+    }
+
+    func testShareGraphCurrentAppearanceFollowsEffectiveAppAppearance() throws {
+        let darkAppearance = try XCTUnwrap(NSAppearance(named: .darkAqua))
+        let lightAppearance = try XCTUnwrap(NSAppearance(named: .aqua))
+
+        XCTAssertEqual(PingScopeShareGraphAppearance.resolvedColorScheme(for: darkAppearance), .dark)
+        XCTAssertEqual(PingScopeShareGraphAppearance.resolvedColorScheme(for: lightAppearance), .light)
+    }
+
+    func testShareGraphPresentationUsesSelectedAppearanceColorScheme() async {
+        let model = PingScopeModel()
+
+        let lightPresentation = await model.shareGraphPresentation(options: PingScopeShareGraphOptions(appearance: .light))
+        let darkPresentation = await model.shareGraphPresentation(options: PingScopeShareGraphOptions(appearance: .dark))
+
+        XCTAssertEqual(lightPresentation.colorScheme, .light)
+        XCTAssertEqual(darkPresentation.colorScheme, .dark)
+    }
+
+    func testOverlayCompactModeDefaultsToRingCompactAndPersistsExplicitFalse() {
+        let suiteName = "PingScopeOverlayCompactModeTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        defaults.removeObject(forKey: "overlayCompactMode")
+        XCTAssertTrue(defaults.overlayCompactMode)
+
+        defaults.overlayCompactMode = false
+        XCTAssertFalse(defaults.overlayCompactMode)
+    }
+
     func testSavingDraftHostOptimisticallyUpdatesVisibleSnapshot() {
         let oldHostConfigs = UserDefaults.standard.hostConfigs
         let oldPrimaryHostID = UserDefaults.standard.primaryHostID

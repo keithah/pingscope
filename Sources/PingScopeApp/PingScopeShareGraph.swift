@@ -18,9 +18,42 @@ enum PingScopeShareGraphScope: String, CaseIterable, Identifiable {
     }
 }
 
+enum PingScopeShareGraphAppearance: String, CaseIterable, Identifiable {
+    case current
+    case light
+    case dark
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .current: "Current"
+        case .light: "Light"
+        case .dark: "Dark"
+        }
+    }
+
+    @MainActor
+    var resolvedColorScheme: ColorScheme {
+        switch self {
+        case .current:
+            return Self.resolvedColorScheme(for: NSApp.effectiveAppearance)
+        case .light:
+            return .light
+        case .dark:
+            return .dark
+        }
+    }
+
+    static func resolvedColorScheme(for appearance: NSAppearance) -> ColorScheme {
+        appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? .dark : .light
+    }
+}
+
 struct PingScopeShareGraphOptions {
     var scope: PingScopeShareGraphScope = .currentView
     var range: TimeRange = .fiveMinutes
+    var appearance: PingScopeShareGraphAppearance = .current
     var includesTable = false
 }
 
@@ -41,6 +74,7 @@ struct PingScopeShareGraphPresentation {
     let statusColor: StatusColor
     let generatedAt: Date
     let showsAllHosts: Bool
+    let colorScheme: ColorScheme
     let includesTable: Bool
     let sampleRows: [PingScopeShareSampleRow]
     let displayPresentation: PingScopeDisplayPresentation
@@ -70,6 +104,7 @@ struct PingScopeShareGraphImage: View {
             RoundedRectangle(cornerRadius: 18)
                 .stroke(.secondary.opacity(0.22), lineWidth: 1)
         )
+        .environment(\.colorScheme, presentation.colorScheme)
     }
 
     private var header: some View {

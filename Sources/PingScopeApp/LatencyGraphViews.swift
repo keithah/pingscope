@@ -102,6 +102,29 @@ struct LatencyGraph: View {
                 let plotHeight = max(size.height - plotTop - plotBottom, 1)
 
                 let renderPoints = graphData.renderPoints(pixelWidth: size.width)
+                let linePoints = renderPoints.compactMap { pointValue -> CGPoint? in
+                    guard let value = pointValue.latencyMilliseconds else { return nil }
+                    let x = pointValue.xPosition(sampleCount: graphData.sampleCount, width: size.width)
+                    let normalized = min(value / maxValue, 1)
+                    let y = plotTop + plotHeight - (plotHeight * CGFloat(normalized))
+                    return CGPoint(x: x, y: y)
+                }
+                if linePoints.count > 1 {
+                    var fillPath = Path()
+                    fillPath.move(to: linePoints[0])
+                    for point in linePoints.dropFirst() {
+                        fillPath.addLine(to: point)
+                    }
+                    fillPath.addLine(to: CGPoint(x: linePoints.last!.x, y: plotTop + plotHeight))
+                    fillPath.addLine(to: CGPoint(x: linePoints[0].x, y: plotTop + plotHeight))
+                    fillPath.closeSubpath()
+                    context.fill(fillPath, with: .linearGradient(
+                        Gradient(colors: [Color.accentColor.opacity(0.28), Color.accentColor.opacity(0)]),
+                        startPoint: CGPoint(x: 0, y: plotTop),
+                        endPoint: CGPoint(x: 0, y: plotTop + plotHeight)
+                    ))
+                }
+
                 for pointValue in renderPoints {
                     let x = pointValue.xPosition(sampleCount: graphData.sampleCount, width: size.width)
                     guard let value = pointValue.latencyMilliseconds else {
@@ -124,11 +147,50 @@ struct LatencyGraph: View {
                         path.addLine(to: point)
                     }
                 }
-                context.stroke(path, with: .color(.accentColor), lineWidth: 2)
+                context.stroke(path, with: .color(.accentColor), style: StrokeStyle(lineWidth: 2.2, lineCap: .round, lineJoin: .round))
 
         }
     }
 
+}
+
+struct LatencySparkline: View {
+    let graphData: LatencyGraphData
+    var color: Color = .accentColor
+
+    init(samples: [PingResult], color: Color = .accentColor) {
+        self.init(graphData: LatencyGraphData(samples: samples), color: color)
+    }
+
+    init(graphData: LatencyGraphData, color: Color = .accentColor) {
+        self.graphData = graphData
+        self.color = color
+    }
+
+    var body: some View {
+        Canvas { context, size in
+            guard graphData.points.count > 1 else { return }
+            let maxValue = graphData.scale.axisMaximumMilliseconds
+            var path = Path()
+            var isDrawingSegment = false
+            for pointValue in graphData.renderPoints(pixelWidth: size.width) {
+                let x = pointValue.xPosition(sampleCount: graphData.sampleCount, width: size.width)
+                guard let value = pointValue.latencyMilliseconds else {
+                    isDrawingSegment = false
+                    continue
+                }
+                let normalized = min(value / maxValue, 1)
+                let point = CGPoint(x: x, y: size.height - (size.height * CGFloat(normalized)))
+                if !isDrawingSegment {
+                    path.move(to: point)
+                    isDrawingSegment = true
+                } else {
+                    path.addLine(to: point)
+                }
+            }
+            context.stroke(path, with: .color(color), style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
+        }
+    }
 }
 
 struct MultiHostLatencyGraph: View {

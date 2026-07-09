@@ -34,3 +34,21 @@ extension HealthStatus {
         }
     }
 }
+
+struct PulseHealthRing: View {
+    var progress: Double
+    var color: Color
+    var lineWidth: CGFloat
+    var trackColor: Color = Color(hex: "#2c2c2e")
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .stroke(trackColor, lineWidth: lineWidth)
+            Circle()
+                .trim(from: 0, to: min(max(progress, 0), 1))
+                .stroke(color, style: StrokeStyle(lineWidth: lineWidth, lineCap: .round, lineJoin: .round))
+                .rotationEffect(.degrees(-90))
+        }
+    }
+}

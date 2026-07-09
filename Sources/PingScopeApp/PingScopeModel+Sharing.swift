@@ -10,7 +10,7 @@ extension PingScopeModel {
         }
     }
 
-    private func shareGraphPresentation(options: PingScopeShareGraphOptions) async -> PingScopeShareGraphPresentation {
+    func shareGraphPresentation(options: PingScopeShareGraphOptions) async -> PingScopeShareGraphPresentation {
         let now = Date()
         let snapshot = snapshot
         let showsAllHosts = shareGraphShowsAllHosts(scope: options.scope)
@@ -51,6 +51,7 @@ extension PingScopeModel {
             statusColor: shareStatus.color,
             generatedAt: now,
             showsAllHosts: showsAllHosts,
+            colorScheme: options.appearance.resolvedColorScheme,
             includesTable: options.includesTable,
             sampleRows: options.includesTable
                 ? shareGraphSampleRows(
