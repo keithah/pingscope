@@ -179,7 +179,7 @@ public actor WidgetSnapshotStore {
     #if os(macOS)
     public static let defaultSuiteName = "6R7S5GA944.group.com.hadm.PingScope"
     #else
-    public static let defaultSuiteName = "group.com.hadm.PingScope"
+    public static let defaultSuiteName = "group.com.hadm.pingscope"
     #endif
     public static let defaultKey = "PingScopeWidgetSnapshot"
     public static let legacyKey = "widgetData"

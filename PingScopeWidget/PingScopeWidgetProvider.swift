@@ -8,7 +8,7 @@ struct Provider: TimelineProvider {
     #if os(macOS)
     private let groupIdentifier = "6R7S5GA944.group.com.hadm.PingScope"
     #else
-    private let groupIdentifier = "group.com.hadm.PingScope"
+    private let groupIdentifier = "group.com.hadm.pingscope"
     #endif
 
     func placeholder(in context: Context) -> WidgetEntry {
