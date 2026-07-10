@@ -3,13 +3,13 @@
     <channel>
         <title>PingScope</title>
         <item>
-            <title>0.3.1</title>
-            <pubDate>Mon, 06 Jul 2026 00:17:11 -0700</pubDate>
-            <sparkle:version>79</sparkle:version>
-            <sparkle:shortVersionString>0.3.1</sparkle:shortVersionString>
+            <title>0.4.0</title>
+            <pubDate>Fri, 10 Jul 2026 00:36:49 -0700</pubDate>
+            <sparkle:version>80</sparkle:version>
+            <sparkle:shortVersionString>0.4.0</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
-            <sparkle:releaseNotesLink>https://keithah.github.io/pingscope/PingScope-v0.3.1.md</sparkle:releaseNotesLink>
-            <enclosure url="https://keithah.github.io/pingscope/PingScope-v0.3.1.dmg" length="5148585" type="application/octet-stream" sparkle:edSignature="Nm919XWfyKw/jYxQSV2CVt0qmg60QQgma6fM+0ZrbZISJeICEbKWQ5G1Q3e0x0C8QnYo5WJfISMKYa+UfHXiBg=="/>
+            <sparkle:releaseNotesLink>https://keithah.github.io/pingscope/PingScope-v0.4.0.md</sparkle:releaseNotesLink>
+            <enclosure url="https://keithah.github.io/pingscope/PingScope-v0.4.0.dmg" length="6427970" type="application/octet-stream" sparkle:edSignature="l7Noap73ZC6rLILlR417A/K71hDm+ZKGq1SRSriNLnfjTwl/SQ1P5o4En/eaask6lFpVu8JWt4ELDOpuedfIDA=="/>
         </item>
     </channel>
 </rss>
