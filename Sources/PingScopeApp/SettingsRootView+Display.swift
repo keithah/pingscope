@@ -6,6 +6,16 @@ extension SettingsRootView {
     var display: some View {
         SettingsPane {
             SettingsSection("Menu Bar") {
+                SettingsRow(systemImage: "rectangle.2.swap", tint: .indigo, title: "Display style") {
+                    Picker("Display style", selection: $model.displayMode) {
+                        ForEach(PingScopeDisplayMode.allCases) { mode in
+                            Text(mode.displayName).tag(mode)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .frame(width: 150)
+                }
                 SettingsRow(systemImage: "chart.xyaxis.line", tint: .blue, title: "Graph range") {
                     Picker("Menu bar range", selection: $model.selectedRange) {
                         ForEach(TimeRange.displayCases) { range in
@@ -36,7 +46,7 @@ extension SettingsRootView {
                         AppDelegate.shared?.applyOverlayBehavior()
                     }
                 ))
-                SettingsToggleRow(systemImage: "arrow.up.left.and.arrow.down.right", tint: .purple, title: "Compact graph mode", isOn: Binding(
+                SettingsToggleRow(systemImage: "arrow.up.left.and.arrow.down.right", tint: .purple, title: "Compact overlay", isOn: Binding(
                     get: { model.overlayCompactMode },
                     set: {
                         DebugLog.write("settings overlay compact changed value=\($0)")

@@ -155,11 +155,24 @@ extension UserDefaults {
 
     var overlayCompactMode: Bool {
         get {
-            guard object(forKey: "overlayCompactMode") != nil else { return true }
+            guard object(forKey: "overlayCompactMode") != nil else { return false }
             return bool(forKey: "overlayCompactMode")
         }
         set {
             set(newValue, forKey: "overlayCompactMode")
+        }
+    }
+
+    var pingScopeDisplayMode: PingScopeDisplayMode {
+        get {
+            guard let rawValue = string(forKey: "pingScopeDisplayMode"),
+                  let mode = PingScopeDisplayMode(rawValue: rawValue) else {
+                return .signal
+            }
+            return mode
+        }
+        set {
+            set(newValue.rawValue, forKey: "pingScopeDisplayMode")
         }
     }
 

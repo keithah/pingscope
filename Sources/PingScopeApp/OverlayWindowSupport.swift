@@ -5,17 +5,23 @@ final class OverlayWindow: NSWindow {
     init(contentRect: NSRect) {
         super.init(
             contentRect: contentRect,
-            styleMask: [.borderless, .resizable],
+            styleMask: [.titled, .fullSizeContentView, .resizable],
             backing: .buffered,
             defer: false
         )
         isOpaque = false
         backgroundColor = .clear
+        titleVisibility = .hidden
+        titlebarAppearsTransparent = true
+        standardWindowButton(.closeButton)?.isHidden = true
+        standardWindowButton(.miniaturizeButton)?.isHidden = true
+        standardWindowButton(.zoomButton)?.isHidden = true
         level = .normal
         collectionBehavior = [.fullScreenAuxiliary]
         isMovableByWindowBackground = true
         ignoresMouseEvents = false
         hasShadow = true
+        minSize = NSSize(width: 150, height: 54)
     }
 
     override var canBecomeKey: Bool { false }
@@ -101,11 +107,14 @@ final class OverlayContainerView: NSView {
             graphClickView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -8),
             graphClickView.heightAnchor.constraint(equalTo: heightAnchor, multiplier: isCompact() ? 0.78 : 0.42)
         ])
+        graphClickView.onRightClick = { [weak self] event in
+            self?.presentOverlayContextMenu(with: event)
+        }
 
         if !isCompact() {
             let compactButton = makeButton(
                 symbolName: "arrow.up.left.and.arrow.down.right",
-                tooltip: "Compact graph mode",
+                tooltip: "Compact overlay",
                 action: #selector(toggleCompact)
             )
             let settingsButton = makeButton(symbolName: "gearshape", tooltip: "Open settings", action: #selector(openSettings))
@@ -151,7 +160,7 @@ final class OverlayContainerView: NSView {
 
     private func contextMenu() -> NSMenu {
         let menu = NSMenu()
-        let compactTitle = isCompact() ? "Exit Compact Graph" : "Compact Graph"
+        let compactTitle = isCompact() ? "Expanded Overlay" : "Compact Overlay"
         menu.addItem(NSMenuItem(title: compactTitle, action: #selector(toggleCompact), keyEquivalent: ""))
         let hosts = hostOptions()
         if hosts.count > 1 {
@@ -255,6 +264,7 @@ extension OverlayContainerView: OverlayContextMenuPresenting {
 
 final class OverlayGraphClickView: NSView {
     private let onClick: () -> Void
+    var onRightClick: ((NSEvent) -> Void)?
     private var mouseDownLocation: NSPoint?
     private var hasHandledMouseUp = false
 
@@ -292,7 +302,7 @@ final class OverlayGraphClickView: NSView {
     }
 
     override func rightMouseDown(with event: NSEvent) {
-        nextResponder?.rightMouseDown(with: event)
+        onRightClick?(event)
     }
 }
 

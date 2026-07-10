@@ -8,34 +8,16 @@ struct OverlayView: View {
     var body: some View {
         let presentation = viewModel.presentation
         Group {
-            if presentation.compactMode {
-                ringCompact
-            } else {
-                VStack(alignment: .leading, spacing: 6) {
-                HStack(alignment: .center, spacing: 7) {
-                    Text(presentation.menuBarState.text)
-                        .font(.system(size: 13, weight: .medium, design: .monospaced))
-                        .foregroundStyle(Color(statusColor: presentation.menuBarState.color))
-                        .lineLimit(1)
-                        .fixedSize()
-                    overlayHostSelector
-                    Spacer()
-                }
-                .frame(height: 20, alignment: .center)
-                .padding(.trailing, 68)
-                    overlayGraph
-                        .contentShape(Rectangle())
-                        .onTapGesture {
-                            viewModel.openDetails()
-                        }
-                }
-                .padding(EdgeInsets(top: 4, leading: 12, bottom: 12, trailing: 12))
-                .frame(minWidth: 190, minHeight: 78)
+            switch presentation.displayMode.resolvedForHostScope(showsAllHosts: presentation.showsAllHosts) {
+            case .signal:
+                presentation.compactMode ? AnyView(signalCompact) : AnyView(signalExpanded)
+            case .ring:
+                presentation.compactMode ? AnyView(ringCompact) : AnyView(ringExpanded)
             }
         }
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
         .contextMenu {
-            Button(presentation.compactMode ? "Expanded Graph" : "Ring Compact") {
+            Button(presentation.compactMode ? "Expanded Overlay" : "Compact Overlay") {
                 AppDelegate.shared?.toggleOverlayCompactMode()
             }
             if presentation.hostOptions.count > 1 {
@@ -58,6 +40,44 @@ struct OverlayView: View {
                 AppDelegate.shared?.hideOverlay()
             }
         }
+    }
+
+    private var signalExpanded: some View {
+        let presentation = viewModel.presentation
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .center, spacing: 7) {
+                PingScopeStatusPill(status: overlayStatus)
+                overlayHostSelector
+                Spacer()
+            }
+            .frame(height: 28, alignment: .center)
+            .padding(.trailing, 68)
+            overlayGraph
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    viewModel.openDetails()
+                }
+            HStack {
+                Text(presentation.displayPresentation.primaryStats.averageMilliseconds.map { "avg \(Int($0.rounded()))ms" } ?? "avg --")
+                Spacer()
+                Text("loss \(Int(presentation.displayPresentation.primaryStats.lossPercent.rounded()))%")
+            }
+            .font(.system(size: 10, weight: .medium, design: .monospaced))
+            .foregroundStyle(.secondary)
+        }
+        .padding(EdgeInsets(top: 6, leading: 12, bottom: 10, trailing: 12))
+        .frame(minWidth: 280, maxWidth: .infinity, minHeight: 106, maxHeight: .infinity)
+    }
+
+    private var signalCompact: some View {
+        compactOverlayGraph
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .frame(minWidth: 150, maxWidth: .infinity, minHeight: 54, maxHeight: .infinity)
+            .contentShape(Rectangle())
+            .onTapGesture {
+                viewModel.openDetails()
+            }
     }
 
     private var ringCompact: some View {
@@ -83,7 +103,45 @@ struct OverlayView: View {
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
-        .frame(width: 178, height: 76)
+        .frame(minWidth: 178, maxWidth: .infinity, minHeight: 76, maxHeight: .infinity)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            viewModel.openDetails()
+        }
+    }
+
+    private var ringExpanded: some View {
+        let presentation = viewModel.presentation
+        return HStack(spacing: 12) {
+            PulseHealthRing(progress: ringProgress, color: Color(statusColor: presentation.menuBarState.color), lineWidth: 8)
+                .frame(width: 76, height: 76)
+            VStack(alignment: .leading, spacing: 5) {
+                HStack(alignment: .firstTextBaseline, spacing: 2) {
+                    Text(latencyNumberText)
+                        .font(.system(size: 28, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(Color(statusColor: presentation.menuBarState.color))
+                    if presentation.menuBarState.text.hasSuffix("ms") {
+                        Text("ms")
+                            .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                Text(presentation.showsAllHosts ? "All Hosts" : presentation.primaryHostName)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                HStack(spacing: 10) {
+                    Text("avg \(presentation.displayPresentation.primaryStats.averageMilliseconds.map { "\(Int($0.rounded()))ms" } ?? "--")")
+                    Text("loss \(Int(presentation.displayPresentation.primaryStats.lossPercent.rounded()))%")
+                }
+                .font(.system(size: 10, weight: .medium, design: .monospaced))
+                .foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .frame(minWidth: 240, maxWidth: .infinity, minHeight: 96, maxHeight: .infinity)
         .contentShape(Rectangle())
         .onTapGesture {
             viewModel.openDetails()
@@ -98,6 +156,20 @@ struct OverlayView: View {
                 series: presentation.displayPresentation.allHostGraphSeries,
                 graphData: presentation.displayPresentation.allHostsGraphData,
                 showsLegend: presentation.showsLegend
+            )
+        } else {
+            LatencyGraph(graphData: presentation.displayPresentation.primaryGraphData)
+        }
+    }
+
+    @ViewBuilder
+    private var compactOverlayGraph: some View {
+        let presentation = viewModel.presentation
+        if presentation.showsAllHosts {
+            MultiHostLatencyGraph(
+                series: presentation.displayPresentation.allHostGraphSeries,
+                graphData: presentation.displayPresentation.allHostsGraphData,
+                showsLegend: false
             )
         } else {
             LatencyGraph(graphData: presentation.displayPresentation.primaryGraphData)
@@ -156,5 +228,14 @@ struct OverlayView: View {
         }
         let threshold = max(presentation.primaryDegradedThresholdMilliseconds, 1)
         return min(max(latest / threshold, 0), 1)
+    }
+
+    private var overlayStatus: HealthStatus {
+        switch viewModel.presentation.menuBarState.color {
+        case .green: .healthy
+        case .yellow: .degraded
+        case .red: .down
+        case .gray: .noData
+        }
     }
 }

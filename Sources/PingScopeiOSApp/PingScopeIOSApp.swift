@@ -27,7 +27,11 @@ struct PingScopeIOSApp: App {
                 gatewayDetectionText: model.gatewayDetectionText,
                 backgroundKeepAliveEnabled: model.backgroundKeepAliveEnabled,
                 backgroundKeepAliveStatus: model.backgroundKeepAliveStatus,
+                displayMode: model.displayMode,
                 selectedHostID: model.snapshot.host.id,
+                onSelectDisplayMode: { mode in
+                    model.displayMode = mode
+                },
                 onSelectHost: { hostID in
                     model.selectHost(hostID)
                 },
@@ -83,6 +87,11 @@ private final class PingScopeIOSAppModel: ObservableObject {
     @Published var gatewayDetectionText: String?
     @Published var backgroundKeepAliveEnabled: Bool
     @Published var backgroundKeepAliveStatus: String = "Disabled"
+    @Published var displayMode: PingScopeIOSDisplayMode {
+        didSet {
+            UserDefaults.standard.pingScopeIOSDisplayMode = displayMode
+        }
+    }
 
     private let hostStore: PingScopeIOSHostStore
     private let historyStore: (any PingHistoryStore)?
@@ -98,7 +107,7 @@ private final class PingScopeIOSAppModel: ObservableObject {
     private var lifecycleTask: Task<Void, Never>?
     private var lifecycleGeneration = 0
     private var liveActivity: Activity<PingScopeLiveActivityAttributes>?
-    private var hasStartedInitialSession = false
+    private var initialSessionCoordinator = PingScopeIOSInitialSessionCoordinator()
     private var lastGatewayAddress: String?
     private var lastHistoryRefreshAt: Date?
     private var lastPublishedWidgetSnapshot: WidgetSnapshot?
@@ -118,6 +127,7 @@ private final class PingScopeIOSAppModel: ObservableObject {
         }
         self.backgroundRuntime = LiveMonitorBackgroundRuntime(client: UIApplicationBackgroundTaskClient())
         self.backgroundKeepAliveEnabled = UserDefaults.standard.bool(forKey: Self.backgroundKeepAliveEnabledKey)
+        self.displayMode = UserDefaults.standard.pingScopeIOSDisplayMode
         let state = hostStore.load()
         let host = state.selectedHost
         self.hosts = state.hosts
@@ -209,14 +219,14 @@ private final class PingScopeIOSAppModel: ObservableObject {
     }
 
     func start(duration: MonitorSessionDuration) {
+        initialSessionCoordinator.markExplicitSessionAction()
         runLifecycleTask { model, context in
             await model.startSession(duration: duration, context: context)
         }
     }
 
     func startInitialSessionIfNeeded() {
-        guard !hasStartedInitialSession else { return }
-        hasStartedInitialSession = true
+        guard initialSessionCoordinator.shouldStartInitialSession else { return }
         runLifecycleTask { model, context in
             guard await model.refreshDefaultGatewayHost(
                 shouldCreateIfMissing: false,
@@ -228,10 +238,13 @@ private final class PingScopeIOSAppModel: ObservableObject {
             }
             guard model.isCurrentLifecycle(context) else { return }
             await model.startSession(duration: .continuous, context: context)
+            guard model.isCurrentLifecycle(context) else { return }
+            model.initialSessionCoordinator.markInitialSessionStarted()
         }
     }
 
     func stop() {
+        initialSessionCoordinator.markExplicitSessionAction()
         runLifecycleTask { model, context in
             model.cancelRefreshLoop()
             await model.backgroundRuntime.end()
@@ -266,6 +279,7 @@ private final class PingScopeIOSAppModel: ObservableObject {
                 await model.restartContinuousSessionAfterBackgroundExpirationIfNeeded(context: context)
                 guard model.isCurrentLifecycle(context) else { return }
                 model.applyBackgroundKeepAlive()
+                model.startInitialSessionIfNeeded()
             }
         case .background:
             applyBackgroundKeepAlive()

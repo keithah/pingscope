@@ -540,15 +540,15 @@
     <main id="top">
       <section class="hero shell" aria-labelledby="title">
         <div>
-          <p class="eyebrow">Native macOS network visibility</p>
+          <p class="eyebrow">Redesigned for macOS and iOS</p>
           <h1 id="title">PingScope</h1>
-          <p class="lede">A menu-bar latency monitor that tells you whether the problem is local, upstream, or the destination before you start guessing.</p>
+          <p class="lede">A graph-first latency monitor that shows local, upstream, and destination health at a glance, now with Signal and Ring views across Mac and iPhone.</p>
           <div class="actions">
             <a class="button" href="https://apps.apple.com/us/app/pingscope-keep-connected/id6759278369?mt=12">Mac App Store</a>
-            <a class="button secondary" id="download-button" href="https://github.com/keithah/pingscope/releases/download/v0.3.1/PingScope-v0.3.1.dmg">Download 0.3.1</a>
+            <a class="button secondary" id="download-button" href="https://github.com/keithah/pingscope/releases/download/v0.4.0/PingScope-v0.4.0.dmg">Download 0.4.0</a>
             <a class="button ghost" href="#support">Get Support</a>
           </div>
-          <p class="release-note" id="release-note">Latest Developer ID release: v0.3.1. The button updates from GitHub when a newer DMG is published.</p>
+          <p class="release-note" id="release-note">PingScope 0.4.0 introduces the redesigned Signal and Ring monitoring experience.</p>
         </div>
 
         <div class="device-stage" aria-label="PingScope app preview">
@@ -558,8 +558,8 @@
             <span>Healthy</span>
           </div>
           <div class="mini-card" aria-hidden="true">
-            <b>Three enabled hosts</b>
-            <p>Cloudflare, Google, and the default gateway are shown together so local and upstream failures separate quickly.</p>
+            <b>Signal + Ring</b>
+            <p>Choose a graph-first live view or a focused health ring. All Hosts keeps the colored comparison graph.</p>
           </div>
         </div>
       </section>
@@ -572,18 +572,18 @@
         <div class="feature-grid">
           <article class="feature">
             <div class="icon">1</div>
-            <h3>Always visible</h3>
-            <p>A compact status dot and latency readout live in the menu bar, with a floating overlay when a connection needs closer watching.</p>
+            <h3>Signal at a glance</h3>
+            <p>Smooth live graphs, compact statistics, and per-host sparklines keep the useful signal visible without repeating it.</p>
           </article>
           <article class="feature">
             <div class="icon">2</div>
-            <h3>Failure context</h3>
-            <p>Monitor gateway and remote hosts together to tell the difference between Wi-Fi, router, ISP, and destination trouble.</p>
+            <h3>Every host together</h3>
+            <p>Compare gateway and remote hosts in one colored graph, then inspect each host's latest latency and sparkline.</p>
           </article>
           <article class="feature">
             <div class="icon">3</div>
-            <h3>Local first</h3>
-            <p>Settings, retained history, exports, and widget snapshots stay on your Mac. Developer ID builds support Sparkle updates.</p>
+            <h3>Mac and iPhone</h3>
+            <p>Monitor, Hosts, and History organize the iOS app while the Mac keeps its menu-bar popover and resizable overlay.</p>
           </article>
         </div>
       </section>
@@ -595,19 +595,19 @@
             <p>The App Store build is the simplest install path. The Developer ID DMG is pulled from the latest public GitHub release and updates automatically on this page.</p>
             <div class="actions">
               <a class="button" href="https://apps.apple.com/us/app/pingscope-keep-connected/id6759278369?mt=12">Open App Store</a>
-              <a class="button secondary" id="download-button-secondary" href="https://github.com/keithah/pingscope/releases/download/v0.3.1/PingScope-v0.3.1.dmg">Download 0.3.1 DMG</a>
+              <a class="button secondary" id="download-button-secondary" href="https://github.com/keithah/pingscope/releases/download/v0.4.0/PingScope-v0.4.0.dmg">Download 0.4.0 DMG</a>
             </div>
           </div>
           <div class="release-box" aria-live="polite">
             <dl>
               <dt>Version</dt>
-              <dd id="release-version">v0.3.1</dd>
+              <dd id="release-version">v0.4.0</dd>
               <dt>Published</dt>
-              <dd id="release-date">July 3, 2026</dd>
+              <dd id="release-date">July 10, 2026</dd>
               <dt>Package</dt>
-              <dd id="release-asset">PingScope-v0.3.1.dmg</dd>
+              <dd id="release-asset">PingScope-v0.4.0.dmg</dd>
             </dl>
-            <a class="button secondary" id="release-link" href="https://github.com/keithah/pingscope/releases/tag/v0.3.1">Release notes</a>
+            <a class="button secondary" id="release-link" href="https://github.com/keithah/pingscope/releases/tag/v0.4.0">Release notes</a>
           </div>
         </div>
       </section>
@@ -702,7 +702,7 @@
           document.getElementById("release-link").href = release.html_url;
         })
         .catch(() => {
-          document.getElementById("release-note").textContent = "Latest Developer ID release: v0.3.1. GitHub release lookup is temporarily unavailable.";
+          document.getElementById("release-note").textContent = "PingScope 0.4.0 introduces the redesigned Signal and Ring monitoring experience.";
         });
 
       document.getElementById("support-form").addEventListener("submit", (event) => {

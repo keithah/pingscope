@@ -1,4 +1,5 @@
 import SwiftUI
+import PingScopeCore
 #if os(iOS)
 import UIKit
 #endif
@@ -78,19 +79,13 @@ struct WidgetLatencySparkline: View {
             let maximum = max(latencies.max() ?? 1, 1)
             let minimum = latencies.min() ?? 0
             let span = max(maximum - minimum, 1)
-            var path = Path()
-
-            for (index, latency) in latencies.enumerated() {
+            let points = latencies.enumerated().map { index, latency in
                 let x = size.width * CGFloat(index) / CGFloat(max(latencies.count - 1, 1))
                 let normalized = (latency - minimum) / span
                 let y = size.height - (size.height * CGFloat(normalized))
-                let point = CGPoint(x: x, y: min(max(y, 1), size.height - 1))
-                if index == 0 {
-                    path.move(to: point)
-                } else {
-                    path.addLine(to: point)
-                }
+                return CGPoint(x: x, y: min(max(y, 1), size.height - 1))
             }
+            let path = Path(LatencyCurve.smoothedPath(points: points, closed: false))
 
             context.stroke(path, with: .color(color), lineWidth: 1.6)
         }

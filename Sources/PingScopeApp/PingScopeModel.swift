@@ -69,6 +69,12 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
             onPresentationChanged?()
         }
     }
+    @Published var displayMode: PingScopeDisplayMode {
+        didSet {
+            UserDefaults.standard.pingScopeDisplayMode = displayMode
+            onPresentationChanged?()
+        }
+    }
     @Published var overlayShowsAllHosts: Bool {
         didSet {
             UserDefaults.standard.overlayShowsAllHosts = overlayShowsAllHosts
@@ -208,6 +214,7 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
         self.overlayAlwaysOnTop = UserDefaults.standard.overlayAlwaysOnTop
         self.overlayOpacity = UserDefaults.standard.overlayOpacity
         self.overlayCompactMode = UserDefaults.standard.overlayCompactMode
+        self.displayMode = UserDefaults.standard.pingScopeDisplayMode
         self.overlayShowsAllHosts = UserDefaults.standard.overlayShowsAllHosts
         self.popoverShowsAllHosts = UserDefaults.standard.popoverShowsAllHosts
         self.overlayShowsLegend = UserDefaults.standard.overlayShowsLegend

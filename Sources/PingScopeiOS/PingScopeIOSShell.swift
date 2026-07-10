@@ -12,6 +12,35 @@ public enum PingScopeIOSRunControlAction: Equatable, Sendable {
     }
 }
 
+public enum PingScopeIOSDisplayMode: String, CaseIterable, Identifiable, Sendable {
+    case signal
+    case ring
+
+    public var id: String { rawValue }
+
+    public var displayName: String {
+        switch self {
+        case .signal: "Signal"
+        case .ring: "Ring"
+        }
+    }
+}
+
+public extension UserDefaults {
+    var pingScopeIOSDisplayMode: PingScopeIOSDisplayMode {
+        get {
+            guard let rawValue = string(forKey: "pingScopeIOSDisplayMode"),
+                  let mode = PingScopeIOSDisplayMode(rawValue: rawValue) else {
+                return .signal
+            }
+            return mode
+        }
+        set {
+            set(newValue.rawValue, forKey: "pingScopeIOSDisplayMode")
+        }
+    }
+}
+
 #if os(iOS)
 public struct PingScopeIOSRootView: View {
     private enum Tab: String, CaseIterable, Identifiable {
@@ -30,17 +59,11 @@ public struct PingScopeIOSRootView: View {
         }
     }
 
-    private enum DisplayMode {
-        case signal
-        case ring
-    }
-
     @State private var selectedTab: Tab = .monitor
     @State private var editingHost: HostConfig?
     @State private var isHostSwitcherPresented = false
     @State private var isMonitorSettingsPresented = false
     @State private var scrubbedLatencyMilliseconds: Double?
-    @State private var displayMode: DisplayMode = .signal
 
     public var hosts: [HostConfig]
     public var host: HostConfig
@@ -53,7 +76,9 @@ public struct PingScopeIOSRootView: View {
     public var gatewayDetectionText: String?
     public var backgroundKeepAliveEnabled: Bool
     public var backgroundKeepAliveStatus: String
+    public var displayMode: PingScopeIOSDisplayMode
     public var selectedHostID: UUID
+    public var onSelectDisplayMode: (PingScopeIOSDisplayMode) -> Void
     public var onSelectHost: (UUID) -> Void
     public var onSaveHost: (HostConfig) -> Void
     public var onDeleteHost: (UUID) -> Void
@@ -77,7 +102,9 @@ public struct PingScopeIOSRootView: View {
         gatewayDetectionText: String? = nil,
         backgroundKeepAliveEnabled: Bool = false,
         backgroundKeepAliveStatus: String = "Disabled",
+        displayMode: PingScopeIOSDisplayMode = .signal,
         selectedHostID: UUID? = nil,
+        onSelectDisplayMode: @escaping (PingScopeIOSDisplayMode) -> Void = { _ in },
         onSelectHost: @escaping (UUID) -> Void = { _ in },
         onSaveHost: @escaping (HostConfig) -> Void = { _ in },
         onDeleteHost: @escaping (UUID) -> Void = { _ in },
@@ -100,7 +127,9 @@ public struct PingScopeIOSRootView: View {
         self.gatewayDetectionText = gatewayDetectionText
         self.backgroundKeepAliveEnabled = backgroundKeepAliveEnabled
         self.backgroundKeepAliveStatus = backgroundKeepAliveStatus
+        self.displayMode = displayMode
         self.selectedHostID = selectedHostID ?? host.id
+        self.onSelectDisplayMode = onSelectDisplayMode
         self.onSelectHost = onSelectHost
         self.onSaveHost = onSaveHost
         self.onDeleteHost = onDeleteHost
@@ -247,7 +276,15 @@ public struct PingScopeIOSRootView: View {
                 onSwipeHost: swipeHost
             )
         case .ring:
-            EmptyView()
+            PingScopeIOSRingHero(
+                latencyMilliseconds: displayLatencyMilliseconds,
+                status: health.status,
+                statusLabel: health.status.displayName,
+                progress: ringProgress,
+                onHostSwitch: {
+                    isHostSwitcherPresented = true
+                }
+            )
         }
     }
 
@@ -461,6 +498,17 @@ public struct PingScopeIOSRootView: View {
     private var monitorSettings: some View {
         NavigationStack {
             Form {
+                Section("Display") {
+                    Picker("Display", selection: Binding(
+                        get: { displayMode },
+                        set: { onSelectDisplayMode($0) }
+                    )) {
+                        ForEach(PingScopeIOSDisplayMode.allCases) { mode in
+                            Text(mode.displayName).tag(mode)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                }
                 Section("Gateway") {
                     Button("Use Default Gateway", action: onUseDefaultGateway)
                     if let gatewayDetectionText {
@@ -632,6 +680,23 @@ public struct PingScopeIOSRootView: View {
         let nextIndex = (index + direction + hosts.count) % hosts.count
         onSelectHost(hosts[nextIndex].id)
     }
+
+    private var ringProgress: Double {
+        guard let latency = displayLatencyMilliseconds else { return 0 }
+        let threshold = max(host.thresholds.degradedMilliseconds, 1)
+        return min(max(latency / threshold, 0), 1)
+    }
+}
+
+private extension HealthStatus {
+    var displayName: String {
+        switch self {
+        case .noData: "No Data"
+        case .healthy: "Healthy"
+        case .degraded: "Degraded"
+        case .down: "Down"
+        }
+    }
 }
 
 private struct PingScopeIOSStatusPill: View {
@@ -662,6 +727,51 @@ private struct PingScopeIOSStatusPill: View {
         case .degraded: "Degraded"
         case .down: "Down"
         }
+    }
+}
+
+private struct PingScopeIOSRingHero: View {
+    let latencyMilliseconds: Double?
+    let status: HealthStatus
+    let statusLabel: String
+    let progress: Double
+    let onHostSwitch: () -> Void
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .stroke(Color.primary.opacity(0.10), lineWidth: 16)
+            Circle()
+                .trim(from: 0, to: min(max(progress, 0), 1))
+                .stroke(ringColor, style: StrokeStyle(lineWidth: 16, lineCap: .round, lineJoin: .round))
+                .rotationEffect(.degrees(-90))
+            VStack(spacing: 4) {
+                HStack(alignment: .firstTextBaseline, spacing: 3) {
+                    Text(latencyMilliseconds.map { "\(Int($0.rounded()))" } ?? "--")
+                        .font(.system(size: 46, weight: .semibold, design: .monospaced))
+                        .minimumScaleFactor(0.7)
+                    Text("ms")
+                        .font(.system(size: 17, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                }
+                Text(statusLabel)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(ringColor)
+                    .lineLimit(1)
+            }
+        }
+        .padding(18)
+        .frame(maxWidth: .infinity)
+        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 22))
+        .overlay(RoundedRectangle(cornerRadius: 22).stroke(Color.primary.opacity(0.05), lineWidth: 1))
+        .contentShape(Rectangle())
+        .onLongPressGesture(perform: onHostSwitch)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(statusLabel), \(latencyMilliseconds.map { "\(Int($0.rounded())) milliseconds" } ?? "no latency")")
+    }
+
+    private var ringColor: Color {
+        Color(iosStatusColor: status.iosStatusColor)
     }
 }
 
@@ -769,16 +879,18 @@ private struct SignalHeroGraphCard: View {
 
     private func drawLinePath(size: CGSize) -> Path? {
         guard renderData.points.count > 1 else { return nil }
-        var path = Path()
+        let points = graphPoints(size: size)
+        return Path(LatencyCurve.smoothedPath(points: points, closed: false))
+    }
+
+    private func graphPoints(size: CGSize) -> [CGPoint] {
         let axisMax = max(renderData.scale.axisMaximumMilliseconds, 1)
-        for (index, pointValue) in renderData.points.enumerated() {
+        return renderData.points.map { pointValue in
             let elapsed = pointValue.timestamp.timeIntervalSince(renderData.startDate)
             let x = size.width * CGFloat(min(max(elapsed / range.duration, 0), 1))
             let y = size.height - (size.height * CGFloat(min(pointValue.latencyMilliseconds / axisMax, 1)))
-            let point = CGPoint(x: x, y: y)
-            index == 0 ? path.move(to: point) : path.addLine(to: point)
+            return CGPoint(x: x, y: y)
         }
-        return path
     }
 
     private func drawFill(context: inout GraphicsContext, size: CGSize) {
@@ -810,14 +922,14 @@ private struct PingScopeIOSSparkline: View {
     var body: some View {
         Canvas { context, size in
             guard renderData.points.count > 1 else { return }
-            var path = Path()
             let axisMax = max(renderData.scale.axisMaximumMilliseconds, 1)
-            for (index, pointValue) in renderData.points.enumerated() {
+            let points = renderData.points.map { pointValue in
                 let elapsed = pointValue.timestamp.timeIntervalSince(renderData.startDate)
                 let x = size.width * CGFloat(min(max(elapsed / max(renderData.endDate.timeIntervalSince(renderData.startDate), 1), 0), 1))
                 let y = size.height - (size.height * CGFloat(min(pointValue.latencyMilliseconds / axisMax, 1)))
-                index == 0 ? path.move(to: CGPoint(x: x, y: y)) : path.addLine(to: CGPoint(x: x, y: y))
+                return CGPoint(x: x, y: y)
             }
+            let path = Path(LatencyCurve.smoothedPath(points: points, closed: false))
             context.stroke(path, with: .color(color), style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
         }
     }

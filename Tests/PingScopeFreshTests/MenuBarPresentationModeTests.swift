@@ -16,6 +16,19 @@ final class MenuBarPresentationModeTests: XCTestCase {
         XCTAssertTrue(style.contains(.resizable))
     }
 
+    @MainActor
+    func testOverlayWindowUsesHiddenTitlebarResizeStyle() {
+        let window = OverlayWindow(contentRect: NSRect(x: 0, y: 0, width: 240, height: 96))
+
+        XCTAssertTrue(window.styleMask.contains(.titled))
+        XCTAssertTrue(window.styleMask.contains(.fullSizeContentView))
+        XCTAssertTrue(window.styleMask.contains(.resizable))
+        XCTAssertEqual(window.titleVisibility, .hidden)
+        XCTAssertTrue(window.titlebarAppearsTransparent)
+        XCTAssertGreaterThanOrEqual(window.minSize.width, 150)
+        XCTAssertGreaterThanOrEqual(window.minSize.height, 54)
+    }
+
     func testDetachedPopoverContentHasSmallerMinimumThanInitialSize() {
         XCTAssertLessThan(MenuBarPresentationMode.statusContentMinimumSize.width, MenuBarPresentationMode.statusContentSize.width)
         XCTAssertLessThan(MenuBarPresentationMode.statusContentMinimumSize.height, MenuBarPresentationMode.statusContentSize.height)

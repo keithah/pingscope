@@ -14,6 +14,48 @@ final class LiveMonitorSessionControllerTests: XCTestCase {
         XCTAssertNotEqual(PingScopeIOSRunControlAction.selectionChanged(to: .oneMinute), .stop)
     }
 
+    func testIOSDisplayModeDefaultsToSignalAndPersistsRing() {
+        let suiteName = "PingScopeIOSDisplayModeTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        defaults.removeObject(forKey: "pingScopeIOSDisplayMode")
+        XCTAssertEqual(defaults.pingScopeIOSDisplayMode, .signal)
+
+        defaults.pingScopeIOSDisplayMode = .ring
+        XCTAssertEqual(defaults.pingScopeIOSDisplayMode, .ring)
+    }
+
+    func testInitialSessionCoordinatorAllowsActiveBackstopAfterSupersededStart() {
+        var coordinator = PingScopeIOSInitialSessionCoordinator()
+        var startedDurations: [MonitorSessionDuration] = []
+
+        XCTAssertTrue(coordinator.shouldStartInitialSession)
+
+        if coordinator.shouldStartInitialSession {
+            // The original launch attempt was superseded before completion, so
+            // it must not permanently mark initial monitoring as started.
+        }
+
+        XCTAssertTrue(coordinator.shouldStartInitialSession)
+
+        if coordinator.shouldStartInitialSession {
+            startedDurations.append(.continuous)
+            coordinator.markInitialSessionStarted()
+        }
+
+        XCTAssertEqual(startedDurations, [.continuous])
+        XCTAssertFalse(coordinator.shouldStartInitialSession)
+    }
+
+    func testInitialSessionCoordinatorDoesNotRetryAfterExplicitSessionAction() {
+        var coordinator = PingScopeIOSInitialSessionCoordinator()
+
+        coordinator.markExplicitSessionAction()
+
+        XCTAssertFalse(coordinator.shouldStartInitialSession)
+    }
+
     func testControllerStartsFiniteSessionAndPublishesProbeResult() async throws {
         let host = HostConfig(id: UUID(), displayName: "Cloudflare", address: "1.1.1.1")
         let probe = RecordingProbe(results: [

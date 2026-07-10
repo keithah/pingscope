@@ -3,6 +3,24 @@ import Foundation
 import PingScopeCore
 import SwiftUI
 
+enum PingScopeDisplayMode: String, CaseIterable, Identifiable {
+    case signal
+    case ring
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .signal: "Signal"
+        case .ring: "Ring"
+        }
+    }
+
+    func resolvedForHostScope(showsAllHosts: Bool) -> PingScopeDisplayMode {
+        showsAllHosts ? .signal : self
+    }
+}
+
 struct OverlayHostOption: Identifiable {
     let id: UUID
     let name: String
@@ -17,6 +35,7 @@ struct OverlayPresentation {
     var primaryDegradedThresholdMilliseconds: Double
     var showsAllHosts: Bool
     var showsLegend: Bool
+    var displayMode: PingScopeDisplayMode
     var displayPresentation: PingScopeDisplayPresentation
 
     @MainActor
@@ -35,6 +54,7 @@ struct OverlayPresentation {
         primaryDegradedThresholdMilliseconds = model.primaryHost?.thresholds.degradedMilliseconds ?? LatencyThresholds.defaults.degradedMilliseconds
         showsAllHosts = model.overlayShowsAllHosts
         showsLegend = model.overlayShowsLegend
+        displayMode = model.displayMode
         displayPresentation = model.displayPresentation
     }
 }
@@ -90,6 +110,7 @@ struct StatusPopoverPresentation {
     var popoverShowsAllHosts: Bool
     var selectedRangeState: MenuBarState
     var selectedRangeStatusLabel: String
+    var displayMode: PingScopeDisplayMode
     var displayPresentation: PingScopeDisplayPresentation
     var networkDiagnosis: NetworkPerspectiveDiagnosis
 
@@ -101,6 +122,7 @@ struct StatusPopoverPresentation {
         popoverShowsAllHosts = model.popoverShowsAllHosts
         selectedRangeState = model.selectedRangeState
         selectedRangeStatusLabel = model.selectedRangeStatusLabel
+        displayMode = model.displayMode
         displayPresentation = model.displayPresentation
         networkDiagnosis = model.networkDiagnosis
     }
@@ -140,6 +162,21 @@ final class StatusPopoverPresentationViewModel: ObservableObject {
 
     func setPingInterval(_ milliseconds: Int, for hostID: UUID) {
         model?.setPingInterval(.milliseconds(Double(milliseconds)), for: hostID)
+        refresh()
+    }
+
+    func setPingIntervalForAllHosts(_ milliseconds: Int) {
+        guard let model else { return }
+        let targetHosts = presentation.snapshot.hosts.filter(\.isEnabled)
+        let hosts = targetHosts.isEmpty ? presentation.snapshot.hosts : targetHosts
+        for host in hosts {
+            model.setPingInterval(.milliseconds(Double(milliseconds)), for: host.id)
+        }
+        refresh()
+    }
+
+    func setDisplayMode(_ displayMode: PingScopeDisplayMode) {
+        model?.displayMode = displayMode
         refresh()
     }
 

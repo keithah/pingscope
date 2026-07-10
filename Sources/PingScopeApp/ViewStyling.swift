@@ -52,3 +52,34 @@ struct PulseHealthRing: View {
         }
     }
 }
+
+struct PingScopeStatusPill: View {
+    let status: HealthStatus
+
+    var body: some View {
+        HStack(spacing: 7) {
+            Circle()
+                .fill(color)
+                .frame(width: 8, height: 8)
+            Text(label)
+                .font(.system(size: 13, weight: .semibold))
+        }
+        .foregroundStyle(color)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .background(color.opacity(0.16), in: Capsule())
+    }
+
+    private var color: Color {
+        Color(statusColor: status.statusColor)
+    }
+
+    private var label: String {
+        switch status {
+        case .noData: "No Data"
+        case .healthy: "Healthy"
+        case .degraded: "Degraded"
+        case .down: "Down"
+        }
+    }
+}

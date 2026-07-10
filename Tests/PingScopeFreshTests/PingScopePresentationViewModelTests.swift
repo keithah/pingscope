@@ -75,16 +75,66 @@ final class PingScopePresentationViewModelTests: XCTestCase {
         XCTAssertEqual(darkPresentation.colorScheme, .dark)
     }
 
-    func testOverlayCompactModeDefaultsToRingCompactAndPersistsExplicitFalse() {
+    func testMacDisplayModeDefaultsToSignalAndPersistsRing() {
+        let suiteName = "PingScopeDisplayModeTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        defaults.removeObject(forKey: "pingScopeDisplayMode")
+        XCTAssertEqual(defaults.pingScopeDisplayMode, .signal)
+
+        defaults.pingScopeDisplayMode = .ring
+        XCTAssertEqual(defaults.pingScopeDisplayMode, .ring)
+    }
+
+    func testDisplayModeFlowsIntoPopoverAndOverlayPresentations() {
+        let oldDisplayMode = UserDefaults.standard.pingScopeDisplayMode
+        defer { UserDefaults.standard.pingScopeDisplayMode = oldDisplayMode }
+
+        let model = PingScopeModel()
+        model.displayMode = .ring
+
+        let popoverViewModel = StatusPopoverPresentationViewModel(model: model)
+        let overlayViewModel = OverlayPresentationViewModel(model: model)
+
+        XCTAssertEqual(popoverViewModel.presentation.displayMode, .ring)
+        XCTAssertEqual(overlayViewModel.presentation.displayMode, .ring)
+
+        model.displayMode = .signal
+        popoverViewModel.refresh()
+        overlayViewModel.refresh()
+
+        XCTAssertEqual(popoverViewModel.presentation.displayMode, .signal)
+        XCTAssertEqual(overlayViewModel.presentation.displayMode, .signal)
+    }
+
+    func testDisplayModeResolvesAllHostsToSignal() {
+        XCTAssertEqual(PingScopeDisplayMode.signal.resolvedForHostScope(showsAllHosts: false), .signal)
+        XCTAssertEqual(PingScopeDisplayMode.ring.resolvedForHostScope(showsAllHosts: false), .ring)
+        XCTAssertEqual(PingScopeDisplayMode.signal.resolvedForHostScope(showsAllHosts: true), .signal)
+        XCTAssertEqual(PingScopeDisplayMode.ring.resolvedForHostScope(showsAllHosts: true), .signal)
+    }
+
+    func testOverlayCompactModeDefaultsToExpandedAndPersistsExplicitCompact() {
         let suiteName = "PingScopeOverlayCompactModeTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
         defer { defaults.removePersistentDomain(forName: suiteName) }
 
         defaults.removeObject(forKey: "overlayCompactMode")
-        XCTAssertTrue(defaults.overlayCompactMode)
-
-        defaults.overlayCompactMode = false
         XCTAssertFalse(defaults.overlayCompactMode)
+
+        defaults.overlayCompactMode = true
+        XCTAssertTrue(defaults.overlayCompactMode)
+    }
+
+    func testPingIntervalSelectionIsMixedWhenHostIntervalsDiffer() {
+        XCTAssertEqual(
+            PingIntervalPresentation.commonSelection(for: [.seconds(2), .seconds(2)]),
+            2_000
+        )
+        XCTAssertNil(
+            PingIntervalPresentation.commonSelection(for: [.seconds(2), .seconds(5)])
+        )
     }
 
     func testSavingDraftHostOptimisticallyUpdatesVisibleSnapshot() {

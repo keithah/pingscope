@@ -95,26 +95,24 @@ struct LatencyGraph: View {
                 }
 
                 let maxValue = graphData.scale.axisMaximumMilliseconds
-                var path = Path()
-                var isDrawingSegment = false
                 let plotTop: CGFloat = showsAxes ? 6 : 0
                 let plotBottom: CGFloat = showsAxes ? 6 : 0
                 let plotHeight = max(size.height - plotTop - plotBottom, 1)
 
                 let renderPoints = graphData.renderPoints(pixelWidth: size.width)
-                let linePoints = renderPoints.compactMap { pointValue -> CGPoint? in
-                    guard let value = pointValue.latencyMilliseconds else { return nil }
-                    let x = pointValue.xPosition(sampleCount: graphData.sampleCount, width: size.width)
+                let lineSegments = graphSegments(
+                    renderPoints: renderPoints,
+                    sampleCount: graphData.sampleCount,
+                    width: size.width
+                ) { _, x, value in
                     let normalized = min(value / maxValue, 1)
                     let y = plotTop + plotHeight - (plotHeight * CGFloat(normalized))
                     return CGPoint(x: x, y: y)
                 }
-                if linePoints.count > 1 {
+
+                for linePoints in lineSegments where linePoints.count > 1 {
                     var fillPath = Path()
-                    fillPath.move(to: linePoints[0])
-                    for point in linePoints.dropFirst() {
-                        fillPath.addLine(to: point)
-                    }
+                    fillPath.addPath(Path(LatencyCurve.smoothedPath(points: linePoints, closed: false)))
                     fillPath.addLine(to: CGPoint(x: linePoints.last!.x, y: plotTop + plotHeight))
                     fillPath.addLine(to: CGPoint(x: linePoints[0].x, y: plotTop + plotHeight))
                     fillPath.closeSubpath()
@@ -127,27 +125,22 @@ struct LatencyGraph: View {
 
                 for pointValue in renderPoints {
                     let x = pointValue.xPosition(sampleCount: graphData.sampleCount, width: size.width)
-                    guard let value = pointValue.latencyMilliseconds else {
+                    guard pointValue.latencyMilliseconds != nil else {
                         let failureMark = Path { mark in
                             mark.move(to: CGPoint(x: x, y: plotTop + plotHeight * 0.2))
                             mark.addLine(to: CGPoint(x: x, y: plotTop + plotHeight))
                         }
                         context.stroke(failureMark, with: .color(.red.opacity(0.72)), lineWidth: 1.5)
-                        isDrawingSegment = false
                         continue
                     }
-
-                    let normalized = min(value / maxValue, 1)
-                    let y = plotTop + plotHeight - (plotHeight * CGFloat(normalized))
-                    let point = CGPoint(x: x, y: y)
-                    if !isDrawingSegment {
-                        path.move(to: point)
-                        isDrawingSegment = true
-                    } else {
-                        path.addLine(to: point)
-                    }
                 }
-                context.stroke(path, with: .color(.accentColor), style: StrokeStyle(lineWidth: 2.2, lineCap: .round, lineJoin: .round))
+                for linePoints in lineSegments {
+                    context.stroke(
+                        Path(LatencyCurve.smoothedPath(points: linePoints, closed: false)),
+                        with: .color(.accentColor),
+                        style: StrokeStyle(lineWidth: 2.2, lineCap: .round, lineJoin: .round)
+                    )
+                }
 
         }
     }
@@ -171,24 +164,21 @@ struct LatencySparkline: View {
         Canvas { context, size in
             guard graphData.points.count > 1 else { return }
             let maxValue = graphData.scale.axisMaximumMilliseconds
-            var path = Path()
-            var isDrawingSegment = false
-            for pointValue in graphData.renderPoints(pixelWidth: size.width) {
-                let x = pointValue.xPosition(sampleCount: graphData.sampleCount, width: size.width)
-                guard let value = pointValue.latencyMilliseconds else {
-                    isDrawingSegment = false
-                    continue
-                }
+            let lineSegments = graphSegments(
+                renderPoints: graphData.renderPoints(pixelWidth: size.width),
+                sampleCount: graphData.sampleCount,
+                width: size.width
+            ) { _, x, value in
                 let normalized = min(value / maxValue, 1)
-                let point = CGPoint(x: x, y: size.height - (size.height * CGFloat(normalized)))
-                if !isDrawingSegment {
-                    path.move(to: point)
-                    isDrawingSegment = true
-                } else {
-                    path.addLine(to: point)
-                }
+                return CGPoint(x: x, y: size.height - (size.height * CGFloat(normalized)))
             }
-            context.stroke(path, with: .color(color), style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
+            for linePoints in lineSegments {
+                context.stroke(
+                    Path(LatencyCurve.smoothedPath(points: linePoints, closed: false)),
+                    with: .color(color),
+                    style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round)
+                )
+            }
         }
     }
 }
@@ -291,13 +281,11 @@ struct MultiHostLatencyGraph: View {
         let plotTop: CGFloat = showsAxes ? 6 : 0
         let plotBottom: CGFloat = showsAxes ? 6 : 0
         let plotHeight = max(size.height - plotTop - plotBottom, 1)
-        var path = Path()
-        var isDrawingSegment = false
 
         let renderPoints = hostSeries.renderPoints(pixelWidth: size.width)
         for pointValue in renderPoints {
             let x = pointValue.xPosition(sampleCount: hostSeries.sampleCount, width: size.width)
-            guard let value = pointValue.latencyMilliseconds else {
+            guard pointValue.latencyMilliseconds != nil else {
                 if hostSeries.source.isPrimary {
                     let failureMark = Path { mark in
                         mark.move(to: CGPoint(x: x, y: plotTop + plotHeight * 0.2))
@@ -305,28 +293,53 @@ struct MultiHostLatencyGraph: View {
                     }
                     context.stroke(failureMark, with: .color(.red.opacity(0.55)), lineWidth: 1.2)
                 }
-                isDrawingSegment = false
                 continue
-            }
-
-            let normalized = min(value / maxValue, 1)
-            let y = plotTop + plotHeight - (plotHeight * CGFloat(normalized))
-            let point = CGPoint(x: x, y: y)
-            if !isDrawingSegment {
-                path.move(to: point)
-                isDrawingSegment = true
-            } else {
-                path.addLine(to: point)
             }
         }
 
-        context.stroke(
-            path,
-            with: .color(hostSeries.source.color.opacity(hostSeries.source.isPrimary ? 1 : 0.72)),
-            lineWidth: hostSeries.source.isPrimary ? 2.2 : 1.5
-        )
+        let lineSegments = graphSegments(
+            renderPoints: renderPoints,
+            sampleCount: hostSeries.sampleCount,
+            width: size.width
+        ) { _, x, value in
+            let normalized = min(value / maxValue, 1)
+            let y = plotTop + plotHeight - (plotHeight * CGFloat(normalized))
+            return CGPoint(x: x, y: y)
+        }
+        for linePoints in lineSegments {
+            context.stroke(
+                Path(LatencyCurve.smoothedPath(points: linePoints, closed: false)),
+                with: .color(hostSeries.source.color.opacity(hostSeries.source.isPrimary ? 1 : 0.72)),
+                lineWidth: hostSeries.source.isPrimary ? 2.2 : 1.5
+            )
+        }
     }
 
+}
+
+private func graphSegments(
+    renderPoints: [LatencyGraphPoint],
+    sampleCount: Int,
+    width: CGFloat,
+    point: (LatencyGraphPoint, CGFloat, Double) -> CGPoint
+) -> [[CGPoint]] {
+    var segments: [[CGPoint]] = []
+    var current: [CGPoint] = []
+    for pointValue in renderPoints {
+        let x = pointValue.xPosition(sampleCount: sampleCount, width: width)
+        guard let latency = pointValue.latencyMilliseconds else {
+            if !current.isEmpty {
+                segments.append(current)
+                current.removeAll(keepingCapacity: true)
+            }
+            continue
+        }
+        current.append(point(pointValue, x, latency))
+    }
+    if !current.isEmpty {
+        segments.append(current)
+    }
+    return segments
 }
 
 private struct LatencyGraphAxisLabels: View {

@@ -22,6 +22,15 @@ enum PingIntervalPresentation {
         Int(interval.milliseconds.rounded())
     }
 
+    static func commonSelection(for intervals: [Duration]) -> Int? {
+        let selections = intervals.map(selection(for:))
+        guard let first = selections.first,
+              selections.allSatisfy({ $0 == first }) else {
+            return nil
+        }
+        return first
+    }
+
     static func options(including milliseconds: Int) -> [PingIntervalOption] {
         guard !options.contains(where: { $0.milliseconds == milliseconds }) else {
             return options
