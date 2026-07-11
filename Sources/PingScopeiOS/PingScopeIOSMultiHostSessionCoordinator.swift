@@ -69,6 +69,22 @@ public struct PingScopeIOSMultiHostSessionState: Equatable, Sendable {
     }
 }
 
+private actor PingScopeIOSMultiHostLifecycleTransactions {
+    private var tail: Task<Void, Never>?
+
+    func perform(_ transaction: @escaping @Sendable () async -> Void) async {
+        let previous = tail
+        // The detached transaction is intentionally independent of the caller:
+        // cancelling one lifecycle caller must not abandon the shared queue.
+        let next = Task.detached { [previous, transaction] in
+            await previous?.value
+            await transaction()
+        }
+        tail = next
+        await next.value
+    }
+}
+
 public actor PingScopeIOSMultiHostSessionCoordinator {
     private struct ControllerEntry: Sendable {
         let host: HostConfig
@@ -78,6 +94,7 @@ public actor PingScopeIOSMultiHostSessionCoordinator {
     private let historyStore: (any PingHistoryStore)?
     private let controllerFactory: any PingScopeIOSMultiHostSessionControllerFactory
     private let now: @Sendable () -> Date
+    private let lifecycleTransactions = PingScopeIOSMultiHostLifecycleTransactions()
     private var controllers: [UUID: ControllerEntry] = [:]
     private var orderedHostIDs: [UUID] = []
     private var aggregateSession: PingScopeIOSMultiHostSessionState?
@@ -93,6 +110,24 @@ public actor PingScopeIOSMultiHostSessionCoordinator {
     }
 
     public func start(duration: MonitorSessionDuration) async {
+        await lifecycleTransactions.perform { [weak self] in
+            await self?.startTransaction(duration: duration)
+        }
+    }
+
+    public func stop(reason: MonitorSessionEndReason = .userStopped) async {
+        await lifecycleTransactions.perform { [weak self] in
+            await self?.stopTransaction(reason: reason)
+        }
+    }
+
+    public func reconcile(hosts: [HostConfig]) async {
+        await lifecycleTransactions.perform { [weak self] in
+            await self?.reconcileTransaction(hosts: hosts)
+        }
+    }
+
+    private func startTransaction(duration: MonitorSessionDuration) async {
         let startedAt = now()
         aggregateSession = PingScopeIOSMultiHostSessionState(duration: duration, startedAt: startedAt)
         for hostID in orderedHostIDs {
@@ -101,7 +136,7 @@ public actor PingScopeIOSMultiHostSessionCoordinator {
         }
     }
 
-    public func stop(reason: MonitorSessionEndReason = .userStopped) async {
+    private func stopTransaction(reason: MonitorSessionEndReason) async {
         let stoppedAt = now()
         for hostID in orderedHostIDs {
             guard let entry = controllers[hostID] else { continue }
@@ -115,25 +150,35 @@ public actor PingScopeIOSMultiHostSessionCoordinator {
     }
 
     public func aggregateHealth() async -> HealthStatus {
-        let snapshots = await snapshots()
-        let statuses = snapshots.values.map(\.health.status)
+        let statuses = await orderedSnapshots().map(\.health.status)
         if statuses.contains(.down) { return .down }
         if statuses.contains(.degraded) { return .degraded }
         if statuses.contains(.healthy) { return .healthy }
         return .noData
     }
 
-    public func snapshots() async -> [UUID: LiveMonitorSessionSnapshot] {
-        var snapshots: [UUID: LiveMonitorSessionSnapshot] = [:]
+    /// Returns snapshots in the saved enabled-host order used for lifecycle fan-out.
+    public func orderedSnapshots() async -> [LiveMonitorSessionSnapshot] {
+        var snapshots: [LiveMonitorSessionSnapshot] = []
         snapshots.reserveCapacity(orderedHostIDs.count)
         for hostID in orderedHostIDs {
             guard let entry = controllers[hostID] else { continue }
-            snapshots[hostID] = await entry.controller.snapshot()
+            snapshots.append(await entry.controller.snapshot())
         }
         return snapshots
     }
 
-    public func reconcile(hosts: [HostConfig]) async {
+    /// Returns a keyed lookup for a host ID. Dictionary iteration order is unspecified.
+    public func snapshotsByHostID() async -> [UUID: LiveMonitorSessionSnapshot] {
+        Dictionary(uniqueKeysWithValues: await orderedSnapshots().map { ($0.host.id, $0) })
+    }
+
+    /// Returns a keyed host lookup. Dictionary iteration order is unspecified.
+    public func snapshots() async -> [UUID: LiveMonitorSessionSnapshot] {
+        await snapshotsByHostID()
+    }
+
+    private func reconcileTransaction(hosts: [HostConfig]) async {
         let enabledHosts = PingScopeIOSHostScopePresentation.enabledHosts(from: hosts)
         let desiredHostIDs = Set(enabledHosts.map(\.id))
         let reconciledAt = now()
