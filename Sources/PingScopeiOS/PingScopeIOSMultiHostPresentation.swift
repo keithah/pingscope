@@ -43,6 +43,24 @@ public struct PingScopeIOSHostRowSnapshot: Equatable, Sendable {
 
     public var formattedLatency: String { latencyText }
 
+    fileprivate init(
+        hostID: UUID,
+        displayName: String,
+        endpointCaption: String,
+        status: HealthStatus,
+        latestLatencyMilliseconds: Double?,
+        samples: [PingResult],
+        isStale: Bool
+    ) {
+        self.hostID = hostID
+        self.displayName = displayName
+        self.endpointCaption = endpointCaption
+        self.status = status
+        self.latestLatencyMilliseconds = latestLatencyMilliseconds
+        self.samples = samples
+        self.isStale = isStale
+    }
+
     public init(
         host: HostConfig,
         health: HostHealth?,
@@ -57,6 +75,18 @@ public struct PingScopeIOSHostRowSnapshot: Equatable, Sendable {
         self.latestLatencyMilliseconds = health?.latestResult?.latency?.milliseconds
         self.samples = PingScopeIOSLatencySampleReducer.reduce(samples, limit: sampleLimit)
         self.isStale = isStale
+    }
+
+    fileprivate func cappedForActivity() -> Self {
+        Self(
+            hostID: hostID,
+            displayName: displayName,
+            endpointCaption: endpointCaption,
+            status: status,
+            latestLatencyMilliseconds: latestLatencyMilliseconds,
+            samples: PingScopeIOSLatencySampleReducer.reduce(samples, limit: PingScopeIOSLatencySampleReducer.defaultLimit),
+            isStale: isStale
+        )
     }
 }
 
@@ -88,7 +118,7 @@ public enum PingScopeIOSHostScopePresentation {
     }
 
     public static func activityRows(from rows: [PingScopeIOSHostRowSnapshot]) -> [PingScopeIOSHostRowSnapshot] {
-        Array(rows.prefix(activityHostLimit))
+        rows.prefix(activityHostLimit).map { $0.cappedForActivity() }
     }
 
     public static func activityRows(

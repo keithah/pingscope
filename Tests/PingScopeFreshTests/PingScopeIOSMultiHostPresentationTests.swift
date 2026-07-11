@@ -59,6 +59,25 @@ final class PingScopeIOSMultiHostPresentationTests: XCTestCase {
         )
     }
 
+    func testActivityRowsReduceSamplesOnPrebuiltRows() {
+        let host = HostConfig(displayName: "Router", address: "192.168.1.1")
+        let row = PingScopeIOSHostRowSnapshot(
+            host: host,
+            health: nil,
+            samples: makeSuccessfulResults(count: 25, hostID: host.id),
+            sampleLimit: 25
+        )
+
+        let activityRows = PingScopeIOSHostScopePresentation.activityRows(from: [row])
+
+        XCTAssertEqual(activityRows.count, 1)
+        XCTAssertEqual(activityRows[0].samples.count, 12)
+        XCTAssertEqual(
+            activityRows[0].samples.map { Int($0.latency!.milliseconds) },
+            [0, 2, 4, 7, 9, 11, 13, 15, 17, 20, 22, 24]
+        )
+    }
+
     func testHostRowSnapshotMapsHealthSamplesAndStaleState() {
         let host = HostConfig(displayName: "Router", address: "192.168.1.1", method: .tcp)
         var health = HostHealth(hostID: host.id, thresholds: host.thresholds)
