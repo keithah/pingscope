@@ -379,6 +379,70 @@ final class LiveMonitorSessionControllerTests: XCTestCase {
         XCTAssertEqual(state.selectedHost.id, hosts[1].id)
     }
 
+    func testIOSHostStorePersistsAllHostsIndependentlyFromConcreteSelection() {
+        let suite = "PingScopeIOSHostScopeTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = PingScopeIOSHostStore(defaults: defaults)
+        let hosts = PingScopeIOSHostStore.defaultHosts
+
+        store.save(hosts: hosts, selectedHostID: hosts[1].id, hostScope: .allHosts)
+
+        let state = store.load()
+        XCTAssertEqual(state.hostScope, .allHosts)
+        XCTAssertEqual(state.selectedHost.id, hosts[1].id)
+    }
+
+    func testIOSHostStorePreservesAllHostsThroughHostMutationSaves() {
+        let suite = "PingScopeIOSHostScopeTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let hosts = [
+            HostConfig(id: UUID(), displayName: "Cloudflare", address: "1.1.1.1"),
+            HostConfig(id: UUID(), displayName: "Google", address: "8.8.8.8"),
+            HostConfig(id: UUID(), displayName: "Router", address: "192.168.1.1")
+        ]
+        let store = PingScopeIOSHostStore(defaults: defaults, defaultHosts: hosts)
+        let selectedHostID = hosts[1].id
+
+        store.save(hosts: hosts, selectedHostID: selectedHostID, hostScope: .allHosts)
+
+        let reordered = PingScopeIOSHostOrdering.reordered(hosts: hosts, fromOffsets: IndexSet(integer: 2), toOffset: 0)
+        store.save(hosts: reordered, selectedHostID: selectedHostID)
+        XCTAssertEqual(store.load().hostScope, .allHosts)
+
+        var edited = reordered
+        edited[0].displayName = "Edited Router"
+        store.save(hosts: edited, selectedHostID: selectedHostID)
+        XCTAssertEqual(store.load().hostScope, .allHosts)
+
+        let deleted = Array(edited.dropFirst())
+        store.save(hosts: deleted, selectedHostID: selectedHostID)
+        XCTAssertEqual(store.load().hostScope, .allHosts)
+
+        var disabled = deleted
+        disabled[0].isEnabled = false
+        store.save(hosts: disabled, selectedHostID: selectedHostID)
+        let state = store.load()
+        XCTAssertEqual(state.hostScope, .allHosts)
+        XCTAssertEqual(state.selectedHost.id, selectedHostID)
+        XCTAssertFalse(state.hosts[0].isEnabled)
+    }
+
+    func testIOSHostStoreDefaultsMissingAndInvalidScopeToFocused() {
+        let suite = "PingScopeIOSHostScopeTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let hosts = PingScopeIOSHostStore.defaultHosts
+        let store = PingScopeIOSHostStore(defaults: defaults, defaultHosts: hosts)
+
+        store.save(hosts: hosts, selectedHostID: hosts[0].id)
+        XCTAssertEqual(store.load().hostScope, .focused)
+
+        defaults.set("unsupported", forKey: "PingScope.iOS.hostScope")
+        XCTAssertEqual(store.load().hostScope, .focused)
+    }
+
     func testIOSHostOrderingReordersAndPreservesSelectedHostWhenPersisted() {
         let suiteName = "PingScopeIOSHostStoreTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!

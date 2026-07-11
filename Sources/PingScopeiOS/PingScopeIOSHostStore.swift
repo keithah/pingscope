@@ -1,13 +1,20 @@
 import Foundation
 import PingScopeCore
 
+public enum PingScopeIOSHostScope: String, Codable, Sendable {
+    case focused
+    case allHosts
+}
+
 public struct PingScopeIOSHostState: Equatable, Sendable {
     public var hosts: [HostConfig]
     public var selectedHost: HostConfig
+    public var hostScope: PingScopeIOSHostScope
 
-    public init(hosts: [HostConfig], selectedHost: HostConfig) {
+    public init(hosts: [HostConfig], selectedHost: HostConfig, hostScope: PingScopeIOSHostScope = .focused) {
         self.hosts = hosts
         self.selectedHost = selectedHost
+        self.hostScope = hostScope
     }
 }
 
@@ -36,6 +43,7 @@ public final class PingScopeIOSHostStore: @unchecked Sendable {
     private let defaultHosts: [HostConfig]
     private let hostsKey = "PingScope.iOS.hosts"
     private let selectedHostIDKey = "PingScope.iOS.selectedHostID"
+    private let hostScopeKey = "PingScope.iOS.hostScope"
 
     public init(defaults: UserDefaults = .standard, defaultHosts: [HostConfig] = PingScopeIOSHostStore.defaultHosts) {
         self.defaults = defaults
@@ -49,10 +57,14 @@ public final class PingScopeIOSHostStore: @unchecked Sendable {
         let selectedHost = selectedID.flatMap { id in
             hosts.first { $0.id == id }
         } ?? hosts[0]
-        return PingScopeIOSHostState(hosts: hosts, selectedHost: selectedHost)
+        return PingScopeIOSHostState(hosts: hosts, selectedHost: selectedHost, hostScope: loadHostScope())
     }
 
     public func save(hosts: [HostConfig], selectedHostID: UUID) {
+        save(hosts: hosts, selectedHostID: selectedHostID, hostScope: loadHostScope())
+    }
+
+    public func save(hosts: [HostConfig], selectedHostID: UUID, hostScope: PingScopeIOSHostScope) {
         let sanitizedHosts = HostConfig.sanitizedHosts(hosts.isEmpty ? defaultHosts : hosts)
         let normalizedHosts = sanitizedHosts.isEmpty ? defaultHosts : sanitizedHosts
         let selectedID = normalizedHosts.contains { $0.id == selectedHostID } ? selectedHostID : normalizedHosts[0].id
@@ -60,9 +72,14 @@ public final class PingScopeIOSHostStore: @unchecked Sendable {
             let data = try JSONEncoder().encode(normalizedHosts)
             defaults.set(data, forKey: hostsKey)
             defaults.set(selectedID.uuidString, forKey: selectedHostIDKey)
+            defaults.set(hostScope.rawValue, forKey: hostScopeKey)
         } catch {
             NSLog("PingScope iOS host encode failed: \(error.localizedDescription)")
         }
+    }
+
+    private func loadHostScope() -> PingScopeIOSHostScope {
+        defaults.string(forKey: hostScopeKey).flatMap(PingScopeIOSHostScope.init(rawValue:)) ?? .focused
     }
 
     private func loadHosts() -> [HostConfig] {
