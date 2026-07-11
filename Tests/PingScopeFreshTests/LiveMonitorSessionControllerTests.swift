@@ -429,15 +429,27 @@ final class LiveMonitorSessionControllerTests: XCTestCase {
         XCTAssertFalse(state.hosts[0].isEnabled)
     }
 
-    func testIOSHostStoreDefaultsMissingAndInvalidScopeToFocused() {
+    func testIOSHostStoreDefaultsMissingScopeToFocusedWithExistingStoredValues() {
+        let suite = "PingScopeIOSHostScopeTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let hosts = PingScopeIOSHostStore.defaultHosts
+
+        defaults.set(try! JSONEncoder().encode(hosts), forKey: "PingScope.iOS.hosts")
+        defaults.set(hosts[0].id.uuidString, forKey: "PingScope.iOS.selectedHostID")
+        XCTAssertNil(defaults.object(forKey: "PingScope.iOS.hostScope"))
+
+        let state = PingScopeIOSHostStore(defaults: defaults, defaultHosts: hosts).load()
+        XCTAssertEqual(state.hostScope, .focused)
+        XCTAssertEqual(state.selectedHost.id, hosts[0].id)
+    }
+
+    func testIOSHostStoreDefaultsInvalidScopeToFocused() {
         let suite = "PingScopeIOSHostScopeTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
         defer { defaults.removePersistentDomain(forName: suite) }
         let hosts = PingScopeIOSHostStore.defaultHosts
         let store = PingScopeIOSHostStore(defaults: defaults, defaultHosts: hosts)
-
-        store.save(hosts: hosts, selectedHostID: hosts[0].id)
-        XCTAssertEqual(store.load().hostScope, .focused)
 
         defaults.set("unsupported", forKey: "PingScope.iOS.hostScope")
         XCTAssertEqual(store.load().hostScope, .focused)
