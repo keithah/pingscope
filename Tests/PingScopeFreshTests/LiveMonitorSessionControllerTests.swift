@@ -710,6 +710,104 @@ final class LiveMonitorSessionControllerTests: XCTestCase {
         XCTAssertEqual(cleanupCount, 0)
         XCTAssertEqual(endedIDs, [LiveMonitorBackgroundTaskID(rawValue: 1)])
     }
+
+    func testIOSAllHostsCoordinatorFansOutToEnabledHostsInSavedOrder() async {
+        let enabledA = HostConfig(id: UUID(), displayName: "Cloudflare", address: "1.1.1.1")
+        let disabledB = HostConfig(id: UUID(), displayName: "Disabled", address: "8.8.8.8", isEnabled: false)
+        let enabledC = HostConfig(id: UUID(), displayName: "Gateway", address: "192.168.1.1")
+        let factory = RecordingIOSAllHostsControllerFactory(statuses: [
+            enabledA.id: .healthy,
+            enabledC.id: .down
+        ])
+        let startedAt = Date(timeIntervalSince1970: 20_000)
+        let coordinator = PingScopeIOSMultiHostSessionCoordinator(
+            controllerFactory: factory,
+            now: { startedAt }
+        )
+
+        await coordinator.reconcile(hosts: [enabledA, disabledB, enabledC])
+        await coordinator.start(duration: .oneMinute)
+
+        let createdHostIDs = await factory.createdHostIDs
+        let startedHostIDs = await factory.startedHostIDs
+        let startedDurations = await factory.startedDurations
+        let snapshots = await coordinator.snapshots()
+        let aggregateHealth = await coordinator.aggregateHealth()
+        XCTAssertEqual(createdHostIDs, [enabledA.id, enabledC.id])
+        XCTAssertEqual(startedHostIDs, [enabledA.id, enabledC.id])
+        XCTAssertEqual(startedDurations, [.oneMinute, .oneMinute])
+        XCTAssertEqual(snapshots[enabledA.id]?.host.id, enabledA.id)
+        XCTAssertEqual(snapshots[enabledC.id]?.host.id, enabledC.id)
+        XCTAssertNil(snapshots[disabledB.id])
+        XCTAssertEqual(aggregateHealth, .down)
+
+        let session = await coordinator.session()
+        XCTAssertEqual(session?.duration, .oneMinute)
+        XCTAssertEqual(session?.startedAt, startedAt)
+        XCTAssertEqual(session?.remainingDuration(at: startedAt), .seconds(60))
+    }
+
+    func testIOSAllHostsCoordinatorStopsAndFlushesRemovedOrDisabledControllersBeforeDroppingThem() async {
+        let enabledA = HostConfig(id: UUID(), displayName: "Cloudflare", address: "1.1.1.1")
+        let enabledB = HostConfig(id: UUID(), displayName: "Google", address: "8.8.8.8")
+        let enabledC = HostConfig(id: UUID(), displayName: "Gateway", address: "192.168.1.1")
+        let factory = RecordingIOSAllHostsControllerFactory()
+        let coordinator = PingScopeIOSMultiHostSessionCoordinator(controllerFactory: factory)
+
+        await coordinator.reconcile(hosts: [enabledA, enabledB, enabledC])
+        await coordinator.start(duration: .continuous)
+        await coordinator.reconcile(hosts: [enabledA, HostConfig(
+            id: enabledB.id,
+            displayName: enabledB.displayName,
+            address: enabledB.address,
+            isEnabled: false
+        )])
+
+        let stoppedHostIDs = await factory.stoppedAndFlushedHostIDs
+        let snapshots = await coordinator.snapshots()
+        XCTAssertEqual(stoppedHostIDs, [enabledB.id, enabledC.id])
+        XCTAssertEqual(Set(snapshots.keys), Set([enabledA.id]))
+    }
+
+    func testIOSAllHostsCoordinatorStopsEveryActiveControllerWithOneReason() async {
+        let hostA = HostConfig(id: UUID(), displayName: "Cloudflare", address: "1.1.1.1")
+        let hostB = HostConfig(id: UUID(), displayName: "Google", address: "8.8.8.8")
+        let factory = RecordingIOSAllHostsControllerFactory()
+        let coordinator = PingScopeIOSMultiHostSessionCoordinator(controllerFactory: factory)
+
+        await coordinator.reconcile(hosts: [hostA, hostB])
+        await coordinator.start(duration: .thirtySeconds)
+        await coordinator.stop(reason: .backgroundRuntimeExpired)
+
+        let stoppedHostIDs = await factory.stoppedAndFlushedHostIDs
+        let stopReasons = await factory.stopReasons
+        let session = await coordinator.session()
+        XCTAssertEqual(stoppedHostIDs, [hostA.id, hostB.id])
+        XCTAssertEqual(stopReasons, [.backgroundRuntimeExpired, .backgroundRuntimeExpired])
+        XCTAssertEqual(session?.endReason, .backgroundRuntimeExpired)
+    }
+
+    func testIOSAllHostsCoordinatorDropsRemovedControllerAfterStopFlushCompletes() async {
+        let host = HostConfig(id: UUID(), displayName: "Cloudflare", address: "1.1.1.1")
+        let stopGate = IOSAllHostsStopGate()
+        let factory = RecordingIOSAllHostsControllerFactory(stopGate: stopGate)
+        let coordinator = PingScopeIOSMultiHostSessionCoordinator(controllerFactory: factory)
+
+        await coordinator.reconcile(hosts: [host])
+        let reconciliation = Task {
+            await coordinator.reconcile(hosts: [])
+        }
+        await stopGate.waitForStop()
+
+        let snapshotsDuringStop = await coordinator.snapshots()
+        XCTAssertEqual(snapshotsDuringStop[host.id]?.host.id, host.id)
+
+        await stopGate.release()
+        await reconciliation.value
+
+        let snapshotsAfterStop = await coordinator.snapshots()
+        XCTAssertNil(snapshotsAfterStop[host.id])
+    }
 }
 
 private actor RecordingProbe: PingProbe {
@@ -865,5 +963,107 @@ private actor ExpirationObservationBox {
 
     func get() -> [LiveMonitorBackgroundTaskID]? {
         value
+    }
+}
+
+private actor RecordingIOSAllHostsControllerFactory: PingScopeIOSMultiHostSessionControllerFactory {
+    private let statuses: [UUID: HealthStatus]
+    private let stopGate: IOSAllHostsStopGate?
+    private(set) var createdHostIDs: [UUID] = []
+    private(set) var startedHostIDs: [UUID] = []
+    private(set) var startedDurations: [MonitorSessionDuration] = []
+    private(set) var stoppedAndFlushedHostIDs: [UUID] = []
+    private(set) var stopReasons: [MonitorSessionEndReason] = []
+
+    init(statuses: [UUID: HealthStatus] = [:], stopGate: IOSAllHostsStopGate? = nil) {
+        self.statuses = statuses
+        self.stopGate = stopGate
+    }
+
+    func makeController(
+        for host: HostConfig,
+        historyStore: (any PingHistoryStore)?
+    ) async -> any PingScopeIOSMultiHostSessionControlling {
+        createdHostIDs.append(host.id)
+        return RecordingIOSAllHostsController(host: host, factory: self)
+    }
+
+    func recordStart(hostID: UUID, duration: MonitorSessionDuration) {
+        startedHostIDs.append(hostID)
+        startedDurations.append(duration)
+    }
+
+    func recordStop(hostID: UUID, reason: MonitorSessionEndReason) async {
+        stoppedAndFlushedHostIDs.append(hostID)
+        stopReasons.append(reason)
+        await stopGate?.recordStop()
+    }
+
+    func waitForStopRelease() async {
+        await stopGate?.waitForRelease()
+    }
+
+    func snapshot(for host: HostConfig) -> LiveMonitorSessionSnapshot {
+        var health = HostHealth(hostID: host.id, thresholds: host.thresholds)
+        health.status = statuses[host.id] ?? .noData
+        return LiveMonitorSessionSnapshot(host: host, session: nil, health: health)
+    }
+}
+
+private actor RecordingIOSAllHostsController: PingScopeIOSMultiHostSessionControlling {
+    private let host: HostConfig
+    private let factory: RecordingIOSAllHostsControllerFactory
+
+    init(host: HostConfig, factory: RecordingIOSAllHostsControllerFactory) {
+        self.host = host
+        self.factory = factory
+    }
+
+    func start(duration: MonitorSessionDuration, at date: Date) async {
+        await factory.recordStart(hostID: host.id, duration: duration)
+    }
+
+    func stop(reason: MonitorSessionEndReason, at date: Date) async {
+        await factory.recordStop(hostID: host.id, reason: reason)
+        await factory.waitForStopRelease()
+    }
+
+    func snapshot() async -> LiveMonitorSessionSnapshot {
+        await factory.snapshot(for: host)
+    }
+}
+
+private actor IOSAllHostsStopGate {
+    private var stopRecorded = false
+    private var released = false
+    private var stopWaiters: [CheckedContinuation<Void, Never>] = []
+    private var releaseWaiters: [CheckedContinuation<Void, Never>] = []
+
+    func recordStop() {
+        stopRecorded = true
+        stopWaiters.forEach { $0.resume() }
+        stopWaiters.removeAll()
+    }
+
+    func waitForStop() async {
+        while !stopRecorded {
+            await withCheckedContinuation { continuation in
+                stopWaiters.append(continuation)
+            }
+        }
+    }
+
+    func waitForRelease() async {
+        while !released {
+            await withCheckedContinuation { continuation in
+                releaseWaiters.append(continuation)
+            }
+        }
+    }
+
+    func release() {
+        released = true
+        releaseWaiters.forEach { $0.resume() }
+        releaseWaiters.removeAll()
     }
 }
