@@ -978,6 +978,30 @@ final class LiveMonitorSessionControllerTests: XCTestCase {
         XCTAssertEqual(stopRecords.map(\.hostID), [hostA.id, hostB.id])
         XCTAssertEqual(stopRecords.map(\.date), [clock.baseDate.addingTimeInterval(12), clock.baseDate.addingTimeInterval(12)])
     }
+
+    func testIOSAllHostsCoordinatorSnapshotCollectionUsesSingleCapturedTopology() async {
+        let hostA = HostConfig(id: UUID(), displayName: "Cloudflare", address: "1.1.1.1")
+        let originalHostB = HostConfig(id: UUID(), displayName: "Gateway", address: "192.168.1.1")
+        var replacementHostB = originalHostB
+        replacementHostB.address = "192.168.1.254"
+        let snapshotGate = IOSAllHostsFirstSnapshotGate()
+        let factory = RecordingIOSAllHostsControllerFactory(snapshotGate: snapshotGate)
+        let coordinator = PingScopeIOSMultiHostSessionCoordinator(controllerFactory: factory)
+
+        await coordinator.reconcile(hosts: [hostA, originalHostB])
+        let inFlightSnapshots = Task {
+            await coordinator.orderedSnapshots()
+        }
+        await snapshotGate.waitForFirstSnapshot()
+
+        await coordinator.reconcile(hosts: [hostA, replacementHostB])
+        await snapshotGate.release()
+
+        let capturedSnapshots = await inFlightSnapshots.value
+        let currentSnapshots = await coordinator.orderedSnapshots()
+        XCTAssertEqual(capturedSnapshots.map(\.host.address), [hostA.address, originalHostB.address])
+        XCTAssertEqual(currentSnapshots.map(\.host.address), [hostA.address, replacementHostB.address])
+    }
 }
 
 private actor RecordingProbe: PingProbe {
@@ -1141,6 +1165,7 @@ private actor RecordingIOSAllHostsControllerFactory: PingScopeIOSMultiHostSessio
     private let startGate: IOSAllHostsStartGate?
     private let stopGate: IOSAllHostsStopGate?
     private let firstStopGate: IOSAllHostsFirstStopGate?
+    private let snapshotGate: IOSAllHostsFirstSnapshotGate?
     private var nextControllerToken = 0
     private var runningByControllerToken: [Int: Bool] = [:]
     private(set) var createdHostIDs: [UUID] = []
@@ -1158,12 +1183,14 @@ private actor RecordingIOSAllHostsControllerFactory: PingScopeIOSMultiHostSessio
         statuses: [UUID: HealthStatus] = [:],
         startGate: IOSAllHostsStartGate? = nil,
         stopGate: IOSAllHostsStopGate? = nil,
-        firstStopGate: IOSAllHostsFirstStopGate? = nil
+        firstStopGate: IOSAllHostsFirstStopGate? = nil,
+        snapshotGate: IOSAllHostsFirstSnapshotGate? = nil
     ) {
         self.statuses = statuses
         self.startGate = startGate
         self.stopGate = stopGate
         self.firstStopGate = firstStopGate
+        self.snapshotGate = snapshotGate
     }
 
     func makeController(
@@ -1211,7 +1238,11 @@ private actor RecordingIOSAllHostsControllerFactory: PingScopeIOSMultiHostSessio
         runningByControllerToken[controllerToken] ?? false
     }
 
-    func snapshot(for host: HostConfig) -> LiveMonitorSessionSnapshot {
+    func snapshot(for host: HostConfig) async -> LiveMonitorSessionSnapshot {
+        if await snapshotGate?.recordSnapshot() == true {
+            await snapshotGate?.waitForRelease()
+        }
+
         var health = HostHealth(hostID: host.id, thresholds: host.thresholds)
         health.status = statuses[host.id] ?? .noData
         return LiveMonitorSessionSnapshot(host: host, session: nil, health: health)
@@ -1350,6 +1381,44 @@ private actor IOSAllHostsFirstStopGate {
         while stopCount == 0 {
             await withCheckedContinuation { continuation in
                 firstStopWaiters.append(continuation)
+            }
+        }
+    }
+
+    func waitForRelease() async {
+        while !released {
+            await withCheckedContinuation { continuation in
+                releaseWaiters.append(continuation)
+            }
+        }
+    }
+
+    func release() {
+        released = true
+        releaseWaiters.forEach { $0.resume() }
+        releaseWaiters.removeAll()
+    }
+}
+
+private actor IOSAllHostsFirstSnapshotGate {
+    private var snapshotCount = 0
+    private var released = false
+    private var firstSnapshotWaiters: [CheckedContinuation<Void, Never>] = []
+    private var releaseWaiters: [CheckedContinuation<Void, Never>] = []
+
+    func recordSnapshot() -> Bool {
+        snapshotCount += 1
+        guard snapshotCount == 1 else { return false }
+
+        firstSnapshotWaiters.forEach { $0.resume() }
+        firstSnapshotWaiters.removeAll()
+        return true
+    }
+
+    func waitForFirstSnapshot() async {
+        while snapshotCount == 0 {
+            await withCheckedContinuation { continuation in
+                firstSnapshotWaiters.append(continuation)
             }
         }
     }

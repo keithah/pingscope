@@ -159,10 +159,10 @@ public actor PingScopeIOSMultiHostSessionCoordinator {
 
     /// Returns snapshots in the saved enabled-host order used for lifecycle fan-out.
     public func orderedSnapshots() async -> [LiveMonitorSessionSnapshot] {
+        let orderedEntries = orderedHostIDs.compactMap { controllers[$0] }
         var snapshots: [LiveMonitorSessionSnapshot] = []
-        snapshots.reserveCapacity(orderedHostIDs.count)
-        for hostID in orderedHostIDs {
-            guard let entry = controllers[hostID] else { continue }
+        snapshots.reserveCapacity(orderedEntries.count)
+        for entry in orderedEntries {
             snapshots.append(await entry.controller.snapshot())
         }
         return snapshots
