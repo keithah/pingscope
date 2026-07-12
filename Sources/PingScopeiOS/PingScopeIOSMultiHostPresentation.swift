@@ -93,6 +93,14 @@ public struct PingScopeIOSHostRowSnapshot: Equatable, Sendable {
 public enum PingScopeIOSHostScopePresentation {
     public static let activityHostLimit = 3
 
+    public static func aggregateStatus(from rows: [PingScopeIOSHostRowSnapshot]) -> HealthStatus {
+        let statuses = rows.map { $0.isStale ? HealthStatus.noData : $0.status }
+        if statuses.contains(.down) { return .down }
+        if statuses.contains(.degraded) { return .degraded }
+        if statuses.contains(.healthy) { return .healthy }
+        return .noData
+    }
+
     public static func enabledHosts(from hosts: [HostConfig]) -> [HostConfig] {
         hosts.filter(\.isEnabled)
     }

@@ -90,7 +90,12 @@ public struct PingScopeLiveActivityHostRow: Codable, Hashable, Sendable {
 
 }
 
-public struct PingScopeLiveActivityAttributes: Sendable {
+public struct PingScopeLiveActivityAttributes: Codable, Sendable {
+    public static let hostNameCharacterLimit = PingScopeLiveActivityHostRow.displayNameCharacterLimit
+    public static let hostNameUTF8ByteLimit = PingScopeLiveActivityHostRow.displayNameUTF8ByteLimit
+    public static let addressCharacterLimit = 128
+    public static let addressUTF8ByteLimit = 384
+
     public struct ContentState: Codable, Hashable, Sendable {
         public static let hostRowLimit = PingScopeIOSHostScopePresentation.activityHostLimit
         public static let failureMessageCharacterLimit = 64
@@ -169,18 +174,61 @@ public struct PingScopeLiveActivityAttributes: Sendable {
         }
     }
 
-    public var hostID: UUID
-    public var hostName: String
-    public var address: String
-    public var method: PingMethod
-    public var duration: MonitorSessionDuration
+    public let hostID: UUID
+    public let hostName: String
+    public let address: String
+    public let method: PingMethod
+    public let duration: MonitorSessionDuration
 
     public init(host: HostConfig, duration: MonitorSessionDuration) {
-        self.hostID = host.id
-        self.hostName = host.displayName
-        self.address = host.address
-        self.method = host.method
+        self.init(
+            hostID: host.id,
+            hostName: host.displayName,
+            address: host.address,
+            method: host.method,
+            duration: duration
+        )
+    }
+
+    private init(
+        hostID: UUID,
+        hostName: String,
+        address: String,
+        method: PingMethod,
+        duration: MonitorSessionDuration
+    ) {
+        self.hostID = hostID
+        self.hostName = boundedActivityPayloadString(
+            hostName,
+            characterLimit: Self.hostNameCharacterLimit,
+            utf8ByteLimit: Self.hostNameUTF8ByteLimit
+        )
+        self.address = boundedActivityPayloadString(
+            address,
+            characterLimit: Self.addressCharacterLimit,
+            utf8ByteLimit: Self.addressUTF8ByteLimit
+        )
+        self.method = method
         self.duration = duration
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case hostID
+        case hostName
+        case address
+        case method
+        case duration
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            hostID: try container.decode(UUID.self, forKey: .hostID),
+            hostName: try container.decode(String.self, forKey: .hostName),
+            address: try container.decode(String.self, forKey: .address),
+            method: try container.decode(PingMethod.self, forKey: .method),
+            duration: try container.decode(MonitorSessionDuration.self, forKey: .duration)
+        )
     }
 }
 

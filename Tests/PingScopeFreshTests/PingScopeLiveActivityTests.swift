@@ -21,6 +21,85 @@ final class PingScopeLiveActivityTests: XCTestCase {
         XCTAssertEqual(try roundTrip(state), state)
     }
 
+    func testHostileFocusedAttributesInitializationKeepsCombinedPayloadUnderFourKilobytes() throws {
+        let hostID = UUID()
+        let attributes = PingScopeLiveActivityAttributes(
+            host: HostConfig(
+                id: hostID,
+                displayName: String(repeating: "👩🏽‍💻", count: 200),
+                address: oversizedAddress,
+                method: .https
+            ),
+            duration: .oneMinute
+        )
+        let state = makeContentState(
+            failureMessage: oversizedFailureMessage,
+            mode: .focused,
+            hostRows: [makeOversizedPayloadRow()]
+        )
+
+        assertAttributeStringLimits(attributes)
+        XCTAssertEqual(attributes.hostID, hostID)
+        XCTAssertEqual(attributes.hostName, String(repeating: "👩🏽‍💻", count: 4))
+        XCTAssertEqual(attributes.address, boundedAddress)
+        XCTAssertEqual(attributes.method, .https)
+        XCTAssertEqual(attributes.duration, .oneMinute)
+        XCTAssertLessThan(try encodedCombinedPayloadSize(attributes: attributes, state: state), 4_096)
+    }
+
+    func testHostileAllHostsPlaceholderInitializationKeepsCombinedPayloadUnderFourKilobytes() throws {
+        let hostID = UUID()
+        let attributes = PingScopeLiveActivityAttributes(
+            host: HostConfig(
+                id: hostID,
+                displayName: "All Hosts",
+                address: oversizedAddress,
+                method: .udp
+            ),
+            duration: .thirtySeconds
+        )
+        let state = makeContentState(
+            failureMessage: oversizedFailureMessage,
+            mode: .allHosts,
+            hostRows: Array(repeating: makeOversizedPayloadRow(), count: 3)
+        )
+
+        assertAttributeStringLimits(attributes)
+        XCTAssertEqual(attributes.hostID, hostID)
+        XCTAssertEqual(attributes.hostName, "All Hosts")
+        XCTAssertEqual(attributes.address, boundedAddress)
+        XCTAssertEqual(attributes.method, .udp)
+        XCTAssertEqual(attributes.duration, .thirtySeconds)
+        XCTAssertLessThan(try encodedCombinedPayloadSize(attributes: attributes, state: state), 4_096)
+    }
+
+    func testHostileAttributesDecodeKeepsCombinedPayloadUnderFourKilobytes() throws {
+        let hostID = UUID()
+        let unboundedAttributes = UnboundedLiveActivityAttributes(
+            hostID: hostID,
+            hostName: String(repeating: "All Hosts 👩🏽‍💻", count: 200),
+            address: oversizedAddress,
+            method: .icmp,
+            duration: .continuous
+        )
+        let attributes = try JSONDecoder().decode(
+            PingScopeLiveActivityAttributes.self,
+            from: JSONEncoder().encode(unboundedAttributes)
+        )
+        let state = makeContentState(
+            failureMessage: oversizedFailureMessage,
+            mode: .allHosts,
+            hostRows: Array(repeating: makeOversizedPayloadRow(), count: 3)
+        )
+
+        assertAttributeStringLimits(attributes)
+        XCTAssertEqual(attributes.hostID, hostID)
+        XCTAssertEqual(attributes.address, boundedAddress)
+        XCTAssertEqual(attributes.method, .icmp)
+        XCTAssertEqual(attributes.duration, .continuous)
+        XCTAssertLessThan(try encodedCombinedPayloadSize(attributes: attributes, state: state), 4_096)
+    }
+
     func testFocusedPresentationUsesScalarIdentityAndLatencyWithBoundedSparkline() {
         let host = HostConfig(
             displayName: "Focused Host",
@@ -433,6 +512,34 @@ final class PingScopeLiveActivityTests: XCTestCase {
         )
     }
 
+    private func assertAttributeStringLimits(_ attributes: PingScopeLiveActivityAttributes) {
+        XCTAssertLessThanOrEqual(
+            attributes.hostName.count,
+            PingScopeLiveActivityAttributes.hostNameCharacterLimit
+        )
+        XCTAssertLessThanOrEqual(
+            attributes.hostName.utf8.count,
+            PingScopeLiveActivityAttributes.hostNameUTF8ByteLimit
+        )
+        XCTAssertLessThanOrEqual(
+            attributes.address.count,
+            PingScopeLiveActivityAttributes.addressCharacterLimit
+        )
+        XCTAssertLessThanOrEqual(
+            attributes.address.utf8.count,
+            PingScopeLiveActivityAttributes.addressUTF8ByteLimit
+        )
+    }
+
+    private func encodedCombinedPayloadSize(
+        attributes: PingScopeLiveActivityAttributes,
+        state: PingScopeLiveActivityAttributes.ContentState
+    ) throws -> Int {
+        try JSONEncoder().encode(
+            CombinedLiveActivityPayload(attributes: attributes, contentState: state)
+        ).count
+    }
+
     private func assertPayloadStringLimits(_ rows: [PingScopeLiveActivityHostRow]) {
         for row in rows {
             XCTAssertEqual(row.displayName, String(repeating: "👩🏽‍💻", count: 4))
@@ -455,6 +562,14 @@ final class PingScopeLiveActivityTests: XCTestCase {
         String(repeating: "👩🏽‍💻", count: 200)
     }
 
+    private var oversizedAddress: String {
+        String(repeating: "连接-", count: 500)
+    }
+
+    private var boundedAddress: String {
+        String(repeating: "连接-", count: 42) + "连接"
+    }
+
     private func roundTrip(
         _ state: PingScopeLiveActivityAttributes.ContentState
     ) throws -> PingScopeLiveActivityAttributes.ContentState {
@@ -463,6 +578,19 @@ final class PingScopeLiveActivityTests: XCTestCase {
             from: JSONEncoder().encode(state)
         )
     }
+}
+
+private struct CombinedLiveActivityPayload: Encodable {
+    let attributes: PingScopeLiveActivityAttributes
+    let contentState: PingScopeLiveActivityAttributes.ContentState
+}
+
+private struct UnboundedLiveActivityAttributes: Encodable {
+    let hostID: UUID
+    let hostName: String
+    let address: String
+    let method: PingMethod
+    let duration: MonitorSessionDuration
 }
 
 private struct UnboundedContentState: Codable {

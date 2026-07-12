@@ -114,6 +114,41 @@ final class PingScopeIOSMultiHostPresentationTests: XCTestCase {
         XCTAssertFalse(row.isStale)
     }
 
+    func testActivityAggregateIgnoresStaleDownWhenFreshHostIsHealthy() {
+        let rows = [
+            makeStatusRow(status: .down, isStale: true),
+            makeStatusRow(status: .healthy, isStale: false)
+        ]
+
+        XCTAssertEqual(PingScopeIOSHostScopePresentation.aggregateStatus(from: rows), .healthy)
+    }
+
+    func testActivityAggregateIsNeutralWhenEveryHostIsStale() {
+        let rows = [
+            makeStatusRow(status: .down, isStale: true),
+            makeStatusRow(status: .degraded, isStale: true)
+        ]
+
+        XCTAssertEqual(PingScopeIOSHostScopePresentation.aggregateStatus(from: rows), .noData)
+    }
+
+    func testActivityAggregatePreservesFreshDegradedAndDownPriority() {
+        XCTAssertEqual(
+            PingScopeIOSHostScopePresentation.aggregateStatus(from: [
+                makeStatusRow(status: .healthy, isStale: false),
+                makeStatusRow(status: .degraded, isStale: false)
+            ]),
+            .degraded
+        )
+        XCTAssertEqual(
+            PingScopeIOSHostScopePresentation.aggregateStatus(from: [
+                makeStatusRow(status: .degraded, isStale: false),
+                makeStatusRow(status: .down, isStale: false)
+            ]),
+            .down
+        )
+    }
+
     func testDisplayModeAlwaysUsesSignalForAllHosts() {
         XCTAssertEqual(PingScopeIOSDisplayMode.signal.resolvedForHostScope(showsAllHosts: false), .signal)
         XCTAssertEqual(PingScopeIOSDisplayMode.ring.resolvedForHostScope(showsAllHosts: false), .ring)
@@ -283,5 +318,15 @@ final class PingScopeIOSMultiHostPresentationTests: XCTestCase {
                 timestamp: Date(timeIntervalSince1970: Double(index))
             )
         }
+    }
+
+    private func makeStatusRow(
+        status: HealthStatus,
+        isStale: Bool
+    ) -> PingScopeIOSHostRowSnapshot {
+        let host = HostConfig(displayName: "Host", address: "host.example")
+        var health = HostHealth(hostID: host.id, thresholds: host.thresholds)
+        health.status = status
+        return PingScopeIOSHostRowSnapshot(host: host, health: health, isStale: isStale)
     }
 }

@@ -1041,7 +1041,7 @@ private final class PingScopeIOSAppModel: ObservableObject {
             .max { lhs, rhs in lhs.timestamp < rhs.timestamp }
         return PingScopeLiveActivityAttributes.ContentState(
             latencyMilliseconds: nil,
-            status: aggregateAllHostsStatus,
+            status: PingScopeIOSHostScopePresentation.aggregateStatus(from: allHostRows),
             lastUpdatedAt: latestResult?.timestamp,
             remainingSeconds: session.duration == .continuous
                 ? 0
@@ -1050,14 +1050,6 @@ private final class PingScopeIOSAppModel: ObservableObject {
             mode: .allHosts,
             hostRows: activityRows
         )
-    }
-
-    private var aggregateAllHostsStatus: HealthStatus {
-        let statuses = allHostRows.map(\.status)
-        if statuses.contains(.down) { return .down }
-        if statuses.contains(.degraded) { return .degraded }
-        if statuses.contains(.healthy) { return .healthy }
-        return .noData
     }
 }
 
