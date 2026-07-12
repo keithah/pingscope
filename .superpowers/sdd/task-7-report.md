@@ -92,3 +92,7 @@ The Simulator window exposed the active Live Activity on the Lock Screen.
 `simctl io screenshot` did not include that ActivityKit overlay, so a future
 Task 8 image artifact needs Simulator-window capture or UI automation rather
 than the headless `simctl io` screenshot command.
+
+### Implementation Commit
+
+`cf4d678eae3f613b5d6b45f63a8beecd10549b14` (`Fix Live Activity layout review findings`)
