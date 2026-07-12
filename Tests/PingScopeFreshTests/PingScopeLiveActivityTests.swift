@@ -57,6 +57,29 @@ final class PingScopeLiveActivityTests: XCTestCase {
         XCTAssertEqual(decoded.hostRows, [])
     }
 
+    func testOldScalarOnlyPayloadClampsHostileFailureMessage() throws {
+        let oldScalarOnlyJSON = Data("""
+        {
+          "latencyMilliseconds":42,
+          "status":"healthy",
+          "lastUpdatedAt":0,
+          "remainingSeconds":30,
+          "isStale":false,
+          "failureMessage":"\(oversizedFailureMessage)"
+        }
+        """.utf8)
+
+        let decoded = try JSONDecoder().decode(
+            PingScopeLiveActivityAttributes.ContentState.self,
+            from: oldScalarOnlyJSON
+        )
+
+        try assertFailureMessageLimit(decoded)
+        XCTAssertEqual(decoded.mode, .focused)
+        XCTAssertEqual(decoded.hostRows, [])
+        XCTAssertLessThan(try JSONEncoder().encode(decoded).count, 4_096)
+    }
+
     func testWorstCaseActivityPayloadIsUnderFourKilobytes() throws {
         let rows = (0..<3).map { index in
             PingScopeLiveActivityHostRow(
@@ -78,11 +101,16 @@ final class PingScopeLiveActivityTests: XCTestCase {
 
     func testPayloadInitializationClampsUnicodeStringsAndCollections() throws {
         let row = makeOversizedPayloadRow()
-        let state = makeContentState(mode: .allHosts, hostRows: Array(repeating: row, count: 4))
+        let state = makeContentState(
+            failureMessage: oversizedFailureMessage,
+            mode: .allHosts,
+            hostRows: Array(repeating: row, count: 4)
+        )
 
         XCTAssertEqual(state.hostRows.count, PingScopeLiveActivityAttributes.ContentState.hostRowLimit)
         XCTAssertEqual(state.hostRows.map(\.samples.count), Array(repeating: PingScopeLiveActivityHostRow.sampleLimit, count: 3))
         assertPayloadStringLimits(state.hostRows)
+        try assertFailureMessageLimit(state)
         XCTAssertLessThan(try JSONEncoder().encode(state).count, 4_096)
     }
 
@@ -94,7 +122,7 @@ final class PingScopeLiveActivityTests: XCTestCase {
             lastUpdatedAt: Date(timeIntervalSinceReferenceDate: 123),
             remainingSeconds: 30,
             isStale: false,
-            failureMessage: nil,
+            failureMessage: oversizedFailureMessage,
             mode: .allHosts,
             hostRows: Array(repeating: UnboundedHostRow(row), count: 4)
         )
@@ -107,10 +135,12 @@ final class PingScopeLiveActivityTests: XCTestCase {
         XCTAssertEqual(decoded.hostRows.count, PingScopeLiveActivityAttributes.ContentState.hostRowLimit)
         XCTAssertEqual(decoded.hostRows.map(\.samples.count), Array(repeating: PingScopeLiveActivityHostRow.sampleLimit, count: 3))
         assertPayloadStringLimits(decoded.hostRows)
+        try assertFailureMessageLimit(decoded)
         XCTAssertLessThan(try JSONEncoder().encode(decoded).count, 4_096)
     }
 
     private func makeContentState(
+        failureMessage: String? = nil,
         mode: PingScopeLiveActivityMode = .focused,
         hostRows: [PingScopeLiveActivityHostRow] = []
     ) -> PingScopeLiveActivityAttributes.ContentState {
@@ -120,7 +150,7 @@ final class PingScopeLiveActivityTests: XCTestCase {
             lastUpdatedAt: Date(timeIntervalSinceReferenceDate: 123),
             remainingSeconds: 30,
             isStale: false,
-            failureMessage: nil,
+            failureMessage: failureMessage,
             mode: mode,
             hostRows: hostRows
         )
@@ -171,6 +201,17 @@ final class PingScopeLiveActivityTests: XCTestCase {
             XCTAssertLessThanOrEqual(row.endpointCaption.count, PingScopeLiveActivityHostRow.endpointCaptionCharacterLimit)
             XCTAssertLessThanOrEqual(row.endpointCaption.utf8.count, PingScopeLiveActivityHostRow.endpointCaptionUTF8ByteLimit)
         }
+    }
+
+    private func assertFailureMessageLimit(_ state: PingScopeLiveActivityAttributes.ContentState) throws {
+        let failureMessage = try XCTUnwrap(state.failureMessage)
+        XCTAssertEqual(failureMessage, String(repeating: "👩🏽‍💻", count: 12))
+        XCTAssertLessThanOrEqual(failureMessage.count, PingScopeLiveActivityAttributes.ContentState.failureMessageCharacterLimit)
+        XCTAssertLessThanOrEqual(failureMessage.utf8.count, PingScopeLiveActivityAttributes.ContentState.failureMessageUTF8ByteLimit)
+    }
+
+    private var oversizedFailureMessage: String {
+        String(repeating: "👩🏽‍💻", count: 200)
     }
 
     private func roundTrip(

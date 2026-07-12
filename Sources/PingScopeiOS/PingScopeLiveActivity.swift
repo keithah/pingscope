@@ -36,12 +36,12 @@ public struct PingScopeLiveActivityHostRow: Codable, Hashable, Sendable {
         isStale: Bool
     ) {
         self.hostID = hostID
-        self.displayName = Self.boundedString(
+        self.displayName = boundedActivityPayloadString(
             displayName,
             characterLimit: Self.displayNameCharacterLimit,
             utf8ByteLimit: Self.displayNameUTF8ByteLimit
         )
-        self.endpointCaption = Self.boundedString(
+        self.endpointCaption = boundedActivityPayloadString(
             endpointCaption,
             characterLimit: Self.endpointCaptionCharacterLimit,
             utf8ByteLimit: Self.endpointCaptionUTF8ByteLimit
@@ -88,36 +88,20 @@ public struct PingScopeLiveActivityHostRow: Codable, Hashable, Sendable {
         )
     }
 
-    private static func boundedString(
-        _ value: String,
-        characterLimit: Int,
-        utf8ByteLimit: Int
-    ) -> String {
-        var bounded: [Character] = []
-        bounded.reserveCapacity(characterLimit)
-        var utf8ByteCount = 0
-
-        for character in value {
-            guard bounded.count < characterLimit else { break }
-            let characterUTF8ByteCount = String(character).utf8.count
-            guard utf8ByteCount + characterUTF8ByteCount <= utf8ByteLimit else { break }
-            bounded.append(character)
-            utf8ByteCount += characterUTF8ByteCount
-        }
-        return String(bounded)
-    }
 }
 
 public struct PingScopeLiveActivityAttributes: Sendable {
     public struct ContentState: Codable, Hashable, Sendable {
         public static let hostRowLimit = PingScopeIOSHostScopePresentation.activityHostLimit
+        public static let failureMessageCharacterLimit = 64
+        public static let failureMessageUTF8ByteLimit = 192
 
         public var latencyMilliseconds: Int?
         public var status: HealthStatus
         public var lastUpdatedAt: Date?
         public var remainingSeconds: Int
         public var isStale: Bool
-        public var failureMessage: String?
+        public let failureMessage: String?
         public var mode: PingScopeLiveActivityMode
         public let hostRows: [PingScopeLiveActivityHostRow]
 
@@ -136,7 +120,13 @@ public struct PingScopeLiveActivityAttributes: Sendable {
             self.lastUpdatedAt = lastUpdatedAt
             self.remainingSeconds = max(0, remainingSeconds)
             self.isStale = isStale
-            self.failureMessage = failureMessage
+            self.failureMessage = failureMessage.map {
+                boundedActivityPayloadString(
+                    $0,
+                    characterLimit: Self.failureMessageCharacterLimit,
+                    utf8ByteLimit: Self.failureMessageUTF8ByteLimit
+                )
+            }
             self.mode = mode
             self.hostRows = Array(hostRows.prefix(Self.hostRowLimit))
         }
@@ -192,6 +182,25 @@ public struct PingScopeLiveActivityAttributes: Sendable {
         self.method = host.method
         self.duration = duration
     }
+}
+
+private func boundedActivityPayloadString(
+    _ value: String,
+    characterLimit: Int,
+    utf8ByteLimit: Int
+) -> String {
+    var bounded: [Character] = []
+    bounded.reserveCapacity(characterLimit)
+    var utf8ByteCount = 0
+
+    for character in value {
+        guard bounded.count < characterLimit else { break }
+        let characterUTF8ByteCount = String(character).utf8.count
+        guard utf8ByteCount + characterUTF8ByteCount <= utf8ByteLimit else { break }
+        bounded.append(character)
+        utf8ByteCount += characterUTF8ByteCount
+    }
+    return String(bounded)
 }
 
 #if os(iOS) && canImport(ActivityKit)
