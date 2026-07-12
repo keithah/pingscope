@@ -14,6 +14,84 @@ final class LiveMonitorSessionControllerTests: XCTestCase {
         XCTAssertNotEqual(PingScopeIOSRunControlAction.selectionChanged(to: .oneMinute), .stop)
     }
 
+    func testIOSLiveActivityDecisionDoesNothingWithoutActiveSession() {
+        let hostID = UUID()
+
+        XCTAssertEqual(
+            PingScopeIOSLiveActivityDecision.decide(
+                isSessionActive: false,
+                previousScope: .focused,
+                newScope: .allHosts,
+                previousFocusedHostID: hostID,
+                newFocusedHostID: hostID
+            ),
+            .none
+        )
+    }
+
+    func testIOSLiveActivityDecisionUpdatesForOrdinaryContentRefresh() {
+        let hostID = UUID()
+
+        XCTAssertEqual(
+            PingScopeIOSLiveActivityDecision.decide(
+                isSessionActive: true,
+                previousScope: .focused,
+                newScope: .focused,
+                previousFocusedHostID: hostID,
+                newFocusedHostID: hostID
+            ),
+            .update
+        )
+        XCTAssertEqual(
+            PingScopeIOSLiveActivityDecision.decide(
+                isSessionActive: true,
+                previousScope: .allHosts,
+                newScope: .allHosts,
+                previousFocusedHostID: hostID,
+                newFocusedHostID: UUID()
+            ),
+            .update
+        )
+    }
+
+    func testIOSLiveActivityDecisionRestartsForFocusedHostChange() {
+        XCTAssertEqual(
+            PingScopeIOSLiveActivityDecision.decide(
+                isSessionActive: true,
+                previousScope: .focused,
+                newScope: .focused,
+                previousFocusedHostID: UUID(),
+                newFocusedHostID: UUID()
+            ),
+            .restart
+        )
+    }
+
+    func testIOSLiveActivityDecisionRestartsAcrossHostScopes() {
+        let hostID = UUID()
+
+        XCTAssertEqual(
+            PingScopeIOSLiveActivityDecision.decide(
+                isSessionActive: true,
+                previousScope: .focused,
+                newScope: .allHosts,
+                previousFocusedHostID: hostID,
+                newFocusedHostID: hostID
+            ),
+            .restart
+        )
+        XCTAssertEqual(
+            PingScopeIOSLiveActivityDecision.decide(
+                isSessionActive: true,
+                previousScope: .allHosts,
+                newScope: .focused,
+                previousFocusedHostID: hostID,
+                newFocusedHostID: hostID
+            ),
+            .restart
+        )
+    }
+
     func testIOSDisplayModeDefaultsToSignalAndPersistsRing() {
         let suiteName = "PingScopeIOSDisplayModeTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!

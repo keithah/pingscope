@@ -12,6 +12,39 @@ public enum PingScopeIOSRunControlAction: Equatable, Sendable {
     }
 }
 
+public enum PingScopeIOSLiveActivityDecision: Equatable, Sendable {
+    case none
+    case update
+    case restart
+
+    public static func decide(
+        isSessionActive: Bool,
+        previousScope: PingScopeIOSHostScope,
+        newScope: PingScopeIOSHostScope,
+        previousFocusedHostID: UUID,
+        newFocusedHostID: UUID
+    ) -> Self {
+        guard isSessionActive else { return .none }
+        guard previousScope == newScope else { return .restart }
+        guard newScope == .allHosts || previousFocusedHostID == newFocusedHostID else {
+            return .restart
+        }
+        return .update
+    }
+}
+
+public struct PingScopeIOSHostGraphSeries: Identifiable, Equatable, Sendable {
+    public let hostID: UUID
+    public let samples: [PingResult]
+
+    public var id: UUID { hostID }
+
+    public init(hostID: UUID, samples: [PingResult]) {
+        self.hostID = hostID
+        self.samples = samples
+    }
+}
+
 public enum PingScopeIOSDisplayMode: String, CaseIterable, Identifiable, Sendable {
     case signal
     case ring
@@ -77,8 +110,12 @@ public struct PingScopeIOSRootView: View {
     public var backgroundKeepAliveEnabled: Bool
     public var backgroundKeepAliveStatus: String
     public var displayMode: PingScopeIOSDisplayMode
+    public var hostScope: PingScopeIOSHostScope
+    public var allHostRows: [PingScopeIOSHostRowSnapshot]
+    public var allHostGraphSeries: [PingScopeIOSHostGraphSeries]
     public var selectedHostID: UUID
     public var onSelectDisplayMode: (PingScopeIOSDisplayMode) -> Void
+    public var onSelectAllHosts: () -> Void
     public var onSelectHost: (UUID) -> Void
     public var onSaveHost: (HostConfig) -> Void
     public var onDeleteHost: (UUID) -> Void
@@ -103,8 +140,12 @@ public struct PingScopeIOSRootView: View {
         backgroundKeepAliveEnabled: Bool = false,
         backgroundKeepAliveStatus: String = "Disabled",
         displayMode: PingScopeIOSDisplayMode = .signal,
+        hostScope: PingScopeIOSHostScope = .focused,
+        allHostRows: [PingScopeIOSHostRowSnapshot] = [],
+        allHostGraphSeries: [PingScopeIOSHostGraphSeries] = [],
         selectedHostID: UUID? = nil,
         onSelectDisplayMode: @escaping (PingScopeIOSDisplayMode) -> Void = { _ in },
+        onSelectAllHosts: @escaping () -> Void = {},
         onSelectHost: @escaping (UUID) -> Void = { _ in },
         onSaveHost: @escaping (HostConfig) -> Void = { _ in },
         onDeleteHost: @escaping (UUID) -> Void = { _ in },
@@ -128,8 +169,12 @@ public struct PingScopeIOSRootView: View {
         self.backgroundKeepAliveEnabled = backgroundKeepAliveEnabled
         self.backgroundKeepAliveStatus = backgroundKeepAliveStatus
         self.displayMode = displayMode
+        self.hostScope = hostScope
+        self.allHostRows = allHostRows
+        self.allHostGraphSeries = allHostGraphSeries
         self.selectedHostID = selectedHostID ?? host.id
         self.onSelectDisplayMode = onSelectDisplayMode
+        self.onSelectAllHosts = onSelectAllHosts
         self.onSelectHost = onSelectHost
         self.onSaveHost = onSaveHost
         self.onDeleteHost = onDeleteHost
