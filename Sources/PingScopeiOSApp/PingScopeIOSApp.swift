@@ -31,6 +31,7 @@ struct PingScopeIOSApp: App {
                 hostScope: model.hostScope,
                 allHostRows: model.allHostRows,
                 allHostGraphSeries: model.allHostGraphSeries,
+                allHostsPresentationEndDate: model.allHostsPresentationEndDate,
                 selectedHostID: model.snapshot.host.id,
                 onSelectDisplayMode: { mode in
                     model.displayMode = mode
@@ -86,6 +87,7 @@ private final class PingScopeIOSAppModel: ObservableObject {
     @Published var hostScope: PingScopeIOSHostScope
     @Published var allHostRows: [PingScopeIOSHostRowSnapshot] = []
     @Published var allHostGraphSeries: [PingScopeIOSHostGraphSeries] = []
+    @Published var allHostsPresentationEndDate = Date()
     @Published private var allHostsSession: MonitorSessionState?
     @Published var historySamples: [PingResult] = []
     @Published var graphPresentation = PingScopeIOSGraphPresentation(samples: [], range: .fiveMinutes)
@@ -764,6 +766,7 @@ private final class PingScopeIOSAppModel: ObservableObject {
 
     private func refreshAllHostsSnapshot() async {
         let snapshots = await multiHostCoordinator.orderedSnapshots()
+        let presentationEndDate = Date()
         allHostRows = snapshots.map { snapshot in
             PingScopeIOSHostRowSnapshot(
                 host: snapshot.host,
@@ -775,6 +778,7 @@ private final class PingScopeIOSAppModel: ObservableObject {
         allHostGraphSeries = snapshots.map { snapshot in
             PingScopeIOSHostGraphSeries(hostID: snapshot.host.id, samples: snapshot.series.samples)
         }
+        allHostsPresentationEndDate = presentationEndDate
 
         guard let session = await multiHostCoordinator.session() else {
             allHostsSession = nil

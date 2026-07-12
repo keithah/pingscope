@@ -45,6 +45,39 @@ public struct PingScopeIOSHostGraphSeries: Identifiable, Equatable, Sendable {
     }
 }
 
+public struct PingScopeIOSAllHostsGraphRenderSeries: Equatable, Sendable {
+    public let hostID: UUID
+    public let startDate: Date
+    public let endDate: Date
+    public let samples: [PingResult]
+
+    public init(hostID: UUID, startDate: Date, endDate: Date, samples: [PingResult]) {
+        self.hostID = hostID
+        self.startDate = startDate
+        self.endDate = endDate
+        self.samples = samples
+    }
+}
+
+public struct PingScopeIOSAllHostsRowPresentation: Equatable, Sendable {
+    public let displayStatus: HealthStatus
+    public let latencyText: String
+    public let accessibilityLabel: String
+    public let focusAccessibilityHint: String
+
+    public init(
+        displayStatus: HealthStatus,
+        latencyText: String,
+        accessibilityLabel: String,
+        focusAccessibilityHint: String
+    ) {
+        self.displayStatus = displayStatus
+        self.latencyText = latencyText
+        self.accessibilityLabel = accessibilityLabel
+        self.focusAccessibilityHint = focusAccessibilityHint
+    }
+}
+
 public enum PingScopeIOSDisplayMode: String, CaseIterable, Identifiable, Sendable {
     case signal
     case ring
@@ -103,6 +136,47 @@ public enum PingScopeIOSAllHostsMonitorPresentation {
         allHostGraphSeries.first { $0.hostID == row.hostID }?.samples ?? row.samples
     }
 
+    public static func graphRenderSeries(
+        from series: [PingScopeIOSHostGraphSeries],
+        range: TimeRange,
+        endDate: Date
+    ) -> [PingScopeIOSAllHostsGraphRenderSeries] {
+        let startDate = endDate.addingTimeInterval(-range.duration)
+        return series.map { source in
+            PingScopeIOSAllHostsGraphRenderSeries(
+                hostID: source.hostID,
+                startDate: startDate,
+                endDate: endDate,
+                samples: samples(in: range, endingAt: endDate, from: source.samples)
+            )
+        }
+    }
+
+    public static func statistics(
+        for series: [PingScopeIOSHostGraphSeries],
+        range: TimeRange,
+        endDate: Date
+    ) -> SampleStats {
+        SampleStats(samples: graphRenderSeries(from: series, range: range, endDate: endDate).flatMap(\.samples))
+    }
+
+    public static func rowPresentation(for row: PingScopeIOSHostRowSnapshot) -> PingScopeIOSAllHostsRowPresentation {
+        let displayName = row.displayName.isEmpty ? "Unnamed Host" : row.displayName
+        let isUnavailable = row.isStale || row.latestLatencyMilliseconds == nil
+        let displayStatus: HealthStatus = row.isStale ? .noData : row.status
+        let latencyText = isUnavailable ? "--ms" : row.latencyText
+        let statusText = row.isStale ? "Stale" : accessibilityStatusText(for: row.status)
+        let latencyDescription = isUnavailable
+            ? "unavailable"
+            : "\(Int((row.latestLatencyMilliseconds ?? 0).rounded())) milliseconds"
+        return PingScopeIOSAllHostsRowPresentation(
+            displayStatus: displayStatus,
+            latencyText: latencyText,
+            accessibilityLabel: "\(displayName), \(row.endpointCaption), \(statusText), \(latencyDescription)",
+            focusAccessibilityHint: "Double-tap to focus \(displayName)."
+        )
+    }
+
     public static func stableColorIndex(for hostID: UUID, paletteCount: Int) -> Int {
         guard paletteCount > 0 else { return 0 }
         let bytes = hostID.uuid
@@ -111,10 +185,26 @@ public enum PingScopeIOSAllHostsMonitorPresentation {
             bytes.4, bytes.5, bytes.6, bytes.7,
             bytes.8, bytes.9, bytes.10, bytes.11,
             bytes.12, bytes.13, bytes.14, bytes.15
-        ].reduce(0) { partialResult, byte in
-            (partialResult &* 31) &+ Int(byte)
+        ].reduce(UInt64.zero) { partialResult, byte in
+            (partialResult &* 31) &+ UInt64(byte)
         }
-        return value % paletteCount
+        return Int(value % UInt64(paletteCount))
+    }
+
+    private static func samples(in range: TimeRange, endingAt endDate: Date, from samples: [PingResult]) -> [PingResult] {
+        let startDate = endDate.addingTimeInterval(-range.duration)
+        return samples.filter { sample in
+            sample.timestamp >= startDate && sample.timestamp <= endDate
+        }
+    }
+
+    private static func accessibilityStatusText(for status: HealthStatus) -> String {
+        switch status {
+        case .noData: "No data"
+        case .healthy: "Healthy"
+        case .degraded: "Degraded"
+        case .down: "Down"
+        }
     }
 }
 
@@ -157,6 +247,7 @@ public struct PingScopeIOSRootView: View {
     public var hostScope: PingScopeIOSHostScope
     public var allHostRows: [PingScopeIOSHostRowSnapshot]
     public var allHostGraphSeries: [PingScopeIOSHostGraphSeries]
+    public var allHostsPresentationEndDate: Date
     public var selectedHostID: UUID
     public var onSelectDisplayMode: (PingScopeIOSDisplayMode) -> Void
     public var onSelectAllHosts: () -> Void
@@ -187,6 +278,7 @@ public struct PingScopeIOSRootView: View {
         hostScope: PingScopeIOSHostScope = .focused,
         allHostRows: [PingScopeIOSHostRowSnapshot] = [],
         allHostGraphSeries: [PingScopeIOSHostGraphSeries] = [],
+        allHostsPresentationEndDate: Date? = nil,
         selectedHostID: UUID? = nil,
         onSelectDisplayMode: @escaping (PingScopeIOSDisplayMode) -> Void = { _ in },
         onSelectAllHosts: @escaping () -> Void = {},
@@ -206,7 +298,8 @@ public struct PingScopeIOSRootView: View {
         self.session = session
         self.health = health
         self.samples = samples
-        self.graphPresentation = graphPresentation ?? PingScopeIOSGraphPresentation(samples: samples, range: selectedGraphRange)
+        let resolvedGraphPresentation = graphPresentation ?? PingScopeIOSGraphPresentation(samples: samples, range: selectedGraphRange)
+        self.graphPresentation = resolvedGraphPresentation
         self.historySamples = historySamples
         self.selectedGraphRange = selectedGraphRange
         self.gatewayDetectionText = gatewayDetectionText
@@ -216,6 +309,7 @@ public struct PingScopeIOSRootView: View {
         self.hostScope = hostScope
         self.allHostRows = allHostRows
         self.allHostGraphSeries = allHostGraphSeries
+        self.allHostsPresentationEndDate = allHostsPresentationEndDate ?? resolvedGraphPresentation.renderData.endDate
         self.selectedHostID = selectedHostID ?? host.id
         self.onSelectDisplayMode = onSelectDisplayMode
         self.onSelectAllHosts = onSelectAllHosts
@@ -408,7 +502,7 @@ public struct PingScopeIOSRootView: View {
                 PingScopeIOSAllHostsSignalHeroGraphCard(
                     series: allHostsMonitorGraphSeries,
                     range: selectedGraphRange,
-                    endDate: graphPresentation.renderData.endDate,
+                    endDate: allHostsPresentationEndDate,
                     scrubbedLatencyMilliseconds: $scrubbedLatencyMilliseconds,
                     onStepRange: stepRange
                 )
@@ -543,13 +637,15 @@ public struct PingScopeIOSRootView: View {
                     .frame(height: 54)
             } else {
                 ForEach(rows, id: \.hostID) { row in
+                    let presentation = PingScopeIOSAllHostsMonitorPresentation.rowPresentation(for: row)
                     Button {
                         onSelectHost(row.hostID)
                     } label: {
-                        allHostsRow(row)
+                        allHostsRow(row, presentation: presentation)
                     }
                     .buttonStyle(.plain)
-                    .accessibilityLabel("Focus \(row.displayName)")
+                    .accessibilityLabel(presentation.accessibilityLabel)
+                    .accessibilityHint(presentation.focusAccessibilityHint)
                     if row.hostID != rows.last?.hostID {
                         Divider()
                             .padding(.leading, 20)
@@ -833,15 +929,18 @@ public struct PingScopeIOSRootView: View {
         .accessibilityElement(children: .combine)
     }
 
-    private func allHostsRow(_ row: PingScopeIOSHostRowSnapshot) -> some View {
-        let color = Color(iosStatusColor: row.status.iosStatusColor)
+    private func allHostsRow(
+        _ row: PingScopeIOSHostRowSnapshot,
+        presentation: PingScopeIOSAllHostsRowPresentation
+    ) -> some View {
+        let color = Color(iosStatusColor: presentation.displayStatus.iosStatusColor)
         let graphData = PingScopeIOSLatencyGraphData(
             samples: PingScopeIOSAllHostsMonitorPresentation.graphSamples(
                 for: row,
                 allHostGraphSeries: allHostsMonitorGraphSeries
             ),
             range: selectedGraphRange,
-            endDate: graphPresentation.renderData.endDate
+            endDate: allHostsPresentationEndDate
         )
         return HStack(spacing: 10) {
             Circle()
@@ -861,7 +960,7 @@ public struct PingScopeIOSRootView: View {
             PingScopeIOSSparkline(renderData: graphData, color: color)
                 .frame(width: 64, height: 28)
                 .opacity(graphData.points.count > 1 ? 1 : 0.18)
-            Text(row.latencyText)
+            Text(presentation.latencyText)
                 .font(.system(size: 15, weight: .semibold, design: .monospaced))
                 .foregroundStyle(color)
                 .lineLimit(1)
@@ -928,7 +1027,11 @@ public struct PingScopeIOSRootView: View {
 
     private var monitorStats: SampleStats {
         guard hostScope == .allHosts else { return graphPresentation.stats }
-        return SampleStats(samples: allHostsMonitorGraphSeries.flatMap(\.samples))
+        return PingScopeIOSAllHostsMonitorPresentation.statistics(
+            for: allHostsMonitorGraphSeries,
+            range: selectedGraphRange,
+            endDate: allHostsPresentationEndDate
+        )
     }
 
     private var notableHistorySamples: [PingResult] {
@@ -1266,7 +1369,11 @@ private struct PingScopeIOSAllHostsSignalHeroGraphCard: View {
     }
 
     private var renderSeries: [RenderSeries] {
-        series.map { source in
+        PingScopeIOSAllHostsMonitorPresentation.graphRenderSeries(
+            from: series,
+            range: range,
+            endDate: endDate
+        ).map { source in
             let colorIndex = PingScopeIOSAllHostsMonitorPresentation.stableColorIndex(
                 for: source.hostID,
                 paletteCount: Self.graphColors.count
@@ -1276,7 +1383,7 @@ private struct PingScopeIOSAllHostsSignalHeroGraphCard: View {
                 renderData: PingScopeIOSLatencyGraphData(
                     samples: source.samples,
                     range: range,
-                    endDate: endDate
+                    endDate: source.endDate
                 ),
                 color: Self.graphColors[colorIndex]
             )

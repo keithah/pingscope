@@ -137,10 +137,26 @@ final class PingScopeIOSMultiHostPresentationTests: XCTestCase {
             PingScopeIOSAllHostsMonitorPresentation.displayMode(.ring, hostScope: .allHosts),
             .signal
         )
-        XCTAssertEqual(
-            PingScopeIOSAllHostsMonitorPresentation.stableColorIndex(for: hosts[0].id, paletteCount: 6),
-            PingScopeIOSAllHostsMonitorPresentation.stableColorIndex(for: hosts[0].id, paletteCount: 6)
-        )
+    }
+
+    func testStablePaletteIndexStaysWithinBoundsForAdversarialAndRandomUUIDs() {
+        let adversarialIDs = [
+            UUID(uuid: (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)),
+            UUID(uuid: (127, 127, 127, 127, 127, 127, 127, 127, 127, 127, 127, 127, 127, 127, 127, 127)),
+            UUID(uuid: (255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255))
+        ]
+        let hostIDs = adversarialIDs + (0..<512).map { _ in UUID() }
+
+        for paletteCount in [1, 2, 5, 6, 97] {
+            for hostID in hostIDs {
+                let index = PingScopeIOSAllHostsMonitorPresentation.stableColorIndex(
+                    for: hostID,
+                    paletteCount: paletteCount
+                )
+                XCTAssertGreaterThanOrEqual(index, 0)
+                XCTAssertLessThan(index, paletteCount)
+            }
+        }
     }
 
     func testFocusedMonitorPresentationHidesAllHostContentAndKeepsSelectedDisplayMode() {
@@ -178,6 +194,78 @@ final class PingScopeIOSMultiHostPresentationTests: XCTestCase {
         XCTAssertEqual(
             PingScopeIOSAllHostsMonitorPresentation.graphSamples(for: row, allHostGraphSeries: []),
             row.samples
+        )
+    }
+
+    func testAllHostsGraphRenderSeriesUseRefreshedEndDate() {
+        let hostID = UUID()
+        let refreshedEndDate = Date(timeIntervalSince1970: 1_000)
+        let series = [PingScopeIOSHostGraphSeries(
+            hostID: hostID,
+            samples: [
+                PingResult.success(hostID: hostID, latency: .milliseconds(20), timestamp: Date(timeIntervalSince1970: 939)),
+                PingResult.success(hostID: hostID, latency: .milliseconds(30), timestamp: Date(timeIntervalSince1970: 940)),
+                PingResult.success(hostID: hostID, latency: .milliseconds(40), timestamp: Date(timeIntervalSince1970: 1_000)),
+                PingResult.success(hostID: hostID, latency: .milliseconds(50), timestamp: Date(timeIntervalSince1970: 1_001))
+            ]
+        )]
+
+        let renderSeries = PingScopeIOSAllHostsMonitorPresentation.graphRenderSeries(
+            from: series,
+            range: .oneMinute,
+            endDate: refreshedEndDate
+        )
+
+        XCTAssertEqual(renderSeries.count, 1)
+        XCTAssertEqual(renderSeries[0].startDate, Date(timeIntervalSince1970: 940))
+        XCTAssertEqual(renderSeries[0].endDate, refreshedEndDate)
+        XCTAssertEqual(renderSeries[0].samples.map { $0.latency?.milliseconds }, [30, 40])
+    }
+
+    func testAllHostsStatisticsUseSharedSelectedRangeWindow() {
+        let hostID = UUID()
+        let endDate = Date(timeIntervalSince1970: 1_000)
+        let series = [PingScopeIOSHostGraphSeries(
+            hostID: hostID,
+            samples: [
+                PingResult.success(hostID: hostID, latency: .milliseconds(100), timestamp: Date(timeIntervalSince1970: 900)),
+                PingResult.success(hostID: hostID, latency: .milliseconds(10), timestamp: Date(timeIntervalSince1970: 970)),
+                PingResult.failure(hostID: hostID, reason: .timeout, timestamp: Date(timeIntervalSince1970: 980)),
+                PingResult.success(hostID: hostID, latency: .milliseconds(1), timestamp: Date(timeIntervalSince1970: 1_001))
+            ]
+        )]
+
+        let stats = PingScopeIOSAllHostsMonitorPresentation.statistics(
+            for: series,
+            range: .oneMinute,
+            endDate: endDate
+        )
+
+        XCTAssertEqual(stats.transmitted, 2)
+        XCTAssertEqual(stats.received, 1)
+        XCTAssertEqual(stats.lossPercent, 50, accuracy: 0.001)
+        XCTAssertEqual(stats.minimumMilliseconds, 10)
+        XCTAssertEqual(stats.averageMilliseconds, 10)
+        XCTAssertEqual(stats.maximumMilliseconds, 10)
+    }
+
+    func testStaleRowPresentationShowsUnavailableWithoutDroppingGraphSamples() {
+        let host = HostConfig(displayName: "Router", address: "192.168.1.1", method: .tcp)
+        let samples = makeSuccessfulResults(count: 3, hostID: host.id)
+        var health = HostHealth(hostID: host.id, thresholds: host.thresholds)
+        health.ingest(samples[2])
+        let row = PingScopeIOSHostRowSnapshot(host: host, health: health, samples: samples, isStale: true)
+        let graphSeries = [PingScopeIOSHostGraphSeries(hostID: host.id, samples: samples)]
+
+        let presentation = PingScopeIOSAllHostsMonitorPresentation.rowPresentation(for: row)
+
+        XCTAssertEqual(presentation.displayStatus, .noData)
+        XCTAssertEqual(presentation.latencyText, "--ms")
+        XCTAssertEqual(presentation.accessibilityLabel, "Router, TCP 192.168.1.1, Stale, unavailable")
+        XCTAssertEqual(presentation.focusAccessibilityHint, "Double-tap to focus Router.")
+        XCTAssertEqual(
+            PingScopeIOSAllHostsMonitorPresentation.graphSamples(for: row, allHostGraphSeries: graphSeries),
+            samples
         )
     }
 
