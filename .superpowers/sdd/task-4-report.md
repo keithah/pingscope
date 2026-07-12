@@ -34,3 +34,22 @@
 No defects found. The old scalar-only decode fixture verifies the compatibility
 path, while focused and All Hosts round trips, 3-row/12-sample caps, and the
 under-4096-byte maximum payload fixture cover the new contract.
+
+## Payload-Bound Follow-Up
+
+**Payload fix commit:** `aed51d9` (`Bound Live Activity row payloads`)
+
+- Made `ContentState.hostRows` and `PingScopeLiveActivityHostRow.samples`
+  immutable after initialization.
+- Added deterministic, Unicode-safe host-string limits: display names allow at
+  most 24 characters / 72 UTF-8 bytes; endpoint captions allow at most 48
+  characters / 144 UTF-8 bytes.
+- Applied the same bounds through normal construction and custom decoding.
+- Added oversized row, sample, and multi-byte grapheme tests that assert the
+  exact stored truncation and an encoded `ContentState` below 4,096 bytes.
+
+**Results:**
+
+- `swift test --filter PingScopeLiveActivityTests`: 7 passed.
+- `swift test`: passed.
+- `xcodebuild -project PingScope.xcodeproj -scheme PingScope-iOS -destination 'generic/platform=iOS Simulator' build`: `BUILD SUCCEEDED`.
