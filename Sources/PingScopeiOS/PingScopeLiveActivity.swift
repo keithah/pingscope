@@ -12,13 +12,18 @@ public enum PingScopeLiveActivityMode: String, Codable, Hashable, Sendable {
 
 public struct PingScopeLiveActivityHostRow: Codable, Hashable, Sendable {
     public static let sampleLimit = PingScopeIOSLatencySampleReducer.defaultLimit
+    // These retain room for three rows, twelve Int samples each, and scalar state.
+    public static let displayNameCharacterLimit = 24
+    public static let displayNameUTF8ByteLimit = 72
+    public static let endpointCaptionCharacterLimit = 48
+    public static let endpointCaptionUTF8ByteLimit = 144
 
     public var hostID: UUID
-    public var displayName: String
-    public var endpointCaption: String
+    public let displayName: String
+    public let endpointCaption: String
     public var status: HealthStatus
     public var latestLatencyMilliseconds: Int?
-    public var samples: [Int]
+    public let samples: [Int]
     public var isStale: Bool
 
     public init(
@@ -31,8 +36,16 @@ public struct PingScopeLiveActivityHostRow: Codable, Hashable, Sendable {
         isStale: Bool
     ) {
         self.hostID = hostID
-        self.displayName = displayName
-        self.endpointCaption = endpointCaption
+        self.displayName = Self.boundedString(
+            displayName,
+            characterLimit: Self.displayNameCharacterLimit,
+            utf8ByteLimit: Self.displayNameUTF8ByteLimit
+        )
+        self.endpointCaption = Self.boundedString(
+            endpointCaption,
+            characterLimit: Self.endpointCaptionCharacterLimit,
+            utf8ByteLimit: Self.endpointCaptionUTF8ByteLimit
+        )
         self.status = status
         self.latestLatencyMilliseconds = latestLatencyMilliseconds
         self.samples = Array(samples.prefix(Self.sampleLimit))
@@ -74,6 +87,25 @@ public struct PingScopeLiveActivityHostRow: Codable, Hashable, Sendable {
             isStale: try container.decode(Bool.self, forKey: .isStale)
         )
     }
+
+    private static func boundedString(
+        _ value: String,
+        characterLimit: Int,
+        utf8ByteLimit: Int
+    ) -> String {
+        var bounded: [Character] = []
+        bounded.reserveCapacity(characterLimit)
+        var utf8ByteCount = 0
+
+        for character in value {
+            guard bounded.count < characterLimit else { break }
+            let characterUTF8ByteCount = String(character).utf8.count
+            guard utf8ByteCount + characterUTF8ByteCount <= utf8ByteLimit else { break }
+            bounded.append(character)
+            utf8ByteCount += characterUTF8ByteCount
+        }
+        return String(bounded)
+    }
 }
 
 public struct PingScopeLiveActivityAttributes: Sendable {
@@ -87,7 +119,7 @@ public struct PingScopeLiveActivityAttributes: Sendable {
         public var isStale: Bool
         public var failureMessage: String?
         public var mode: PingScopeLiveActivityMode
-        public var hostRows: [PingScopeLiveActivityHostRow]
+        public let hostRows: [PingScopeLiveActivityHostRow]
 
         public init(
             latencyMilliseconds: Int?,

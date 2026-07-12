@@ -76,6 +76,40 @@ final class PingScopeLiveActivityTests: XCTestCase {
         XCTAssertLessThan(encoded.count, 4_096)
     }
 
+    func testPayloadInitializationClampsUnicodeStringsAndCollections() throws {
+        let row = makeOversizedPayloadRow()
+        let state = makeContentState(mode: .allHosts, hostRows: Array(repeating: row, count: 4))
+
+        XCTAssertEqual(state.hostRows.count, PingScopeLiveActivityAttributes.ContentState.hostRowLimit)
+        XCTAssertEqual(state.hostRows.map(\.samples.count), Array(repeating: PingScopeLiveActivityHostRow.sampleLimit, count: 3))
+        assertPayloadStringLimits(state.hostRows)
+        XCTAssertLessThan(try JSONEncoder().encode(state).count, 4_096)
+    }
+
+    func testPayloadDecodingClampsUnicodeStringsAndCollections() throws {
+        let row = makeOversizedPayloadRow()
+        let oversizedState = UnboundedContentState(
+            latencyMilliseconds: 42,
+            status: .healthy,
+            lastUpdatedAt: Date(timeIntervalSinceReferenceDate: 123),
+            remainingSeconds: 30,
+            isStale: false,
+            failureMessage: nil,
+            mode: .allHosts,
+            hostRows: Array(repeating: UnboundedHostRow(row), count: 4)
+        )
+
+        let decoded = try JSONDecoder().decode(
+            PingScopeLiveActivityAttributes.ContentState.self,
+            from: JSONEncoder().encode(oversizedState)
+        )
+
+        XCTAssertEqual(decoded.hostRows.count, PingScopeLiveActivityAttributes.ContentState.hostRowLimit)
+        XCTAssertEqual(decoded.hostRows.map(\.samples.count), Array(repeating: PingScopeLiveActivityHostRow.sampleLimit, count: 3))
+        assertPayloadStringLimits(decoded.hostRows)
+        XCTAssertLessThan(try JSONEncoder().encode(decoded).count, 4_096)
+    }
+
     private func makeContentState(
         mode: PingScopeLiveActivityMode = .focused,
         hostRows: [PingScopeLiveActivityHostRow] = []
@@ -116,6 +150,29 @@ final class PingScopeLiveActivityTests: XCTestCase {
         return PingScopeLiveActivityHostRow(snapshot: snapshot)
     }
 
+    private func makeOversizedPayloadRow() -> PingScopeLiveActivityHostRow {
+        PingScopeLiveActivityHostRow(
+            hostID: UUID(),
+            displayName: String(repeating: "👩🏽‍💻", count: 200),
+            endpointCaption: String(repeating: "连接-", count: 200),
+            status: .degraded,
+            latestLatencyMilliseconds: Int.max,
+            samples: Array(repeating: Int.max, count: 20),
+            isStale: true
+        )
+    }
+
+    private func assertPayloadStringLimits(_ rows: [PingScopeLiveActivityHostRow]) {
+        for row in rows {
+            XCTAssertEqual(row.displayName, String(repeating: "👩🏽‍💻", count: 4))
+            XCTAssertEqual(row.endpointCaption, String(repeating: "连接-", count: 16))
+            XCTAssertLessThanOrEqual(row.displayName.count, PingScopeLiveActivityHostRow.displayNameCharacterLimit)
+            XCTAssertLessThanOrEqual(row.displayName.utf8.count, PingScopeLiveActivityHostRow.displayNameUTF8ByteLimit)
+            XCTAssertLessThanOrEqual(row.endpointCaption.count, PingScopeLiveActivityHostRow.endpointCaptionCharacterLimit)
+            XCTAssertLessThanOrEqual(row.endpointCaption.utf8.count, PingScopeLiveActivityHostRow.endpointCaptionUTF8ByteLimit)
+        }
+    }
+
     private func roundTrip(
         _ state: PingScopeLiveActivityAttributes.ContentState
     ) throws -> PingScopeLiveActivityAttributes.ContentState {
@@ -123,5 +180,36 @@ final class PingScopeLiveActivityTests: XCTestCase {
             PingScopeLiveActivityAttributes.ContentState.self,
             from: JSONEncoder().encode(state)
         )
+    }
+}
+
+private struct UnboundedContentState: Codable {
+    let latencyMilliseconds: Int?
+    let status: HealthStatus
+    let lastUpdatedAt: Date?
+    let remainingSeconds: Int
+    let isStale: Bool
+    let failureMessage: String?
+    let mode: PingScopeLiveActivityMode
+    let hostRows: [UnboundedHostRow]
+}
+
+private struct UnboundedHostRow: Codable {
+    let hostID: UUID
+    let displayName: String
+    let endpointCaption: String
+    let status: HealthStatus
+    let latestLatencyMilliseconds: Int?
+    let samples: [Int]
+    let isStale: Bool
+
+    init(_ row: PingScopeLiveActivityHostRow) {
+        hostID = row.hostID
+        displayName = String(repeating: "👩🏽‍💻", count: 200)
+        endpointCaption = String(repeating: "连接-", count: 200)
+        status = row.status
+        latestLatencyMilliseconds = row.latestLatencyMilliseconds
+        samples = Array(repeating: Int.max, count: 20)
+        isStale = row.isStale
     }
 }
