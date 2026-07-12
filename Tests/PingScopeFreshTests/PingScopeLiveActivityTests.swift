@@ -1,3 +1,4 @@
+import CoreGraphics
 import XCTest
 @testable import PingScopeCore
 @testable import PingScopeiOS
@@ -18,6 +19,174 @@ final class PingScopeLiveActivityTests: XCTestCase {
         let state = makeContentState(mode: .allHosts, hostRows: rows)
 
         XCTAssertEqual(try roundTrip(state), state)
+    }
+
+    func testFocusedPresentationUsesScalarIdentityAndLatencyWithBoundedSparkline() {
+        let host = HostConfig(
+            displayName: "Focused Host",
+            address: "focused.example",
+            method: .https
+        )
+        let state = makeContentState(
+            mode: .focused,
+            hostRows: [
+                PingScopeLiveActivityHostRow(
+                    hostID: host.id,
+                    displayName: "Outdated row identity",
+                    endpointCaption: "TCP ignored.example",
+                    status: .down,
+                    latestLatencyMilliseconds: nil,
+                    samples: [18, 42],
+                    isStale: true
+                )
+            ]
+        )
+
+        let rows = PingScopeLiveActivityPresentation.rows(
+            attributes: PingScopeLiveActivityAttributes(host: host, duration: .continuous),
+            contentState: state
+        )
+
+        XCTAssertEqual(rows.count, 1)
+        XCTAssertEqual(rows[0].displayName, "Focused Host")
+        XCTAssertEqual(rows[0].endpointCaption, "HTTPS focused.example")
+        XCTAssertEqual(rows[0].status, .healthy)
+        XCTAssertEqual(rows[0].latencyText, "42ms")
+        XCTAssertEqual(rows[0].samples, [18, 42])
+    }
+
+    func testAllHostsPresentationPreservesOrderAndHidesStaleOrUnavailableLatency() {
+        let rows = [
+            PingScopeLiveActivityHostRow(
+                hostID: UUID(),
+                displayName: "First",
+                endpointCaption: "HTTPS first.example",
+                status: .healthy,
+                latestLatencyMilliseconds: 18,
+                samples: [14, 18],
+                isStale: false
+            ),
+            PingScopeLiveActivityHostRow(
+                hostID: UUID(),
+                displayName: "Second",
+                endpointCaption: "TCP second.example",
+                status: .degraded,
+                latestLatencyMilliseconds: 89,
+                samples: [42, 89],
+                isStale: true
+            ),
+            PingScopeLiveActivityHostRow(
+                hostID: UUID(),
+                displayName: "Third",
+                endpointCaption: "UDP third.example",
+                status: .noData,
+                latestLatencyMilliseconds: 12,
+                samples: [12],
+                isStale: false
+            )
+        ]
+        let state = makeContentState(mode: .allHosts, hostRows: rows)
+        let attributes = PingScopeLiveActivityAttributes(
+            host: HostConfig(displayName: "Placeholder", address: "placeholder.example"),
+            duration: .oneMinute
+        )
+
+        let presentation = PingScopeLiveActivityPresentation.rows(
+            attributes: attributes,
+            contentState: state
+        )
+
+        XCTAssertEqual(presentation.map(\.displayName), ["First", "Second", "Third"])
+        XCTAssertEqual(presentation.map(\.latencyText), ["18ms", "--ms", "--ms"])
+        XCTAssertEqual(presentation.map(\.samples), [[14, 18], [42, 89], [12]])
+        XCTAssertEqual(presentation.map(\.status), [.healthy, .noData, .noData])
+        XCTAssertEqual(
+            presentation[1].accessibilityLabel,
+            "Second, TCP second.example, Stale, Latency unavailable"
+        )
+    }
+
+    func testSessionPresentationUsesOneLiveOrRemainingLabel() {
+        XCTAssertEqual(
+            PingScopeLiveActivityPresentation.sessionText(duration: .continuous, remainingSeconds: 0),
+            "Live"
+        )
+        XCTAssertEqual(
+            PingScopeLiveActivityPresentation.sessionText(
+                duration: .continuous,
+                remainingSeconds: 0,
+                isStale: true
+            ),
+            "Stale"
+        )
+        XCTAssertEqual(
+            PingScopeLiveActivityPresentation.sessionText(duration: .oneMinute, remainingSeconds: 31),
+            "31s"
+        )
+        XCTAssertEqual(
+            PingScopeLiveActivityPresentation.sessionText(duration: .thirtySeconds, remainingSeconds: 0),
+            "Ended"
+        )
+    }
+
+    func testAggregatePresentationUsesNeutralStatusWhenActivityIsStale() {
+        let state = PingScopeLiveActivityAttributes.ContentState(
+            latencyMilliseconds: 42,
+            status: .healthy,
+            lastUpdatedAt: nil,
+            remainingSeconds: 30,
+            isStale: true
+        )
+
+        XCTAssertEqual(PingScopeLiveActivityPresentation.aggregateStatus(contentState: state), .noData)
+        XCTAssertEqual(
+            PingScopeLiveActivityPresentation.aggregateStatusAccessibilityDescription(contentState: state),
+            "Stale"
+        )
+    }
+
+    func testRowPresentationAccessibilityDescribesUnavailableLatency() {
+        let payloadRow = PingScopeLiveActivityHostRow(
+            hostID: UUID(),
+            displayName: "Offline Host",
+            endpointCaption: "HTTPS offline.example",
+            status: .down,
+            latestLatencyMilliseconds: 93,
+            samples: [21, 93],
+            isStale: false
+        )
+        let row = PingScopeLiveActivityPresentation.rows(
+            attributes: PingScopeLiveActivityAttributes(
+                host: HostConfig(displayName: "Placeholder", address: "placeholder.example"),
+                duration: .continuous
+            ),
+            contentState: makeContentState(mode: .allHosts, hostRows: [payloadRow])
+        )[0]
+
+        XCTAssertEqual(
+            row.accessibilityLabel,
+            "Offline Host, HTTPS offline.example, Down, Latency unavailable"
+        )
+    }
+
+    func testSparklinePointsStayInsideTheirFixedBounds() {
+        XCTAssertEqual(
+            PingScopeLiveActivitySparklinePresentation.points(
+                samples: [10, 20, 30],
+                in: CGSize(width: 72, height: 28)
+            ),
+            [
+                CGPoint(x: 1, y: 27),
+                CGPoint(x: 36, y: 14),
+                CGPoint(x: 71, y: 1)
+            ]
+        )
+        XCTAssertTrue(
+            PingScopeLiveActivitySparklinePresentation.points(
+                samples: [42],
+                in: CGSize(width: 72, height: 28)
+            ).isEmpty
+        )
     }
 
     func testContentStateCapsActivityPayloadRowsAndSamples() {
