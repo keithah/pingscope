@@ -74,6 +74,50 @@ public extension UserDefaults {
     }
 }
 
+public enum PingScopeIOSAllHostsMonitorPresentation {
+    public static func displayMode(
+        _ displayMode: PingScopeIOSDisplayMode,
+        hostScope: PingScopeIOSHostScope
+    ) -> PingScopeIOSDisplayMode {
+        displayMode.resolvedForHostScope(showsAllHosts: hostScope == .allHosts)
+    }
+
+    public static func rows(
+        hostScope: PingScopeIOSHostScope,
+        allHostRows: [PingScopeIOSHostRowSnapshot]
+    ) -> [PingScopeIOSHostRowSnapshot] {
+        hostScope == .allHosts ? allHostRows : []
+    }
+
+    public static func graphSeries(
+        hostScope: PingScopeIOSHostScope,
+        allHostGraphSeries: [PingScopeIOSHostGraphSeries]
+    ) -> [PingScopeIOSHostGraphSeries] {
+        hostScope == .allHosts ? allHostGraphSeries : []
+    }
+
+    public static func graphSamples(
+        for row: PingScopeIOSHostRowSnapshot,
+        allHostGraphSeries: [PingScopeIOSHostGraphSeries]
+    ) -> [PingResult] {
+        allHostGraphSeries.first { $0.hostID == row.hostID }?.samples ?? row.samples
+    }
+
+    public static func stableColorIndex(for hostID: UUID, paletteCount: Int) -> Int {
+        guard paletteCount > 0 else { return 0 }
+        let bytes = hostID.uuid
+        let value = [
+            bytes.0, bytes.1, bytes.2, bytes.3,
+            bytes.4, bytes.5, bytes.6, bytes.7,
+            bytes.8, bytes.9, bytes.10, bytes.11,
+            bytes.12, bytes.13, bytes.14, bytes.15
+        ].reduce(0) { partialResult, byte in
+            (partialResult &* 31) &+ Int(byte)
+        }
+        return value % paletteCount
+    }
+}
+
 #if os(iOS)
 public struct PingScopeIOSRootView: View {
     private enum Tab: String, CaseIterable, Identifiable {
@@ -247,7 +291,7 @@ public struct PingScopeIOSRootView: View {
                 rangePicker
                 statsStrip
                 runControl
-                otherHostsCard
+                monitorHostRows
             }
             .padding(.horizontal, 20)
             .padding(.top, 18)
@@ -276,7 +320,16 @@ public struct PingScopeIOSRootView: View {
         }
     }
 
+    @ViewBuilder
     private var readingRow: some View {
+        if hostScope == .allHosts {
+            allHostsReadingRow
+        } else {
+            focusedHostReadingRow
+        }
+    }
+
+    private var focusedHostReadingRow: some View {
         HStack(alignment: .top, spacing: 12) {
             Button {
                 isHostSwitcherPresented = true
@@ -308,18 +361,67 @@ public struct PingScopeIOSRootView: View {
         }
     }
 
+    private var allHostsReadingRow: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Button {
+                isHostSwitcherPresented = true
+            } label: {
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 5) {
+                        Text("All Hosts")
+                            .font(.system(size: 19, weight: .semibold))
+                            .foregroundStyle(.blue)
+                            .lineLimit(1)
+                        Image(systemName: "chevron.up.chevron.down")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundStyle(.blue.opacity(0.72))
+                    }
+                    Text("\(allHostsMonitorRows.count) enabled")
+                        .font(.system(size: 12, weight: .medium, design: .monospaced))
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                }
+            }
+            .buttonStyle(.plain)
+
+            Spacer(minLength: 8)
+
+            if let scrubbedLatencyMilliseconds {
+                latencyReading(milliseconds: scrubbedLatencyMilliseconds, size: 30)
+            } else {
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text("\(allHostsMonitorRows.count)")
+                        .font(.system(size: 30, weight: .semibold, design: .monospaced))
+                    Text("HOSTS")
+                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
     @ViewBuilder
     private var heroDisplay: some View {
-        switch displayMode {
+        switch effectiveDisplayMode {
         case .signal:
-            SignalHeroGraphCard(
-                renderData: graphPresentation.renderData,
-                range: selectedGraphRange,
-                status: health.status,
-                scrubbedLatencyMilliseconds: $scrubbedLatencyMilliseconds,
-                onStepRange: stepRange,
-                onSwipeHost: swipeHost
-            )
+            if hostScope == .allHosts {
+                PingScopeIOSAllHostsSignalHeroGraphCard(
+                    series: allHostsMonitorGraphSeries,
+                    range: selectedGraphRange,
+                    endDate: graphPresentation.renderData.endDate,
+                    scrubbedLatencyMilliseconds: $scrubbedLatencyMilliseconds,
+                    onStepRange: stepRange
+                )
+            } else {
+                SignalHeroGraphCard(
+                    renderData: graphPresentation.renderData,
+                    range: selectedGraphRange,
+                    status: health.status,
+                    scrubbedLatencyMilliseconds: $scrubbedLatencyMilliseconds,
+                    onStepRange: stepRange,
+                    onSwipeHost: swipeHost
+                )
+            }
         case .ring:
             PingScopeIOSRingHero(
                 latencyMilliseconds: displayLatencyMilliseconds,
@@ -347,7 +449,7 @@ public struct PingScopeIOSRootView: View {
     }
 
     private var statsStrip: some View {
-        let stats = graphPresentation.stats
+        let stats = monitorStats
         return HStack(spacing: 0) {
             iosStat("Min", latencyValue(stats.minimumMilliseconds))
             iosStat("Avg", latencyValue(stats.averageMilliseconds))
@@ -411,6 +513,46 @@ public struct PingScopeIOSRootView: View {
                     .buttonStyle(.plain)
                     if host.id != others.last?.id {
                         Divider()
+                    }
+                }
+            }
+        }
+        .padding(16)
+        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 18))
+    }
+
+    @ViewBuilder
+    private var monitorHostRows: some View {
+        if hostScope == .allHosts {
+            allHostsCard
+        } else {
+            otherHostsCard
+        }
+    }
+
+    private var allHostsCard: some View {
+        let rows = allHostsMonitorRows
+        return VStack(alignment: .leading, spacing: 0) {
+            sectionHeader("Hosts")
+                .padding(.bottom, 8)
+            if rows.isEmpty {
+                Text("No enabled hosts to monitor.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .frame(height: 54)
+            } else {
+                ForEach(rows, id: \.hostID) { row in
+                    Button {
+                        onSelectHost(row.hostID)
+                    } label: {
+                        allHostsRow(row)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Focus \(row.displayName)")
+                    if row.hostID != rows.last?.hostID {
+                        Divider()
+                            .padding(.leading, 20)
                     }
                 }
             }
@@ -521,12 +663,26 @@ public struct PingScopeIOSRootView: View {
 
     private var hostSwitcher: some View {
         NavigationStack {
-            List(hosts) { listedHost in
+            List {
                 Button {
-                    onSelectHost(listedHost.id)
+                    onSelectAllHosts()
                     isHostSwitcherPresented = false
                 } label: {
-                    hostRow(listedHost, isActive: listedHost.id == host.id, showsSparkline: false)
+                    allHostsSwitcherRow
+                }
+                .buttonStyle(.plain)
+
+                ForEach(hosts) { listedHost in
+                    Button {
+                        onSelectHost(listedHost.id)
+                        isHostSwitcherPresented = false
+                    } label: {
+                        hostRow(
+                            listedHost,
+                            isActive: hostScope == .focused && listedHost.id == selectedHostID,
+                            showsSparkline: false
+                        )
+                    }
                 }
             }
             .navigationTitle("Switch Host")
@@ -538,6 +694,32 @@ public struct PingScopeIOSRootView: View {
                 }
             }
         }
+    }
+
+    private var allHostsSwitcherRow: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "rectangle.3.group")
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(.blue)
+                .frame(width: 18)
+            VStack(alignment: .leading, spacing: 3) {
+                Text("All Hosts")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(.primary)
+                Text("Monitor enabled hosts")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 8)
+            if hostScope == .allHosts {
+                Image(systemName: "checkmark")
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundStyle(.blue)
+            }
+        }
+        .frame(height: 48)
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
     }
 
     private var monitorSettings: some View {
@@ -651,6 +833,46 @@ public struct PingScopeIOSRootView: View {
         .accessibilityElement(children: .combine)
     }
 
+    private func allHostsRow(_ row: PingScopeIOSHostRowSnapshot) -> some View {
+        let color = Color(iosStatusColor: row.status.iosStatusColor)
+        let graphData = PingScopeIOSLatencyGraphData(
+            samples: PingScopeIOSAllHostsMonitorPresentation.graphSamples(
+                for: row,
+                allHostGraphSeries: allHostsMonitorGraphSeries
+            ),
+            range: selectedGraphRange,
+            endDate: graphPresentation.renderData.endDate
+        )
+        return HStack(spacing: 10) {
+            Circle()
+                .fill(color)
+                .frame(width: 8, height: 8)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(row.displayName.isEmpty ? "Unnamed Host" : row.displayName)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                Text(row.endpointCaption)
+                    .font(.system(size: 12, weight: .medium, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 8)
+            PingScopeIOSSparkline(renderData: graphData, color: color)
+                .frame(width: 64, height: 28)
+                .opacity(graphData.points.count > 1 ? 1 : 0.18)
+            Text(row.latencyText)
+                .font(.system(size: 15, weight: .semibold, design: .monospaced))
+                .foregroundStyle(color)
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+                .frame(width: 56, alignment: .trailing)
+        }
+        .frame(height: 54)
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
+    }
+
     private func historyRow(_ sample: PingResult) -> some View {
         HStack(spacing: 10) {
             Circle()
@@ -687,6 +909,26 @@ public struct PingScopeIOSRootView: View {
 
     private var displayLatencyMilliseconds: Double? {
         scrubbedLatencyMilliseconds ?? health.latestResult?.latency?.milliseconds
+    }
+
+    private var effectiveDisplayMode: PingScopeIOSDisplayMode {
+        PingScopeIOSAllHostsMonitorPresentation.displayMode(displayMode, hostScope: hostScope)
+    }
+
+    private var allHostsMonitorRows: [PingScopeIOSHostRowSnapshot] {
+        PingScopeIOSAllHostsMonitorPresentation.rows(hostScope: hostScope, allHostRows: allHostRows)
+    }
+
+    private var allHostsMonitorGraphSeries: [PingScopeIOSHostGraphSeries] {
+        PingScopeIOSAllHostsMonitorPresentation.graphSeries(
+            hostScope: hostScope,
+            allHostGraphSeries: allHostGraphSeries
+        )
+    }
+
+    private var monitorStats: SampleStats {
+        guard hostScope == .allHosts else { return graphPresentation.stats }
+        return SampleStats(samples: allHostsMonitorGraphSeries.flatMap(\.samples))
     }
 
     private var notableHistorySamples: [PingResult] {
@@ -957,6 +1199,174 @@ private struct SignalHeroGraphCard: View {
     private func drawLine(context: inout GraphicsContext, size: CGSize) {
         guard let path = drawLinePath(size: size) else { return }
         context.stroke(path, with: .color(graphColor), style: StrokeStyle(lineWidth: 2.5, lineCap: .round, lineJoin: .round))
+    }
+}
+
+private struct PingScopeIOSAllHostsSignalHeroGraphCard: View {
+    private struct RenderSeries {
+        let hostID: UUID
+        let renderData: PingScopeIOSLatencyGraphData
+        let color: Color
+    }
+
+    private static let graphColors: [Color] = [
+        .blue,
+        .cyan,
+        .orange,
+        .pink,
+        .mint,
+        .indigo
+    ]
+
+    let series: [PingScopeIOSHostGraphSeries]
+    let range: TimeRange
+    let endDate: Date
+    @Binding var scrubbedLatencyMilliseconds: Double?
+    let onStepRange: (Int) -> Void
+
+    private let yAxisWidth: CGFloat = 44
+
+    var body: some View {
+        VStack(spacing: 6) {
+            HStack(spacing: 8) {
+                yAxisLabels
+                    .frame(width: yAxisWidth)
+                GeometryReader { proxy in
+                    ZStack {
+                        Canvas { context, size in
+                            drawGrid(context: &context, size: size)
+                            for series in renderSeries {
+                                drawLine(series, context: &context, size: size)
+                            }
+                        }
+                        if !hasLatencyData {
+                            Text("No samples in range")
+                                .font(.callout)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .gesture(graphDrag(size: proxy.size))
+                    .simultaneousGesture(magnifyGesture)
+                }
+            }
+            HStack {
+                Color.clear.frame(width: yAxisWidth + 8)
+                Text(startDate, style: .time)
+                Spacer()
+                Text("now")
+            }
+            .font(.system(size: 11, weight: .medium, design: .monospaced))
+            .foregroundStyle(.secondary)
+            .frame(height: 18)
+        }
+        .padding(16)
+        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 22))
+        .overlay(RoundedRectangle(cornerRadius: 22).stroke(Color.primary.opacity(0.05), lineWidth: 1))
+        .accessibilityLabel("All hosts latency graph")
+    }
+
+    private var renderSeries: [RenderSeries] {
+        series.map { source in
+            let colorIndex = PingScopeIOSAllHostsMonitorPresentation.stableColorIndex(
+                for: source.hostID,
+                paletteCount: Self.graphColors.count
+            )
+            return RenderSeries(
+                hostID: source.hostID,
+                renderData: PingScopeIOSLatencyGraphData(
+                    samples: source.samples,
+                    range: range,
+                    endDate: endDate
+                ),
+                color: Self.graphColors[colorIndex]
+            )
+        }
+    }
+
+    private var scale: LatencyGraphScale {
+        LatencyGraphScale(latencies: renderSeries.flatMap { series in
+            series.renderData.points.map(\.latencyMilliseconds)
+        })
+    }
+
+    private var startDate: Date {
+        endDate.addingTimeInterval(-range.duration)
+    }
+
+    private var hasLatencyData: Bool {
+        renderSeries.contains { !$0.renderData.points.isEmpty }
+    }
+
+    private var yAxisLabels: some View {
+        VStack(alignment: .trailing) {
+            ForEach(Array(scale.tickMilliseconds.enumerated()), id: \.offset) { _, tick in
+                Text(scale.label(for: tick))
+                    .font(.system(size: 11, weight: .medium, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .frame(height: 12)
+                if tick != scale.tickMilliseconds.last {
+                    Spacer(minLength: 0)
+                }
+            }
+        }
+    }
+
+    private var magnifyGesture: some Gesture {
+        MagnificationGesture()
+            .onEnded { value in
+                if value > 1.08 {
+                    onStepRange(1)
+                } else if value < 0.92 {
+                    onStepRange(-1)
+                }
+            }
+    }
+
+    private func graphDrag(size: CGSize) -> some Gesture {
+        DragGesture(minimumDistance: 0)
+            .onChanged { value in
+                let x = min(max(value.location.x, 0), max(size.width, 1))
+                scrubbedLatencyMilliseconds = latency(atX: x, width: size.width)
+            }
+            .onEnded { _ in
+                scrubbedLatencyMilliseconds = nil
+            }
+    }
+
+    private func latency(atX x: CGFloat, width: CGFloat) -> Double? {
+        let points = renderSeries.flatMap { $0.renderData.points }
+        guard !points.isEmpty else { return nil }
+        let ratio = min(max(Double(x / max(width, 1)), 0), 1)
+        let targetDate = startDate.addingTimeInterval(range.duration * ratio)
+        return points.min {
+            abs($0.timestamp.timeIntervalSince(targetDate)) < abs($1.timestamp.timeIntervalSince(targetDate))
+        }?.latencyMilliseconds
+    }
+
+    private func drawGrid(context: inout GraphicsContext, size: CGSize) {
+        var path = Path()
+        for ratio in [0.0, 0.5, 1.0] {
+            let y = size.height * ratio
+            path.move(to: CGPoint(x: 0, y: y))
+            path.addLine(to: CGPoint(x: size.width, y: y))
+        }
+        context.stroke(path, with: .color(.secondary.opacity(0.14)), lineWidth: 1)
+    }
+
+    private func drawLine(_ series: RenderSeries, context: inout GraphicsContext, size: CGSize) {
+        guard series.renderData.points.count > 1 else { return }
+        let axisMaximum = max(scale.axisMaximumMilliseconds, 1)
+        let points = series.renderData.points.map { pointValue in
+            let elapsed = pointValue.timestamp.timeIntervalSince(startDate)
+            let x = size.width * CGFloat(min(max(elapsed / range.duration, 0), 1))
+            let y = size.height - (size.height * CGFloat(min(pointValue.latencyMilliseconds / axisMaximum, 1)))
+            return CGPoint(x: x, y: y)
+        }
+        context.stroke(
+            Path(LatencyCurve.smoothedPath(points: points, closed: false)),
+            with: .color(series.color),
+            style: StrokeStyle(lineWidth: 2.3, lineCap: .round, lineJoin: .round)
+        )
     }
 }
 

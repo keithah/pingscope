@@ -115,6 +115,72 @@ final class PingScopeIOSMultiHostPresentationTests: XCTestCase {
         XCTAssertEqual(PingScopeIOSDisplayMode.ring.resolvedForHostScope(showsAllHosts: true), .signal)
     }
 
+    func testAllHostsMonitorPresentationKeepsSuppliedRowsAndSeriesInOrder() {
+        let hosts = [
+            HostConfig(id: UUID(), displayName: "Router", address: "192.168.1.1"),
+            HostConfig(id: UUID(), displayName: "DNS", address: "1.1.1.1")
+        ]
+        let rows = hosts.map { PingScopeIOSHostRowSnapshot(host: $0, health: nil) }
+        let series = hosts.map { host in
+            PingScopeIOSHostGraphSeries(hostID: host.id, samples: [])
+        }
+
+        XCTAssertEqual(
+            PingScopeIOSAllHostsMonitorPresentation.rows(hostScope: .allHosts, allHostRows: rows).map(\.hostID),
+            hosts.map(\.id)
+        )
+        XCTAssertEqual(
+            PingScopeIOSAllHostsMonitorPresentation.graphSeries(hostScope: .allHosts, allHostGraphSeries: series).map(\.hostID),
+            hosts.map(\.id)
+        )
+        XCTAssertEqual(
+            PingScopeIOSAllHostsMonitorPresentation.displayMode(.ring, hostScope: .allHosts),
+            .signal
+        )
+        XCTAssertEqual(
+            PingScopeIOSAllHostsMonitorPresentation.stableColorIndex(for: hosts[0].id, paletteCount: 6),
+            PingScopeIOSAllHostsMonitorPresentation.stableColorIndex(for: hosts[0].id, paletteCount: 6)
+        )
+    }
+
+    func testFocusedMonitorPresentationHidesAllHostContentAndKeepsSelectedDisplayMode() {
+        let host = HostConfig(displayName: "Router", address: "192.168.1.1")
+        let rows = [PingScopeIOSHostRowSnapshot(host: host, health: nil)]
+        let series = [PingScopeIOSHostGraphSeries(hostID: host.id, samples: [])]
+
+        XCTAssertTrue(
+            PingScopeIOSAllHostsMonitorPresentation.rows(hostScope: .focused, allHostRows: rows).isEmpty
+        )
+        XCTAssertTrue(
+            PingScopeIOSAllHostsMonitorPresentation.graphSeries(hostScope: .focused, allHostGraphSeries: series).isEmpty
+        )
+        XCTAssertEqual(
+            PingScopeIOSAllHostsMonitorPresentation.displayMode(.ring, hostScope: .focused),
+            .ring
+        )
+    }
+
+    func testAllHostsMonitorPresentationUsesFullSeriesForCompactRowGraphs() {
+        let host = HostConfig(displayName: "Router", address: "192.168.1.1")
+        let fullSeries = makeSuccessfulResults(count: 3, hostID: host.id)
+        let row = PingScopeIOSHostRowSnapshot(
+            host: host,
+            health: nil,
+            samples: fullSeries,
+            sampleLimit: 1
+        )
+        let graphSeries = [PingScopeIOSHostGraphSeries(hostID: host.id, samples: fullSeries)]
+
+        XCTAssertEqual(
+            PingScopeIOSAllHostsMonitorPresentation.graphSamples(for: row, allHostGraphSeries: graphSeries),
+            fullSeries
+        )
+        XCTAssertEqual(
+            PingScopeIOSAllHostsMonitorPresentation.graphSamples(for: row, allHostGraphSeries: []),
+            row.samples
+        )
+    }
+
     private func makeSuccessfulResults(count: Int, hostID: UUID = UUID()) -> [PingResult] {
         (0..<count).map { index in
             PingResult.success(
