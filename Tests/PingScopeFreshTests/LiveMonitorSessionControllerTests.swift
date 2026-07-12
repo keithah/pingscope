@@ -910,6 +910,14 @@ final class LiveMonitorSessionControllerTests: XCTestCase {
         XCTAssertTrue(draft.validationErrors.isEmpty)
     }
 
+    func testIOSHostDraftPreservesDisabledStateWhenFinalized() {
+        var draft = PingScopeIOSHostDraft(host: HostConfig(displayName: "Paused host", address: "1.1.1.1"))
+
+        draft.isEnabled = false
+
+        XCTAssertFalse(draft.finalizedHost.isEnabled)
+    }
+
     func testIOSHostDraftAppliesMethodAwarePortAndRejectsInvalidInput() {
         var draft = PingScopeIOSHostDraft(host: HostConfig(displayName: "Cloudflare", address: "1.1.1.1"))
 

@@ -208,25 +208,29 @@ public enum PingScopeIOSAllHostsMonitorPresentation {
     }
 }
 
-#if os(iOS)
-public struct PingScopeIOSRootView: View {
-    private enum Tab: String, CaseIterable, Identifiable {
-        case monitor = "Monitor"
-        case hosts = "Hosts"
-        case history = "History"
+public enum PingScopeIOSRootTab: String, CaseIterable, Identifiable, Sendable {
+    case monitor = "Monitor"
+    case hosts = "Hosts"
+    case history = "History"
 
-        var id: String { rawValue }
+    public var id: String { rawValue }
 
-        var icon: String {
-            switch self {
-            case .monitor: "waveform.path.ecg"
-            case .hosts: "server.rack"
-            case .history: "clock.arrow.circlepath"
-            }
+    public var icon: String {
+        switch self {
+        case .monitor: "waveform.path.ecg"
+        case .hosts: "server.rack"
+        case .history: "clock.arrow.circlepath"
         }
     }
 
-    @State private var selectedTab: Tab = .monitor
+    public var hidesNavigationBar: Bool {
+        self != .hosts
+    }
+}
+
+#if os(iOS)
+public struct PingScopeIOSRootView: View {
+    @State private var selectedTab: PingScopeIOSRootTab = .monitor
     @State private var editingHost: HostConfig?
     @State private var isHostSwitcherPresented = false
     @State private var isMonitorSettingsPresented = false
@@ -345,7 +349,7 @@ public struct PingScopeIOSRootView: View {
                     .padding(.bottom, 12)
             }
             .background(Color(.systemGroupedBackground))
-            .navigationBarHidden(true)
+            .toolbar(selectedTab.hidesNavigationBar ? .hidden : .visible, for: .navigationBar)
             .sheet(item: $editingHost) { draft in
                 PingScopeIOSHostEditor(
                     host: draft,
@@ -870,7 +874,7 @@ public struct PingScopeIOSRootView: View {
 
     private var floatingTabBar: some View {
         HStack(spacing: 4) {
-            ForEach(Tab.allCases) { tab in
+            ForEach(PingScopeIOSRootTab.allCases) { tab in
                 Button {
                     selectedTab = tab
                 } label: {
@@ -1527,6 +1531,7 @@ private struct PingScopeIOSHostEditor: View {
                     TextField("Address", text: $draft.address)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
+                    Toggle("Enabled", isOn: $draft.isEnabled)
                 }
 
                 Section("Probe") {

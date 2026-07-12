@@ -3,6 +3,12 @@ import XCTest
 @testable import PingScopeiOS
 
 final class PingScopeIOSMultiHostPresentationTests: XCTestCase {
+    func testHostsTabKeepsNavigationControlsVisibleForReorderAndEditing() {
+        XCTAssertFalse(PingScopeIOSRootTab.hosts.hidesNavigationBar)
+        XCTAssertTrue(PingScopeIOSRootTab.monitor.hidesNavigationBar)
+        XCTAssertTrue(PingScopeIOSRootTab.history.hidesNavigationBar)
+    }
+
     func testReducerReturnsNoSamplesForEmptyInput() {
         XCTAssertEqual(PingScopeIOSLatencySampleReducer.reduce([], limit: 12), [])
     }
