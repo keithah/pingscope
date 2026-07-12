@@ -1025,17 +1025,12 @@ private final class PingScopeIOSAppModel: ObservableObject {
         at date: Date = Date()
     ) -> PingScopeLiveActivityAttributes.ContentState {
         guard hostScope == .allHosts else {
-            let latestResult = session.latestResult ?? snapshot.health.latestResult
-            return PingScopeLiveActivityAttributes.ContentState(
-                latencyMilliseconds: latestResult?.latency.map { Int($0.milliseconds.rounded()) },
-                status: snapshot.health.status,
-                lastUpdatedAt: latestResult?.timestamp,
-                remainingSeconds: session.duration == .continuous
-                    ? 0
-                    : Int(session.remainingDuration(at: date).seconds.rounded(.down)),
-                isStale: session.phase(at: date) != .live,
-                failureMessage: latestResult?.failureReason?.userMessage,
-                mode: .focused
+            return PingScopeIOSLiveActivityContentStateBuilder.focused(
+                host: snapshot.host,
+                session: session,
+                health: snapshot.health,
+                samples: snapshot.series.samples,
+                at: date
             )
         }
 

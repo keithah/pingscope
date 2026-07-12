@@ -26,8 +26,8 @@ struct PingScopeLiveActivityWidget: Widget {
                         sessionText: sessionText(for: context),
                         density: .expanded
                     )
-                    .padding(.horizontal, 12)
-                    .padding(.bottom, 8)
+                    .padding(.horizontal, PingScopeLiveActivityLayout.expandedIslandHorizontalPadding)
+                    .padding(.bottom, PingScopeLiveActivityLayout.expandedIslandBottomPadding)
                 }
             } compactLeading: {
                 statusDot(aggregateStatus(for: context), diameter: 7)
@@ -105,8 +105,8 @@ private struct PingScopeLiveActivityView: View {
             ),
             density: .lockScreen
         )
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
+        .padding(.horizontal, PingScopeLiveActivityLayout.lockScreenHorizontalPadding)
+        .padding(.vertical, PingScopeLiveActivityLayout.lockScreenVerticalPadding)
     }
 }
 
@@ -124,7 +124,7 @@ private struct PingScopeLiveActivityRowsView: View {
                 .font(density.sessionFont)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
-                .frame(maxWidth: .infinity, minHeight: density.sessionHeight, alignment: .trailing)
+                .frame(maxWidth: .infinity, minHeight: density.sessionHeight, maxHeight: density.sessionHeight, alignment: .trailing)
                 .accessibilityLabel("Session \(sessionText)")
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -199,92 +199,92 @@ private enum PingScopeLiveActivityRowDensity {
 
     var rowHeight: CGFloat {
         switch self {
-        case .lockScreen: 46
-        case .expanded: 38
+        case .lockScreen: PingScopeLiveActivityLayout.lockScreenRowHeight
+        case .expanded: PingScopeLiveActivityLayout.expandedIslandRowHeight
         }
     }
 
     var rowSpacing: CGFloat {
         switch self {
-        case .lockScreen: 6
-        case .expanded: 4
+        case .lockScreen: PingScopeLiveActivityLayout.lockScreenStackSpacing
+        case .expanded: PingScopeLiveActivityLayout.expandedIslandStackSpacing
         }
     }
 
     var columnSpacing: CGFloat {
         switch self {
-        case .lockScreen: 8
+        case .lockScreen: 7
         case .expanded: 6
         }
     }
 
     var dotDiameter: CGFloat {
         switch self {
-        case .lockScreen: 8
+        case .lockScreen: 7
         case .expanded: 7
         }
     }
 
     var identityWidth: CGFloat {
         switch self {
-        case .lockScreen: 126
+        case .lockScreen: 120
         case .expanded: 112
         }
     }
 
     var sparklineWidth: CGFloat {
         switch self {
-        case .lockScreen: 72
-        case .expanded: 64
+        case .lockScreen: 62
+        case .expanded: 60
         }
     }
 
     var sparklineHeight: CGFloat {
         switch self {
-        case .lockScreen: 28
-        case .expanded: 22
+        case .lockScreen: 22
+        case .expanded: 20
         }
     }
 
     var latencyWidth: CGFloat {
         switch self {
-        case .lockScreen: 52
+        case .lockScreen: 48
         case .expanded: 46
         }
     }
 
     var nameFont: Font {
         switch self {
-        case .lockScreen: .system(size: 15, weight: .semibold)
-        case .expanded: .system(size: 13, weight: .semibold)
+        case .lockScreen: .system(size: 13, weight: .semibold)
+        case .expanded: .system(size: 12, weight: .semibold)
         }
     }
 
     var endpointFont: Font {
         switch self {
-        case .lockScreen: .system(size: 12, weight: .medium, design: .monospaced)
-        case .expanded: .system(size: 10, weight: .medium, design: .monospaced)
+        case .lockScreen: .system(size: 10, weight: .medium, design: .monospaced)
+        case .expanded: .system(size: 9, weight: .medium, design: .monospaced)
         }
     }
 
     var latencyFont: Font {
         switch self {
-        case .lockScreen: .system(size: 15, weight: .semibold, design: .monospaced)
-        case .expanded: .system(size: 13, weight: .semibold, design: .monospaced)
+        case .lockScreen: .system(size: 13, weight: .semibold, design: .monospaced)
+        case .expanded: .system(size: 12, weight: .semibold, design: .monospaced)
         }
     }
 
     var sessionFont: Font {
         switch self {
-        case .lockScreen: .caption.monospacedDigit()
+        case .lockScreen: .caption2.monospacedDigit()
         case .expanded: .caption2.monospacedDigit()
         }
     }
 
     var sessionHeight: CGFloat {
         switch self {
-        case .lockScreen: 16
-        case .expanded: 12
+        case .lockScreen: PingScopeLiveActivityLayout.lockScreenSessionHeight
+        case .expanded: PingScopeLiveActivityLayout.expandedIslandSessionHeight
         }
     }
 }

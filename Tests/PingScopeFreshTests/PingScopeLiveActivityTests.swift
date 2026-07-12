@@ -189,6 +189,78 @@ final class PingScopeLiveActivityTests: XCTestCase {
         )
     }
 
+    func testLiveActivityLayoutCapsThreeRowLockScreenAndExpandedIslandHeights() {
+        let hostRowLimit = PingScopeLiveActivityAttributes.ContentState.hostRowLimit
+
+        XCTAssertEqual(
+            PingScopeLiveActivityLayout.maximumLockScreenContentHeight,
+            147
+        )
+        XCTAssertLessThanOrEqual(
+            PingScopeLiveActivityLayout.maximumLockScreenContentHeight,
+            PingScopeLiveActivityLayout.lockScreenActivityHeightLimit
+        )
+        XCTAssertEqual(
+            PingScopeLiveActivityLayout.lockScreenContentHeight(forHostRows: hostRowLimit + 1),
+            PingScopeLiveActivityLayout.maximumLockScreenContentHeight
+        )
+
+        XCTAssertEqual(
+            PingScopeLiveActivityLayout.maximumExpandedIslandContentHeight,
+            125
+        )
+        XCTAssertLessThanOrEqual(
+            PingScopeLiveActivityLayout.maximumExpandedIslandContentHeight,
+            PingScopeLiveActivityLayout.expandedIslandSafeHeightLimit
+        )
+    }
+
+    func testFocusedContentStateBuilderIncludesBoundedCurrentHostRow() {
+        let host = HostConfig(displayName: "Focused Host", address: "focused.example", method: .https)
+        let startedAt = Date(timeIntervalSinceReferenceDate: 1_000)
+        let latest = PingResult.success(
+            hostID: host.id,
+            latency: .milliseconds(42),
+            timestamp: startedAt.addingTimeInterval(5)
+        )
+        var health = HostHealth(hostID: host.id, thresholds: host.thresholds)
+        health.ingest(latest)
+        let samples = (0..<14).map { index in
+            PingResult.success(
+                hostID: host.id,
+                latency: .milliseconds(Double(index)),
+                timestamp: startedAt.addingTimeInterval(Double(index))
+            )
+        }
+        let session = MonitorSessionState(
+            hostID: host.id,
+            duration: .oneMinute,
+            startedAt: startedAt,
+            latestResult: latest
+        )
+
+        let state = PingScopeIOSLiveActivityContentStateBuilder.focused(
+            host: host,
+            session: session,
+            health: health,
+            samples: samples,
+            at: startedAt.addingTimeInterval(6)
+        )
+
+        XCTAssertEqual(state.mode, .focused)
+        XCTAssertEqual(state.latencyMilliseconds, 42)
+        XCTAssertEqual(state.status, .healthy)
+        XCTAssertEqual(state.hostRows.count, 1)
+        XCTAssertEqual(state.hostRows[0].hostID, host.id)
+        XCTAssertEqual(state.hostRows[0].displayName, "Focused Host")
+        XCTAssertEqual(state.hostRows[0].endpointCaption, "HTTPS focused.example")
+        XCTAssertEqual(state.hostRows[0].latestLatencyMilliseconds, 42)
+        XCTAssertFalse(state.hostRows[0].isStale)
+        XCTAssertEqual(state.hostRows[0].samples.count, PingScopeLiveActivityHostRow.sampleLimit)
+        XCTAssertEqual(state.hostRows[0].samples.first, 0)
+        XCTAssertEqual(state.hostRows[0].samples.last, 13)
+    }
+
     func testContentStateCapsActivityPayloadRowsAndSamples() {
         let rows = (0..<4).map { makePayloadRow(index: $0, sampleCount: 20) }
 

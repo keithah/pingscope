@@ -2,6 +2,71 @@ import CoreGraphics
 import Foundation
 import PingScopeCore
 
+public enum PingScopeLiveActivityLayout {
+    public static let lockScreenActivityHeightLimit: CGFloat = 160
+    public static let lockScreenHorizontalPadding: CGFloat = 16
+    public static let lockScreenVerticalPadding: CGFloat = 8
+    public static let lockScreenRowHeight: CGFloat = 36
+    public static let lockScreenStackSpacing: CGFloat = 3
+    public static let lockScreenSessionHeight: CGFloat = 14
+
+    public static let expandedIslandSafeHeightLimit: CGFloat = 136
+    public static let expandedIslandHorizontalPadding: CGFloat = 12
+    public static let expandedIslandBottomPadding: CGFloat = 8
+    public static let expandedIslandRowHeight: CGFloat = 32
+    public static let expandedIslandStackSpacing: CGFloat = 3
+    public static let expandedIslandSessionHeight: CGFloat = 12
+
+    public static var maximumLockScreenContentHeight: CGFloat {
+        lockScreenContentHeight(forHostRows: PingScopeLiveActivityAttributes.ContentState.hostRowLimit)
+    }
+
+    public static var maximumExpandedIslandContentHeight: CGFloat {
+        expandedIslandContentHeight(forHostRows: PingScopeLiveActivityAttributes.ContentState.hostRowLimit)
+    }
+
+    public static func lockScreenContentHeight(forHostRows hostRows: Int) -> CGFloat {
+        verticalContentHeight(
+            rowCount: cappedHostRowCount(hostRows),
+            rowHeight: lockScreenRowHeight,
+            sessionHeight: lockScreenSessionHeight,
+            stackSpacing: lockScreenStackSpacing,
+            topPadding: lockScreenVerticalPadding,
+            bottomPadding: lockScreenVerticalPadding
+        )
+    }
+
+    public static func expandedIslandContentHeight(forHostRows hostRows: Int) -> CGFloat {
+        verticalContentHeight(
+            rowCount: cappedHostRowCount(hostRows),
+            rowHeight: expandedIslandRowHeight,
+            sessionHeight: expandedIslandSessionHeight,
+            stackSpacing: expandedIslandStackSpacing,
+            topPadding: 0,
+            bottomPadding: expandedIslandBottomPadding
+        )
+    }
+
+    private static func cappedHostRowCount(_ hostRows: Int) -> Int {
+        min(max(hostRows, 0), PingScopeLiveActivityAttributes.ContentState.hostRowLimit)
+    }
+
+    private static func verticalContentHeight(
+        rowCount: Int,
+        rowHeight: CGFloat,
+        sessionHeight: CGFloat,
+        stackSpacing: CGFloat,
+        topPadding: CGFloat,
+        bottomPadding: CGFloat
+    ) -> CGFloat {
+        CGFloat(rowCount) * rowHeight
+            + sessionHeight
+            + CGFloat(rowCount) * stackSpacing
+            + topPadding
+            + bottomPadding
+    }
+}
+
 public struct PingScopeLiveActivityRowPresentation: Equatable, Sendable {
     public let hostID: UUID
     public let displayName: String

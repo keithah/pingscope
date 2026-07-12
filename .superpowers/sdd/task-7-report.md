@@ -54,6 +54,41 @@ implemented and rerun green:
 
 ## Remaining Concern
 
-Generic simulator builds compile and link the Live Activity but cannot capture
-an active Lock Screen/Dynamic Island state. A manual activity run on a booted
-simulator or device is still useful for final system-surface visual inspection.
+No current correctness blocker. The original generic-build-only limitation was
+resolved with a booted Simulator inspection; the follow-up note records the
+remaining distinction between Simulator-window and headless screenshot output.
+
+## Review Follow-Up: Height and Focused Sparkline
+
+### Fixes
+
+- Replaced the oversized three-row Lock Screen geometry with fixed metrics:
+  `3 * 36pt` rows, `3 * 3pt` stack gaps, `14pt` session label, and `8pt`
+  top/bottom padding. The computed maximum is `147pt`, below ActivityKit's
+  `160pt` Lock Screen ceiling.
+- Reduced the expanded Dynamic Island stack to a computed `125pt` maximum
+  (`3 * 32pt` rows, session label, gaps, and bottom padding), below its local
+  `136pt` safe content budget.
+- Added `PingScopeIOSLiveActivityContentStateBuilder.focused` and changed the
+  iOS app's production focused-state path to pass `snapshot.series.samples`.
+  Focused ContentState now carries one bounded host row while retaining scalar
+  fields for compatibility.
+
+### Review Verification
+
+- `swift test --filter PingScopeLiveActivityTests`: 16 tests, 0 failures.
+- `swift test --filter PingScopeIOSMultiHostPresentationTests`: 17 tests, 0 failures.
+- `swift test --filter LiveMonitorSessionControllerTests`: 57 tests, 0 failures.
+- `swift test`: 321 tests, 0 failures.
+- `xcodebuild -scheme PingScope-iOS -destination 'generic/platform=iOS Simulator' build`: `** BUILD SUCCEEDED **`.
+- Installed the resulting app on the booted iPhone 17 Pro Simulator and
+  inspected the focused Lock Screen Live Activity in the Simulator window. It
+  rendered host identity, endpoint, a live sparkline, status-colored latency,
+  and one session label.
+
+### System-Surface Note
+
+The Simulator window exposed the active Live Activity on the Lock Screen.
+`simctl io screenshot` did not include that ActivityKit overlay, so a future
+Task 8 image artifact needs Simulator-window capture or UI automation rather
+than the headless `simctl io` screenshot command.
