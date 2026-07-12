@@ -115,8 +115,9 @@ private final class PingScopeIOSAppModel: ObservableObject {
     private let pathMonitorQueue = DispatchQueue(label: "PingScope.iOS.NetworkPath")
     private var controller: LiveMonitorSessionController
     private var refreshTask: Task<Void, Never>?
-    private let lifecycleOperations = PingScopeIOSLifecycleOperationQueue()
-    private let activityOwnership = PingScopeIOSActivityOwnership()
+    private let lifecycleHarness = PingScopeIOSLifecycleHarness(
+        promptBackgroundProtectionClient: UIApplicationPromptBackgroundProtectionClient()
+    )
     private var liveActivity: Activity<PingScopeLiveActivityAttributes>?
     private var liveActivityLease: PingScopeIOSActivityOwnershipLease?
     private var initialSessionCoordinator = PingScopeIOSInitialSessionCoordinator()
@@ -329,6 +330,19 @@ private final class PingScopeIOSAppModel: ObservableObject {
     }
 
     func handleScenePhase(_ phase: ScenePhase) {
+        let lifecyclePhase: PingScopeIOSLifecycleScenePhase
+        switch phase {
+        case .active:
+            lifecyclePhase = .active
+        case .background:
+            lifecyclePhase = .background
+        case .inactive:
+            lifecyclePhase = .inactive
+        @unknown default:
+            return
+        }
+        let sceneEpoch = lifecycleHarness.transitionScene(to: lifecyclePhase)
+
         switch phase {
         case .active:
             runLifecycleTask { model, context in
@@ -349,9 +363,16 @@ private final class PingScopeIOSAppModel: ObservableObject {
                 model.startInitialSessionIfNeeded()
             }
         case .background:
-            runLifecycleTask { model, context in
+            lifecycleHarness.enqueueBackgroundWork(originatingAt: sceneEpoch) { @MainActor [weak self] in
+                guard let model = self else { return }
+                let context = LifecycleContext()
                 model.applyBackgroundKeepAlive()
-                await model.beginBackgroundRuntimeIfNeeded(context: context)
+                await model.beginBackgroundRuntimeIfNeeded(originatingAt: sceneEpoch)
+                model.lifecycleHarness.finishPromptBackgroundProtection()
+                guard model.lifecycleHarness.isCurrentBackground(sceneEpoch) else {
+                    await model.backgroundRuntime.end()
+                    return
+                }
                 guard model.isCurrentLifecycle(context) else { return }
                 await model.ensureLiveActivityForCurrentSession()
             }
@@ -368,16 +389,7 @@ private final class PingScopeIOSAppModel: ObservableObject {
     private struct LifecycleContext {}
 
     private func runLifecycleTask(_ operation: @escaping @MainActor (PingScopeIOSAppModel, LifecycleContext) async -> Void) {
-        lifecycleOperations.enqueue { @MainActor [weak self] in
-            guard let self else { return }
-            await operation(self, LifecycleContext())
-        }
-    }
-
-    private func performLifecycleOperation(
-        _ operation: @escaping @MainActor (PingScopeIOSAppModel, LifecycleContext) async -> Void
-    ) async {
-        await lifecycleOperations.perform { @MainActor [weak self] in
+        lifecycleHarness.enqueue { @MainActor [weak self] in
             guard let self else { return }
             await operation(self, LifecycleContext())
         }
@@ -403,6 +415,7 @@ private final class PingScopeIOSAppModel: ObservableObject {
         guard isCurrentLifecycle(context) else { return }
         await endLiveActivity()
         guard isCurrentLifecycle(context) else { return }
+        invalidateLifecycleSession()
         await startMonitoring(duration: duration)
         guard isCurrentLifecycle(context) else { return }
         await refreshSnapshot()
@@ -417,16 +430,11 @@ private final class PingScopeIOSAppModel: ObservableObject {
         refreshTask = Task {
             while !Task.isCancelled {
                 await refreshSnapshot()
-                if presentedSession?.phase() == .ended {
-                    if hostScope == .allHosts {
-                        await stopMonitoring(reason: .completed)
-                        await refreshSnapshot()
-                    } else {
-                        await refreshHistory(force: true)
+                if presentedSession?.phase() == .ended,
+                   let sessionIdentity = lifecycleHarness.currentSessionIdentity {
+                    lifecycleHarness.enqueueFiniteCompletion(for: sessionIdentity) { @MainActor [weak self] in
+                        await self?.completeFiniteSession()
                     }
-                    await backgroundRuntime.end()
-                    await endLiveActivity()
-                    applyBackgroundKeepAlive()
                     break
                 }
                 await updateLiveActivity()
@@ -436,6 +444,19 @@ private final class PingScopeIOSAppModel: ObservableObject {
                 try? await Task.sleep(for: .seconds(1))
             }
         }
+    }
+
+    private func completeFiniteSession() async {
+        cancelRefreshLoop()
+        if hostScope == .allHosts {
+            await stopMonitoring(reason: .completed)
+            await refreshSnapshot()
+        } else {
+            await refreshHistory(force: true)
+        }
+        await backgroundRuntime.end()
+        await endLiveActivity()
+        applyBackgroundKeepAlive()
     }
 
     private var activeRestartDuration: MonitorSessionDuration? {
@@ -583,6 +604,7 @@ private final class PingScopeIOSAppModel: ObservableObject {
         await refreshHistory(force: true)
         guard isCurrentLifecycle(context) else { return }
         if let restartDuration {
+            invalidateLifecycleSession()
             await controller.start(duration: restartDuration)
             guard isCurrentLifecycle(context) else { return }
             await refreshSnapshot()
@@ -622,6 +644,7 @@ private final class PingScopeIOSAppModel: ObservableObject {
         await multiHostCoordinator.reconcile(hosts: hosts)
         guard isCurrentLifecycle(context) else { return }
         if let restartDuration {
+            invalidateLifecycleSession()
             await multiHostCoordinator.start(duration: restartDuration)
             guard isCurrentLifecycle(context) else { return }
         }
@@ -698,13 +721,45 @@ private final class PingScopeIOSAppModel: ObservableObject {
     }
 
     private func refreshSnapshot() async {
-        guard hostScope == .focused else {
+        if hostScope == .allHosts {
             await refreshAllHostsSnapshot()
+        } else {
+            snapshot = await controller.snapshot()
+            rebuildGraphSamples()
+            await publishWidgetSnapshot()
+        }
+        recordLifecycleRefresh()
+    }
+
+    private func recordLifecycleRefresh() {
+        guard let session = presentedSession else {
+            lifecycleHarness.recordRefresh(sessionIdentity: nil, coordinatorState: .idle)
             return
         }
-        snapshot = await controller.snapshot()
-        rebuildGraphSamples()
-        await publishWidgetSnapshot()
+        let focusedHostID = hostScope == .focused ? snapshot.host.id : nil
+        let identity: PingScopeIOSLifecycleSessionIdentity
+        if let currentIdentity = lifecycleHarness.currentSessionIdentity,
+           currentIdentity.describes(
+               scope: hostScope,
+               focusedHostID: focusedHostID,
+               startedAt: session.startedAt
+           ) {
+            identity = currentIdentity
+        } else {
+            identity = PingScopeIOSLifecycleSessionIdentity(
+                scope: hostScope,
+                focusedHostID: focusedHostID,
+                startedAt: session.startedAt
+            )
+        }
+        lifecycleHarness.recordRefresh(
+            sessionIdentity: identity,
+            coordinatorState: session.phase() == .ended ? .ended : .active
+        )
+    }
+
+    private func invalidateLifecycleSession() {
+        lifecycleHarness.recordRefresh(sessionIdentity: nil, coordinatorState: .idle)
     }
 
     private func refreshAllHostsSnapshot() async {
@@ -822,12 +877,13 @@ private final class PingScopeIOSAppModel: ObservableObject {
         }
     }
 
-    private func beginBackgroundRuntimeIfNeeded(context: LifecycleContext) async {
+    private func beginBackgroundRuntimeIfNeeded(originatingAt sceneEpoch: PingScopeIOSLifecycleSceneEpoch) async {
         guard let session = presentedSession, session.phase() != .ended else { return }
         await backgroundRuntime.begin { [weak self] in
-            await self?.performLifecycleOperation { model, expirationContext in
-                await model.expireForBackgroundRuntime(context: expirationContext)
-            }
+            guard let self else { return }
+            await self.lifecycleHarness.enqueueBackgroundExpiration(originatingAt: sceneEpoch) { [weak self] in
+                await self?.expireForBackgroundRuntime()
+            }.value
         }
     }
 
@@ -863,7 +919,7 @@ private final class PingScopeIOSAppModel: ObservableObject {
                 content: ActivityContent(state: state, staleDate: staleDate),
                 pushType: nil
             )
-            let lease = await activityOwnership.claim()
+            let lease = await lifecycleHarness.claimActivity()
             liveActivity = requestedActivity
             liveActivityLease = lease
         } catch {
@@ -912,6 +968,7 @@ private final class PingScopeIOSAppModel: ObservableObject {
         }
         await endLiveActivity()
         guard isCurrentLifecycle(context) else { return }
+        invalidateLifecycleSession()
         await startMonitoring(duration: .continuous)
         guard isCurrentLifecycle(context) else { return }
         await refreshSnapshot()
@@ -940,7 +997,7 @@ private final class PingScopeIOSAppModel: ObservableObject {
             }
             return
         }
-        if await activityOwnership.clear(ifCurrent: endingLease), liveActivityLease == endingLease {
+        if await lifecycleHarness.clearActivity(ifCurrent: endingLease), liveActivityLease == endingLease {
             liveActivity = nil
             liveActivityLease = nil
         }
@@ -1002,6 +1059,27 @@ private final class PingScopeIOSAppModel: ObservableObject {
         if statuses.contains(.degraded) { return .degraded }
         if statuses.contains(.healthy) { return .healthy }
         return .noData
+    }
+}
+
+@MainActor
+private final class UIApplicationPromptBackgroundProtectionClient: PingScopeIOSPromptBackgroundProtectionClient {
+    private var taskID: UIBackgroundTaskIdentifier = .invalid
+
+    func beginPromptBackgroundProtection() {
+        guard taskID == .invalid else { return }
+        taskID = UIApplication.shared.beginBackgroundTask(withName: "PingScope Lifecycle Handoff") { [weak self] in
+            Task { @MainActor in
+                self?.endPromptBackgroundProtection()
+            }
+        }
+    }
+
+    func endPromptBackgroundProtection() {
+        guard taskID != .invalid else { return }
+        let endingTaskID = taskID
+        taskID = .invalid
+        UIApplication.shared.endBackgroundTask(endingTaskID)
     }
 }
 

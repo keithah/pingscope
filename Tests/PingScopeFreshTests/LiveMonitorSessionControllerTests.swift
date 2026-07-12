@@ -238,6 +238,131 @@ final class LiveMonitorSessionControllerTests: XCTestCase {
         )
     }
 
+    @MainActor
+    func testIOSLifecycleHarnessStaleFiniteCompletionCannotTearDownReplacementSession() async {
+        let host = HostConfig(id: UUID(), displayName: "Cloudflare", address: "1.1.1.1")
+        let clock = ManualClock(baseDate: Date(timeIntervalSince1970: 70_000))
+        let factory = RecordingIOSAllHostsControllerFactory()
+        let coordinator = PingScopeIOSMultiHostSessionCoordinator(
+            controllerFactory: factory,
+            now: { clock.currentDate }
+        )
+        let harness = PingScopeIOSLifecycleHarness()
+        let queueGate = IOSLifecycleGate()
+        let state = IOSLifecycleHarnessTestState()
+
+        await coordinator.reconcile(hosts: [host])
+        await coordinator.start(duration: .oneMinute)
+        let firstSessionValue = await coordinator.session()
+        let firstSession = try! XCTUnwrap(firstSessionValue)
+        let firstIdentity = PingScopeIOSLifecycleSessionIdentity(
+            scope: .allHosts,
+            focusedHostID: nil,
+            startedAt: firstSession.startedAt
+        )
+        clock.advance(by: .seconds(61))
+        harness.recordRefresh(sessionIdentity: firstIdentity, coordinatorState: .ended)
+        let firstActivityLease = await harness.claimActivity()
+
+        harness.enqueue {
+            await queueGate.block()
+        }
+        await queueGate.waitUntilBlocked()
+
+        harness.enqueue {
+            await coordinator.start(duration: .continuous)
+            let replacementSessionValue = await coordinator.session()
+            let replacementSession = try! XCTUnwrap(replacementSessionValue)
+            let replacementIdentity = PingScopeIOSLifecycleSessionIdentity(
+                scope: .allHosts,
+                focusedHostID: nil,
+                startedAt: replacementSession.startedAt
+            )
+            harness.recordRefresh(sessionIdentity: replacementIdentity, coordinatorState: .active)
+            state.replacementIdentity = replacementIdentity
+            state.replacementActivityLease = await harness.claimActivity()
+        }
+        harness.enqueueFiniteCompletion(for: firstIdentity) {
+            state.staleFiniteCleanupCount += 1
+            await coordinator.stop(reason: .completed)
+            _ = await harness.clearActivity(ifCurrent: firstActivityLease)
+        }
+
+        await queueGate.release()
+        await harness.waitForIdle()
+
+        let replacementSessionValue = await coordinator.session()
+        let replacementSession = try! XCTUnwrap(replacementSessionValue)
+        let replacementLease = try! XCTUnwrap(state.replacementActivityLease)
+        let replacementLeaseIsCurrent = await harness.isActivityCurrent(replacementLease)
+        XCTAssertEqual(state.staleFiniteCleanupCount, 0)
+        XCTAssertEqual(harness.currentSessionIdentity, state.replacementIdentity)
+        XCTAssertEqual(replacementSession.duration, .continuous)
+        XCTAssertTrue(replacementSession.isActive(at: clock.currentDate))
+        XCTAssertTrue(replacementLeaseIsCurrent)
+    }
+
+    @MainActor
+    func testIOSLifecycleHarnessPromptlyProtectsBackgroundAndRejectsStaleExpirationEpoch() async {
+        let host = HostConfig(id: UUID(), displayName: "Cloudflare", address: "1.1.1.1")
+        let factory = RecordingIOSAllHostsControllerFactory()
+        let coordinator = PingScopeIOSMultiHostSessionCoordinator(controllerFactory: factory)
+        let promptClient = RecordingIOSPromptBackgroundProtectionClient()
+        let harness = PingScopeIOSLifecycleHarness(promptBackgroundProtectionClient: promptClient)
+        let queueGate = IOSLifecycleGate()
+        let state = IOSLifecycleHarnessTestState()
+
+        await coordinator.reconcile(hosts: [host])
+        await coordinator.start(duration: .continuous)
+        let sessionValue = await coordinator.session()
+        let session = try! XCTUnwrap(sessionValue)
+        let identity = PingScopeIOSLifecycleSessionIdentity(
+            scope: .allHosts,
+            focusedHostID: nil,
+            startedAt: session.startedAt
+        )
+        harness.recordRefresh(sessionIdentity: identity, coordinatorState: .active)
+        _ = harness.transitionScene(to: .active)
+
+        harness.enqueue {
+            await queueGate.block()
+        }
+        await queueGate.waitUntilBlocked()
+
+        let backgroundEpoch = harness.transitionScene(to: .background)
+        harness.enqueueBackgroundWork(originatingAt: backgroundEpoch) {
+            state.backgroundWorkCount += 1
+        }
+        XCTAssertEqual(promptClient.beginCount, 1)
+        XCTAssertTrue(promptClient.isActive)
+        XCTAssertEqual(state.activeWorkCount, 0)
+
+        _ = harness.transitionScene(to: .active)
+        harness.enqueue {
+            state.activeWorkCount += 1
+        }
+        let staleExpiration = harness.enqueueBackgroundExpiration(originatingAt: backgroundEpoch) {
+            state.staleExpirationCount += 1
+            await coordinator.stop(reason: .backgroundRuntimeExpired)
+        }
+
+        XCTAssertFalse(promptClient.isActive)
+        XCTAssertEqual(promptClient.endCount, 1)
+
+        await queueGate.release()
+        await staleExpiration.value
+        await harness.waitForIdle()
+
+        let survivingSessionValue = await coordinator.session()
+        let survivingSession = try! XCTUnwrap(survivingSessionValue)
+        XCTAssertEqual(state.backgroundWorkCount, 0)
+        XCTAssertEqual(state.activeWorkCount, 1)
+        XCTAssertEqual(state.staleExpirationCount, 0)
+        XCTAssertFalse(promptClient.isActive)
+        XCTAssertEqual(survivingSession.duration, .continuous)
+        XCTAssertNil(survivingSession.endReason)
+    }
+
     func testIOSDisplayModeDefaultsToSignalAndPersistsRing() {
         let suiteName = "PingScopeIOSDisplayModeTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
@@ -1232,6 +1357,33 @@ final class LiveMonitorSessionControllerTests: XCTestCase {
 private final class IOSLifecycleTestState {
     var scope: PingScopeIOSHostScope = .focused
     var events: [String] = []
+}
+
+@MainActor
+private final class IOSLifecycleHarnessTestState {
+    var replacementIdentity: PingScopeIOSLifecycleSessionIdentity?
+    var replacementActivityLease: PingScopeIOSActivityOwnershipLease?
+    var staleFiniteCleanupCount = 0
+    var backgroundWorkCount = 0
+    var activeWorkCount = 0
+    var staleExpirationCount = 0
+}
+
+@MainActor
+private final class RecordingIOSPromptBackgroundProtectionClient: PingScopeIOSPromptBackgroundProtectionClient {
+    private(set) var beginCount = 0
+    private(set) var endCount = 0
+    private(set) var isActive = false
+
+    func beginPromptBackgroundProtection() {
+        beginCount += 1
+        isActive = true
+    }
+
+    func endPromptBackgroundProtection() {
+        endCount += 1
+        isActive = false
+    }
 }
 
 private actor IOSLifecycleGate {
