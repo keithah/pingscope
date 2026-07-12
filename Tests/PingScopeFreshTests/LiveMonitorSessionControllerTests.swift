@@ -92,6 +92,152 @@ final class LiveMonitorSessionControllerTests: XCTestCase {
         )
     }
 
+    @MainActor
+    func testIOSLifecycleQueueCompletesBlockedScopeTransitionBeforeBackgroundAndActive() async {
+        let host = HostConfig(id: UUID(), displayName: "Cloudflare", address: "1.1.1.1")
+        let coordinatorStopGate = IOSAllHostsStopGate()
+        let factory = RecordingIOSAllHostsControllerFactory(stopGate: coordinatorStopGate)
+        let coordinator = PingScopeIOSMultiHostSessionCoordinator(controllerFactory: factory)
+        let queue = PingScopeIOSLifecycleOperationQueue()
+        let state = IOSLifecycleTestState()
+
+        await coordinator.reconcile(hosts: [host])
+        await coordinator.start(duration: .continuous)
+        queue.enqueue {
+            state.events.append("scope-stop-began")
+            await coordinator.stop(reason: .userStopped)
+            state.scope = .allHosts
+            state.events.append(contentsOf: ["scope-committed", "refreshed", "activity-restored", "keepalive-restored"])
+        }
+        await coordinatorStopGate.waitForStop()
+
+        queue.enqueue {
+            state.events.append("background")
+        }
+        queue.enqueue {
+            state.events.append("active")
+        }
+        await Task.yield()
+
+        XCTAssertEqual(state.scope, .focused)
+        XCTAssertEqual(state.events, ["scope-stop-began"])
+
+        await coordinatorStopGate.release()
+        await queue.waitForIdle()
+
+        let stopReasons = await factory.stopReasons
+        XCTAssertEqual(state.scope, .allHosts)
+        XCTAssertEqual(stopReasons, [.userStopped])
+        XCTAssertEqual(state.events, [
+            "scope-stop-began",
+            "scope-committed",
+            "refreshed",
+            "activity-restored",
+            "keepalive-restored",
+            "background",
+            "active"
+        ])
+    }
+
+    @MainActor
+    func testIOSLifecycleQueueCompletesStartPostconditionsBeforeOverlappingMutation() async {
+        let hostA = HostConfig(id: UUID(), displayName: "Cloudflare", address: "1.1.1.1")
+        let hostB = HostConfig(id: UUID(), displayName: "Gateway", address: "192.168.1.1")
+        let coordinatorStartGate = IOSAllHostsStartGate()
+        let factory = RecordingIOSAllHostsControllerFactory(startGate: coordinatorStartGate)
+        let coordinator = PingScopeIOSMultiHostSessionCoordinator(controllerFactory: factory)
+        let queue = PingScopeIOSLifecycleOperationQueue()
+        let state = IOSLifecycleTestState()
+
+        await coordinator.reconcile(hosts: [hostA])
+        queue.enqueue {
+            state.events.append("start-began")
+            await coordinator.start(duration: .continuous)
+            state.events.append(contentsOf: ["start-finished", "refreshed", "activity-restored", "keepalive-restored"])
+        }
+        await coordinatorStartGate.waitForStart()
+
+        queue.enqueue {
+            await coordinator.reconcile(hosts: [hostA, hostB])
+            state.events.append(contentsOf: ["mutation-reconciled", "mutation-refreshed", "mutation-activity-restored", "mutation-keepalive-restored"])
+        }
+        await Task.yield()
+
+        let createdBeforeRelease = await factory.createdHostIDs
+        XCTAssertEqual(createdBeforeRelease, [hostA.id])
+        XCTAssertEqual(state.events, ["start-began"])
+
+        await coordinatorStartGate.release()
+        await queue.waitForIdle()
+
+        let createdHostIDs = await factory.createdHostIDs
+        let startedHostIDs = await factory.startedHostIDs
+        XCTAssertEqual(createdHostIDs, [hostA.id, hostB.id])
+        XCTAssertEqual(startedHostIDs, [hostA.id, hostB.id])
+        XCTAssertEqual(state.events, [
+            "start-began",
+            "start-finished",
+            "refreshed",
+            "activity-restored",
+            "keepalive-restored",
+            "mutation-reconciled",
+            "mutation-refreshed",
+            "mutation-activity-restored",
+            "mutation-keepalive-restored"
+        ])
+    }
+
+    func testIOSActivityOwnershipDelayedEndCannotClearReplacement() async {
+        let ownership = PingScopeIOSActivityOwnership()
+        let endGate = IOSLifecycleGate()
+        let firstLease = await ownership.claim()
+
+        let delayedEnd = Task {
+            await endGate.block()
+            return await ownership.clear(ifCurrent: firstLease)
+        }
+        await endGate.waitUntilBlocked()
+
+        let replacementLease = await ownership.claim()
+        await endGate.release()
+
+        let staleEndClearedOwner = await delayedEnd.value
+        let replacementIsCurrent = await ownership.isCurrent(replacementLease)
+
+        XCTAssertFalse(staleEndClearedOwner)
+        XCTAssertTrue(replacementIsCurrent)
+    }
+
+    func testIOSLiveActivityAvailabilityRequestsWhenActiveAggregateGainsFirstPlaceholder() {
+        XCTAssertEqual(
+            PingScopeIOSLiveActivityAvailabilityDecision.decide(
+                isSessionActive: true,
+                hasPlaceholderHost: false,
+                hasActivity: false
+            ),
+            .none
+        )
+        XCTAssertEqual(
+            PingScopeIOSLiveActivityAvailabilityDecision.decide(
+                isSessionActive: true,
+                hasPlaceholderHost: true,
+                hasActivity: false
+            ),
+            .request
+        )
+    }
+
+    func testIOSLiveActivityAvailabilityUpdatesExistingActivityWithoutPlaceholder() {
+        XCTAssertEqual(
+            PingScopeIOSLiveActivityAvailabilityDecision.decide(
+                isSessionActive: true,
+                hasPlaceholderHost: false,
+                hasActivity: true
+            ),
+            .update
+        )
+    }
+
     func testIOSDisplayModeDefaultsToSignalAndPersistsRing() {
         let suiteName = "PingScopeIOSDisplayModeTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
@@ -1079,6 +1225,44 @@ final class LiveMonitorSessionControllerTests: XCTestCase {
         let currentSnapshots = await coordinator.orderedSnapshots()
         XCTAssertEqual(capturedSnapshots.map(\.host.address), [hostA.address, originalHostB.address])
         XCTAssertEqual(currentSnapshots.map(\.host.address), [hostA.address, replacementHostB.address])
+    }
+}
+
+@MainActor
+private final class IOSLifecycleTestState {
+    var scope: PingScopeIOSHostScope = .focused
+    var events: [String] = []
+}
+
+private actor IOSLifecycleGate {
+    private var isBlocked = false
+    private var isReleased = false
+    private var blockedWaiters: [CheckedContinuation<Void, Never>] = []
+    private var releaseWaiters: [CheckedContinuation<Void, Never>] = []
+
+    func block() async {
+        isBlocked = true
+        blockedWaiters.forEach { $0.resume() }
+        blockedWaiters.removeAll()
+        while !isReleased {
+            await withCheckedContinuation { continuation in
+                releaseWaiters.append(continuation)
+            }
+        }
+    }
+
+    func waitUntilBlocked() async {
+        while !isBlocked {
+            await withCheckedContinuation { continuation in
+                blockedWaiters.append(continuation)
+            }
+        }
+    }
+
+    func release() {
+        isReleased = true
+        releaseWaiters.forEach { $0.resume() }
+        releaseWaiters.removeAll()
     }
 }
 
