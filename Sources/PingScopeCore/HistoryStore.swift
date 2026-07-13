@@ -268,6 +268,11 @@ private final class SQLiteHistoryWorker: @unchecked Sendable {
             );
             """)
             try addColumnIfNeeded(table: "ping_samples", column: "metadata_json", definition: "TEXT")
+            try addColumnIfNeeded(table: "ping_samples", column: "latitude", definition: "REAL")
+            try addColumnIfNeeded(table: "ping_samples", column: "longitude", definition: "REAL")
+            try addColumnIfNeeded(table: "ping_samples", column: "horizontal_accuracy", definition: "REAL")
+            try addColumnIfNeeded(table: "ping_samples", column: "network_name", definition: "TEXT")
+            try addColumnIfNeeded(table: "ping_samples", column: "network_interface", definition: "TEXT")
             try execute("CREATE INDEX IF NOT EXISTS ping_samples_host_time ON ping_samples(host_id, timestamp);")
             try execute("CREATE INDEX IF NOT EXISTS ping_samples_timestamp ON ping_samples(timestamp);")
         } catch {
@@ -294,8 +299,9 @@ private final class SQLiteHistoryWorker: @unchecked Sendable {
     private func insert(_ results: [PingResult]) throws {
         let sql = """
         INSERT OR REPLACE INTO ping_samples
-        (id, host_id, address, method, port, timestamp, latency_ms, failure_reason, metadata_note, metadata_json)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+        (id, host_id, address, method, port, timestamp, latency_ms, failure_reason, metadata_note, metadata_json,
+         latitude, longitude, horizontal_accuracy, network_name, network_interface)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
         """
         let shouldWrapInTransaction = true
         if shouldWrapInTransaction {
@@ -356,11 +362,35 @@ private final class SQLiteHistoryWorker: @unchecked Sendable {
         } else {
             sqlite3_bind_null(statement, 10)
         }
+        if let location = result.location {
+            sqlite3_bind_double(statement, 11, location.latitude)
+            sqlite3_bind_double(statement, 12, location.longitude)
+            if let horizontalAccuracy = location.horizontalAccuracy {
+                sqlite3_bind_double(statement, 13, horizontalAccuracy)
+            } else {
+                sqlite3_bind_null(statement, 13)
+            }
+            if let networkName = location.networkName {
+                bindText(networkName, to: 14, in: statement)
+            } else {
+                sqlite3_bind_null(statement, 14)
+            }
+            if let networkInterface = location.networkInterface {
+                bindText(networkInterface, to: 15, in: statement)
+            } else {
+                sqlite3_bind_null(statement, 15)
+            }
+        } else {
+            for index in 11...15 {
+                sqlite3_bind_null(statement, Int32(index))
+            }
+        }
     }
 
     private func query(hostID: UUID, since: Date, limit: Int) throws -> [PingResult] {
         let sql = """
-        SELECT id, host_id, address, method, port, timestamp, latency_ms, failure_reason, metadata_note, metadata_json
+        SELECT id, host_id, address, method, port, timestamp, latency_ms, failure_reason, metadata_note, metadata_json,
+               latitude, longitude, horizontal_accuracy, network_name, network_interface
         FROM ping_samples
         WHERE host_id = ? AND timestamp >= ?
         ORDER BY timestamp ASC
@@ -388,7 +418,8 @@ private final class SQLiteHistoryWorker: @unchecked Sendable {
 
     private func queryLatest(hostID: UUID, since: Date, limit: Int) throws -> [PingResult] {
         let sql = """
-        SELECT id, host_id, address, method, port, timestamp, latency_ms, failure_reason, metadata_note, metadata_json
+        SELECT id, host_id, address, method, port, timestamp, latency_ms, failure_reason, metadata_note, metadata_json,
+               latitude, longitude, horizontal_accuracy, network_name, network_interface
         FROM ping_samples
         WHERE host_id = ? AND timestamp >= ?
         ORDER BY timestamp DESC
@@ -416,7 +447,8 @@ private final class SQLiteHistoryWorker: @unchecked Sendable {
 
     private func streamSamples(hostID: UUID, since: Date, to writer: HistoryExportSampleWriter) throws -> Int {
         let sql = """
-        SELECT id, host_id, address, method, port, timestamp, latency_ms, failure_reason, metadata_note, metadata_json
+        SELECT id, host_id, address, method, port, timestamp, latency_ms, failure_reason, metadata_note, metadata_json,
+               latitude, longitude, horizontal_accuracy, network_name, network_interface
         FROM ping_samples
         WHERE host_id = ? AND timestamp >= ?
         ORDER BY timestamp ASC;
@@ -571,6 +603,22 @@ private final class SQLiteHistoryWorker: @unchecked Sendable {
         } else {
             metadata = ProbeMetadata(note: text(at: 8, in: statement))
         }
+        let location: SampleLocation?
+        if sqlite3_column_type(statement, 10) != SQLITE_NULL,
+           sqlite3_column_type(statement, 11) != SQLITE_NULL {
+            let horizontalAccuracy = sqlite3_column_type(statement, 12) == SQLITE_NULL
+                ? nil
+                : sqlite3_column_double(statement, 12)
+            location = SampleLocation(
+                latitude: sqlite3_column_double(statement, 10),
+                longitude: sqlite3_column_double(statement, 11),
+                horizontalAccuracy: horizontalAccuracy,
+                networkName: text(at: 13, in: statement),
+                networkInterface: text(at: 14, in: statement)
+            )
+        } else {
+            location = nil
+        }
 
         return PingResult(
             id: id,
@@ -581,7 +629,8 @@ private final class SQLiteHistoryWorker: @unchecked Sendable {
             timestamp: timestamp,
             latency: latency,
             failureReason: failureReason,
-            metadata: metadata
+            metadata: metadata,
+            location: location
         )
     }
 

@@ -31,7 +31,7 @@
 	<key>NSLocationAlwaysUsageDescription</key>
 	<string>PingScope can optionally use background location to keep active network monitoring alive when you leave the app. This is disabled by default and may reduce battery life.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>PingScope uses location only if you enable Background Keep Alive for active network monitoring.</string>
+	<string>PingScope uses location when you enable History map tagging or Background Keep Alive for active network monitoring.</string>
 	<key>NSSupportsLiveActivities</key>
 	<true/>
 	<key>UIBackgroundModes</key>

@@ -532,6 +532,335 @@ final class LiveMonitorSessionControllerTests: XCTestCase {
         let samples = await history.samples(hostID: host.id, since: .distantPast, limit: 10)
         XCTAssertEqual(samples.count, 1)
         XCTAssertEqual(samples[0].latency, .milliseconds(18))
+        XCTAssertNil(samples[0].location)
+    }
+
+    func testControllerEnrichesOnlyPersistedSample() async throws {
+        let host = HostConfig(id: UUID(), displayName: "Cloudflare", address: "1.1.1.1")
+        let probe = RecordingProbe(results: [
+            .success(hostID: host.id, latency: .milliseconds(18))
+        ])
+        let history = RecordingLiveMonitorHistoryStore()
+        let clock = ManualClock()
+        let location = try XCTUnwrap(SampleLocation(
+            latitude: 37.7749,
+            longitude: -122.4194,
+            horizontalAccuracy: 12,
+            networkName: "Wi-Fi",
+            networkInterface: "wifi"
+        ))
+        let controller = LiveMonitorSessionController(
+            host: host,
+            probeFactory: StaticProbeFactory(probe: probe),
+            policy: MonitorSessionPolicy(liveFreshness: .milliseconds(50), staleAfter: .milliseconds(100), probeInterval: .milliseconds(50)),
+            historyStore: history,
+            clock: clock,
+            now: { clock.currentDate },
+            historySampleEnricher: { result in
+                var copy = result
+                copy.location = location
+                return copy
+            }
+        )
+
+        await controller.start(duration: .thirtySeconds, at: clock.baseDate)
+        try await clock.waitForSleepers(atLeast: 1)
+        let snapshot = await controller.snapshot()
+        await controller.stop()
+
+        let samples = await history.samples(hostID: host.id, since: .distantPast, limit: 10)
+        XCTAssertEqual(samples.first?.location, location)
+        XCTAssertNil(snapshot.health.latestResult?.location)
+        XCTAssertNil(snapshot.series.samples.first?.location)
+        XCTAssertNil(snapshot.session?.latestResult?.location)
+    }
+
+    func testHistoryLocationProviderEnrichesEnabledAuthorizedSampleWithFixAndInterface() throws {
+        let store = PingScopeIOSHistoryLocationSnapshotStore()
+        let fix = try XCTUnwrap(SampleLocation(latitude: 37.7749, longitude: -122.4194, horizontalAccuracy: 12))
+        store.update(
+            PingScopeIOSHistoryLocationSnapshot(
+                isTaggingEnabled: true,
+                isAuthorized: true,
+                fix: fix,
+                networkInterface: "wifi"
+            )
+        )
+        let result = PingResult.success(hostID: UUID(), latency: .milliseconds(18))
+
+        let enriched = store.makeHistorySampleEnricher()(result)
+
+        XCTAssertEqual(enriched.location?.latitude, fix.latitude)
+        XCTAssertEqual(enriched.location?.longitude, fix.longitude)
+        XCTAssertEqual(enriched.location?.horizontalAccuracy, 12)
+        XCTAssertEqual(enriched.location?.networkName, "Wi-Fi")
+        XCTAssertEqual(enriched.location?.networkInterface, "wifi")
+    }
+
+    func testHistoryLocationProviderLeavesSampleUnchangedWhenTaggingDisabled() throws {
+        let original = PingResult.success(hostID: UUID(), latency: .milliseconds(18))
+        let store = PingScopeIOSHistoryLocationSnapshotStore()
+        store.update(PingScopeIOSHistoryLocationSnapshot(
+            isTaggingEnabled: false,
+            isAuthorized: true,
+            fix: try XCTUnwrap(SampleLocation(latitude: 1, longitude: 2)),
+            networkInterface: "wifi"
+        ))
+
+        XCTAssertEqual(store.makeHistorySampleEnricher()(original), original)
+    }
+
+    func testHistoryLocationProviderLeavesSampleUnchangedWhenUnauthorized() throws {
+        let original = PingResult.success(hostID: UUID(), latency: .milliseconds(18))
+        let store = PingScopeIOSHistoryLocationSnapshotStore()
+        store.update(PingScopeIOSHistoryLocationSnapshot(
+            isTaggingEnabled: true,
+            isAuthorized: false,
+            fix: try XCTUnwrap(SampleLocation(latitude: 1, longitude: 2)),
+            networkInterface: "wifi"
+        ))
+
+        XCTAssertEqual(store.makeHistorySampleEnricher()(original), original)
+    }
+
+    func testHistoryLocationProviderLeavesSampleUnchangedWithoutFix() {
+        let original = PingResult.success(hostID: UUID(), latency: .milliseconds(18))
+        let store = PingScopeIOSHistoryLocationSnapshotStore()
+        store.update(PingScopeIOSHistoryLocationSnapshot(
+            isTaggingEnabled: true,
+            isAuthorized: true,
+            fix: nil,
+            networkInterface: "wifi"
+        ))
+
+        XCTAssertEqual(store.makeHistorySampleEnricher()(original), original)
+    }
+
+    func testHistoryLocationProviderEnrichesWithoutNetworkInterface() throws {
+        let store = PingScopeIOSHistoryLocationSnapshotStore()
+        let fix = try XCTUnwrap(SampleLocation(latitude: 51.5074, longitude: -0.1278, horizontalAccuracy: 9))
+        store.update(PingScopeIOSHistoryLocationSnapshot(
+            isTaggingEnabled: true,
+            isAuthorized: true,
+            fix: fix,
+            networkInterface: nil
+        ))
+
+        let enriched = store.makeHistorySampleEnricher()(.success(hostID: UUID(), latency: .milliseconds(12)))
+
+        XCTAssertEqual(enriched.location?.latitude, fix.latitude)
+        XCTAssertEqual(enriched.location?.longitude, fix.longitude)
+        XCTAssertNil(enriched.location?.networkName)
+        XCTAssertNil(enriched.location?.networkInterface)
+    }
+
+    func testLatestValidHistoryLocationFixUsesNewestValidCandidate() throws {
+        let previous = try XCTUnwrap(SampleLocation(latitude: 1, longitude: 2))
+        let candidates = [
+            PingScopeIOSHistoryLocationFixCandidate(latitude: 10, longitude: 20, horizontalAccuracy: 5),
+            PingScopeIOSHistoryLocationFixCandidate(latitude: 200, longitude: 20, horizontalAccuracy: 6),
+        ]
+
+        let selected = PingScopeIOSHistoryLocationFixReducer.latestValidFix(
+            from: candidates,
+            preserving: previous
+        )
+
+        XCTAssertEqual(selected, SampleLocation(latitude: 10, longitude: 20, horizontalAccuracy: 5))
+    }
+
+    func testLatestValidHistoryLocationFixPreservesPreviousWhenCallbackHasNoValidCandidate() throws {
+        let previous = try XCTUnwrap(SampleLocation(latitude: 1, longitude: 2, horizontalAccuracy: 7))
+        let candidates = [
+            PingScopeIOSHistoryLocationFixCandidate(latitude: .nan, longitude: 20, horizontalAccuracy: 5),
+            PingScopeIOSHistoryLocationFixCandidate(latitude: 30, longitude: 400, horizontalAccuracy: 6),
+        ]
+
+        XCTAssertEqual(
+            PingScopeIOSHistoryLocationFixReducer.latestValidFix(from: candidates, preserving: previous),
+            previous
+        )
+    }
+
+    func testHistoryLocationProviderReadsCoherentSnapshotsDuringConcurrentUpdates() async throws {
+        let store = PingScopeIOSHistoryLocationSnapshotStore()
+        let first = try XCTUnwrap(SampleLocation(latitude: 10, longitude: 20))
+        let second = try XCTUnwrap(SampleLocation(latitude: -30, longitude: -40))
+        let result = PingResult.success(hostID: UUID(), latency: .milliseconds(18))
+        let enricher = store.makeHistorySampleEnricher()
+
+        let locations = await withTaskGroup(of: [SampleLocation].self, returning: [SampleLocation].self) { group in
+            group.addTask {
+                for index in 0..<2_000 {
+                    store.update(PingScopeIOSHistoryLocationSnapshot(
+                        isTaggingEnabled: true,
+                        isAuthorized: true,
+                        fix: index.isMultiple(of: 2) ? first : second,
+                        networkInterface: index.isMultiple(of: 2) ? "wifi" : "cellular"
+                    ))
+                }
+                return []
+            }
+            for _ in 0..<4 {
+                group.addTask {
+                    (0..<2_000).compactMap { _ in enricher(result).location }
+                }
+            }
+            return await group.reduce(into: []) { $0.append(contentsOf: $1) }
+        }
+
+        XCTAssertFalse(locations.isEmpty)
+        XCTAssertTrue(locations.allSatisfy { location in
+            (location.latitude == 10 && location.longitude == 20 && location.networkInterface == "wifi")
+                || (location.latitude == -30 && location.longitude == -40 && location.networkInterface == "cellular")
+        })
+    }
+
+    func testHistoryLocationPolicyKeepsIndependentModesAndPrefersTaggingAccuracy() {
+        XCTAssertEqual(
+            PingScopeIOSHistoryLocationPolicy.reduce(
+                keepAliveEnabled: true,
+                taggingEnabled: false,
+                monitoringActive: true,
+                authorization: .whenInUse
+            ),
+            .inactive
+        )
+        XCTAssertEqual(
+            PingScopeIOSHistoryLocationPolicy.reduce(
+                keepAliveEnabled: true,
+                taggingEnabled: false,
+                monitoringActive: true,
+                authorization: .always
+            ),
+            .init(updatesActive: true, backgroundActive: true, accuracy: .keepAlive)
+        )
+        XCTAssertEqual(
+            PingScopeIOSHistoryLocationPolicy.reduce(
+                keepAliveEnabled: false,
+                taggingEnabled: true,
+                monitoringActive: true,
+                authorization: .whenInUse
+            ),
+            .init(updatesActive: true, backgroundActive: false, accuracy: .tagging)
+        )
+        XCTAssertEqual(
+            PingScopeIOSHistoryLocationPolicy.reduce(
+                keepAliveEnabled: true,
+                taggingEnabled: true,
+                monitoringActive: true,
+                authorization: .always
+            ),
+            .init(updatesActive: true, backgroundActive: true, accuracy: .tagging)
+        )
+        XCTAssertEqual(
+            PingScopeIOSHistoryLocationPolicy.reduce(
+                keepAliveEnabled: true,
+                taggingEnabled: true,
+                monitoringActive: false,
+                authorization: .always
+            ),
+            .inactive
+        )
+        XCTAssertEqual(
+            PingScopeIOSHistoryLocationPolicy.reduce(
+                keepAliveEnabled: true,
+                taggingEnabled: true,
+                monitoringActive: true,
+                authorization: .denied
+            ),
+            .inactive
+        )
+        XCTAssertEqual(
+            PingScopeIOSHistoryLocationPolicy.reduce(
+                keepAliveEnabled: true,
+                taggingEnabled: false,
+                monitoringActive: true,
+                authorization: .undetermined
+            ),
+            .inactive
+        )
+    }
+
+    func testHistoryLocationStateMachineTaggingRequestNeverRequestsAlways() {
+        var machine = PingScopeIOSHistoryLocationStateMachine(authorization: .undetermined)
+
+        XCTAssertEqual(machine.handle(.requestTaggingAuthorization), [.requestWhenInUseAuthorization])
+        XCTAssertEqual(machine.handle(.authorizationChanged(.whenInUse)), [])
+        XCTAssertEqual(machine.handle(.authorizationChanged(.always)), [])
+    }
+
+    func testHistoryLocationStateMachineTaggingRequestDoesNotRepeatAfterDenialOrRestriction() {
+        var denied = PingScopeIOSHistoryLocationStateMachine(authorization: .denied)
+        var restricted = PingScopeIOSHistoryLocationStateMachine(authorization: .restricted)
+
+        XCTAssertEqual(denied.handle(.requestTaggingAuthorization), [])
+        XCTAssertEqual(restricted.handle(.requestTaggingAuthorization), [])
+    }
+
+    func testHistoryLocationStateMachineTaggingRequestPreservesPendingKeepAliveEscalation() {
+        var machine = PingScopeIOSHistoryLocationStateMachine(authorization: .undetermined)
+
+        XCTAssertEqual(machine.handle(.requestKeepAliveAuthorization), [.requestWhenInUseAuthorization])
+        XCTAssertEqual(machine.handle(.requestTaggingAuthorization), [.requestWhenInUseAuthorization])
+        XCTAssertEqual(machine.handle(.authorizationChanged(.whenInUse)), [.requestAlwaysAuthorization])
+    }
+
+    func testHistoryLocationStateMachineExplicitKeepAliveRequestEscalatesToAlways() {
+        var machine = PingScopeIOSHistoryLocationStateMachine(authorization: .undetermined)
+
+        XCTAssertEqual(machine.handle(.requestKeepAliveAuthorization), [.requestWhenInUseAuthorization])
+        XCTAssertEqual(machine.handle(.authorizationChanged(.whenInUse)), [.requestAlwaysAuthorization])
+    }
+
+    func testHistoryLocationStateMachineDisablingKeepAliveCancelsPendingEscalation() {
+        var machine = PingScopeIOSHistoryLocationStateMachine(authorization: .undetermined)
+        _ = machine.handle(.setState(keepAliveEnabled: true, taggingEnabled: false, monitoringActive: false))
+        _ = machine.handle(.requestKeepAliveAuthorization)
+
+        XCTAssertEqual(
+            machine.handle(.setState(keepAliveEnabled: false, taggingEnabled: false, monitoringActive: false)),
+            []
+        )
+        XCTAssertEqual(machine.handle(.authorizationChanged(.whenInUse)), [])
+    }
+
+    func testHistoryLocationStateMachineDisablingOneModeKeepsOtherActive() {
+        var machine = PingScopeIOSHistoryLocationStateMachine(authorization: .always)
+
+        XCTAssertEqual(
+            machine.handle(.setState(keepAliveEnabled: true, taggingEnabled: true, monitoringActive: true)),
+            [.configureAccuracy(.tagging), .setBackgroundUpdates(true), .startUpdatingLocation]
+        )
+        XCTAssertEqual(
+            machine.handle(.setState(keepAliveEnabled: false, taggingEnabled: true, monitoringActive: true)),
+            [.setBackgroundUpdates(false)]
+        )
+        XCTAssertEqual(
+            machine.handle(.setState(keepAliveEnabled: true, taggingEnabled: false, monitoringActive: true)),
+            [.configureAccuracy(.keepAlive), .setBackgroundUpdates(true)]
+        )
+    }
+
+    func testHistoryLocationStateMachineEmitsDeterministicManagerTransitionCommands() {
+        var machine = PingScopeIOSHistoryLocationStateMachine(authorization: .always)
+
+        XCTAssertEqual(
+            machine.handle(.setState(keepAliveEnabled: true, taggingEnabled: false, monitoringActive: true)),
+            [.configureAccuracy(.keepAlive), .setBackgroundUpdates(true), .startUpdatingLocation]
+        )
+        XCTAssertEqual(
+            machine.handle(.setState(keepAliveEnabled: true, taggingEnabled: false, monitoringActive: true)),
+            []
+        )
+        XCTAssertEqual(
+            machine.handle(.setState(keepAliveEnabled: false, taggingEnabled: false, monitoringActive: false)),
+            [.setBackgroundUpdates(false), .stopUpdatingLocation]
+        )
+        XCTAssertEqual(
+            machine.handle(.setState(keepAliveEnabled: false, taggingEnabled: false, monitoringActive: false)),
+            []
+        )
     }
 
     func testControllerHistoryStoreKeepsHostMetadata() async throws {
@@ -1446,6 +1775,35 @@ final class LiveMonitorSessionControllerTests: XCTestCase {
         XCTAssertEqual(orderedSnapshots.first?.host.address, editedHost.address)
     }
 
+    func testIOSAllHostsCoordinatorFansOutSameHistoryEnricherToInitialAndReplacementControllers() async throws {
+        let hostA = HostConfig(id: UUID(), displayName: "Cloudflare", address: "1.1.1.1")
+        let hostB = HostConfig(id: UUID(), displayName: "Google", address: "8.8.8.8")
+        var replacementA = hostA
+        replacementA.address = "1.0.0.1"
+        let location = try XCTUnwrap(SampleLocation(
+            latitude: 34.0522,
+            longitude: -118.2437,
+            horizontalAccuracy: 8,
+            networkName: "Cellular",
+            networkInterface: "cellular"
+        ))
+        let factory = RecordingIOSAllHostsControllerFactory()
+        let coordinator = PingScopeIOSMultiHostSessionCoordinator(
+            controllerFactory: factory,
+            historySampleEnricher: { result in
+                var copy = result
+                copy.location = location
+                return copy
+            }
+        )
+
+        await coordinator.reconcile(hosts: [hostA, hostB])
+        await coordinator.reconcile(hosts: [replacementA, hostB])
+
+        let receivedLocations = await factory.receivedEnrichedLocations
+        XCTAssertEqual(receivedLocations, [location, location, location])
+    }
+
     func testIOSAllHostsCoordinatorUsesCommonStartAndStopTimestampsForAddedHost() async {
         let hostA = HostConfig(id: UUID(), displayName: "Cloudflare", address: "1.1.1.1")
         let hostB = HostConfig(id: UUID(), displayName: "Gateway", address: "192.168.1.1")
@@ -1765,6 +2123,7 @@ private actor RecordingIOSAllHostsControllerFactory: PingScopeIOSMultiHostSessio
     private(set) var stopReasons: [MonitorSessionEndReason] = []
     private(set) var stopRecords: [IOSAllHostsStopRecord] = []
     private(set) var events: [IOSAllHostsControllerEvent] = []
+    private(set) var receivedEnrichedLocations: [SampleLocation?] = []
 
     init(
         statuses: [UUID: HealthStatus] = [:],
@@ -1784,8 +2143,10 @@ private actor RecordingIOSAllHostsControllerFactory: PingScopeIOSMultiHostSessio
 
     func makeController(
         for host: HostConfig,
-        historyStore: (any PingHistoryStore)?
+        historyStore: (any PingHistoryStore)?,
+        historySampleEnricher: @escaping PingScopeIOSHistorySampleEnricher
     ) async -> any PingScopeIOSMultiHostSessionControlling {
+        receivedEnrichedLocations.append(historySampleEnricher(.success(hostID: host.id, latency: .milliseconds(1))).location)
         nextControllerToken += 1
         createdHostIDs.append(host.id)
         createdControllerTokens.append(nextControllerToken)

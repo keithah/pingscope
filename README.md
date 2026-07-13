@@ -45,6 +45,8 @@ On iOS, PingScope uses the App Store-safe probe set and monitors continuously wh
 
 The iOS app also includes an advanced opt-in Background Keep Alive setting. When enabled, PingScope requests Always Location permission and starts background location updates only while monitoring is active. This may reduce battery life and remains subject to iOS background execution limits and App Store review.
 
+History map coordinates remain local on your device unless you explicitly share an export.
+
 ## Install
 
 For a public Developer ID release:

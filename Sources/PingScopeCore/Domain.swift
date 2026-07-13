@@ -446,6 +446,79 @@ public struct StarlinkTelemetry: Codable, Equatable, Sendable {
     }
 }
 
+public struct SampleLocation: Codable, Equatable, Sendable {
+    public var latitude: Double
+    public var longitude: Double
+    public var horizontalAccuracy: Double?
+    public var networkName: String?
+    public var networkInterface: String?
+
+    public init?(
+        latitude: Double,
+        longitude: Double,
+        horizontalAccuracy: Double? = nil,
+        networkName: String? = nil,
+        networkInterface: String? = nil
+    ) {
+        guard latitude.isFinite,
+              longitude.isFinite,
+              (-90...90).contains(latitude),
+              (-180...180).contains(longitude) else { return nil }
+
+        self.latitude = latitude
+        self.longitude = longitude
+        if let horizontalAccuracy, horizontalAccuracy.isFinite, horizontalAccuracy >= 0 {
+            self.horizontalAccuracy = horizontalAccuracy
+        } else {
+            self.horizontalAccuracy = nil
+        }
+        self.networkName = networkName
+        self.networkInterface = Self.normalizedInterface(networkInterface)
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case latitude
+        case longitude
+        case horizontalAccuracy
+        case networkName
+        case networkInterface
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let latitude = try container.decode(Double.self, forKey: .latitude)
+        let longitude = try container.decode(Double.self, forKey: .longitude)
+        let horizontalAccuracy = try container.decodeIfPresent(Double.self, forKey: .horizontalAccuracy)
+        let networkName = try container.decodeIfPresent(String.self, forKey: .networkName)
+        let networkInterface = try container.decodeIfPresent(String.self, forKey: .networkInterface)
+
+        guard let normalized = SampleLocation(
+            latitude: latitude,
+            longitude: longitude,
+            horizontalAccuracy: horizontalAccuracy,
+            networkName: networkName,
+            networkInterface: networkInterface
+        ) else {
+            throw DecodingError.dataCorruptedError(
+                forKey: .latitude,
+                in: container,
+                debugDescription: "Location coordinates must be finite and within valid ranges."
+            )
+        }
+        self = normalized
+    }
+
+    private static func normalizedInterface(_ value: String?) -> String? {
+        guard let value else { return nil }
+        return switch value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "wifi": "wifi"
+        case "cellular": "cellular"
+        case "wired": "wired"
+        default: "other"
+        }
+    }
+}
+
 public struct PingResult: Identifiable, Codable, Equatable, Sendable {
     public var id: UUID
     public var hostID: UUID
@@ -456,6 +529,20 @@ public struct PingResult: Identifiable, Codable, Equatable, Sendable {
     public var latency: Duration?
     public var failureReason: FailureReason?
     public var metadata: ProbeMetadata
+    public var location: SampleLocation?
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case hostID
+        case address
+        case method
+        case port
+        case timestamp
+        case latency
+        case failureReason
+        case metadata
+        case location
+    }
 
     public init(
         id: UUID = UUID(),
@@ -466,7 +553,8 @@ public struct PingResult: Identifiable, Codable, Equatable, Sendable {
         timestamp: Date = Date(),
         latency: Duration?,
         failureReason: FailureReason?,
-        metadata: ProbeMetadata = ProbeMetadata()
+        metadata: ProbeMetadata = ProbeMetadata(),
+        location: SampleLocation? = nil
     ) {
         self.id = id
         self.hostID = hostID
@@ -477,6 +565,21 @@ public struct PingResult: Identifiable, Codable, Equatable, Sendable {
         self.latency = latency
         self.failureReason = failureReason
         self.metadata = metadata
+        self.location = location
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        hostID = try container.decode(UUID.self, forKey: .hostID)
+        address = try container.decode(String.self, forKey: .address)
+        method = try container.decode(PingMethod.self, forKey: .method)
+        port = try container.decodeIfPresent(UInt16.self, forKey: .port)
+        timestamp = try container.decode(Date.self, forKey: .timestamp)
+        latency = try container.decodeIfPresent(Duration.self, forKey: .latency)
+        failureReason = try container.decodeIfPresent(FailureReason.self, forKey: .failureReason)
+        metadata = try container.decode(ProbeMetadata.self, forKey: .metadata)
+        location = (try? container.decodeIfPresent(SampleLocation.self, forKey: .location)) ?? nil
     }
 
     public var isSuccess: Bool {
@@ -487,18 +590,34 @@ public struct PingResult: Identifiable, Codable, Equatable, Sendable {
         hostID: UUID,
         latency: Duration,
         timestamp: Date = Date(),
-        metadata: ProbeMetadata = ProbeMetadata()
+        metadata: ProbeMetadata = ProbeMetadata(),
+        location: SampleLocation? = nil
     ) -> PingResult {
-        PingResult(hostID: hostID, timestamp: timestamp, latency: latency, failureReason: nil, metadata: metadata)
+        PingResult(
+            hostID: hostID,
+            timestamp: timestamp,
+            latency: latency,
+            failureReason: nil,
+            metadata: metadata,
+            location: location
+        )
     }
 
     public static func failure(
         hostID: UUID,
         reason: FailureReason,
         timestamp: Date = Date(),
-        metadata: ProbeMetadata = ProbeMetadata()
+        metadata: ProbeMetadata = ProbeMetadata(),
+        location: SampleLocation? = nil
     ) -> PingResult {
-        PingResult(hostID: hostID, timestamp: timestamp, latency: nil, failureReason: reason, metadata: metadata)
+        PingResult(
+            hostID: hostID,
+            timestamp: timestamp,
+            latency: nil,
+            failureReason: reason,
+            metadata: metadata,
+            location: location
+        )
     }
 
     public func withHostMetadata(from host: HostConfig) -> PingResult {

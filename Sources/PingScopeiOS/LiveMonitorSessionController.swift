@@ -1,6 +1,8 @@
 import Foundation
 import PingScopeCore
 
+public typealias PingScopeIOSHistorySampleEnricher = @Sendable (PingResult) -> PingResult
+
 public struct LiveMonitorSessionSnapshot: Equatable, Sendable {
     public var host: HostConfig
     public var session: MonitorSessionState?
@@ -24,6 +26,7 @@ public actor LiveMonitorSessionController {
     private let historyWriter: LiveHistoryWriteBuffer?
     private let clock: any Clock<Duration>
     private let now: @Sendable () -> Date
+    private let historySampleEnricher: PingScopeIOSHistorySampleEnricher
     private var session: MonitorSessionState?
     private var health: HostHealth
     private var series: SampleSeries
@@ -39,7 +42,8 @@ public actor LiveMonitorSessionController {
         backgroundRuntimeLimit: Duration? = nil,
         historyStore: (any PingHistoryStore)? = nil,
         clock: any Clock<Duration> = ContinuousClock(),
-        now: @escaping @Sendable () -> Date = { Date() }
+        now: @escaping @Sendable () -> Date = { Date() },
+        historySampleEnricher: @escaping PingScopeIOSHistorySampleEnricher = { $0 }
     ) {
         self.host = BuildFlavor.appStore.normalizedHost(host)
         self.probeFactory = probeFactory
@@ -49,6 +53,7 @@ public actor LiveMonitorSessionController {
         self.historyWriter = historyStore.map { LiveHistoryWriteBuffer(store: $0) }
         self.clock = clock
         self.now = now
+        self.historySampleEnricher = historySampleEnricher
         self.health = HostHealth(hostID: self.host.id, thresholds: self.host.thresholds)
         self.series = SampleSeries(hostID: self.host.id)
     }
@@ -137,7 +142,7 @@ public actor LiveMonitorSessionController {
         health.ingest(result)
         series.append(result)
         session = session?.updating(with: result)
-        await historyWriter?.append(result)
+        await historyWriter?.append(historySampleEnricher(result))
     }
 
     private func finish(reason: MonitorSessionEndReason, at date: Date) {

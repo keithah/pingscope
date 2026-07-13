@@ -3,6 +3,94 @@ import SQLite3
 @testable import PingScopeCore
 
 final class HistoryStoreTests: XCTestCase {
+    func testSQLiteHistoryStoreRoundTripsLocatedAndUnlocatedSamples() async throws {
+        let url = temporaryHistoryURL()
+        let host = HostConfig(displayName: "Example", address: "example.com")
+        let base = Date(timeIntervalSince1970: 900)
+        let location = try XCTUnwrap(SampleLocation(
+            latitude: 37.7749,
+            longitude: -122.4194,
+            horizontalAccuracy: 12.5,
+            networkName: "Wi-Fi",
+            networkInterface: "wifi"
+        ))
+        let store = SQLiteHistoryStore(url: url)
+
+        await store.append(.success(
+            hostID: host.id,
+            latency: .milliseconds(12),
+            timestamp: base,
+            location: location
+        ).withHostMetadata(from: host))
+        await store.append(.failure(
+            hostID: host.id,
+            reason: .timeout,
+            timestamp: base.addingTimeInterval(1)
+        ).withHostMetadata(from: host))
+
+        let samples = await SQLiteHistoryStore(url: url).samples(
+            hostID: host.id,
+            since: base.addingTimeInterval(-1),
+            limit: 10
+        )
+
+        XCTAssertEqual(samples.count, 2)
+        XCTAssertEqual(samples[0].location, location)
+        XCTAssertNil(samples[1].location)
+    }
+
+    func testSQLiteHistoryStoreMigratesLegacySchemaAndReadsOldRowsWithoutLocation() async throws {
+        let url = temporaryHistoryURL()
+        let host = HostConfig(displayName: "Legacy", address: "legacy.example.com")
+        let timestamp = Date(timeIntervalSince1970: 950)
+        try createLegacyHistoryDatabase(url: url, host: host, timestamp: timestamp)
+
+        let store = SQLiteHistoryStore(url: url)
+        let samples = await store.samples(hostID: host.id, since: timestamp.addingTimeInterval(-1), limit: 10)
+
+        XCTAssertEqual(samples.count, 1)
+        XCTAssertNil(samples[0].location)
+        XCTAssertEqual(try historyColumnNames(url: url).intersection([
+            "latitude", "longitude", "horizontal_accuracy", "network_name", "network_interface"
+        ]).count, 5)
+    }
+
+    func testSQLiteHistoryStoreKeepsRowsWithPartialOrCorruptCoordinates() async throws {
+        let url = temporaryHistoryURL()
+        let host = HostConfig(displayName: "Example", address: "example.com")
+        let base = Date(timeIntervalSince1970: 975)
+        let store = SQLiteHistoryStore(url: url)
+        await store.append(.success(hostID: host.id, latency: .milliseconds(10), timestamp: base).withHostMetadata(from: host))
+        try insertRawLocations(host: host, startingAt: base.addingTimeInterval(1), url: url)
+
+        let samples = await store.samples(hostID: host.id, since: base, limit: 10)
+
+        XCTAssertEqual(samples.count, 4)
+        XCTAssertTrue(samples.allSatisfy { $0.location == nil })
+        XCTAssertTrue(samples.allSatisfy { $0.latency != nil })
+    }
+
+    func testSQLiteHistoryStoreRetentionIsConfiguredPerStore() async throws {
+        let defaultURL = temporaryHistoryURL()
+        let thirtyDayURL = temporaryHistoryURL()
+        let host = HostConfig(displayName: "Example", address: "example.com")
+        let now = Date()
+        let twentyDaysAgo = now.addingTimeInterval(-20 * 86_400)
+        let defaultStore = SQLiteHistoryStore(url: defaultURL)
+        let thirtyDayStore = SQLiteHistoryStore(url: thirtyDayURL, retention: .days(30))
+
+        for store in [defaultStore, thirtyDayStore] {
+            await store.append(.success(hostID: host.id, latency: .milliseconds(20), timestamp: twentyDaysAgo).withHostMetadata(from: host))
+            await store.append(.success(hostID: host.id, latency: .milliseconds(1), timestamp: now).withHostMetadata(from: host))
+        }
+
+        let defaultSamples = await defaultStore.samples(hostID: host.id, since: twentyDaysAgo.addingTimeInterval(-1), limit: 10)
+        let thirtyDaySamples = await thirtyDayStore.samples(hostID: host.id, since: twentyDaysAgo.addingTimeInterval(-1), limit: 10)
+
+        XCTAssertEqual(defaultSamples.count, 1)
+        XCTAssertEqual(thirtyDaySamples.count, 2)
+    }
+
     func testSQLiteHistoryStorePersistsSuccessAndFailureSamples() async throws {
         let url = temporaryHistoryURL()
         let hostID = UUID()
@@ -834,6 +922,83 @@ final class HistoryStoreTests: XCTestCase {
         XCTAssertEqual(sqlite3_step(statement), SQLITE_ROW)
         guard let text = sqlite3_column_text(statement, 0) else { return nil }
         return String(cString: text)
+    }
+
+    private func createLegacyHistoryDatabase(url: URL, host: HostConfig, timestamp: Date) throws {
+        var db: OpaquePointer?
+        XCTAssertEqual(sqlite3_open_v2(url.path, &db, SQLITE_OPEN_CREATE | SQLITE_OPEN_READWRITE, nil), SQLITE_OK)
+        defer { sqlite3_close(db) }
+        let createSQL = """
+        CREATE TABLE ping_samples (
+            id TEXT PRIMARY KEY, host_id TEXT NOT NULL, address TEXT NOT NULL, method TEXT NOT NULL,
+            port INTEGER, timestamp REAL NOT NULL, latency_ms REAL, failure_reason TEXT,
+            metadata_note TEXT, metadata_json TEXT
+        );
+        """
+        XCTAssertEqual(sqlite3_exec(db, createSQL, nil, nil, nil), SQLITE_OK)
+        let insertSQL = """
+        INSERT INTO ping_samples
+        (id, host_id, address, method, port, timestamp, latency_ms)
+        VALUES (?, ?, ?, ?, ?, ?, ?);
+        """
+        var statement: OpaquePointer?
+        XCTAssertEqual(sqlite3_prepare_v2(db, insertSQL, -1, &statement, nil), SQLITE_OK)
+        defer { sqlite3_finalize(statement) }
+        sqlite3_bind_text(statement, 1, UUID().uuidString, -1, sqliteTransientForTests)
+        sqlite3_bind_text(statement, 2, host.id.uuidString, -1, sqliteTransientForTests)
+        sqlite3_bind_text(statement, 3, host.address, -1, sqliteTransientForTests)
+        sqlite3_bind_text(statement, 4, host.method.rawValue, -1, sqliteTransientForTests)
+        sqlite3_bind_int64(statement, 5, Int64(host.port ?? 443))
+        sqlite3_bind_double(statement, 6, timestamp.timeIntervalSince1970)
+        sqlite3_bind_double(statement, 7, 15)
+        XCTAssertEqual(sqlite3_step(statement), SQLITE_DONE)
+    }
+
+    private func historyColumnNames(url: URL) throws -> Set<String> {
+        var db: OpaquePointer?
+        XCTAssertEqual(sqlite3_open_v2(url.path, &db, SQLITE_OPEN_READONLY, nil), SQLITE_OK)
+        defer { sqlite3_close(db) }
+        var statement: OpaquePointer?
+        XCTAssertEqual(sqlite3_prepare_v2(db, "PRAGMA table_info('ping_samples');", -1, &statement, nil), SQLITE_OK)
+        defer { sqlite3_finalize(statement) }
+        var names = Set<String>()
+        while sqlite3_step(statement) == SQLITE_ROW {
+            if let text = sqlite3_column_text(statement, 1) {
+                names.insert(String(cString: text))
+            }
+        }
+        return names
+    }
+
+    private func insertRawLocations(host: HostConfig, startingAt timestamp: Date, url: URL) throws {
+        var db: OpaquePointer?
+        XCTAssertEqual(sqlite3_open_v2(url.path, &db, SQLITE_OPEN_READWRITE, nil), SQLITE_OK)
+        defer { sqlite3_close(db) }
+        let sql = """
+        INSERT INTO ping_samples
+        (id, host_id, address, method, port, timestamp, latency_ms, latitude, longitude)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
+        """
+        var statement: OpaquePointer?
+        XCTAssertEqual(sqlite3_prepare_v2(db, sql, -1, &statement, nil), SQLITE_OK)
+        defer { sqlite3_finalize(statement) }
+        let coordinates: [(Double?, Double?)] = [(37, nil), (91, -122), (37, 181)]
+        for (index, coordinates) in coordinates.enumerated() {
+            sqlite3_bind_text(statement, 1, UUID().uuidString, -1, sqliteTransientForTests)
+            sqlite3_bind_text(statement, 2, host.id.uuidString, -1, sqliteTransientForTests)
+            sqlite3_bind_text(statement, 3, host.address, -1, sqliteTransientForTests)
+            sqlite3_bind_text(statement, 4, host.method.rawValue, -1, sqliteTransientForTests)
+            sqlite3_bind_int64(statement, 5, Int64(host.port ?? 443))
+            sqlite3_bind_double(statement, 6, timestamp.addingTimeInterval(Double(index)).timeIntervalSince1970)
+            sqlite3_bind_double(statement, 7, 10)
+            if let latitude = coordinates.0 { sqlite3_bind_double(statement, 8, latitude) }
+            else { sqlite3_bind_null(statement, 8) }
+            if let longitude = coordinates.1 { sqlite3_bind_double(statement, 9, longitude) }
+            else { sqlite3_bind_null(statement, 9) }
+            XCTAssertEqual(sqlite3_step(statement), SQLITE_DONE)
+            sqlite3_reset(statement)
+            sqlite3_clear_bindings(statement)
+        }
     }
 
     private func insertRawLatencies(

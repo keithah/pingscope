@@ -2,6 +2,113 @@ import XCTest
 @testable import PingScopeCore
 
 final class DomainBehaviorTests: XCTestCase {
+    func testSampleLocationAcceptsValidCoordinatesAndNormalizesInterface() throws {
+        let location = try XCTUnwrap(SampleLocation(
+            latitude: 37.3349,
+            longitude: -122.0090,
+            horizontalAccuracy: 12.5,
+            networkName: "Office Wi-Fi",
+            networkInterface: " WiFi "
+        ))
+
+        XCTAssertEqual(location.latitude, 37.3349)
+        XCTAssertEqual(location.longitude, -122.0090)
+        XCTAssertEqual(location.horizontalAccuracy, 12.5)
+        XCTAssertEqual(location.networkName, "Office Wi-Fi")
+        XCTAssertEqual(location.networkInterface, "wifi")
+    }
+
+    func testSampleLocationRejectsInvalidCoordinates() {
+        XCTAssertNil(SampleLocation(latitude: .nan, longitude: 0))
+        XCTAssertNil(SampleLocation(latitude: 0, longitude: .infinity))
+        XCTAssertNil(SampleLocation(latitude: 90.0001, longitude: 0))
+        XCTAssertNil(SampleLocation(latitude: 0, longitude: -180.0001))
+    }
+
+    func testSampleLocationDropsInvalidAccuracyAndNormalizesUnknownInterface() throws {
+        let negative = try XCTUnwrap(SampleLocation(
+            latitude: -90,
+            longitude: 180,
+            horizontalAccuracy: -1,
+            networkInterface: "satellite"
+        ))
+        let nonfinite = try XCTUnwrap(SampleLocation(
+            latitude: 0,
+            longitude: 0,
+            horizontalAccuracy: .infinity
+        ))
+
+        XCTAssertNil(negative.horizontalAccuracy)
+        XCTAssertEqual(negative.networkInterface, "other")
+        XCTAssertNil(nonfinite.horizontalAccuracy)
+    }
+
+    func testSampleLocationDecodingUsesValidationAndNormalization() throws {
+        let data = try JSONSerialization.data(withJSONObject: [
+            "latitude": 37.3349,
+            "longitude": -122.0090,
+            "horizontalAccuracy": -4,
+            "networkName": "Office Wi-Fi",
+            "networkInterface": " WiFi "
+        ])
+
+        let location = try JSONDecoder().decode(SampleLocation.self, from: data)
+
+        XCTAssertNil(location.horizontalAccuracy)
+        XCTAssertEqual(location.networkInterface, "wifi")
+    }
+
+    func testPingResultDecodesLegacyJSONWithoutLocation() throws {
+        let original = PingResult.success(hostID: UUID(), latency: .milliseconds(12))
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(original)) as? [String: Any])
+        object.removeValue(forKey: "location")
+
+        let decoded = try JSONDecoder().decode(PingResult.self, from: JSONSerialization.data(withJSONObject: object))
+
+        XCTAssertNil(decoded.location)
+    }
+
+    func testPingResultDecodesInvalidNestedLocationAsNil() throws {
+        let original = PingResult.success(hostID: UUID(), latency: .milliseconds(12))
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(original)) as? [String: Any])
+        object["location"] = [
+            "latitude": 91,
+            "longitude": -122.0090,
+            "horizontalAccuracy": 5,
+            "networkInterface": "wifi"
+        ]
+
+        let decoded = try JSONDecoder().decode(PingResult.self, from: JSONSerialization.data(withJSONObject: object))
+
+        XCTAssertEqual(decoded.id, original.id)
+        XCTAssertEqual(decoded.hostID, original.hostID)
+        XCTAssertEqual(decoded.latency, original.latency)
+        XCTAssertNil(decoded.location)
+    }
+
+    func testPingResultFactoriesAndMetadataCopyPreserveLocationCompatibility() throws {
+        let location = try XCTUnwrap(SampleLocation(
+            latitude: 37.3349,
+            longitude: -122.0090,
+            networkInterface: "cellular"
+        ))
+        let host = HostConfig(displayName: "Example", address: "example.com", method: .https)
+        let direct = PingResult(
+            hostID: UUID(),
+            latency: .milliseconds(8),
+            failureReason: nil,
+            location: location
+        )
+        let success = PingResult.success(hostID: host.id, latency: .milliseconds(9), location: location)
+        let failure = PingResult.failure(hostID: host.id, reason: .timeout, location: location)
+
+        XCTAssertEqual(direct.location, location)
+        XCTAssertEqual(success.location, location)
+        XCTAssertEqual(failure.location, location)
+        XCTAssertEqual(direct.withHostMetadata(from: host).location, location)
+        XCTAssertNil(PingResult.success(hostID: host.id, latency: .milliseconds(10)).location)
+    }
+
     func testHistoryExportRangePresetsIncludeMaxAndDefaultToOneHour() {
         XCTAssertEqual(HistoryExportRangePreset.default, .oneHour)
         XCTAssertEqual(HistoryExportRangePreset.allCases.map(\.rawValue), ["1m", "5m", "10m", "1h", "Max", "Custom"])

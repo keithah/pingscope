@@ -105,6 +105,48 @@ public extension UserDefaults {
             set(newValue.rawValue, forKey: "pingScopeIOSDisplayMode")
         }
     }
+
+    var pingScopeIOSHistoryRange: HistoryRange {
+        get {
+            guard let rawValue = string(forKey: "pingScopeIOSHistoryRange"),
+                  let range = HistoryRange(rawValue: rawValue) else {
+                return .defaultValue
+            }
+            return range
+        }
+        set {
+            set(newValue.rawValue, forKey: "pingScopeIOSHistoryRange")
+        }
+    }
+
+    var pingScopeIOSHistoryLens: HistoryLens {
+        get {
+            guard let rawValue = string(forKey: "pingScopeIOSHistoryLens"),
+                  let lens = HistoryLens(rawValue: rawValue) else {
+                return .defaultValue
+            }
+            return lens
+        }
+        set {
+            set(newValue.rawValue, forKey: "pingScopeIOSHistoryLens")
+        }
+    }
+
+    var pingScopeIOSHistoryMapLensOverride: HistoryMapLens? {
+        get {
+            guard let rawValue = string(forKey: "pingScopeIOSHistoryMapLensOverride") else {
+                return nil
+            }
+            return HistoryMapLens(rawValue: rawValue)
+        }
+        set {
+            if let newValue {
+                set(newValue.rawValue, forKey: "pingScopeIOSHistoryMapLensOverride")
+            } else {
+                removeObject(forKey: "pingScopeIOSHistoryMapLensOverride")
+            }
+        }
+    }
 }
 
 public enum PingScopeIOSAllHostsMonitorPresentation {
@@ -253,6 +295,13 @@ public struct PingScopeIOSRootView: View {
     public var samples: [PingResult]
     public var graphPresentation: PingScopeIOSGraphPresentation
     public var historySamples: [PingResult]
+    public var historyRange: HistoryRange
+    public var historyPresentationState: PingScopeIOSHistoryPresentationState
+    public var historyLens: HistoryLens
+    public var historyMapLens: HistoryMapLens
+    public var historyLocationAuthorization: PingScopeIOSHistoryLocationAuthorization
+    public var historyLocationTaggingOptIn: Bool
+    public var historyMapContent: (PingScopeIOSHistorySelection, PingScopeIOSResolvedHistoryPresentation, HistoryMapLens) -> AnyView
     public var selectedGraphRange: TimeRange
     public var gatewayDetectionText: String?
     public var backgroundKeepAliveEnabled: Bool
@@ -270,6 +319,13 @@ public struct PingScopeIOSRootView: View {
     public var onDeleteHost: (UUID) -> Void
     public var onMoveHosts: (IndexSet, Int) -> Void
     public var onSelectGraphRange: (TimeRange) -> Void
+    public var onSelectHistoryRange: (HistoryRange) -> Void
+    public var onSelectHistoryLens: (HistoryLens) -> Void
+    public var onSelectHistoryMapLens: (HistoryMapLens) -> Void
+    public var onRequestHistoryMapPermission: () -> Void
+    public var onShareHistory: (HistoryExportFormat) -> Void
+    public var onShareHistoryReport: (HistoryReportFormat) -> Void
+    public var onRefreshHistory: (UUID, HistoryRange) async -> Void
     public var onUseDefaultGateway: () -> Void
     public var onSetBackgroundKeepAlive: (Bool) -> Void
     public var onRequestBackgroundKeepAlivePermission: () -> Void
@@ -284,6 +340,13 @@ public struct PingScopeIOSRootView: View {
         samples: [PingResult] = [],
         graphPresentation: PingScopeIOSGraphPresentation? = nil,
         historySamples: [PingResult] = [],
+        historyRange: HistoryRange = .defaultValue,
+        historyPresentationState: PingScopeIOSHistoryPresentationState? = nil,
+        historyLens: HistoryLens = .defaultValue,
+        historyMapLens: HistoryMapLens? = nil,
+        historyLocationAuthorization: PingScopeIOSHistoryLocationAuthorization = .undetermined,
+        historyLocationTaggingOptIn: Bool = false,
+        historyMapContent: @escaping (PingScopeIOSHistorySelection, PingScopeIOSResolvedHistoryPresentation, HistoryMapLens) -> AnyView = { _, _, _ in AnyView(EmptyView()) },
         selectedGraphRange: TimeRange = .fiveMinutes,
         gatewayDetectionText: String? = nil,
         backgroundKeepAliveEnabled: Bool = false,
@@ -301,6 +364,13 @@ public struct PingScopeIOSRootView: View {
         onDeleteHost: @escaping (UUID) -> Void = { _ in },
         onMoveHosts: @escaping (IndexSet, Int) -> Void = { _, _ in },
         onSelectGraphRange: @escaping (TimeRange) -> Void = { _ in },
+        onSelectHistoryRange: @escaping (HistoryRange) -> Void = { _ in },
+        onSelectHistoryLens: @escaping (HistoryLens) -> Void = { _ in },
+        onSelectHistoryMapLens: @escaping (HistoryMapLens) -> Void = { _ in },
+        onRequestHistoryMapPermission: @escaping () -> Void = {},
+        onShareHistory: @escaping (HistoryExportFormat) -> Void = { _ in },
+        onShareHistoryReport: @escaping (HistoryReportFormat) -> Void = { _ in },
+        onRefreshHistory: @escaping (UUID, HistoryRange) async -> Void = { _, _ in },
         onUseDefaultGateway: @escaping () -> Void = {},
         onSetBackgroundKeepAlive: @escaping (Bool) -> Void = { _ in },
         onRequestBackgroundKeepAlivePermission: @escaping () -> Void = {},
@@ -315,6 +385,16 @@ public struct PingScopeIOSRootView: View {
         let resolvedGraphPresentation = graphPresentation ?? PingScopeIOSGraphPresentation(samples: samples, range: selectedGraphRange)
         self.graphPresentation = resolvedGraphPresentation
         self.historySamples = historySamples
+        self.historyRange = historyRange
+        let resolvedSelectedHostID = selectedHostID ?? host.id
+        self.historyPresentationState = historyPresentationState ?? .loading(
+            selection: PingScopeIOSHistorySelection(hostID: resolvedSelectedHostID, range: historyRange)
+        )
+        self.historyLens = historyLens
+        self.historyMapLens = historyMapLens ?? .defaultValue(for: historyRange)
+        self.historyLocationAuthorization = historyLocationAuthorization
+        self.historyLocationTaggingOptIn = historyLocationTaggingOptIn
+        self.historyMapContent = historyMapContent
         self.selectedGraphRange = selectedGraphRange
         self.gatewayDetectionText = gatewayDetectionText
         self.backgroundKeepAliveEnabled = backgroundKeepAliveEnabled
@@ -324,7 +404,7 @@ public struct PingScopeIOSRootView: View {
         self.allHostRows = allHostRows
         self.allHostGraphSeries = allHostGraphSeries
         self.allHostsPresentationEndDate = allHostsPresentationEndDate ?? resolvedGraphPresentation.renderData.endDate
-        self.selectedHostID = selectedHostID ?? host.id
+        self.selectedHostID = resolvedSelectedHostID
         self.onSelectDisplayMode = onSelectDisplayMode
         self.onSelectAllHosts = onSelectAllHosts
         self.onSelectHost = onSelectHost
@@ -332,6 +412,13 @@ public struct PingScopeIOSRootView: View {
         self.onDeleteHost = onDeleteHost
         self.onMoveHosts = onMoveHosts
         self.onSelectGraphRange = onSelectGraphRange
+        self.onSelectHistoryRange = onSelectHistoryRange
+        self.onSelectHistoryLens = onSelectHistoryLens
+        self.onSelectHistoryMapLens = onSelectHistoryMapLens
+        self.onRequestHistoryMapPermission = onRequestHistoryMapPermission
+        self.onShareHistory = onShareHistory
+        self.onShareHistoryReport = onShareHistoryReport
+        self.onRefreshHistory = onRefreshHistory
         self.onUseDefaultGateway = onUseDefaultGateway
         self.onSetBackgroundKeepAlive = onSetBackgroundKeepAlive
         self.onRequestBackgroundKeepAlivePermission = onRequestBackgroundKeepAlivePermission
@@ -714,54 +801,31 @@ public struct PingScopeIOSRootView: View {
     }
 
     private var historyTab: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                HStack {
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("History")
-                            .font(.largeTitle.bold())
-                        Text(host.displayName)
-                            .font(.system(size: 15, weight: .medium, design: .monospaced))
-                            .foregroundStyle(.secondary)
-                    }
-                    Spacer()
-                    Text(historySamples.isEmpty ? "Rolling" : "\(historySamples.count)")
-                        .font(.system(size: 13, weight: .semibold, design: .monospaced))
-                        .foregroundStyle(.secondary)
-                }
-
-                SignalHeroGraphCard(
-                    renderData: PingScopeIOSGraphPresentation(samples: historySamples, range: selectedGraphRange).renderData,
-                    range: selectedGraphRange,
-                    status: health.status,
-                    scrubbedLatencyMilliseconds: .constant(nil),
-                    onStepRange: { _ in },
-                    onSwipeHost: { _ in }
-                )
-                .frame(height: 220)
-
-                VStack(alignment: .leading, spacing: 12) {
-                    sectionHeader("Notable events")
-                    if notableHistorySamples.isEmpty {
-                        Text(historySamples.isEmpty ? "Samples appear here after monitoring starts." : "No degraded or failed samples in this rolling window.")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                    } else {
-                        ForEach(notableHistorySamples) { sample in
-                            historyRow(sample)
-                            if sample.id != notableHistorySamples.last?.id {
-                                Divider()
-                            }
-                        }
-                    }
-                }
-                .padding(16)
-                .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 18))
-            }
-            .padding(20)
-            .padding(.bottom, 104)
+        let selection = PingScopeIOSHistorySelection(hostID: host.id, range: historyRange)
+        let decision = PingScopeIOSHistoryContainerDecision(
+            requestedLens: historyLens,
+            authorization: historyLocationAuthorization,
+            taggingOptIn: historyLocationTaggingOptIn,
+            selection: selection,
+            presentationState: historyPresentationState
+        )
+        return PingScopeIOSHistoryView(
+            hostName: host.displayName,
+            selectedRange: historyRange,
+            requestedLens: historyLens,
+            selectedMapLens: historyMapLens,
+            decision: decision,
+            mapContent: historyMapContent(selection, decision.resolvedPresentation, historyMapLens),
+            onSelectRange: onSelectHistoryRange,
+            onSelectLens: onSelectHistoryLens,
+            onSelectMapLens: onSelectHistoryMapLens,
+            onRequestMapPermission: onRequestHistoryMapPermission,
+            onShare: onShareHistory,
+            onShareReport: onShareHistoryReport
+        )
+        .task(id: selection) {
+            await onRefreshHistory(selection.hostID, selection.range)
         }
-        .background(Color(.systemGroupedBackground))
     }
 
     private var hostSwitcher: some View {
@@ -1043,13 +1107,6 @@ public struct PingScopeIOSRootView: View {
             range: selectedGraphRange,
             endDate: allHostsPresentationEndDate
         )
-    }
-
-    private var notableHistorySamples: [PingResult] {
-        Array(historySamples.filter { sample in
-            if !sample.isSuccess { return true }
-            return (sample.latency?.milliseconds ?? 0) >= host.thresholds.degradedMilliseconds
-        }.suffix(12).reversed())
     }
 
     private var remainingText: String {
@@ -1615,7 +1672,7 @@ private struct PingScopeIOSHostEditor: View {
     }
 }
 
-private extension HealthStatus {
+extension HealthStatus {
     var iosStatusColor: StatusColor {
         switch self {
         case .noData: .gray
@@ -1626,7 +1683,7 @@ private extension HealthStatus {
     }
 }
 
-private extension Color {
+extension Color {
     init(iosStatusColor: StatusColor) {
         switch iosStatusColor {
         case .gray: self = .gray

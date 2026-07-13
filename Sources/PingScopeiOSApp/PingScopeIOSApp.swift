@@ -34,6 +34,37 @@ struct PingScopeIOSApp: App {
                 samples: model.snapshot.series.samples,
                 graphPresentation: model.graphPresentation,
                 historySamples: model.historySamples,
+                historyRange: model.historyRange,
+                historyPresentationState: model.historyPresentationState,
+                historyLens: model.historyLens,
+                historyMapLens: model.effectiveHistoryMapLens,
+                historyLocationAuthorization: model.historyLocationAuthorization,
+                historyLocationTaggingOptIn: model.historyLocationTaggingEnabled,
+                historyMapContent: { selection, presentation, lens in
+                    AnyView(
+                        PingScopeIOSHistoryMapView(
+                            selection: selection,
+                            resolvedPresentation: presentation,
+                            selectedLens: lens,
+                            onSelectLens: { selectedLens in
+                                model.selectHistoryMapLens(selectedLens)
+                            },
+                            onShare: { format in
+                                model.requestHistoryExport(format: format)
+                            },
+                            onShareReport: { format in
+                                model.requestHistoryReport(format: format)
+                            },
+                            onShareMap: { presentation, lens, visibleRegion in
+                                model.requestHistoryMapExport(
+                                    presentation: presentation,
+                                    lens: lens,
+                                    visibleRegion: visibleRegion
+                                )
+                            }
+                        )
+                    )
+                },
                 selectedGraphRange: model.selectedGraphRange,
                 gatewayDetectionText: model.gatewayDetectionText,
                 backgroundKeepAliveEnabled: model.backgroundKeepAliveEnabled,
@@ -68,6 +99,27 @@ struct PingScopeIOSApp: App {
                 onSelectGraphRange: { range in
                     model.selectedGraphRange = range
                 },
+                onSelectHistoryRange: { range in
+                    model.selectHistoryRange(range)
+                },
+                onSelectHistoryLens: { lens in
+                    model.selectHistoryLens(lens)
+                },
+                onSelectHistoryMapLens: { lens in
+                    model.selectHistoryMapLens(lens)
+                },
+                onRequestHistoryMapPermission: {
+                    model.requestHistoryMapPermission()
+                },
+                onShareHistory: { format in
+                    model.requestHistoryExport(format: format)
+                },
+                onShareHistoryReport: { format in
+                    model.requestHistoryReport(format: format)
+                },
+                onRefreshHistory: { hostID, range in
+                    await model.refreshHistoryPresentation(hostID: hostID, range: range)
+                },
                 onUseDefaultGateway: {
                     model.addDefaultGatewayHost()
                 },
@@ -90,6 +142,31 @@ struct PingScopeIOSApp: App {
             .onChange(of: scenePhase) { _, phase in
                 model.handleScenePhase(phase)
             }
+            .sheet(item: Binding(
+                get: { model.historySharePayload },
+                set: { payload in
+                    if payload == nil { model.historyShareSheetDismissed() }
+                }
+            )) { payload in
+                HistoryActivityViewController(files: payload.files) { completed in
+                    model.historyShareActivityDidFinish(completed: completed)
+                }
+            }
+            .alert(
+                "Unable to Share History",
+                isPresented: Binding(
+                    get: { model.historyExportErrorMessage != nil },
+                    set: { isPresented in
+                        if !isPresented { model.dismissHistoryExportError() }
+                    }
+                )
+            ) {
+                Button("OK", role: .cancel) {
+                    model.dismissHistoryExportError()
+                }
+            } message: {
+                Text(model.historyExportErrorMessage ?? "The export could not be created.")
+            }
         }
     }
 }
@@ -104,6 +181,25 @@ private final class PingScopeIOSAppModel: ObservableObject {
     @Published var allHostsPresentationEndDate = Date()
     @Published private var allHostsSession: MonitorSessionState?
     @Published var historySamples: [PingResult] = []
+    @Published var historyRange: HistoryRange {
+        didSet {
+            UserDefaults.standard.pingScopeIOSHistoryRange = historyRange
+        }
+    }
+    @Published var historyLens: HistoryLens {
+        didSet {
+            UserDefaults.standard.pingScopeIOSHistoryLens = historyLens
+        }
+    }
+    @Published var historyMapLensOverride: HistoryMapLens? {
+        didSet {
+            UserDefaults.standard.pingScopeIOSHistoryMapLensOverride = historyMapLensOverride
+        }
+    }
+    @Published private(set) var historyLocationAuthorization: PingScopeIOSHistoryLocationAuthorization
+    @Published var historyPresentationState = PingScopeIOSHistoryPresentationState.loading(
+        selection: PingScopeIOSHistorySelection(hostID: HostConfig.defaultInternet.id, range: .defaultValue)
+    )
     @Published var graphPresentation = PingScopeIOSGraphPresentation(samples: [], range: .fiveMinutes)
     @Published var selectedGraphRange: TimeRange = .fiveMinutes {
         didSet {
@@ -121,12 +217,15 @@ private final class PingScopeIOSAppModel: ObservableObject {
 
     private let hostStore: PingScopeIOSHostStore
     private let historyStore: (any PingHistoryStore)?
+    private let historyLoader = PingScopeIOSHistoryLoader()
     private let widgetSnapshotStore = WidgetSnapshotStore()
     private let gatewayDetector = PingScopeIOSGatewayDetector()
     private let presenter = DisplayStatePresenter()
     private let backgroundRuntime: LiveMonitorBackgroundRuntime
     private let multiHostCoordinator: PingScopeIOSMultiHostSessionCoordinator
-    private let locationKeepAlive = BackgroundLocationKeepAliveController()
+    private let historyLocationService: HistoryLocationService
+    private var historyExportCoordinator: HistoryExportCoordinator?
+    private var historyExportObservation: AnyCancellable?
     private let pathMonitor = NWPathMonitor()
     private let pathMonitorQueue = DispatchQueue(label: "PingScope.iOS.NetworkPath")
     private var controller: LiveMonitorSessionController
@@ -138,6 +237,7 @@ private final class PingScopeIOSAppModel: ObservableObject {
     private var liveActivityLease: PingScopeIOSActivityOwnershipLease?
     private var initialSessionCoordinator = PingScopeIOSInitialSessionCoordinator()
     private var lastGatewayAddress: String?
+    @Published private(set) var historyLocationTaggingEnabled: Bool
     private var lastHistoryRefreshAt: Date?
     private var lastPublishedWidgetSnapshot: WidgetSnapshot?
     private var lastWidgetTimelineReloadAt: Date?
@@ -145,9 +245,15 @@ private final class PingScopeIOSAppModel: ObservableObject {
 
     init() {
         self.hostStore = PingScopeIOSHostStore()
+        let locationService = HistoryLocationService()
+        let historySampleEnricher = locationService.snapshotStore.makeHistorySampleEnricher()
+        self.historyLocationService = locationService
         let loadedHistoryStore: (any PingHistoryStore)?
         do {
-            loadedHistoryStore = try SQLiteHistoryStore(url: SQLiteHistoryStore.defaultURL(appName: "PingScope-iOS"))
+            loadedHistoryStore = try SQLiteHistoryStore(
+                url: SQLiteHistoryStore.defaultURL(appName: "PingScope-iOS"),
+                retention: .days(30)
+            )
         } catch {
             NSLog("PingScope iOS history store unavailable: \(String(describing: error))")
             #if DEBUG
@@ -156,21 +262,47 @@ private final class PingScopeIOSAppModel: ObservableObject {
             loadedHistoryStore = nil
         }
         self.historyStore = loadedHistoryStore
-        self.multiHostCoordinator = PingScopeIOSMultiHostSessionCoordinator(historyStore: loadedHistoryStore)
+        self.multiHostCoordinator = PingScopeIOSMultiHostSessionCoordinator(
+            historyStore: loadedHistoryStore,
+            historySampleEnricher: historySampleEnricher
+        )
         self.backgroundRuntime = LiveMonitorBackgroundRuntime(client: UIApplicationBackgroundTaskClient())
         self.backgroundKeepAliveEnabled = UserDefaults.standard.bool(forKey: Self.backgroundKeepAliveEnabledKey)
         self.displayMode = UserDefaults.standard.pingScopeIOSDisplayMode
+        let loadedHistoryRange = UserDefaults.standard.pingScopeIOSHistoryRange
+        self.historyRange = loadedHistoryRange
+        self.historyLens = UserDefaults.standard.pingScopeIOSHistoryLens
+        self.historyMapLensOverride = UserDefaults.standard.pingScopeIOSHistoryMapLensOverride
+        self.historyLocationAuthorization = locationService.authorization
+        self.historyLocationTaggingEnabled = UserDefaults.standard.bool(
+            forKey: Self.historyLocationTaggingEnabledKey
+        )
         let state = hostStore.load()
         let host = state.selectedHost
         self.hosts = state.hosts
         self.hostScope = state.hostScope
-        self.controller = LiveMonitorSessionController(host: host, historyStore: loadedHistoryStore)
+        self.historyPresentationState = .loading(
+            selection: PingScopeIOSHistorySelection(hostID: host.id, range: loadedHistoryRange)
+        )
+        self.controller = LiveMonitorSessionController(
+            host: host,
+            historyStore: loadedHistoryStore,
+            historySampleEnricher: historySampleEnricher
+        )
         self.snapshot = LiveMonitorSessionSnapshot(
             host: host,
             session: nil,
             health: HostHealth(hostID: host.id, thresholds: host.thresholds)
         )
         self.graphPresentation = PingScopeIOSGraphPresentation(samples: snapshot.series.samples, range: selectedGraphRange)
+        let exportCoordinator = HistoryExportCoordinator(
+            store: loadedHistoryStore,
+            service: HistoryExportService()
+        )
+        self.historyExportCoordinator = exportCoordinator
+        self.historyExportObservation = exportCoordinator.objectWillChange.sink { [weak self] _ in
+            self?.objectWillChange.send()
+        }
         Task { @MainActor [weak self] in
             self?.runLifecycleTask { model, context in
                 // Nothing owns an activity yet at launch, so anything the system
@@ -188,19 +320,145 @@ private final class PingScopeIOSAppModel: ObservableObject {
                 await model.refreshHistory(force: true)
             }
         }
-        locationKeepAlive.onStatusChange = { [weak self] status in
+        locationService.onStatusChange = { [weak self] status in
             guard let self else { return }
             self.backgroundKeepAliveStatus = status
-            if self.backgroundKeepAliveEnabled, self.isMonitoringActive {
-                self.applyBackgroundKeepAlive()
-            }
         }
-        backgroundKeepAliveStatus = locationKeepAlive.statusText(isEnabled: backgroundKeepAliveEnabled, isMonitoring: false)
+        locationService.onAuthorizationChange = { [weak self] authorization in
+            guard let self else { return }
+            self.historyLocationAuthorization = authorization
+            self.applyBackgroundKeepAlive()
+        }
+        applyBackgroundKeepAlive()
         startNetworkPathMonitoring()
     }
 
     var presentedSession: MonitorSessionState? {
         hostScope == .allHosts ? allHostsSession : snapshot.session
+    }
+
+    var effectiveHistoryMapLens: HistoryMapLens {
+        HistoryMapLens.effective(for: historyRange, override: historyMapLensOverride)
+    }
+
+    var historySharePayload: HistorySharePayload? {
+        historyExportCoordinator?.sharePayload
+    }
+
+    var historyExportErrorMessage: String? {
+        historyExportCoordinator?.errorMessage
+    }
+
+    func selectHistoryRange(_ range: HistoryRange) {
+        guard historyRange != range else { return }
+        historyRange = range
+        historyPresentationState = .loading(
+            selection: PingScopeIOSHistorySelection(hostID: snapshot.host.id, range: range)
+        )
+    }
+
+    func selectHistoryLens(_ lens: HistoryLens) {
+        historyLens = lens
+    }
+
+    func selectHistoryMapLens(_ lens: HistoryMapLens) {
+        historyMapLensOverride = lens
+    }
+
+    func requestHistoryMapPermission() {
+        let authorization = HistoryMapAuthorizationPresentation(
+            authorization: historyLocationAuthorization,
+            taggingOptIn: historyLocationTaggingEnabled
+        )
+        guard authorization.requestDecision != .none else { return }
+        historyLocationTaggingEnabled = true
+        UserDefaults.standard.set(true, forKey: Self.historyLocationTaggingEnabledKey)
+        applyBackgroundKeepAlive()
+        if authorization.requestDecision == .requestWhenInUse {
+            historyLocationService.requestWhenInUseAuthorization()
+        }
+    }
+
+    func requestHistoryExport(format: HistoryExportFormat) {
+        let requestedHost = snapshot.host
+        let requestedRange = historyRange
+        Task { @MainActor [weak self] in
+            await self?.historyExportCoordinator?.requestExport(
+                host: requestedHost,
+                range: requestedRange,
+                format: format,
+                now: Date()
+            )
+        }
+    }
+
+    func requestHistoryReport(format: HistoryReportFormat) {
+        let selection = PingScopeIOSHistorySelection(hostID: snapshot.host.id, range: historyRange)
+        guard case let .loaded(loadedSelection, historyPresentation) = historyPresentationState,
+              loadedSelection == selection else {
+            return
+        }
+        let report = HistoryReportPresentation(
+            host: snapshot.host,
+            range: historyRange,
+            samples: historyPresentation.sourceSamples
+        )
+        Task { @MainActor [weak self] in
+            await self?.historyExportCoordinator?.requestReport(
+                presentation: report,
+                format: format
+            )
+        }
+    }
+
+    func requestHistoryMapExport(
+        presentation: HistoryMapPresentation,
+        lens: HistoryMapLens,
+        visibleRegion: HistoryMapExportRegion
+    ) {
+        let requestedHost = snapshot.host
+        let requestedRange = historyRange
+        let selection = PingScopeIOSHistorySelection(hostID: requestedHost.id, range: requestedRange)
+        guard case let .loaded(loadedSelection, historyPresentation) = historyPresentationState,
+              loadedSelection == selection,
+              historyPresentation.mapPresentation == presentation else {
+            return
+        }
+        let request = HistoryMapExportRequest(
+            host: requestedHost,
+            range: requestedRange,
+            lens: lens,
+            presentation: presentation,
+            visibleRegion: visibleRegion
+        )
+        Task { @MainActor [weak self] in
+            await self?.historyExportCoordinator?.requestMap(request)
+        }
+    }
+
+    func historyShareActivityDidFinish(completed: Bool) {
+        historyExportCoordinator?.activityDidFinish(completed: completed)
+    }
+
+    func historyShareSheetDismissed() {
+        historyExportCoordinator?.activityDidFinish(completed: false)
+    }
+
+    func dismissHistoryExportError() {
+        historyExportCoordinator?.dismissError()
+    }
+
+    func refreshHistoryPresentation(hostID: UUID, range: HistoryRange) async {
+        let trigger = PingScopeIOSHistoryRefreshTrigger.historyVisible(
+            PingScopeIOSHistorySelection(hostID: hostID, range: range)
+        )
+        guard let selection = PingScopeIOSHistoryRangedRefreshPolicy.selection(for: trigger),
+              snapshot.host.id == selection.hostID,
+              historyRange == selection.range else {
+            return
+        }
+        historyPresentationState = .loading(selection: selection)
+        await refreshRangedHistory(selection: selection, now: Date())
     }
 
     deinit {
@@ -293,17 +551,23 @@ private final class PingScopeIOSAppModel: ObservableObject {
         backgroundKeepAliveEnabled = isEnabled
         UserDefaults.standard.set(isEnabled, forKey: Self.backgroundKeepAliveEnabledKey)
         if isEnabled {
-            locationKeepAlive.requestAlwaysAuthorization()
+            historyLocationService.requestAlwaysAuthorization()
         }
         applyBackgroundKeepAlive()
     }
 
     func requestBackgroundKeepAlivePermission() {
-        locationKeepAlive.requestAlwaysAuthorization()
-        backgroundKeepAliveStatus = locationKeepAlive.statusText(
-            isEnabled: backgroundKeepAliveEnabled,
-            isMonitoring: isMonitoringActive
-        )
+        historyLocationService.requestAlwaysAuthorization()
+        backgroundKeepAliveStatus = historyLocationService.statusText()
+    }
+
+    func setHistoryLocationTaggingEnabled(_ isEnabled: Bool) {
+        historyLocationTaggingEnabled = isEnabled
+        UserDefaults.standard.set(isEnabled, forKey: Self.historyLocationTaggingEnabledKey)
+        if isEnabled {
+            historyLocationService.requestWhenInUseAuthorization()
+        }
+        applyBackgroundKeepAlive()
     }
 
     func start(duration: MonitorSessionDuration) {
@@ -488,9 +752,23 @@ private final class PingScopeIOSAppModel: ObservableObject {
     }
 
     private static let backgroundKeepAliveEnabledKey = "PingScope.iOS.backgroundKeepAliveEnabled"
+    private static let historyLocationTaggingEnabledKey = "PingScope.iOS.historyLocationTaggingEnabled"
 
     private func startNetworkPathMonitoring() {
+        let locationSnapshotStore = historyLocationService.snapshotStore
         pathMonitor.pathUpdateHandler = { [weak self] path in
+            let interface = if path.status != .satisfied {
+                "other"
+            } else if path.usesInterfaceType(.wifi) {
+                "wifi"
+            } else if path.usesInterfaceType(.cellular) {
+                "cellular"
+            } else if path.usesInterfaceType(.wiredEthernet) {
+                "wired"
+            } else {
+                "other"
+            }
+            locationSnapshotStore.updateNetworkInterface(interface)
             guard path.status == .satisfied else { return }
             Task { @MainActor [weak self] in
                 self?.runLifecycleTask { model, context in
@@ -617,7 +895,11 @@ private final class PingScopeIOSAppModel: ObservableObject {
         if saveSelection {
             hostStore.save(hosts: hosts, selectedHostID: host.id, hostScope: .focused)
         }
-        controller = LiveMonitorSessionController(host: host, historyStore: historyStore)
+        controller = LiveMonitorSessionController(
+            host: host,
+            historyStore: historyStore,
+            historySampleEnricher: historyLocationService.snapshotStore.makeHistorySampleEnricher()
+        )
         snapshot = LiveMonitorSessionSnapshot(
             host: host,
             session: nil,
@@ -686,7 +968,11 @@ private final class PingScopeIOSAppModel: ObservableObject {
     }
 
     private func replaceRememberedFocusedHost(_ host: HostConfig) {
-        controller = LiveMonitorSessionController(host: host, historyStore: historyStore)
+        controller = LiveMonitorSessionController(
+            host: host,
+            historyStore: historyStore,
+            historySampleEnricher: historyLocationService.snapshotStore.makeHistorySampleEnricher()
+        )
         snapshot = LiveMonitorSessionSnapshot(
             host: host,
             session: nil,
@@ -715,15 +1001,12 @@ private final class PingScopeIOSAppModel: ObservableObject {
     }
 
     private func applyBackgroundKeepAlive() {
-        if backgroundKeepAliveEnabled, isMonitoringActive {
-            locationKeepAlive.start()
-        } else {
-            locationKeepAlive.stop()
-        }
-        backgroundKeepAliveStatus = locationKeepAlive.statusText(
-            isEnabled: backgroundKeepAliveEnabled,
-            isMonitoring: isMonitoringActive
+        historyLocationService.setState(
+            keepAliveEnabled: backgroundKeepAliveEnabled,
+            taggingEnabled: historyLocationTaggingEnabled,
+            monitoringActive: isMonitoringActive
         )
+        backgroundKeepAliveStatus = historyLocationService.statusText()
     }
 
     private func startMonitoring(duration: MonitorSessionDuration) async {
@@ -851,6 +1134,45 @@ private final class PingScopeIOSAppModel: ObservableObject {
         historySamples = samples
         rebuildGraphSamples()
         await publishWidgetSnapshot()
+    }
+
+    private func refreshRangedHistory(
+        selection: PingScopeIOSHistorySelection,
+        now: Date
+    ) async {
+        let result: PingScopeIOSHistoryLoadResult
+        if let historyStore {
+            guard let loaded = await historyLoader.load(
+                store: historyStore,
+                hostID: selection.hostID,
+                range: selection.range,
+                now: now
+            ) else {
+                return
+            }
+            result = loaded
+        } else {
+            result = PingScopeIOSHistoryLoadResult(
+                hostID: selection.hostID,
+                range: selection.range,
+                cutoff: selection.range.cutoff(endingAt: now),
+                endingAt: now,
+                samples: [],
+                chartReduction: HistoryChartReduction(samples: []),
+                isCollecting: false
+            )
+        }
+
+        guard snapshot.host.id == selection.hostID,
+              historyRange == selection.range else { return }
+        let thresholds = snapshot.host.thresholds
+        let presentation = await Task.detached(priority: .userInitiated) {
+            PingScopeIOSHistoryPresentation(loadResult: result, thresholds: thresholds)
+        }.value
+        // Host or range may change while the detached presentation work runs.
+        guard snapshot.host.id == selection.hostID,
+              historyRange == selection.range else { return }
+        historyPresentationState = .loaded(selection: selection, presentation: presentation)
     }
 
     private func refreshHistoryIfStale() async {
@@ -1200,108 +1522,5 @@ private struct UIApplicationBackgroundTaskClient: LiveMonitorBackgroundTaskClien
         await MainActor.run {
             UIApplication.shared.endBackgroundTask(UIBackgroundTaskIdentifier(rawValue: id.rawValue))
         }
-    }
-}
-
-@MainActor
-private final class BackgroundLocationKeepAliveController: NSObject, CLLocationManagerDelegate {
-    var onStatusChange: ((String) -> Void)?
-
-    private let manager = CLLocationManager()
-    private var isRunning = false
-
-    override init() {
-        super.init()
-        manager.delegate = self
-        manager.desiredAccuracy = kCLLocationAccuracyThreeKilometers
-        manager.distanceFilter = 1_000
-        manager.activityType = .other
-        manager.pausesLocationUpdatesAutomatically = false
-    }
-
-    func requestAlwaysAuthorization() {
-        switch manager.authorizationStatus {
-        case .notDetermined:
-            manager.requestWhenInUseAuthorization()
-        case .authorizedWhenInUse:
-            manager.requestAlwaysAuthorization()
-        case .restricted, .denied, .authorizedAlways:
-            notify()
-        @unknown default:
-            notify()
-        }
-    }
-
-    func start() {
-        guard isAlwaysAuthorized else {
-            notify()
-            return
-        }
-        guard !isRunning else {
-            return
-        }
-        isRunning = true
-        manager.allowsBackgroundLocationUpdates = true
-        manager.showsBackgroundLocationIndicator = true
-        manager.startUpdatingLocation()
-        notify()
-    }
-
-    func stop() {
-        guard isRunning else {
-            notify()
-            return
-        }
-        isRunning = false
-        manager.stopUpdatingLocation()
-        manager.allowsBackgroundLocationUpdates = false
-        manager.showsBackgroundLocationIndicator = false
-        notify()
-    }
-
-    func statusText(isEnabled: Bool, isMonitoring: Bool) -> String {
-        guard isEnabled else { return "Disabled" }
-        guard isAlwaysAuthorized else { return authorizationStatusText }
-        return isMonitoring && isRunning ? "Running while monitoring" : "Allowed; starts while monitoring"
-    }
-
-    nonisolated func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
-        Task { @MainActor in
-            if manager.authorizationStatus == .authorizedWhenInUse {
-                manager.requestAlwaysAuthorization()
-            }
-            notify()
-        }
-    }
-
-    nonisolated func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
-        Task { @MainActor in
-            onStatusChange?("Location keep alive error: \(error.localizedDescription)")
-        }
-    }
-
-    private var isAlwaysAuthorized: Bool {
-        manager.authorizationStatus == .authorizedAlways
-    }
-
-    private var authorizationStatusText: String {
-        switch manager.authorizationStatus {
-        case .notDetermined:
-            "Location permission not requested"
-        case .restricted:
-            "Location permission restricted"
-        case .denied:
-            "Location permission denied"
-        case .authorizedWhenInUse:
-            "Allow Always Location in Settings"
-        case .authorizedAlways:
-            isRunning ? "Running while monitoring" : "Allowed; starts while monitoring"
-        @unknown default:
-            "Location permission unknown"
-        }
-    }
-
-    private func notify() {
-        onStatusChange?(authorizationStatusText)
     }
 }

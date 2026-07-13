@@ -12,7 +12,8 @@ extension LiveMonitorSessionController: PingScopeIOSMultiHostSessionControlling 
 public protocol PingScopeIOSMultiHostSessionControllerFactory: Sendable {
     func makeController(
         for host: HostConfig,
-        historyStore: (any PingHistoryStore)?
+        historyStore: (any PingHistoryStore)?,
+        historySampleEnricher: @escaping PingScopeIOSHistorySampleEnricher
     ) async -> any PingScopeIOSMultiHostSessionControlling
 }
 
@@ -21,9 +22,14 @@ public struct DefaultPingScopeIOSMultiHostSessionControllerFactory: PingScopeIOS
 
     public func makeController(
         for host: HostConfig,
-        historyStore: (any PingHistoryStore)?
+        historyStore: (any PingHistoryStore)?,
+        historySampleEnricher: @escaping PingScopeIOSHistorySampleEnricher
     ) async -> any PingScopeIOSMultiHostSessionControlling {
-        LiveMonitorSessionController(host: host, historyStore: historyStore)
+        LiveMonitorSessionController(
+            host: host,
+            historyStore: historyStore,
+            historySampleEnricher: historySampleEnricher
+        )
     }
 }
 
@@ -94,6 +100,7 @@ public actor PingScopeIOSMultiHostSessionCoordinator {
     private let historyStore: (any PingHistoryStore)?
     private let controllerFactory: any PingScopeIOSMultiHostSessionControllerFactory
     private let now: @Sendable () -> Date
+    private let historySampleEnricher: PingScopeIOSHistorySampleEnricher
     private let lifecycleTransactions = PingScopeIOSMultiHostLifecycleTransactions()
     private var controllers: [UUID: ControllerEntry] = [:]
     private var orderedHostIDs: [UUID] = []
@@ -102,11 +109,13 @@ public actor PingScopeIOSMultiHostSessionCoordinator {
     public init(
         historyStore: (any PingHistoryStore)? = nil,
         controllerFactory: any PingScopeIOSMultiHostSessionControllerFactory = DefaultPingScopeIOSMultiHostSessionControllerFactory(),
-        now: @escaping @Sendable () -> Date = { Date() }
+        now: @escaping @Sendable () -> Date = { Date() },
+        historySampleEnricher: @escaping PingScopeIOSHistorySampleEnricher = { $0 }
     ) {
         self.historyStore = historyStore
         self.controllerFactory = controllerFactory
         self.now = now
+        self.historySampleEnricher = historySampleEnricher
     }
 
     public func start(duration: MonitorSessionDuration) async {
@@ -196,7 +205,11 @@ public actor PingScopeIOSMultiHostSessionCoordinator {
             }
             guard controllers[host.id] == nil else { continue }
 
-            let controller = await controllerFactory.makeController(for: host, historyStore: historyStore)
+            let controller = await controllerFactory.makeController(
+                for: host,
+                historyStore: historyStore,
+                historySampleEnricher: historySampleEnricher
+            )
             controllers[host.id] = ControllerEntry(host: host, controller: controller)
             if let aggregateSession, aggregateSession.isActive(at: reconciledAt) {
                 await controller.start(duration: aggregateSession.duration, at: aggregateSession.startedAt)

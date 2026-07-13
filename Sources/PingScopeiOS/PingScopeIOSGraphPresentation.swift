@@ -1,7 +1,6 @@
 import Foundation
 import PingScopeCore
 
-#if os(iOS)
 public struct PingScopeIOSGraphPresentation: Sendable, Equatable {
     public let renderData: PingScopeIOSLatencyGraphData
     public let stats: SampleStats
@@ -29,8 +28,16 @@ public struct PingScopeIOSLatencyGraphData: Sendable, Equatable {
     public let points: [PingScopeIOSLatencyGraphPoint]
 
     public init(samples: [PingResult], range: TimeRange, endDate: Date = Date()) {
+        self.init(
+            samples: samples,
+            startDate: endDate.addingTimeInterval(-range.duration),
+            endDate: endDate
+        )
+    }
+
+    public init(samples: [PingResult], startDate: Date, endDate: Date) {
         self.endDate = endDate
-        startDate = endDate.addingTimeInterval(-range.duration)
+        self.startDate = startDate
         var maximumLatency: Double?
         var points: [PingScopeIOSLatencyGraphPoint] = []
         for sample in samples where sample.timestamp >= startDate && sample.timestamp <= endDate {
@@ -41,5 +48,16 @@ public struct PingScopeIOSLatencyGraphData: Sendable, Equatable {
         self.points = points
         self.scale = LatencyGraphScale(maximumMilliseconds: maximumLatency)
     }
+
+    public init(historyPoints: [HistoryChartPoint], startDate: Date, endDate: Date) {
+        self.startDate = startDate
+        self.endDate = endDate
+        self.points = historyPoints.map {
+            PingScopeIOSLatencyGraphPoint(
+                timestamp: $0.timestamp,
+                latencyMilliseconds: $0.latencyMilliseconds
+            )
+        }
+        self.scale = LatencyGraphScale(maximumMilliseconds: historyPoints.map(\.latencyMilliseconds).max())
+    }
 }
-#endif
