@@ -160,6 +160,16 @@ public enum PingScopeIOSAllHostsMonitorPresentation {
         SampleStats(samples: graphRenderSeries(from: series, range: range, endDate: endDate).flatMap(\.samples))
     }
 
+    public static func combinedLatencyMilliseconds(
+        from rows: [PingScopeIOSHostRowSnapshot]
+    ) -> Double? {
+        let latencies = rows.compactMap { row in
+            row.isStale ? nil : row.latestLatencyMilliseconds
+        }
+        guard !latencies.isEmpty else { return nil }
+        return latencies.reduce(0, +) / Double(latencies.count)
+    }
+
     public static func rowPresentation(for row: PingScopeIOSHostRowSnapshot) -> PingScopeIOSAllHostsRowPresentation {
         let displayName = row.displayName.isEmpty ? "Unnamed Host" : row.displayName
         let isUnavailable = row.isStale || row.latestLatencyMilliseconds == nil
@@ -484,17 +494,10 @@ public struct PingScopeIOSRootView: View {
 
             Spacer(minLength: 8)
 
-            if let scrubbedLatencyMilliseconds {
-                latencyReading(milliseconds: scrubbedLatencyMilliseconds, size: 30)
-            } else {
-                VStack(alignment: .trailing, spacing: 2) {
-                    Text("\(allHostsMonitorRows.count)")
-                        .font(.system(size: 30, weight: .semibold, design: .monospaced))
-                    Text("HOSTS")
-                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                        .foregroundStyle(.secondary)
-                }
-            }
+            latencyReading(
+                milliseconds: scrubbedLatencyMilliseconds ?? allHostsCombinedLatencyMilliseconds,
+                size: 34
+            )
         }
     }
 
@@ -1027,6 +1030,10 @@ public struct PingScopeIOSRootView: View {
             hostScope: hostScope,
             allHostGraphSeries: allHostGraphSeries
         )
+    }
+
+    private var allHostsCombinedLatencyMilliseconds: Double? {
+        PingScopeIOSAllHostsMonitorPresentation.combinedLatencyMilliseconds(from: allHostsMonitorRows)
     }
 
     private var monitorStats: SampleStats {

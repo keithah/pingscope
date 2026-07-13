@@ -22,8 +22,9 @@ struct PingScopeLiveActivityWidget: Widget {
             DynamicIsland {
                 DynamicIslandExpandedRegion(.bottom) {
                     PingScopeLiveActivityRowsView(
-                        rows: rows(for: context),
+                        rows: dynamicIslandRows(for: context),
                         sessionText: sessionText(for: context),
+                        aggregateStatus: aggregateStatus(for: context),
                         density: .expanded
                     )
                     .padding(.horizontal, PingScopeLiveActivityLayout.expandedIslandHorizontalPadding)
@@ -33,32 +34,32 @@ struct PingScopeLiveActivityWidget: Widget {
                 statusDot(aggregateStatus(for: context), diameter: 7)
                     .accessibilityLabel("\(aggregateStatusDescription(for: context)) status")
             } compactTrailing: {
-                Text(sessionText(for: context))
+                Text(latencyText(for: context))
                     .font(.caption2.monospacedDigit())
                     .lineLimit(1)
                     .minimumScaleFactor(0.7)
-                    .frame(width: 30, alignment: .trailing)
-                    .accessibilityLabel("Session \(sessionText(for: context))")
+                    .frame(width: 38, alignment: .trailing)
+                    .accessibilityLabel("Latency \(latencyText(for: context))")
             } minimal: {
                 HStack(spacing: 2) {
                     statusDot(aggregateStatus(for: context), diameter: 6)
-                    Text(sessionText(for: context))
+                    Text(latencyText(for: context))
                         .font(.system(size: 9, weight: .semibold, design: .monospaced))
                         .lineLimit(1)
                         .minimumScaleFactor(0.55)
-                        .frame(width: 24, alignment: .leading)
+                        .frame(width: 26, alignment: .leading)
                 }
                 .frame(width: 34, height: 22)
                 .accessibilityElement(children: .ignore)
-                .accessibilityLabel("\(aggregateStatusDescription(for: context)) status, session \(sessionText(for: context))")
+                .accessibilityLabel("\(aggregateStatusDescription(for: context)) status, latency \(latencyText(for: context))")
             }
         }
     }
 
-    private func rows(
+    private func dynamicIslandRows(
         for context: ActivityViewContext<PingScopeLiveActivityAttributes>
     ) -> [PingScopeLiveActivityRowPresentation] {
-        PingScopeLiveActivityPresentation.rows(
+        PingScopeLiveActivityPresentation.dynamicIslandRows(
             attributes: context.attributes,
             contentState: context.state
         )
@@ -74,16 +75,22 @@ struct PingScopeLiveActivityWidget: Widget {
         )
     }
 
+    private func latencyText(
+        for context: ActivityViewContext<PingScopeLiveActivityAttributes>
+    ) -> String {
+        dynamicIslandRows(for: context).first?.latencyMilliseconds.map { "\($0)ms" } ?? "--"
+    }
+
     private func aggregateStatus(
         for context: ActivityViewContext<PingScopeLiveActivityAttributes>
     ) -> HealthStatus {
-        PingScopeLiveActivityPresentation.aggregateStatus(contentState: context.state)
+        PingScopeLiveActivityPresentation.dynamicIslandAggregateStatus(contentState: context.state)
     }
 
     private func aggregateStatusDescription(
         for context: ActivityViewContext<PingScopeLiveActivityAttributes>
     ) -> String {
-        PingScopeLiveActivityPresentation.aggregateStatusAccessibilityDescription(
+        PingScopeLiveActivityPresentation.dynamicIslandAggregateStatusAccessibilityDescription(
             contentState: context.state
         )
     }
@@ -103,6 +110,7 @@ private struct PingScopeLiveActivityView: View {
                 remainingSeconds: context.state.remainingSeconds,
                 isStale: context.state.isStale
             ),
+            aggregateStatus: PingScopeLiveActivityPresentation.aggregateStatus(contentState: context.state),
             density: .lockScreen
         )
         .padding(.horizontal, PingScopeLiveActivityLayout.lockScreenHorizontalPadding)
@@ -113,6 +121,7 @@ private struct PingScopeLiveActivityView: View {
 private struct PingScopeLiveActivityRowsView: View {
     let rows: [PingScopeLiveActivityRowPresentation]
     let sessionText: String
+    let aggregateStatus: HealthStatus
     let density: PingScopeLiveActivityRowDensity
 
     var body: some View {
@@ -120,12 +129,18 @@ private struct PingScopeLiveActivityRowsView: View {
             ForEach(rows.prefix(PingScopeLiveActivityAttributes.ContentState.hostRowLimit), id: \.hostID) { row in
                 PingScopeLiveActivityHostRowView(row: row, density: density)
             }
-            Text(sessionText)
-                .font(density.sessionFont)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .frame(maxWidth: .infinity, minHeight: density.sessionHeight, maxHeight: density.sessionHeight, alignment: .trailing)
-                .accessibilityLabel("Session \(sessionText)")
+            HStack(spacing: 4) {
+                statusDot(aggregateStatus, diameter: density.sessionDotDiameter)
+                Text(sessionText)
+                    .font(density.sessionFont)
+                    .lineLimit(1)
+            }
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 5)
+            .frame(minHeight: density.sessionHeight, maxHeight: density.sessionHeight)
+            .background(Color.secondary.opacity(0.1), in: Capsule())
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Session \(sessionText)")
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -153,9 +168,9 @@ private struct PingScopeLiveActivityHostRowView: View {
                     .truncationMode(.tail)
                     .minimumScaleFactor(0.75)
             }
-            .frame(width: density.identityWidth, alignment: .leading)
+            Spacer(minLength: 8)
 
-            PingScopeLiveActivitySparkline(samples: row.samples)
+            PingScopeLiveActivitySparkline(samples: row.samples, color: color(for: row.status))
                 .frame(width: density.sparklineWidth, height: density.sparklineHeight)
 
             Text(row.latencyText)
@@ -174,6 +189,7 @@ private struct PingScopeLiveActivityHostRowView: View {
 
 private struct PingScopeLiveActivitySparkline: View {
     let samples: [Int]
+    let color: Color
 
     var body: some View {
         GeometryReader { proxy in
@@ -184,7 +200,7 @@ private struct PingScopeLiveActivitySparkline: View {
             if points.count > 1 {
                 Path(LatencyCurve.smoothedPath(points: points, closed: false))
                     .stroke(
-                        Color.blue,
+                        color,
                         style: StrokeStyle(lineWidth: 1.5, lineCap: .round, lineJoin: .round)
                     )
             }
@@ -213,7 +229,7 @@ private enum PingScopeLiveActivityRowDensity {
 
     var columnSpacing: CGFloat {
         switch self {
-        case .lockScreen: 7
+        case .lockScreen: 10
         case .expanded: 6
         }
     }
@@ -225,24 +241,17 @@ private enum PingScopeLiveActivityRowDensity {
         }
     }
 
-    var identityWidth: CGFloat {
-        switch self {
-        case .lockScreen: 120
-        case .expanded: 112
-        }
-    }
-
     var sparklineWidth: CGFloat {
         switch self {
-        case .lockScreen: 62
-        case .expanded: 60
+        case .lockScreen: 58
+        case .expanded: 52
         }
     }
 
     var sparklineHeight: CGFloat {
         switch self {
-        case .lockScreen: 22
-        case .expanded: 20
+        case .lockScreen: 26
+        case .expanded: 22
         }
     }
 
@@ -285,6 +294,13 @@ private enum PingScopeLiveActivityRowDensity {
         switch self {
         case .lockScreen: PingScopeLiveActivityLayout.lockScreenSessionHeight
         case .expanded: PingScopeLiveActivityLayout.expandedIslandSessionHeight
+        }
+    }
+
+    var sessionDotDiameter: CGFloat {
+        switch self {
+        case .lockScreen: 5
+        case .expanded: 4
         }
     }
 }

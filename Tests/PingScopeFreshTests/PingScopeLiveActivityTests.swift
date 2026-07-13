@@ -185,6 +185,62 @@ final class PingScopeLiveActivityTests: XCTestCase {
         )
     }
 
+    func testDynamicIslandExcludesGatewayWhileLockScreenKeepsAllRows() {
+        let gatewaySnapshot = PingScopeIOSHostRowSnapshot(
+            host: HostConfig.defaultGatewayHost(address: "192.168.1.1"),
+            health: nil
+        )
+        XCTAssertTrue(gatewaySnapshot.isDefaultGateway)
+        XCTAssertTrue(PingScopeLiveActivityHostRow(snapshot: gatewaySnapshot).isDefaultGateway)
+
+        let dnsA = PingScopeLiveActivityHostRow(
+            hostID: UUID(), displayName: "Cloudflare", endpointCaption: "HTTPS 1.1.1.1",
+            status: .healthy, latestLatencyMilliseconds: 18, samples: [14, 18], isStale: false
+        )
+        let gateway = PingScopeLiveActivityHostRow(
+            hostID: UUID(), displayName: "Default Gateway", endpointCaption: "UDP 192.168.1.1",
+            status: .down, latestLatencyMilliseconds: nil, samples: [1, 2], isStale: false,
+            isDefaultGateway: true
+        )
+        let dnsB = PingScopeLiveActivityHostRow(
+            hostID: UUID(), displayName: "Google", endpointCaption: "TCP 8.8.8.8",
+            status: .degraded, latestLatencyMilliseconds: 72, samples: [50, 72], isStale: false
+        )
+        let state = makeContentState(mode: .allHosts, hostRows: [dnsA, gateway, dnsB])
+        let attributes = PingScopeLiveActivityAttributes(
+            host: HostConfig(displayName: "All Hosts", address: "1.1.1.1"),
+            duration: .continuous
+        )
+
+        let lockScreenRows = PingScopeLiveActivityPresentation.rows(
+            attributes: attributes,
+            contentState: state
+        )
+        let islandRows = PingScopeLiveActivityPresentation.dynamicIslandRows(
+            attributes: attributes,
+            contentState: state
+        )
+
+        XCTAssertEqual(lockScreenRows.map(\.displayName), ["Cloudflare", "Default Gateway", "Google"])
+        XCTAssertEqual(islandRows.map(\.displayName), ["Cloudflare", "Google"])
+        XCTAssertEqual(PingScopeLiveActivityPresentation.dynamicIslandAggregateStatus(contentState: state), .degraded)
+    }
+
+    func testLegacyHostRowPayloadDefaultsGatewayFlagToFalse() throws {
+        let row = makePayloadRow(index: 0, sampleCount: 2)
+        var encodedObject = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: JSONEncoder().encode(row)) as? [String: Any]
+        )
+        encodedObject.removeValue(forKey: "isDefaultGateway")
+
+        let decoded = try JSONDecoder().decode(
+            PingScopeLiveActivityHostRow.self,
+            from: JSONSerialization.data(withJSONObject: encodedObject)
+        )
+
+        XCTAssertFalse(decoded.isDefaultGateway)
+    }
+
     func testSessionPresentationUsesOneLiveOrRemainingLabel() {
         XCTAssertEqual(
             PingScopeLiveActivityPresentation.sessionText(duration: .continuous, remainingSeconds: 0),
@@ -273,7 +329,7 @@ final class PingScopeLiveActivityTests: XCTestCase {
 
         XCTAssertEqual(
             PingScopeLiveActivityLayout.maximumLockScreenContentHeight,
-            147
+            145
         )
         XCTAssertLessThanOrEqual(
             PingScopeLiveActivityLayout.maximumLockScreenContentHeight,
@@ -286,7 +342,7 @@ final class PingScopeLiveActivityTests: XCTestCase {
 
         XCTAssertEqual(
             PingScopeLiveActivityLayout.maximumExpandedIslandContentHeight,
-            125
+            124
         )
         XCTAssertLessThanOrEqual(
             PingScopeLiveActivityLayout.maximumExpandedIslandContentHeight,

@@ -5,6 +5,9 @@ import UIKit
 #endif
 
 enum WidgetStatusStyle {
+    static let degradedThresholdMS = 50.0
+    static let downThresholdMS = 100.0
+
     static var backgroundColor: Color {
         #if os(macOS)
         Color(nsColor: .controlBackgroundColor)
@@ -27,9 +30,19 @@ enum WidgetStatusStyle {
 
     static func color(for result: WidgetData.SimplifiedPingResult) -> Color {
         guard result.isSuccess, let latency = result.latencyMS else { return .red }
-        if latency < 50 { return .green }
-        if latency < 100 { return .yellow }
+        return ringColor(forLatency: latency)
+    }
+
+    static func ringColor(forLatency ms: Double?) -> Color {
+        guard let ms else { return .gray }
+        if ms < degradedThresholdMS { return .green }
+        if ms < downThresholdMS { return .yellow }
         return .red
+    }
+
+    static func ringProgress(forLatency ms: Double?) -> Double {
+        guard let ms, ms > 0 else { return 0 }
+        return min(ms / downThresholdMS, 1)
     }
 
     static func latencyText(for health: WidgetSnapshotData.HostHealth?) -> String {
@@ -37,6 +50,25 @@ enum WidgetStatusStyle {
             return "\(Int(latency.rounded()))ms"
         }
         return health?.failureReason ?? "No sample"
+    }
+}
+
+struct WidgetHealthRing<Center: View>: View {
+    let progress: Double
+    let color: Color
+    var lineWidth: CGFloat = 9
+    @ViewBuilder var center: () -> Center
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .stroke(Color.secondary.opacity(0.18), lineWidth: lineWidth)
+            Circle()
+                .trim(from: 0, to: min(max(progress, 0), 1))
+                .stroke(color, style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
+                .rotationEffect(.degrees(-90))
+            center()
+        }
     }
 }
 

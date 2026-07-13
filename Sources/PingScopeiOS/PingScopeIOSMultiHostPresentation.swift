@@ -33,6 +33,7 @@ public struct PingScopeIOSHostRowSnapshot: Equatable, Sendable {
     public let latestLatencyMilliseconds: Double?
     public let samples: [PingResult]
     public let isStale: Bool
+    public let isDefaultGateway: Bool
 
     public var reducedSamples: [PingResult] { samples }
 
@@ -50,7 +51,8 @@ public struct PingScopeIOSHostRowSnapshot: Equatable, Sendable {
         status: HealthStatus,
         latestLatencyMilliseconds: Double?,
         samples: [PingResult],
-        isStale: Bool
+        isStale: Bool,
+        isDefaultGateway: Bool = false
     ) {
         self.hostID = hostID
         self.displayName = displayName
@@ -59,6 +61,7 @@ public struct PingScopeIOSHostRowSnapshot: Equatable, Sendable {
         self.latestLatencyMilliseconds = latestLatencyMilliseconds
         self.samples = samples
         self.isStale = isStale
+        self.isDefaultGateway = isDefaultGateway
     }
 
     public init(
@@ -75,6 +78,7 @@ public struct PingScopeIOSHostRowSnapshot: Equatable, Sendable {
         self.latestLatencyMilliseconds = health?.latestResult?.latency?.milliseconds
         self.samples = PingScopeIOSLatencySampleReducer.reduce(samples, limit: sampleLimit)
         self.isStale = isStale
+        self.isDefaultGateway = host.isDefaultGateway
     }
 
     fileprivate func cappedForActivity() -> Self {
@@ -85,7 +89,8 @@ public struct PingScopeIOSHostRowSnapshot: Equatable, Sendable {
             status: status,
             latestLatencyMilliseconds: latestLatencyMilliseconds,
             samples: PingScopeIOSLatencySampleReducer.reduce(samples, limit: PingScopeIOSLatencySampleReducer.defaultLimit),
-            isStale: isStale
+            isStale: isStale,
+            isDefaultGateway: isDefaultGateway
         )
     }
 }

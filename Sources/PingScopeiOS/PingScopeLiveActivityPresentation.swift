@@ -8,14 +8,14 @@ public enum PingScopeLiveActivityLayout {
     public static let lockScreenVerticalPadding: CGFloat = 8
     public static let lockScreenRowHeight: CGFloat = 36
     public static let lockScreenStackSpacing: CGFloat = 3
-    public static let lockScreenSessionHeight: CGFloat = 14
+    public static let lockScreenSessionHeight: CGFloat = 12
 
     public static let expandedIslandSafeHeightLimit: CGFloat = 136
     public static let expandedIslandHorizontalPadding: CGFloat = 12
     public static let expandedIslandBottomPadding: CGFloat = 8
     public static let expandedIslandRowHeight: CGFloat = 32
     public static let expandedIslandStackSpacing: CGFloat = 3
-    public static let expandedIslandSessionHeight: CGFloat = 12
+    public static let expandedIslandSessionHeight: CGFloat = 11
 
     public static var maximumLockScreenContentHeight: CGFloat {
         lockScreenContentHeight(forHostRows: PingScopeLiveActivityAttributes.ContentState.hostRowLimit)
@@ -91,6 +91,29 @@ public enum PingScopeLiveActivityPresentation {
         attributes: PingScopeLiveActivityAttributes,
         contentState: PingScopeLiveActivityAttributes.ContentState
     ) -> [PingScopeLiveActivityRowPresentation] {
+        presentedRows(
+            attributes: attributes,
+            contentState: contentState,
+            allHostRows: contentState.hostRows
+        )
+    }
+
+    public static func dynamicIslandRows(
+        attributes: PingScopeLiveActivityAttributes,
+        contentState: PingScopeLiveActivityAttributes.ContentState
+    ) -> [PingScopeLiveActivityRowPresentation] {
+        presentedRows(
+            attributes: attributes,
+            contentState: contentState,
+            allHostRows: contentState.hostRows.filter { !$0.isDefaultGateway }
+        )
+    }
+
+    private static func presentedRows(
+        attributes: PingScopeLiveActivityAttributes,
+        contentState: PingScopeLiveActivityAttributes.ContentState,
+        allHostRows: [PingScopeLiveActivityHostRow]
+    ) -> [PingScopeLiveActivityRowPresentation] {
         switch contentState.mode {
         case .focused:
             let renderedStatus = displayStatus(contentState.status, isStale: contentState.isStale)
@@ -116,7 +139,7 @@ public enum PingScopeLiveActivityPresentation {
                 )
             ]
         case .allHosts:
-            return contentState.hostRows.map { row in
+            return allHostRows.map { row in
                 let renderedStatus = displayStatus(row.status, isStale: row.isStale)
                 return PingScopeLiveActivityRowPresentation(
                     hostID: row.hostID,
@@ -162,6 +185,30 @@ public enum PingScopeLiveActivityPresentation {
         contentState: PingScopeLiveActivityAttributes.ContentState
     ) -> String {
         accessibilityStatusDescription(contentState.status, isStale: contentState.isStale)
+    }
+
+    public static func dynamicIslandAggregateStatus(
+        contentState: PingScopeLiveActivityAttributes.ContentState
+    ) -> HealthStatus {
+        guard contentState.mode == .allHosts else {
+            return aggregateStatus(contentState: contentState)
+        }
+        let statuses = contentState.hostRows
+            .filter { !$0.isDefaultGateway }
+            .map { displayStatus($0.status, isStale: $0.isStale) }
+        if statuses.contains(.down) { return .down }
+        if statuses.contains(.degraded) { return .degraded }
+        if statuses.contains(.healthy) { return .healthy }
+        return .noData
+    }
+
+    public static func dynamicIslandAggregateStatusAccessibilityDescription(
+        contentState: PingScopeLiveActivityAttributes.ContentState
+    ) -> String {
+        guard contentState.mode == .allHosts else {
+            return aggregateStatusAccessibilityDescription(contentState: contentState)
+        }
+        return dynamicIslandAggregateStatus(contentState: contentState).accessibilityDescription
     }
 
     private static func visibleLatency(

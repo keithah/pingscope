@@ -290,6 +290,21 @@ final class PingScopeIOSMultiHostPresentationTests: XCTestCase {
         XCTAssertEqual(stats.maximumMilliseconds, 10)
     }
 
+    func testAllHostsCombinedLatencyAveragesLatestUsableRowsIncludingGateway() {
+        let dnsA = makeLatencyRow(milliseconds: 20)
+        let dnsB = makeLatencyRow(milliseconds: 40)
+        let gateway = makeLatencyRow(milliseconds: 3, tier: .localGateway)
+        let stale = makeLatencyRow(milliseconds: 1_000, isStale: true)
+
+        let combined = PingScopeIOSAllHostsMonitorPresentation.combinedLatencyMilliseconds(
+            from: [dnsA, dnsB, gateway, stale]
+        )
+
+        XCTAssertEqual(combined ?? 0, 21, accuracy: 0.001)
+        XCTAssertTrue(gateway.isDefaultGateway)
+        XCTAssertNil(PingScopeIOSAllHostsMonitorPresentation.combinedLatencyMilliseconds(from: [stale]))
+    }
+
     func testStaleRowPresentationShowsUnavailableWithoutDroppingGraphSamples() {
         let host = HostConfig(displayName: "Router", address: "192.168.1.1", method: .tcp)
         let samples = makeSuccessfulResults(count: 3, hostID: host.id)
@@ -327,6 +342,17 @@ final class PingScopeIOSMultiHostPresentationTests: XCTestCase {
         let host = HostConfig(displayName: "Host", address: "host.example")
         var health = HostHealth(hostID: host.id, thresholds: host.thresholds)
         health.status = status
+        return PingScopeIOSHostRowSnapshot(host: host, health: health, isStale: isStale)
+    }
+
+    private func makeLatencyRow(
+        milliseconds: Double,
+        tier: NetworkTier? = nil,
+        isStale: Bool = false
+    ) -> PingScopeIOSHostRowSnapshot {
+        let host = HostConfig(displayName: "Host", address: "host.example", tier: tier)
+        var health = HostHealth(hostID: host.id, thresholds: host.thresholds)
+        health.ingest(.success(hostID: host.id, latency: .milliseconds(milliseconds)))
         return PingScopeIOSHostRowSnapshot(host: host, health: health, isStale: isStale)
     }
 }

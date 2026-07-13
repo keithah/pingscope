@@ -25,6 +25,7 @@ public struct PingScopeLiveActivityHostRow: Codable, Hashable, Sendable {
     public var latestLatencyMilliseconds: Int?
     public let samples: [Int]
     public var isStale: Bool
+    public let isDefaultGateway: Bool
 
     public init(
         hostID: UUID,
@@ -33,7 +34,8 @@ public struct PingScopeLiveActivityHostRow: Codable, Hashable, Sendable {
         status: HealthStatus,
         latestLatencyMilliseconds: Int?,
         samples: [Int],
-        isStale: Bool
+        isStale: Bool,
+        isDefaultGateway: Bool = false
     ) {
         self.hostID = hostID
         self.displayName = boundedActivityPayloadString(
@@ -50,6 +52,7 @@ public struct PingScopeLiveActivityHostRow: Codable, Hashable, Sendable {
         self.latestLatencyMilliseconds = latestLatencyMilliseconds
         self.samples = Array(samples.prefix(Self.sampleLimit))
         self.isStale = isStale
+        self.isDefaultGateway = isDefaultGateway
     }
 
     public init(snapshot: PingScopeIOSHostRowSnapshot) {
@@ -61,7 +64,8 @@ public struct PingScopeLiveActivityHostRow: Codable, Hashable, Sendable {
             latestLatencyMilliseconds: snapshot.latestLatencyMilliseconds.map { Int($0.rounded()) },
             samples: PingScopeIOSLatencySampleReducer.reduce(snapshot.samples, limit: Self.sampleLimit)
                 .compactMap { $0.latency.map { Int($0.milliseconds.rounded()) } },
-            isStale: snapshot.isStale
+            isStale: snapshot.isStale,
+            isDefaultGateway: snapshot.isDefaultGateway
         )
     }
 
@@ -73,6 +77,7 @@ public struct PingScopeLiveActivityHostRow: Codable, Hashable, Sendable {
         case latestLatencyMilliseconds
         case samples
         case isStale
+        case isDefaultGateway
     }
 
     public init(from decoder: any Decoder) throws {
@@ -84,7 +89,8 @@ public struct PingScopeLiveActivityHostRow: Codable, Hashable, Sendable {
             status: try container.decode(HealthStatus.self, forKey: .status),
             latestLatencyMilliseconds: try container.decodeIfPresent(Int.self, forKey: .latestLatencyMilliseconds),
             samples: try container.decode([Int].self, forKey: .samples),
-            isStale: try container.decode(Bool.self, forKey: .isStale)
+            isStale: try container.decode(Bool.self, forKey: .isStale),
+            isDefaultGateway: try container.decodeIfPresent(Bool.self, forKey: .isDefaultGateway) ?? false
         )
     }
 
