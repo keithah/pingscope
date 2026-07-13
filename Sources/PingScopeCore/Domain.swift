@@ -221,7 +221,16 @@ public struct HostConfig: Identifiable, Codable, Equatable, Sendable {
     }
 
     public static func sanitizedHosts(_ hosts: [HostConfig], limit: Int = 64) -> [HostConfig] {
-        Array(hosts.compactMap { $0.sanitizedForStorage() }.prefix(max(1, limit)))
+        // Duplicate IDs (corrupt or hand-migrated blobs) must not survive: hosts
+        // are keyed by ID in coordinators and history, and keyed dictionaries
+        // built with uniqueKeysWithValues trap on duplicates.
+        var seenIDs = Set<UUID>()
+        let uniqueHosts = hosts.compactMap { host -> HostConfig? in
+            guard let sanitized = host.sanitizedForStorage(),
+                  seenIDs.insert(sanitized.id).inserted else { return nil }
+            return sanitized
+        }
+        return Array(uniqueHosts.prefix(max(1, limit)))
     }
 
     private static func isLocalIPv6Literal(_ address: String) -> Bool {
@@ -230,6 +239,13 @@ public struct HostConfig: Identifiable, Codable, Equatable, Sendable {
         if literal.hasPrefix("fe80:") { return true }
         if literal.hasPrefix("fc") || literal.hasPrefix("fd") { return true }
         return false
+    }
+}
+
+public extension HostConfig {
+    /// Stable gateway classification for UI scopes that intentionally omit the router.
+    var isDefaultGateway: Bool {
+        tier == .localGateway || displayName == "Default Gateway"
     }
 }
 

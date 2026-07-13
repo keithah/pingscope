@@ -8,6 +8,17 @@ import SwiftUI
 import UIKit
 import WidgetKit
 
+@MainActor
+private struct ActivityKitLiveActivityDirectory: PingScopeIOSLiveActivityDirectory {
+    var currentActivities: [Activity<PingScopeLiveActivityAttributes>] {
+        Activity<PingScopeLiveActivityAttributes>.activities
+    }
+
+    func end(_ activity: Activity<PingScopeLiveActivityAttributes>) async {
+        await activity.end(nil, dismissalPolicy: .immediate)
+    }
+}
+
 @main
 struct PingScopeIOSApp: App {
     @Environment(\.scenePhase) private var scenePhase
@@ -27,7 +38,10 @@ struct PingScopeIOSApp: App {
                 gatewayDetectionText: model.gatewayDetectionText,
                 backgroundKeepAliveEnabled: model.backgroundKeepAliveEnabled,
                 backgroundKeepAliveStatus: model.backgroundKeepAliveStatus,
-                displayMode: model.displayMode.resolvedForHostScope(showsAllHosts: model.hostScope == .allHosts),
+                // Pass the raw stored preference: the view derives the effective
+                // mode itself (effectiveDisplayMode), and pre-resolving here made
+                // the Display picker show the coerced mode in All Hosts scope.
+                displayMode: model.displayMode,
                 hostScope: model.hostScope,
                 allHostRows: model.allHostRows,
                 allHostGraphSeries: model.allHostGraphSeries,
@@ -159,13 +173,19 @@ private final class PingScopeIOSAppModel: ObservableObject {
         self.graphPresentation = PingScopeIOSGraphPresentation(samples: snapshot.series.samples, range: selectedGraphRange)
         Task { @MainActor [weak self] in
             self?.runLifecycleTask { model, context in
+                // Nothing owns an activity yet at launch, so anything the system
+                // still shows is an orphan from a crashed or force-quit process;
+                // left alone it lingers frozen for hours and a fresh request
+                // would stack a second activity on the lock screen.
+                await model.endOrphanedLiveActivities()
+                guard model.isCurrentLifecycle(context) else { return }
                 if model.hostScope == .allHosts {
                     await model.multiHostCoordinator.reconcile(hosts: model.hosts)
                     guard model.isCurrentLifecycle(context) else { return }
                     await model.refreshSnapshot()
-                } else {
-                    await model.refreshHistory(force: true)
+                    guard model.isCurrentLifecycle(context) else { return }
                 }
+                await model.refreshHistory(force: true)
             }
         }
         locationKeepAlive.onStatusChange = { [weak self] status in
@@ -321,9 +341,7 @@ private final class PingScopeIOSAppModel: ObservableObject {
             guard model.isCurrentLifecycle(context) else { return }
             await model.refreshSnapshot()
             guard model.isCurrentLifecycle(context) else { return }
-            if model.hostScope == .focused {
-                await model.refreshHistory(force: true)
-            }
+            await model.refreshHistory(force: true)
             guard model.isCurrentLifecycle(context) else { return }
             await model.endLiveActivity()
             guard model.isCurrentLifecycle(context) else { return }
@@ -440,9 +458,9 @@ private final class PingScopeIOSAppModel: ObservableObject {
                     break
                 }
                 await updateLiveActivity()
-                if hostScope == .focused {
-                    await refreshHistoryIfStale()
-                }
+                // History backs the History tab in both scopes; the query keys
+                // on the remembered focused host, which stays valid in All Hosts.
+                await refreshHistoryIfStale()
                 try? await Task.sleep(for: .seconds(1))
             }
         }
@@ -453,9 +471,8 @@ private final class PingScopeIOSAppModel: ObservableObject {
         if hostScope == .allHosts {
             await stopMonitoring(reason: .completed)
             await refreshSnapshot()
-        } else {
-            await refreshHistory(force: true)
         }
+        await refreshHistory(force: true)
         await backgroundRuntime.end()
         await endLiveActivity()
         applyBackgroundKeepAlive()
@@ -558,7 +575,7 @@ private final class PingScopeIOSAppModel: ObservableObject {
     }
 
     private var defaultGatewayHostIndex: Array<HostConfig>.Index? {
-        hosts.firstIndex { $0.displayName == "Default Gateway" }
+        hosts.firstIndex(where: \.isDefaultGateway)
     }
 
     private var hasDefaultGatewayHost: Bool {
@@ -588,7 +605,10 @@ private final class PingScopeIOSAppModel: ObservableObject {
             await controller.stop(reason: .userStopped)
         }
         guard isCurrentLifecycle(context) else { return }
-        if activityDecision == .restart || liveActivity != nil {
+        // Honor the decision contract: .update keeps the existing activity alive
+        // (startLiveActivity routes an existing activity to update()); ending it
+        // here would flicker the lock screen on a same-host reselect.
+        if activityDecision != .update, liveActivity != nil {
             await endLiveActivity()
         }
         guard isCurrentLifecycle(context) else { return }
@@ -636,7 +656,8 @@ private final class PingScopeIOSAppModel: ObservableObject {
         guard isCurrentLifecycle(context) else { return }
         await controller.stop(reason: .userStopped)
         guard isCurrentLifecycle(context) else { return }
-        if activityDecision == .restart || liveActivity != nil {
+        // Honor the decision contract: .update keeps the existing activity alive.
+        if activityDecision != .update, liveActivity != nil {
             await endLiveActivity()
         }
         guard isCurrentLifecycle(context) else { return }
@@ -726,7 +747,13 @@ private final class PingScopeIOSAppModel: ObservableObject {
         if hostScope == .allHosts {
             await refreshAllHostsSnapshot()
         } else {
-            snapshot = await controller.snapshot()
+            let activeController = controller
+            let refreshedSnapshot = await activeController.snapshot()
+            // A host switch may have replaced the controller while we were
+            // suspended (the refresh loop is not serialized with lifecycle ops);
+            // a stale snapshot must not overwrite the new host's state.
+            guard activeController === controller else { return }
+            snapshot = refreshedSnapshot
             rebuildGraphSamples()
             await publishWidgetSnapshot()
         }
@@ -766,6 +793,9 @@ private final class PingScopeIOSAppModel: ObservableObject {
 
     private func refreshAllHostsSnapshot() async {
         let snapshots = await multiHostCoordinator.orderedSnapshots()
+        // A scope switch may have landed while we were suspended; stale
+        // all-hosts data must not overwrite the focused presentation.
+        guard hostScope == .allHosts else { return }
         let presentationEndDate = Date()
         allHostRows = snapshots.map { snapshot in
             PingScopeIOSHostRowSnapshot(
@@ -779,6 +809,9 @@ private final class PingScopeIOSAppModel: ObservableObject {
             PingScopeIOSHostGraphSeries(hostID: snapshot.host.id, samples: snapshot.series.samples)
         }
         allHostsPresentationEndDate = presentationEndDate
+        // The widget must keep updating in All Hosts scope too; without this the
+        // app-group snapshot freezes at the moment of the scope switch.
+        await publishWidgetSnapshot(allHostsSnapshots: snapshots)
 
         guard let session = await multiHostCoordinator.session() else {
             allHostsSession = nil
@@ -810,7 +843,12 @@ private final class PingScopeIOSAppModel: ObservableObject {
             return
         }
         let cutoff = Date().addingTimeInterval(-24 * 60 * 60)
-        historySamples = await historyStore.latestSamples(hostID: snapshot.host.id, since: cutoff, limit: 100)
+        let requestedHostID = snapshot.host.id
+        let samples = await historyStore.latestSamples(hostID: requestedHostID, since: cutoff, limit: 100)
+        // Drop the result if a host switch happened while we were suspended:
+        // the 30s throttle would otherwise pin the wrong host's history.
+        guard snapshot.host.id == requestedHostID else { return }
+        historySamples = samples
         rebuildGraphSamples()
         await publishWidgetSnapshot()
     }
@@ -832,7 +870,34 @@ private final class PingScopeIOSAppModel: ObservableObject {
         )
     }
 
-    private func publishWidgetSnapshot() async {
+    private func publishWidgetSnapshot(allHostsSnapshots: [LiveMonitorSessionSnapshot]? = nil) async {
+        let widgetSnapshot: WidgetSnapshot
+        if hostScope == .allHosts {
+            let snapshots: [LiveMonitorSessionSnapshot]
+            if let allHostsSnapshots {
+                snapshots = allHostsSnapshots
+            } else {
+                snapshots = await multiHostCoordinator.orderedSnapshots()
+            }
+            widgetSnapshot = makeAllHostsWidgetSnapshot(snapshots: snapshots)
+        } else {
+            widgetSnapshot = makeFocusedWidgetSnapshot()
+        }
+        let publishDecision = widgetPublishPolicy.decision(
+            for: widgetSnapshot,
+            previousSnapshot: lastPublishedWidgetSnapshot,
+            lastTimelineReloadAt: lastWidgetTimelineReloadAt
+        )
+        guard publishDecision.shouldSave else { return }
+        lastPublishedWidgetSnapshot = widgetSnapshot
+        guard await widgetSnapshotStore.save(widgetSnapshot) else { return }
+        if publishDecision.shouldReloadTimeline {
+            lastWidgetTimelineReloadAt = widgetSnapshot.generatedAt
+            WidgetCenter.shared.reloadAllTimelines()
+        }
+    }
+
+    private func makeFocusedWidgetSnapshot() -> WidgetSnapshot {
         let host = snapshot.host
         let recentResults = presenter.mergedSamples(
             history: historySamples,
@@ -841,7 +906,7 @@ private final class PingScopeIOSAppModel: ObservableObject {
         )
         .suffix(60)
 
-        let widgetSnapshot = WidgetSnapshot(
+        return WidgetSnapshot(
             primaryHostID: host.id,
             hosts: [
                 WidgetHost(
@@ -867,18 +932,41 @@ private final class PingScopeIOSAppModel: ObservableObject {
             networkStatus: .connected,
             generatedAt: Date()
         )
-        let publishDecision = widgetPublishPolicy.decision(
-            for: widgetSnapshot,
-            previousSnapshot: lastPublishedWidgetSnapshot,
-            lastTimelineReloadAt: lastWidgetTimelineReloadAt
-        )
-        guard publishDecision.shouldSave else { return }
-        lastPublishedWidgetSnapshot = widgetSnapshot
-        guard await widgetSnapshotStore.save(widgetSnapshot) else { return }
-        if publishDecision.shouldReloadTimeline {
-            lastWidgetTimelineReloadAt = widgetSnapshot.generatedAt
-            WidgetCenter.shared.reloadAllTimelines()
+    }
+
+    private func makeAllHostsWidgetSnapshot(snapshots: [LiveMonitorSessionSnapshot]) -> WidgetSnapshot {
+        let hosts = snapshots.map { entry in
+            WidgetHost(
+                id: entry.host.id,
+                displayName: entry.host.displayName,
+                address: entry.host.address,
+                method: entry.host.method,
+                port: entry.host.port,
+                isPrimary: entry.host.id == snapshot.host.id
+            )
         }
+        let health = snapshots.map { entry in
+            WidgetHostHealth(
+                hostID: entry.host.id,
+                status: entry.health.status,
+                latencyMilliseconds: entry.health.latestResult?.latency?.milliseconds,
+                consecutiveFailureCount: entry.health.consecutiveFailureCount,
+                failureReason: entry.health.latestResult?.failureReason,
+                latestResultAt: entry.health.latestResult?.timestamp
+            )
+        }
+        let recentResults = snapshots
+            .flatMap { $0.series.samples.suffix(60) }
+            .sorted { $0.timestamp < $1.timestamp }
+            .suffix(60)
+        return WidgetSnapshot(
+            primaryHostID: snapshot.host.id,
+            hosts: hosts,
+            health: health,
+            recentSamples: recentResults.map(WidgetSample.init(result:)),
+            networkStatus: .connected,
+            generatedAt: Date()
+        )
     }
 
     private func beginBackgroundRuntimeIfNeeded(originatingAt sceneEpoch: PingScopeIOSLifecycleSceneEpoch) async {
@@ -897,13 +985,19 @@ private final class PingScopeIOSAppModel: ObservableObject {
         guard isCurrentLifecycle(context) else { return }
         await refreshSnapshot()
         guard isCurrentLifecycle(context) else { return }
-        if hostScope == .focused {
-            await refreshHistory(force: true)
-            guard isCurrentLifecycle(context) else { return }
-        }
+        await refreshHistory(force: true)
+        guard isCurrentLifecycle(context) else { return }
         await endLiveActivity()
         guard isCurrentLifecycle(context) else { return }
         applyBackgroundKeepAlive()
+    }
+
+    private func endOrphanedLiveActivities() async {
+        guard liveActivity == nil else { return }
+        let directory = ActivityKitLiveActivityDirectory()
+        for orphan in directory.currentActivities {
+            await directory.end(orphan)
+        }
     }
 
     private func startLiveActivity(duration: MonitorSessionDuration) async {
@@ -918,11 +1012,15 @@ private final class PingScopeIOSAppModel: ObservableObject {
             }
             let state = liveActivityContentState(session: session)
             let staleDate = session.scheduledEndAt
-            let requestedActivity = try Activity.request(
-                attributes: attributes,
-                content: ActivityContent(state: state, staleDate: staleDate),
-                pushType: nil
-            )
+            let requestedActivity = try await PingScopeIOSLiveActivityStartup.requestReplacingOrphans(
+                in: ActivityKitLiveActivityDirectory()
+            ) {
+                try Activity.request(
+                    attributes: attributes,
+                    content: ActivityContent(state: state, staleDate: staleDate),
+                    pushType: nil
+                )
+            }
             let lease = await lifecycleHarness.claimActivity()
             liveActivity = requestedActivity
             liveActivityLease = lease
@@ -932,9 +1030,23 @@ private final class PingScopeIOSAppModel: ObservableObject {
     }
 
     private func updateLiveActivity() async {
+        await releaseLiveActivityIfDefunct()
         guard let liveActivity, let session = presentedSession else { return }
         let state = liveActivityContentState(session: session)
         await liveActivity.update(ActivityContent(state: state, staleDate: session.scheduledEndAt))
+    }
+
+    /// A user-dismissed or system-ended activity never notifies us; holding its
+    /// reference would pin the availability decision to `.update` on a dead
+    /// activity for the rest of the session, so a fresh one is never requested.
+    private func releaseLiveActivityIfDefunct() async {
+        guard let activity = liveActivity,
+              activity.activityState == .dismissed || activity.activityState == .ended else { return }
+        if let lease = liveActivityLease {
+            _ = await lifecycleHarness.clearActivity(ifCurrent: lease)
+        }
+        liveActivity = nil
+        liveActivityLease = nil
     }
 
     private func ensureLiveActivityForCurrentSession() async {
@@ -943,6 +1055,7 @@ private final class PingScopeIOSAppModel: ObservableObject {
     }
 
     private func ensureLiveActivityForPresentedSession() async {
+        await releaseLiveActivityIfDefunct()
         let session = presentedSession
         let decision = PingScopeIOSLiveActivityAvailabilityDecision.decide(
             isSessionActive: session.map { $0.phase() != .ended } ?? false,

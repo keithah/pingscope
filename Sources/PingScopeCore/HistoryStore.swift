@@ -83,6 +83,8 @@ public final class SQLiteHistoryStore: PingHistoryStore, @unchecked Sendable {
 }
 
 private final class SQLiteHistoryWorker: @unchecked Sendable {
+    /// Upper bound for a stored latency value; larger REALs are treated as corrupt.
+    static let maxStoredLatencyMilliseconds: Double = 3_600_000
     private let queue: DispatchQueue
     private let url: URL
     private let retention: Duration
@@ -129,7 +131,11 @@ private final class SQLiteHistoryWorker: @unchecked Sendable {
         try insert(results)
         if let newestTimestamp = results.max(by: { $0.timestamp < $1.timestamp })?.timestamp,
            shouldPrune(at: newestTimestamp) {
-            try pruneSync(olderThan: newestTimestamp.addingTimeInterval(-retention.seconds))
+            // Clamp to the wall clock so a single future-stamped sample (forward
+            // clock jump, bad NTP) cannot drag the cutoff forward and wipe every
+            // host's recent history.
+            let pruneAnchor = min(newestTimestamp, Date())
+            try pruneSync(olderThan: pruneAnchor.addingTimeInterval(-retention.seconds))
             lastPruneAttempt = newestTimestamp
         }
     }
@@ -546,7 +552,15 @@ private final class SQLiteHistoryWorker: @unchecked Sendable {
         if sqlite3_column_type(statement, 6) == SQLITE_NULL {
             latency = nil
         } else {
-            latency = .milliseconds(sqlite3_column_double(statement, 6))
+            // A corrupt or externally edited row (NaN/Infinity/huge REAL) would trap
+            // converting to Duration's Int128 attoseconds — and re-trap on every read.
+            let latencyMilliseconds = sqlite3_column_double(statement, 6)
+            if latencyMilliseconds.isFinite, latencyMilliseconds >= 0,
+               latencyMilliseconds <= Self.maxStoredLatencyMilliseconds {
+                latency = .milliseconds(latencyMilliseconds)
+            } else {
+                latency = nil
+            }
         }
         let failureReason = text(at: 7, in: statement).flatMap(FailureReason.init(rawValue:))
         let metadata: ProbeMetadata

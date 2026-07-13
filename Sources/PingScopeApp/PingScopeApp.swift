@@ -78,9 +78,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         CommandLine.arguments.contains("-windowed")
     }
 
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        // Await the runtime shutdown (history flush included) before letting the
+        // process exit; a fire-and-forget stop loses the write buffer's pending
+        // samples on every quit. The watchdog task bounds the wait so a wedged
+        // flush cannot block quitting; a duplicate reply is ignored by AppKit.
+        let model = model
+        Task { @MainActor in
+            await model.stopAndFlush()
+            NSApp.reply(toApplicationShouldTerminate: true)
+        }
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(3))
+            NSApp.reply(toApplicationShouldTerminate: true)
+        }
+        return .terminateLater
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
         removePowerObservers()
-        model.stop()
         releaseSingleInstanceLock()
     }
 

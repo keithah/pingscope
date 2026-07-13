@@ -172,12 +172,15 @@ final class PingScopePresentationViewModelTests: XCTestCase {
         model.widgetsEnabled = true
         let host = HostConfig(displayName: "Edge", address: "1.1.1.1")
 
+        // The second snapshot must be a genuine widget-state change (status /
+        // failure reason): latency-only changes are volatile per-ping noise and
+        // are deliberately absorbed by the publish throttle.
         model.publishWidgetSnapshot(runtimeSnapshot(host: host, latencyMilliseconds: 12))
-        model.publishWidgetSnapshot(runtimeSnapshot(host: host, latencyMilliseconds: 34))
+        model.publishWidgetSnapshot(runtimeSnapshot(host: host, latencyMilliseconds: 34, isFailure: true))
         await model.widgetSnapshotPublishTask?.value
 
         let saved = await model.widgetSnapshotStore?.load()
-        XCTAssertEqual(saved?.health.first?.latencyMilliseconds, 34)
+        XCTAssertEqual(saved?.health.first?.failureReason, .timeout)
     }
 
     func testGatewayObservationEnablesLocalNetworkAndSyncsResolvedHost() {
@@ -207,12 +210,25 @@ final class PingScopePresentationViewModelTests: XCTestCase {
         XCTAssertTrue(model.allowsLocalNetworkProbes)
     }
 
-    private func runtimeSnapshot(host: HostConfig, latencyMilliseconds: Double) -> RuntimeSnapshot {
-        let result = PingResult.success(
-            hostID: host.id,
-            latency: .milliseconds(latencyMilliseconds),
-            timestamp: Date(timeIntervalSince1970: latencyMilliseconds)
-        ).withHostMetadata(from: host)
+    private func runtimeSnapshot(
+        host: HostConfig,
+        latencyMilliseconds: Double,
+        isFailure: Bool = false
+    ) -> RuntimeSnapshot {
+        let result: PingResult
+        if isFailure {
+            result = PingResult.failure(
+                hostID: host.id,
+                reason: .timeout,
+                timestamp: Date(timeIntervalSince1970: latencyMilliseconds)
+            ).withHostMetadata(from: host)
+        } else {
+            result = PingResult.success(
+                hostID: host.id,
+                latency: .milliseconds(latencyMilliseconds),
+                timestamp: Date(timeIntervalSince1970: latencyMilliseconds)
+            ).withHostMetadata(from: host)
+        }
         var health = HostHealth(hostID: host.id)
         health.ingest(result)
         var series = SampleSeries(hostID: host.id)

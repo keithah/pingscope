@@ -86,7 +86,11 @@ public final class PingScopeIOSHostStore: @unchecked Sendable {
         let stored = defaults.data(forKey: hostsKey)
         if let stored {
             do {
-                let hosts = try JSONDecoder().decode([HostConfig].self, from: stored)
+                let decoded = try JSONDecoder().decode([HostConfig].self, from: stored)
+                // Mirror save(): a corrupt blob (duplicate IDs, invalid hosts) must
+                // not flow into UI/coordinator keying. Sanitizing here does not
+                // write back, so the stored blob stays intact either way.
+                let hosts = HostConfig.sanitizedHosts(decoded)
                 if !hosts.isEmpty {
                     return hosts
                 }

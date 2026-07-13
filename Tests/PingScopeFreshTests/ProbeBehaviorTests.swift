@@ -142,6 +142,18 @@ final class ProbeBehaviorTests: XCTestCase {
         XCTAssertEqual(result.failureReason, .networkUnavailable)
     }
 
+    func testStarlinkProbeRejectsLatencyAboveReportedMaximum() async {
+        let probe = StarlinkProbe(statusClient: StubStarlinkStatusClient(status: StarlinkStatus(
+            popPingLatencyMilliseconds: StarlinkProbe.maxReportedLatencyMilliseconds + 1,
+            telemetry: StarlinkTelemetry(state: "CONNECTED")
+        )))
+
+        let result = await probe.measure(.defaultStarlinkDish)
+
+        XCTAssertNil(result.latency)
+        XCTAssertEqual(result.failureReason, .networkUnavailable)
+    }
+
     func testNetworkProbeResolvesWhenCancelledBeforeStart() async {
         // Cancellation delivered before connection.start() runs the onCancel
         // handler ahead of the operation body. A never-started NWConnection

@@ -31,6 +31,31 @@ final class HistoryStoreTests: XCTestCase {
         XCTAssertEqual(samples[1].metadata.note, "late")
     }
 
+    func testSQLiteHistoryStoreRejectsCorruptStoredLatenciesWithoutTrapping() async throws {
+        let url = temporaryHistoryURL()
+        let host = HostConfig(displayName: "Example", address: "example.com")
+        let store = SQLiteHistoryStore(url: url)
+        let base = Date()
+        await store.append(.success(
+            hostID: host.id,
+            latency: .milliseconds(10),
+            timestamp: base
+        ).withHostMetadata(from: host))
+
+        try insertRawLatencies(
+            [-1, 3_600_001, .infinity],
+            host: host,
+            startingAt: base.addingTimeInterval(1),
+            url: url
+        )
+
+        let samples = await store.samples(hostID: host.id, since: base, limit: 10)
+
+        XCTAssertEqual(samples.count, 4)
+        XCTAssertNotNil(samples[0].latency)
+        XCTAssertTrue(samples.dropFirst().allSatisfy { $0.latency == nil })
+    }
+
     func testSQLiteHistoryStorePersistsStarlinkMetadata() async throws {
         let url = temporaryHistoryURL()
         let host = HostConfig.defaultStarlinkDish
@@ -106,6 +131,34 @@ final class HistoryStoreTests: XCTestCase {
         let samples = await store.samples(hostID: hostID, since: base.addingTimeInterval(-10), limit: 10)
 
         XCTAssertEqual(samples.map { Int($0.latency?.milliseconds ?? 0) }, [20])
+    }
+
+    func testSQLiteHistoryStoreFutureTimestampDoesNotPruneOtherHostsRecentHistory() async throws {
+        let url = temporaryHistoryURL()
+        let recentHost = HostConfig(displayName: "Recent", address: "recent.example.com")
+        let futureHost = HostConfig(displayName: "Future", address: "future.example.com")
+        let now = Date()
+        let store = SQLiteHistoryStore(url: url, retention: .seconds(60))
+
+        await store.append(.success(
+            hostID: recentHost.id,
+            latency: .milliseconds(10),
+            timestamp: now.addingTimeInterval(-30)
+        ).withHostMetadata(from: recentHost))
+        await store.append(.success(
+            hostID: futureHost.id,
+            latency: .milliseconds(20),
+            timestamp: now.addingTimeInterval(86_400)
+        ).withHostMetadata(from: futureHost))
+
+        let recentSamples = await store.samples(
+            hostID: recentHost.id,
+            since: now.addingTimeInterval(-60),
+            limit: 10
+        )
+
+        XCTAssertEqual(recentSamples.count, 1)
+        XCTAssertEqual(recentSamples.first?.latency?.milliseconds, 10)
     }
 
     func testSQLiteHistoryStoreReturnsLatestSamplesDescending() async throws {
@@ -561,6 +614,44 @@ final class HistoryStoreTests: XCTestCase {
         XCTAssertFalse(decision.shouldReloadTimeline)
     }
 
+    func testWidgetSnapshotPublishPolicyIgnoresLatencyButPublishesStatusChanges() {
+        let policy = WidgetSnapshotPublishPolicy(heartbeatInterval: 300, timelineReloadInterval: 300)
+        let hostID = UUID()
+        let generatedAt = Date(timeIntervalSince1970: 1_000)
+        let previous = WidgetSnapshot(
+            primaryHostID: hostID,
+            hosts: [WidgetHost(id: hostID, displayName: "Edge", address: "1.1.1.1", method: .tcp, port: 443, isPrimary: true)],
+            health: [WidgetHostHealth(hostID: hostID, status: .healthy, latencyMilliseconds: 12, consecutiveFailureCount: 0, failureReason: nil, latestResultAt: generatedAt)],
+            recentSamples: [],
+            networkStatus: .connected,
+            generatedAt: generatedAt
+        )
+        var latencyOnly = previous
+        latencyOnly.generatedAt = generatedAt.addingTimeInterval(60)
+        latencyOnly.health[0].latencyMilliseconds = 34
+        latencyOnly.health[0].latestResultAt = latencyOnly.generatedAt
+        latencyOnly.health[0].consecutiveFailureCount = 1
+        var failed = latencyOnly
+        failed.health[0].status = .down
+        failed.health[0].failureReason = .timeout
+
+        let latencyDecision = policy.decision(
+            for: latencyOnly,
+            previousSnapshot: previous,
+            lastTimelineReloadAt: generatedAt
+        )
+        let failureDecision = policy.decision(
+            for: failed,
+            previousSnapshot: previous,
+            lastTimelineReloadAt: generatedAt
+        )
+
+        XCTAssertFalse(latencyDecision.shouldSave)
+        XCTAssertFalse(latencyDecision.shouldReloadTimeline)
+        XCTAssertTrue(failureDecision.shouldSave)
+        XCTAssertTrue(failureDecision.shouldReloadTimeline)
+    }
+
     func testWidgetSnapshotPublishPolicySavesHeartbeatWithoutReloadingTimeline() {
         let policy = WidgetSnapshotPublishPolicy(heartbeatInterval: 300, timelineReloadInterval: 300)
         let previous = WidgetSnapshot.empty
@@ -743,6 +834,42 @@ final class HistoryStoreTests: XCTestCase {
         XCTAssertEqual(sqlite3_step(statement), SQLITE_ROW)
         guard let text = sqlite3_column_text(statement, 0) else { return nil }
         return String(cString: text)
+    }
+
+    private func insertRawLatencies(
+        _ latencies: [Double],
+        host: HostConfig,
+        startingAt timestamp: Date,
+        url: URL
+    ) throws {
+        var db: OpaquePointer?
+        XCTAssertEqual(sqlite3_open_v2(url.path, &db, SQLITE_OPEN_READWRITE, nil), SQLITE_OK)
+        defer { sqlite3_close(db) }
+        let sql = """
+        INSERT INTO ping_samples
+        (id, host_id, address, method, port, timestamp, latency_ms)
+        VALUES (?, ?, ?, ?, ?, ?, ?);
+        """
+        var statement: OpaquePointer?
+        XCTAssertEqual(sqlite3_prepare_v2(db, sql, -1, &statement, nil), SQLITE_OK)
+        defer { sqlite3_finalize(statement) }
+
+        for (index, latency) in latencies.enumerated() {
+            sqlite3_bind_text(statement, 1, UUID().uuidString, -1, sqliteTransientForTests)
+            sqlite3_bind_text(statement, 2, host.id.uuidString, -1, sqliteTransientForTests)
+            sqlite3_bind_text(statement, 3, host.address, -1, sqliteTransientForTests)
+            sqlite3_bind_text(statement, 4, host.method.rawValue, -1, sqliteTransientForTests)
+            if let port = host.port {
+                sqlite3_bind_int64(statement, 5, Int64(port))
+            } else {
+                sqlite3_bind_null(statement, 5)
+            }
+            sqlite3_bind_double(statement, 6, timestamp.addingTimeInterval(Double(index)).timeIntervalSince1970)
+            sqlite3_bind_double(statement, 7, latency)
+            XCTAssertEqual(sqlite3_step(statement), SQLITE_DONE)
+            sqlite3_reset(statement)
+            sqlite3_clear_bindings(statement)
+        }
     }
 }
 

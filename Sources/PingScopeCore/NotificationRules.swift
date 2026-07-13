@@ -472,7 +472,10 @@ public struct AlertDecisionEngine: Sendable {
         case let .partialDegradation(tier):
             return (.pathDegraded, .pathDegraded(tier: tier))
         case let .multipleFailures(hostIDs):
-            return (.hostDown, .remoteServiceDown(hostIDs: hostIDs))
+            // The decision renders as a remote-services-down notification, so
+            // gating and cooldown must use the matching alert type: otherwise a
+            // user's .remoteServiceDown preference is ignored in favor of .hostDown.
+            return (.remoteServiceDown, .remoteServiceDown(hostIDs: hostIDs))
         case .noData, .allReachable:
             return nil
         }

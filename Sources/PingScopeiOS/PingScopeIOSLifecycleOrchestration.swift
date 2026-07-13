@@ -54,6 +54,27 @@ public actor PingScopeIOSActivityOwnership {
     }
 }
 
+@MainActor
+public protocol PingScopeIOSLiveActivityDirectory {
+    associatedtype ActivityHandle
+
+    var currentActivities: [ActivityHandle] { get }
+    func end(_ activity: ActivityHandle) async
+}
+
+@MainActor
+public enum PingScopeIOSLiveActivityStartup {
+    public static func requestReplacingOrphans<Directory, RequestedActivity>(
+        in directory: Directory,
+        request: () async throws -> RequestedActivity
+    ) async rethrows -> RequestedActivity where Directory: PingScopeIOSLiveActivityDirectory {
+        for orphan in directory.currentActivities {
+            await directory.end(orphan)
+        }
+        return try await request()
+    }
+}
+
 public struct PingScopeIOSLifecycleSessionIdentity: Equatable, Sendable {
     public let token: UUID
     public let scope: PingScopeIOSHostScope

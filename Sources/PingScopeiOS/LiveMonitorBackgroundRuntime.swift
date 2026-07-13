@@ -18,6 +18,7 @@ public actor LiveMonitorBackgroundRuntime {
     private var activeTaskID: LiveMonitorBackgroundTaskID?
     private var expiringTaskID: LiveMonitorBackgroundTaskID?
     private var expirationHandler: (@Sendable () async -> Void)?
+    private var stintGeneration = 0
 
     /// How long the app-level cleanup may run once the OS expiration handler has
     /// fired, before the background task is ended regardless. The default is
@@ -34,11 +35,13 @@ public actor LiveMonitorBackgroundRuntime {
 
     public func begin(expirationHandler: @escaping @Sendable () async -> Void) async {
         await end()
+        stintGeneration += 1
+        let generation = stintGeneration
         self.expirationHandler = expirationHandler
 
         activeTaskID = await client.beginBackgroundTask(named: "PingScope Live Monitor") { [weak self] in
             Task {
-                await self?.expire()
+                await self?.expire(ifGeneration: generation)
             }
         }
     }
@@ -54,7 +57,11 @@ public actor LiveMonitorBackgroundRuntime {
         await client.endBackgroundTask(activeTaskID)
     }
 
-    private func expire() async {
+    private func expire(ifGeneration generation: Int) async {
+        // The OS expiration callback carries no task identity, so a delayed
+        // expiration from a previous stint could otherwise end a freshly begun
+        // task and run the new stint's cleanup with a full time budget left.
+        guard generation == stintGeneration else { return }
         guard let activeTaskID else { return }
 
         self.activeTaskID = nil

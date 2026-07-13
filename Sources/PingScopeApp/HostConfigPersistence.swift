@@ -22,6 +22,7 @@ final class HostConfigPersistence {
     private var lastPersistedHostState: PersistedHostState?
     private var preservesUndecodableData = false
     private let seededDefaultsKey = "didSeedDefaultHosts"
+    static let undecodableBackupKey = "hostConfigsUndecodableBackup"
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -37,6 +38,14 @@ final class HostConfigPersistence {
         case .decodeFailed(let error):
             logger("host config decode failed; preserving stored data error=\(error.localizedDescription)")
             preservesUndecodableData = true
+            // The preservation flag is cleared by the first user host mutation
+            // (allowUserManagedPersistence), after which persist() overwrites the
+            // stored blob. Keep a copy under a backup key so the user's prior
+            // host list stays recoverable even after they add or reset hosts.
+            if let undecodableData = defaults.data(forKey: "hostConfigs") {
+                defaults.set(undecodableData, forKey: Self.undecodableBackupKey)
+                logger("host config backup written key=\(Self.undecodableBackupKey)")
+            }
             savedHosts = []
         }
 

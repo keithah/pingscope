@@ -391,6 +391,19 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
     }
 
     func stop() {
+        cancelModelTasks()
+        Task { await runtime.stop() }
+    }
+
+    /// Termination-path stop: awaits the runtime shutdown (including the history
+    /// write-buffer flush) instead of firing it into a task the process exit
+    /// would abandon, so buffered samples reach SQLite before quit.
+    func stopAndFlush() async {
+        cancelModelTasks()
+        await runtime.stop()
+    }
+
+    private func cancelModelTasks() {
         snapshotTask?.cancel()
         alertTask?.cancel()
         networkTask?.cancel()
@@ -401,7 +414,6 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
         localNetworkProbeTask?.cancel()
         draftTestTask?.cancel()
         pathMonitor.cancel()
-        Task { await runtime.stop() }
     }
 
     func pauseMeasurementsForSleep() {

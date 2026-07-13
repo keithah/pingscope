@@ -431,6 +431,8 @@ public struct StarlinkStatusGRPCClient: StarlinkStatusFetching {
 }
 
 public struct StarlinkProbe: PingProbe {
+    /// Upper bound for dish-reported latency; anything beyond this is garbage input.
+    static let maxReportedLatencyMilliseconds: Double = 3_600_000
     private let statusClient: any StarlinkStatusFetching
 
     public init(statusClient: any StarlinkStatusFetching) {
@@ -443,10 +445,12 @@ public struct StarlinkProbe: PingProbe {
             let metadata = ProbeMetadata(note: status.telemetry.noteSummary, starlink: status.telemetry)
             guard status.isConnected,
                   let latencyMilliseconds = status.popPingLatencyMilliseconds,
-                  // Non-finite values pass `>= 0` (infinity) and would trap in
-                  // Duration.milliseconds; the dish payload is untrusted input.
+                  // Non-finite or huge finite values (fixed32 float can encode up to
+                  // ~3.4e38) would trap converting to Duration's Int128 attoseconds;
+                  // the dish payload is untrusted input, so bound it to a sane range.
                   latencyMilliseconds.isFinite,
-                  latencyMilliseconds >= 0 else {
+                  latencyMilliseconds >= 0,
+                  latencyMilliseconds <= Self.maxReportedLatencyMilliseconds else {
                 return .failure(
                     hostID: host.id,
                     reason: .networkUnavailable,

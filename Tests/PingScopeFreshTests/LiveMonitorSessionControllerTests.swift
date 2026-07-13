@@ -208,6 +208,34 @@ final class LiveMonitorSessionControllerTests: XCTestCase {
         XCTAssertTrue(replacementIsCurrent)
     }
 
+    @MainActor
+    func testIOSLiveActivityStartupEndsOrphansBeforeRequestingSingleReplacement() async {
+        let orphanedDirectory = RecordingIOSLiveActivityDirectory(currentActivities: ["old"])
+
+        let replacement = await PingScopeIOSLiveActivityStartup.requestReplacingOrphans(
+            in: orphanedDirectory
+        ) {
+            orphanedDirectory.request("new")
+        }
+
+        XCTAssertEqual(replacement, "new")
+        XCTAssertEqual(orphanedDirectory.events, ["end:old", "request:new"])
+        XCTAssertEqual(orphanedDirectory.ownedActivities, ["new"])
+        XCTAssertEqual(orphanedDirectory.currentActivities, ["new"])
+
+        let emptyDirectory = RecordingIOSLiveActivityDirectory(currentActivities: [])
+        let normalActivity = await PingScopeIOSLiveActivityStartup.requestReplacingOrphans(
+            in: emptyDirectory
+        ) {
+            emptyDirectory.request("new")
+        }
+
+        XCTAssertEqual(normalActivity, "new")
+        XCTAssertEqual(emptyDirectory.events, ["request:new"])
+        XCTAssertEqual(emptyDirectory.ownedActivities, ["new"])
+        XCTAssertEqual(emptyDirectory.currentActivities, ["new"])
+    }
+
     func testIOSLiveActivityAvailabilityRequestsWhenActiveAggregateGainsFirstPlaceholder() {
         XCTAssertEqual(
             PingScopeIOSLiveActivityAvailabilityDecision.decide(
@@ -877,6 +905,25 @@ final class LiveMonitorSessionControllerTests: XCTestCase {
         XCTAssertEqual(defaults.data(forKey: "PingScope.iOS.hosts"), undecodable)
     }
 
+    func testIOSHostStoreDeduplicatesHostIDsWithoutRewritingStoredBlob() throws {
+        let suiteName = "PingScopeIOSHostStoreTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let duplicateID = UUID()
+        let first = HostConfig(id: duplicateID, displayName: "First", address: "1.1.1.1")
+        let second = HostConfig(id: duplicateID, displayName: "Second", address: "8.8.8.8")
+        let encoded = try JSONEncoder().encode([first, second])
+        defaults.set(encoded, forKey: "PingScope.iOS.hosts")
+        defaults.set(duplicateID.uuidString, forKey: "PingScope.iOS.selectedHostID")
+        let store = PingScopeIOSHostStore(defaults: defaults, defaultHosts: [first])
+
+        let state = store.load()
+
+        XCTAssertEqual(state.hosts, [first])
+        XCTAssertEqual(state.selectedHost, first)
+        XCTAssertEqual(defaults.data(forKey: "PingScope.iOS.hosts"), encoded)
+    }
+
     func testIOSHostDraftBuildsValidatedHostFromEditableFields() {
         let host = HostConfig(
             id: UUID(),
@@ -972,6 +1019,32 @@ final class LiveMonitorSessionControllerTests: XCTestCase {
         let endedIDs = await client.endedIDsSnapshot()
         XCTAssertEqual(startedNames, ["PingScope Live Monitor", "PingScope Live Monitor"])
         XCTAssertEqual(endedIDs, [LiveMonitorBackgroundTaskID(rawValue: 1)])
+    }
+
+    func testBackgroundRuntimeIgnoresDelayedExpirationFromPreviousStint() async {
+        let client = RecordingBackgroundTaskClient()
+        let runtime = LiveMonitorBackgroundRuntime(client: client)
+        let oldCleanup = ExpirationCleanupRecorder()
+        let currentCleanup = ExpirationCleanupRecorder()
+
+        await runtime.begin { await oldCleanup.record() }
+        await runtime.begin { await currentCleanup.record() }
+        await client.expire(at: 0)
+        try? await Task.sleep(for: .milliseconds(20))
+
+        let oldCleanupCount = await oldCleanup.countSnapshot()
+        let currentCleanupCount = await currentCleanup.countSnapshot()
+        let endedBeforeCurrentStop = await client.endedIDsSnapshot()
+        XCTAssertEqual(oldCleanupCount, 0)
+        XCTAssertEqual(currentCleanupCount, 0)
+        XCTAssertEqual(endedBeforeCurrentStop, [LiveMonitorBackgroundTaskID(rawValue: 1)])
+
+        await runtime.end()
+        let endedAfterCurrentStop = await client.endedIDsSnapshot()
+        XCTAssertEqual(
+            endedAfterCurrentStop,
+            [LiveMonitorBackgroundTaskID(rawValue: 1), LiveMonitorBackgroundTaskID(rawValue: 2)]
+        )
     }
 
     func testBackgroundRuntimeExpirationCallsCleanupAndEndsTaskOnce() async {
@@ -1089,19 +1162,32 @@ final class LiveMonitorSessionControllerTests: XCTestCase {
         let startedHostIDs = await factory.startedHostIDs
         let startedDurations = await factory.startedDurations
         let snapshots = await coordinator.snapshots()
-        let aggregateHealth = await coordinator.aggregateHealth()
         XCTAssertEqual(createdHostIDs, [enabledA.id, enabledC.id])
         XCTAssertEqual(startedHostIDs, [enabledA.id, enabledC.id])
         XCTAssertEqual(startedDurations, [.oneMinute, .oneMinute])
         XCTAssertEqual(snapshots[enabledA.id]?.host.id, enabledA.id)
         XCTAssertEqual(snapshots[enabledC.id]?.host.id, enabledC.id)
         XCTAssertNil(snapshots[disabledB.id])
-        XCTAssertEqual(aggregateHealth, .down)
 
         let session = await coordinator.session()
         XCTAssertEqual(session?.duration, .oneMinute)
         XCTAssertEqual(session?.startedAt, startedAt)
         XCTAssertEqual(session?.remainingDuration(at: startedAt), .seconds(60))
+    }
+
+    func testIOSAllHostsCoordinatorDuplicateHostIDsDoNotTrapSnapshotLookup() async {
+        let duplicateID = UUID()
+        let first = HostConfig(id: duplicateID, displayName: "First", address: "1.1.1.1")
+        let second = HostConfig(id: duplicateID, displayName: "Second", address: "8.8.8.8")
+        let coordinator = PingScopeIOSMultiHostSessionCoordinator(
+            controllerFactory: RecordingIOSAllHostsControllerFactory()
+        )
+
+        await coordinator.reconcile(hosts: [first, second])
+        let snapshots = await coordinator.snapshotsByHostID()
+
+        XCTAssertEqual(snapshots.count, 1)
+        XCTAssertEqual(snapshots[duplicateID]?.host.id, duplicateID)
     }
 
     func testIOSAllHostsCoordinatorStopsAndFlushesRemovedOrDisabledControllersBeforeDroppingThem() async {
@@ -1290,6 +1376,56 @@ final class LiveMonitorSessionControllerTests: XCTestCase {
         XCTAssertEqual(orderedSnapshots.map(\.host.id), [hostB.id, hostA.id])
     }
 
+    func testIOSAllHostsCoordinatorCosmeticHostEditPreservesRunningControllerAndUpdatesSnapshot() async {
+        let host = HostConfig(id: UUID(), displayName: "Cloudflare", address: "1.1.1.1")
+        var renamedHost = host
+        renamedHost.displayName = "Primary DNS"
+        let factory = RecordingIOSAllHostsControllerFactory()
+        let coordinator = PingScopeIOSMultiHostSessionCoordinator(controllerFactory: factory)
+
+        await coordinator.reconcile(hosts: [host])
+        await coordinator.start(duration: .continuous)
+        await coordinator.reconcile(hosts: [renamedHost])
+
+        let createdControllerTokens = await factory.createdControllerTokens
+        let stoppedControllerTokens = await factory.stoppedControllerTokens
+        let isRunning = await factory.isRunning(controllerToken: 1)
+        let orderedSnapshots = await coordinator.orderedSnapshots()
+        XCTAssertEqual(createdControllerTokens, [1])
+        XCTAssertTrue(stoppedControllerTokens.isEmpty)
+        XCTAssertTrue(isRunning)
+        XCTAssertEqual(orderedSnapshots.first?.host.displayName, renamedHost.displayName)
+    }
+
+    func testIOSAllHostsCoordinatorCosmeticEditPreservesNormalizedProbeMetadata() async {
+        let host = HostConfig(
+            id: UUID(),
+            displayName: "Legacy ICMP",
+            address: "1.1.1.1",
+            method: .icmp,
+            port: nil
+        )
+        var normalizedHost = host
+        normalizedHost.apply(method: .tcp)
+        var renamedHost = host
+        renamedHost.displayName = "Primary DNS"
+        let factory = RecordingIOSAllHostsControllerFactory(snapshotHosts: [host.id: normalizedHost])
+        let coordinator = PingScopeIOSMultiHostSessionCoordinator(controllerFactory: factory)
+
+        await coordinator.reconcile(hosts: [host])
+        await coordinator.start(duration: .continuous)
+        await coordinator.reconcile(hosts: [renamedHost])
+
+        let createdControllerTokens = await factory.createdControllerTokens
+        let stoppedControllerTokens = await factory.stoppedControllerTokens
+        let orderedSnapshots = await coordinator.orderedSnapshots()
+        XCTAssertEqual(createdControllerTokens, [1])
+        XCTAssertTrue(stoppedControllerTokens.isEmpty)
+        XCTAssertEqual(orderedSnapshots.first?.host.displayName, renamedHost.displayName)
+        XCTAssertEqual(orderedSnapshots.first?.host.method, .tcp)
+        XCTAssertEqual(orderedSnapshots.first?.host.port, PingMethod.tcp.defaultPort)
+    }
+
     func testIOSAllHostsCoordinatorReplacesEditedHostAfterStoppingOldController() async {
         let host = HostConfig(id: UUID(), displayName: "Cloudflare", address: "1.1.1.1")
         var editedHost = host
@@ -1365,6 +1501,29 @@ final class LiveMonitorSessionControllerTests: XCTestCase {
 private final class IOSLifecycleTestState {
     var scope: PingScopeIOSHostScope = .focused
     var events: [String] = []
+}
+
+@MainActor
+private final class RecordingIOSLiveActivityDirectory: PingScopeIOSLiveActivityDirectory {
+    private(set) var currentActivities: [String]
+    private(set) var ownedActivities: [String] = []
+    var events: [String] = []
+
+    init(currentActivities: [String]) {
+        self.currentActivities = currentActivities
+    }
+
+    func end(_ activity: String) async {
+        events.append("end:\(activity)")
+        currentActivities.removeAll { $0 == activity }
+    }
+
+    func request(_ activity: String) -> String {
+        events.append("request:\(activity)")
+        ownedActivities = [activity]
+        currentActivities = [activity]
+        return activity
+    }
 }
 
 @MainActor
@@ -1520,11 +1679,11 @@ private actor RecordingBackgroundTaskClient: LiveMonitorBackgroundTaskClient {
     private(set) var startedNames: [String] = []
     private(set) var endedIDs: [LiveMonitorBackgroundTaskID] = []
     private var nextID = 1
-    private var mostRecentExpirationHandler: (@Sendable () -> Void)?
+    private var expirationHandlers: [@Sendable () -> Void] = []
 
     func beginBackgroundTask(named name: String, expirationHandler: @escaping @Sendable () -> Void) async -> LiveMonitorBackgroundTaskID? {
         startedNames.append(name)
-        mostRecentExpirationHandler = expirationHandler
+        expirationHandlers.append(expirationHandler)
         let id = LiveMonitorBackgroundTaskID(rawValue: nextID)
         nextID += 1
         return id
@@ -1535,7 +1694,12 @@ private actor RecordingBackgroundTaskClient: LiveMonitorBackgroundTaskClient {
     }
 
     func expireMostRecent() {
-        mostRecentExpirationHandler?()
+        expirationHandlers.last?()
+    }
+
+    func expire(at index: Int) {
+        guard expirationHandlers.indices.contains(index) else { return }
+        expirationHandlers[index]()
     }
 
     func startedNamesSnapshot() -> [String] {
@@ -1584,6 +1748,7 @@ private actor ExpirationObservationBox {
 
 private actor RecordingIOSAllHostsControllerFactory: PingScopeIOSMultiHostSessionControllerFactory {
     private let statuses: [UUID: HealthStatus]
+    private let snapshotHosts: [UUID: HostConfig]
     private let startGate: IOSAllHostsStartGate?
     private let stopGate: IOSAllHostsStopGate?
     private let firstStopGate: IOSAllHostsFirstStopGate?
@@ -1603,12 +1768,14 @@ private actor RecordingIOSAllHostsControllerFactory: PingScopeIOSMultiHostSessio
 
     init(
         statuses: [UUID: HealthStatus] = [:],
+        snapshotHosts: [UUID: HostConfig] = [:],
         startGate: IOSAllHostsStartGate? = nil,
         stopGate: IOSAllHostsStopGate? = nil,
         firstStopGate: IOSAllHostsFirstStopGate? = nil,
         snapshotGate: IOSAllHostsFirstSnapshotGate? = nil
     ) {
         self.statuses = statuses
+        self.snapshotHosts = snapshotHosts
         self.startGate = startGate
         self.stopGate = stopGate
         self.firstStopGate = firstStopGate
@@ -1665,9 +1832,10 @@ private actor RecordingIOSAllHostsControllerFactory: PingScopeIOSMultiHostSessio
             await snapshotGate?.waitForRelease()
         }
 
-        var health = HostHealth(hostID: host.id, thresholds: host.thresholds)
+        let snapshotHost = snapshotHosts[host.id] ?? host
+        var health = HostHealth(hostID: snapshotHost.id, thresholds: snapshotHost.thresholds)
         health.status = statuses[host.id] ?? .noData
-        return LiveMonitorSessionSnapshot(host: host, session: nil, health: health)
+        return LiveMonitorSessionSnapshot(host: snapshotHost, session: nil, health: health)
     }
 }
 

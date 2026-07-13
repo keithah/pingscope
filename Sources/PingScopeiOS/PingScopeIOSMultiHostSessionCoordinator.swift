@@ -149,28 +149,27 @@ public actor PingScopeIOSMultiHostSessionCoordinator {
         aggregateSession
     }
 
-    public func aggregateHealth() async -> HealthStatus {
-        let statuses = await orderedSnapshots().map(\.health.status)
-        if statuses.contains(.down) { return .down }
-        if statuses.contains(.degraded) { return .degraded }
-        if statuses.contains(.healthy) { return .healthy }
-        return .noData
-    }
-
     /// Returns snapshots in the saved enabled-host order used for lifecycle fan-out.
     public func orderedSnapshots() async -> [LiveMonitorSessionSnapshot] {
         let orderedEntries = orderedHostIDs.compactMap { controllers[$0] }
         var snapshots: [LiveMonitorSessionSnapshot] = []
         snapshots.reserveCapacity(orderedEntries.count)
         for entry in orderedEntries {
-            snapshots.append(await entry.controller.snapshot())
+            var snapshot = await entry.controller.snapshot()
+            snapshot.host = snapshot.host.applyingPresentationMetadata(from: entry.host)
+            snapshots.append(snapshot)
         }
         return snapshots
     }
 
     /// Returns a keyed lookup for a host ID. Dictionary iteration order is unspecified.
     public func snapshotsByHostID() async -> [UUID: LiveMonitorSessionSnapshot] {
-        Dictionary(uniqueKeysWithValues: await orderedSnapshots().map { ($0.host.id, $0) })
+        // Never trap on duplicate IDs, even if an unsanitized host list reaches
+        // reconcile; keep the first (saved-order) snapshot for a duplicated ID.
+        Dictionary(
+            await orderedSnapshots().map { ($0.host.id, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
     }
 
     /// Returns a keyed host lookup. Dictionary iteration order is unspecified.
@@ -188,8 +187,12 @@ public actor PingScopeIOSMultiHostSessionCoordinator {
         }
 
         for host in enabledHosts {
-            if let entry = controllers[host.id], entry.host != host {
-                await stopAndRemoveController(hostID: host.id, at: reconciledAt)
+            if let entry = controllers[host.id] {
+                if entry.host.hasSameProbeConfiguration(as: host) {
+                    controllers[host.id] = ControllerEntry(host: host, controller: entry.controller)
+                } else {
+                    await stopAndRemoveController(hostID: host.id, at: reconciledAt)
+                }
             }
             guard controllers[host.id] == nil else { continue }
 
@@ -207,5 +210,24 @@ public actor PingScopeIOSMultiHostSessionCoordinator {
         guard let entry = controllers[hostID] else { return }
         await entry.controller.stop(reason: .userStopped, at: date)
         controllers.removeValue(forKey: hostID)
+    }
+}
+
+private extension HostConfig {
+    func applyingPresentationMetadata(from other: HostConfig) -> HostConfig {
+        var copy = self
+        copy.displayName = other.displayName
+        copy.tier = other.tier
+        copy.notifications = other.notifications
+        return copy
+    }
+
+    func hasSameProbeConfiguration(as other: HostConfig) -> Bool {
+        address == other.address
+            && method == other.method
+            && port == other.port
+            && interval == other.interval
+            && timeout == other.timeout
+            && thresholds == other.thresholds
     }
 }

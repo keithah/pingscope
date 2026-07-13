@@ -589,6 +589,31 @@ final class DomainBehaviorTests: XCTestCase {
         )
     }
 
+    func testMultipleFailuresUsesRemoteServiceDownPreferenceAndDecision() {
+        let hostIDs = [UUID(), UUID()]
+        var engine = AlertDecisionEngine(rules: NotificationRuleSet(
+            isEnabled: true,
+            cooldown: .seconds(60),
+            alertTypes: [.remoteServiceDown],
+            latencyThreshold: .milliseconds(250),
+            notifyOnRecovery: true
+        ))
+        let diagnosis = NetworkPerspectiveDiagnosis(
+            scope: .remoteService,
+            title: "Multiple failures",
+            detail: "test",
+            affectedHostIDs: hostIDs,
+            verdict: .multipleFailures(hostIDs: hostIDs),
+            confidence: .high,
+            faultTier: .remoteService
+        )
+
+        XCTAssertEqual(
+            engine.evaluateDiagnosis(diagnosis, at: Date(timeIntervalSince1970: 3_500)),
+            .remoteServiceDown(hostIDs: hostIDs)
+        )
+    }
+
     func testTentativeDiagnosisAlertsFallBackToInternetLoss() {
         let hostID = UUID()
         var engine = AlertDecisionEngine(rules: NotificationRuleSet(

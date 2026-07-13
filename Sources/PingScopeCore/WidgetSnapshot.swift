@@ -100,7 +100,8 @@ public struct WidgetSnapshot: Codable, Equatable, Sendable {
         return version == other.version
             && primaryHostID == other.primaryHostID
             && hosts == other.hosts
-            && health == other.health
+            && health.count == other.health.count
+            && zip(health, other.health).allSatisfy { $0.hasSameWidgetState(as: $1) }
             && networkStatus == other.networkStatus
     }
 }
@@ -152,6 +153,16 @@ public struct WidgetHostHealth: Codable, Equatable, Sendable {
         self.consecutiveFailureCount = consecutiveFailureCount
         self.failureReason = failureReason
         self.latestResultAt = latestResultAt
+    }
+
+    /// Equality for publish throttling: ignores the per-ping volatile fields
+    /// (`latencyMilliseconds`, `latestResultAt`, `consecutiveFailureCount`).
+    /// Including them would mark the widget state changed on every ping and
+    /// defeat the heartbeat/timeline-reload throttles entirely.
+    public func hasSameWidgetState(as other: WidgetHostHealth) -> Bool {
+        hostID == other.hostID
+            && status == other.status
+            && failureReason == other.failureReason
     }
 }
 
