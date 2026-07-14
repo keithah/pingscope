@@ -1,5 +1,55 @@
 import Foundation
 
+public struct PingScopeIOSLiveActivityUpdatePolicy: Sendable {
+    private let minimumUpdateInterval: TimeInterval
+    private var lastPublishedState: PingScopeLiveActivityAttributes.ContentState?
+    private var lastPublishedAt: Date?
+
+    public init(minimumUpdateInterval: TimeInterval = 10) {
+        self.minimumUpdateInterval = max(0, minimumUpdateInterval)
+    }
+
+    public mutating func shouldPublish(
+        _ state: PingScopeLiveActivityAttributes.ContentState,
+        at date: Date = Date()
+    ) -> Bool {
+        guard state != lastPublishedState else { return false }
+        if let previous = lastPublishedState,
+           let lastPublishedAt,
+           !hasPriorityChange(from: previous, to: state),
+           date.timeIntervalSince(lastPublishedAt) < minimumUpdateInterval {
+            return false
+        }
+        lastPublishedState = state
+        lastPublishedAt = date
+        return true
+    }
+
+    public mutating func reset() {
+        lastPublishedState = nil
+        lastPublishedAt = nil
+    }
+
+    private func hasPriorityChange(
+        from previous: PingScopeLiveActivityAttributes.ContentState,
+        to next: PingScopeLiveActivityAttributes.ContentState
+    ) -> Bool {
+        guard previous.status == next.status,
+              previous.isStale == next.isStale,
+              previous.mode == next.mode else {
+            return true
+        }
+        let previousRows = previous.hostRows.map { ($0.hostID, $0.status, $0.isStale) }
+        let nextRows = next.hostRows.map { ($0.hostID, $0.status, $0.isStale) }
+        guard previousRows.count == nextRows.count else { return true }
+        return zip(previousRows, nextRows).contains { previousRow, nextRow in
+            previousRow.0 != nextRow.0
+                || previousRow.1 != nextRow.1
+                || previousRow.2 != nextRow.2
+        }
+    }
+}
+
 @MainActor
 public final class PingScopeIOSLifecycleOperationQueue {
     private var tail: Task<Void, Never>?

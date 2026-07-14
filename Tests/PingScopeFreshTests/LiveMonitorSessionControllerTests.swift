@@ -3,6 +3,34 @@ import PingScopeCore
 import PingScopeiOS
 
 final class LiveMonitorSessionControllerTests: XCTestCase {
+    func testIOSLiveActivityUpdatePolicySuppressesDuplicateContentUntilItChanges() {
+        var policy = PingScopeIOSLiveActivityUpdatePolicy(minimumUpdateInterval: 10)
+        let start = Date(timeIntervalSince1970: 1_000)
+        let initial = PingScopeLiveActivityAttributes.ContentState(
+            latencyMilliseconds: 12,
+            status: .healthy,
+            lastUpdatedAt: Date(timeIntervalSince1970: 100),
+            remainingSeconds: 0,
+            isStale: false
+        )
+
+        XCTAssertTrue(policy.shouldPublish(initial, at: start))
+        XCTAssertFalse(policy.shouldPublish(initial, at: start.addingTimeInterval(1)))
+
+        var changed = initial
+        changed.latencyMilliseconds = 18
+        XCTAssertFalse(policy.shouldPublish(changed, at: start.addingTimeInterval(1)))
+        XCTAssertTrue(policy.shouldPublish(changed, at: start.addingTimeInterval(10)))
+        XCTAssertFalse(policy.shouldPublish(changed, at: start.addingTimeInterval(11)))
+
+        var degraded = changed
+        degraded.status = .degraded
+        XCTAssertTrue(policy.shouldPublish(degraded, at: start.addingTimeInterval(11)))
+
+        policy.reset()
+        XCTAssertTrue(policy.shouldPublish(changed, at: start.addingTimeInterval(12)))
+    }
+
     func testIOSRunControlSelectionMapsDurationsAndStop() {
         XCTAssertEqual(PingScopeIOSRunControlAction.selectionChanged(to: .continuous), .start(.continuous))
         XCTAssertEqual(PingScopeIOSRunControlAction.selectionChanged(to: .thirtySeconds), .start(.thirtySeconds))

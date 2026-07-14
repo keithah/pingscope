@@ -235,6 +235,7 @@ private final class PingScopeIOSAppModel: ObservableObject {
     )
     private var liveActivity: Activity<PingScopeLiveActivityAttributes>?
     private var liveActivityLease: PingScopeIOSActivityOwnershipLease?
+    private var liveActivityUpdatePolicy = PingScopeIOSLiveActivityUpdatePolicy()
     private var initialSessionCoordinator = PingScopeIOSInitialSessionCoordinator()
     private var lastGatewayAddress: String?
     @Published private(set) var historyLocationTaggingEnabled: Bool
@@ -1346,6 +1347,7 @@ private final class PingScopeIOSAppModel: ObservableObject {
             let lease = await lifecycleHarness.claimActivity()
             liveActivity = requestedActivity
             liveActivityLease = lease
+            _ = liveActivityUpdatePolicy.shouldPublish(state)
         } catch {
             NSLog("PingScope live activity request failed: \(String(describing: error))")
         }
@@ -1355,6 +1357,7 @@ private final class PingScopeIOSAppModel: ObservableObject {
         await releaseLiveActivityIfDefunct()
         guard let liveActivity, let session = presentedSession else { return }
         let state = liveActivityContentState(session: session)
+        guard liveActivityUpdatePolicy.shouldPublish(state) else { return }
         await liveActivity.update(ActivityContent(state: state, staleDate: session.scheduledEndAt))
     }
 
@@ -1369,6 +1372,7 @@ private final class PingScopeIOSAppModel: ObservableObject {
         }
         liveActivity = nil
         liveActivityLease = nil
+        liveActivityUpdatePolicy.reset()
     }
 
     private func ensureLiveActivityForCurrentSession() async {
@@ -1433,12 +1437,14 @@ private final class PingScopeIOSAppModel: ObservableObject {
         guard let endingLease else {
             if liveActivity?.id == endingActivity.id {
                 liveActivity = nil
+                liveActivityUpdatePolicy.reset()
             }
             return
         }
         if await lifecycleHarness.clearActivity(ifCurrent: endingLease), liveActivityLease == endingLease {
             liveActivity = nil
             liveActivityLease = nil
+            liveActivityUpdatePolicy.reset()
         }
     }
 
