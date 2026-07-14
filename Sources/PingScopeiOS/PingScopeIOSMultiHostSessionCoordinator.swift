@@ -1,5 +1,6 @@
 import Foundation
 import PingScopeCore
+import PingScopeHistoryKit
 
 public protocol PingScopeIOSMultiHostSessionControlling: Sendable {
     func start(duration: MonitorSessionDuration, at date: Date) async

@@ -1,6 +1,7 @@
 import Foundation
 import MapKit
 import PingScopeCore
+import PingScopeHistoryKit
 import PingScopeiOS
 import SwiftUI
 import UIKit

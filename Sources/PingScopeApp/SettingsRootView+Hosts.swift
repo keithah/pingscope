@@ -7,7 +7,7 @@ extension SettingsRootView {
         SettingsPane {
             SettingsSection("Monitored Hosts") {
                 HStack(spacing: 10) {
-                    Text("\(model.snapshot.hosts.count) configured")
+                    Text("\(model.configuredHosts.count) configured")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     Spacer()
@@ -37,24 +37,20 @@ extension SettingsRootView {
                         .foregroundStyle(.secondary)
                 }
 
-                LazyVStack(spacing: 8) {
-                    ForEach(model.snapshot.hosts) { host in
-                        HostSettingsRow(
-                            host: host,
-                            isSelected: model.editingHostID == host.id,
-                            isPrimary: host.id == model.primaryHost?.id,
-                            statusColor: Color(statusColor: model.snapshot.healthByHost[host.id]?.status.statusColor ?? .gray),
-                            onSelect: { model.selectHostForEditing(host.id) },
-                            onMakePrimary: { model.setPrimaryHost(host.id) },
-                            onDelete: {
-                                model.deleteHost(host.id)
-                                if model.editingHostID == host.id {
-                                    model.clearDraftHost()
-                                }
-                            }
-                        )
+                LiveHostSettingsList(
+                    liveDisplay: model.liveDisplay,
+                    hosts: model.configuredHosts,
+                    selectedHostID: model.editingHostID,
+                    primaryHostID: model.configuredPrimaryHostID,
+                    onSelect: model.selectHostForEditing,
+                    onMakePrimary: model.setPrimaryHost,
+                    onDelete: { hostID in
+                        model.deleteHost(hostID)
+                        if model.editingHostID == hostID {
+                            model.clearDraftHost()
+                        }
                     }
-                }
+                )
             }
 
             if model.isCreatingHost || model.editingHostID != nil {
@@ -196,4 +192,32 @@ extension SettingsRootView {
 
     private static let autoNetworkTierSelection = "__auto_network_tier__"
 
+}
+
+private struct LiveHostSettingsList: View {
+    @ObservedObject var liveDisplay: LiveDisplayModel
+    let hosts: [HostConfig]
+    let selectedHostID: UUID?
+    let primaryHostID: UUID?
+    let onSelect: (UUID) -> Void
+    let onMakePrimary: (UUID) -> Void
+    let onDelete: (UUID) -> Void
+
+    var body: some View {
+        LazyVStack(spacing: 8) {
+            ForEach(hosts) { host in
+                HostSettingsRow(
+                    host: host,
+                    isSelected: selectedHostID == host.id,
+                    isPrimary: primaryHostID == host.id,
+                    statusColor: Color(
+                        statusColor: liveDisplay.snapshot.healthByHost[host.id]?.status.statusColor ?? .gray
+                    ),
+                    onSelect: { onSelect(host.id) },
+                    onMakePrimary: { onMakePrimary(host.id) },
+                    onDelete: { onDelete(host.id) }
+                )
+            }
+        }
+    }
 }

@@ -45,7 +45,7 @@ On iOS, PingScope uses the App Store-safe probe set and monitors continuously wh
 
 The iOS app also includes an advanced opt-in Background Keep Alive setting. When enabled, PingScope requests Always Location permission and starts background location updates only while monitoring is active. This may reduce battery life and remains subject to iOS background execution limits and App Store review.
 
-History map coordinates remain local on your device unless you explicitly share an export.
+History (including any stored coordinates, Wi-Fi network name, and network labels) stays local on your device and is never transmitted automatically. It leaves your device only when you explicitly share an export. Any cross-device iCloud Sync is off by default, opt-in with a disclosure, and syncs only through your own private iCloud to your own devices.
 
 ## Install
 

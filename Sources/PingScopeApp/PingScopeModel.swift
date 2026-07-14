@@ -3,17 +3,103 @@ import Combine
 import Foundation
 @preconcurrency import Network
 import PingScopeCore
+import PingScopeHistoryKit
 import ServiceManagement
 import WidgetKit
+#if DEBUG
+import os
+
+private let snapshotPointsOfInterestLog = OSLog(
+    subsystem: "tv.kodi.pingscope",
+    category: .pointsOfInterest
+)
+#endif
+
+struct DisplayPresentationInputKey: Equatable {
+    let visibleSamples: [PingResult]
+    let selectedRange: TimeRange
+    let includesAllHosts: Bool
+    let primaryHost: HostConfig?
+    let hosts: [HostConfig]
+    let healthByHost: [UUID: HostHealth]
+    let allHostVisibleSamples: [UUID: [PingResult]]?
+}
+
+@MainActor
+final class DisplayPresentationRecomputeScheduler {
+    private let delay: Duration
+    private var task: Task<Void, Never>?
+    private(set) var needsRecompute = false
+
+    init(delay: Duration = .milliseconds(200)) {
+        self.delay = delay
+    }
+
+    func schedule(_ operation: @escaping @MainActor () -> Void) {
+        needsRecompute = true
+        guard task == nil else { return }
+
+        task = Task { [weak self] in
+            guard let self else { return }
+            try? await Task.sleep(for: delay)
+            guard !Task.isCancelled else { return }
+
+            task = nil
+            guard needsRecompute else { return }
+            needsRecompute = false
+            operation()
+        }
+    }
+
+    func cancel() {
+        task?.cancel()
+        task = nil
+        needsRecompute = false
+    }
+}
+
+@MainActor
+final class LiveDisplayModel: ObservableObject {
+    @Published private(set) var snapshot: RuntimeSnapshot
+    @Published private(set) var displayPresentation: PingScopeDisplayPresentation
+
+    init(
+        snapshot: RuntimeSnapshot = RuntimeSnapshot(
+            hosts: HostConfig.defaultHosts(),
+            primaryHostID: HostConfig.defaultInternet.id,
+            healthByHost: [:],
+            samplesByHost: [:]
+        ),
+        displayPresentation: PingScopeDisplayPresentation = PingScopeDisplayPresentation()
+    ) {
+        self.snapshot = snapshot
+        self.displayPresentation = displayPresentation
+    }
+
+    func updateSnapshot(_ snapshot: RuntimeSnapshot) {
+        self.snapshot = snapshot
+    }
+
+    func updateDisplayPresentation(_ displayPresentation: PingScopeDisplayPresentation) {
+        self.displayPresentation = displayPresentation
+    }
+}
 
 @MainActor
 final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
-    @Published private(set) var snapshot = RuntimeSnapshot(
-        hosts: HostConfig.defaultHosts(),
-        primaryHostID: HostConfig.defaultInternet.id,
-        healthByHost: [:],
-        samplesByHost: [:]
-    )
+    nonisolated static let historyRetention = PingHistoryRetention.maximumDuration
+
+    let liveDisplay = LiveDisplayModel()
+    var snapshot: RuntimeSnapshot { liveDisplay.snapshot }
+    var displayPresentation: PingScopeDisplayPresentation { liveDisplay.displayPresentation }
+    @Published private(set) var configuredHosts = HostConfig.defaultHosts()
+    @Published private(set) var configuredPrimaryHostID: UUID? = HostConfig.defaultInternet.id
+
+    var configuredPrimaryHost: HostConfig? {
+        guard let configuredPrimaryHostID else { return configuredHosts.first }
+        return configuredHosts.first { $0.id == configuredPrimaryHostID } ?? configuredHosts.first
+    }
+
     @Published var selectedRange: TimeRange = .fiveMinutes {
         didSet {
             recomputeDisplayPresentation()
@@ -130,13 +216,18 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
     @Published private(set) var currentNetworkStatus: NetworkConnectivityStatus = .connected
     @Published private(set) var notificationPermissionState: NotificationPermissionState = .unknown
     @Published private(set) var notificationRequestMessage: String?
-    @Published private(set) var displayPresentation = PingScopeDisplayPresentation()
     @Published var historyExportHostID: UUID?
     @Published var historyExportRange: HistoryExportRangePreset = .default
     @Published var historyExportCustomValue = "1"
     @Published var historyExportCustomUnit: HistoryExportRangeUnit = .hours
     @Published private(set) var historyExportMessage: String?
     @Published private(set) var isExportingHistory = false
+    @Published var historySurfaceHostID: UUID?
+    @Published var historySurfaceRange = UserDefaults.standard.pingScopeMacHistoryRange {
+        didSet { UserDefaults.standard.pingScopeMacHistoryRange = historySurfaceRange }
+    }
+    @Published var historySurfacePresentation: MacHistorySurfacePresentation?
+    @Published var isLoadingHistorySurface = false
     @Published private(set) var diagnosticsMessage: String?
     @Published var overlayFrame: NSRect
 
@@ -150,12 +241,14 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
     private let notificationDispatcher = MacNotificationDispatcher()
     private let pathMonitor = NWPathMonitor()
     private let pathMonitorQueue = DispatchQueue(label: "com.pingscope.network-path")
+    private let networkCaptureStore: NetworkCaptureSnapshotStore
     var widgetSnapshotStore: WidgetSnapshotStore?
     private var snapshotTask: Task<Void, Never>?
     private var alertTask: Task<Void, Never>?
     private var networkTask: Task<Void, Never>?
     var endpointRefreshTask: Task<Void, Never>?
     private var historyTask: Task<Void, Never>?
+    var historySurfaceTask: Task<Void, Never>?
     private var overlayFramePersistTask: Task<Void, Never>?
     var widgetSnapshotPublishTask: Task<Void, Never>?
     var notificationRulesTask: Task<Void, Never>?
@@ -164,10 +257,15 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
     private var draftTestGeneration = 0
     private var isApplyingStartAtLoginChange = false
     private var lastHistoryKey: String?
+    private let displayPresentationRecomputeScheduler = DisplayPresentationRecomputeScheduler()
+    private var presentationVisibleHistorySamples: [PingResult] = []
+    private var lastDisplayPresentationInputKey: DisplayPresentationInputKey?
     var lastPublishedWidgetSnapshot: WidgetSnapshot?
     var lastWidgetTimelineReloadAt: Date?
     let widgetPublishPolicy = WidgetSnapshotPublishPolicy()
     private let hostConfigPersistence: HostConfigPersistence
+    let historySurfaceStore: (any PingHistoryStore)?
+    let historySurfaceLoader = MacHistorySurfaceLoader()
     private var lastObservedGateway: String?
     private var lastNetworkPathSignature: String?
     var onMenuStateChanged: ((MenuBarState) -> Void)?
@@ -181,11 +279,21 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
         }
         let hostStore = HostStore(defaultHosts: loadedHosts.hosts, primaryHostID: loadedHosts.primaryHostID)
         let probeFactory = DefaultProbeFactory()
-        let historyStore: SQLiteHistoryStore?
+        let networkCaptureStore = NetworkCaptureSnapshotStore()
+        self.networkCaptureStore = networkCaptureStore
+        let historyStore: (any PingHistoryStore)?
         do {
-            historyStore = try SQLiteHistoryStore(url: SQLiteHistoryStore.defaultURL(), logger: { message in
-                DebugLog.write(message)
-            })
+            let sqliteHistoryStore = try SQLiteHistoryStore(
+                url: SQLiteHistoryStore.defaultURL(),
+                retention: Self.historyRetention,
+                logger: { message in
+                    DebugLog.write(message)
+                }
+            )
+            historyStore = NetworkCapturedHistoryStore(
+                destination: sqliteHistoryStore,
+                networkCaptureStore: networkCaptureStore
+            )
         } catch {
             DebugLog.write("history store unavailable: \(error)")
             historyStore = nil
@@ -205,6 +313,7 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
                 DebugLog.write(message)
             }
         )
+        self.historySurfaceStore = historyStore
         self.hostConfigPersistence = hostConfigPersistence
         self.hostTester = HostTester(probeFactory: probeFactory)
         self.gatewayEndpointResolver = DefaultGatewayEndpointResolver(probeFactory: probeFactory)
@@ -359,8 +468,26 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
             let snapshots = await self.runtime.snapshots()
             for await snapshot in snapshots {
                 await MainActor.run {
-                    self.snapshot = snapshot
-                    self.recomputeDisplayPresentation()
+                    #if DEBUG
+                    let signpostID = OSSignpostID(log: snapshotPointsOfInterestLog)
+                    os_signpost(
+                        .begin,
+                        log: snapshotPointsOfInterestLog,
+                        name: "PingScopeModel.processSnapshot",
+                        signpostID: signpostID
+                    )
+                    defer {
+                        os_signpost(
+                            .end,
+                            log: snapshotPointsOfInterestLog,
+                            name: "PingScopeModel.processSnapshot",
+                            signpostID: signpostID
+                        )
+                    }
+                    #endif
+                    self.liveDisplay.updateSnapshot(snapshot)
+                    self.updateConfiguredHostsIfNeeded(snapshot)
+                    self.scheduleDisplayPresentationRecompute()
                     self.persistHostState(snapshot)
                     self.onMenuStateChanged?(self.menuBarState)
                     self.ensureLocalNetworkProbesForSelectedLocalHost(snapshot)
@@ -409,6 +536,8 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
         networkTask?.cancel()
         endpointRefreshTask?.cancel()
         historyTask?.cancel()
+        historySurfaceTask?.cancel()
+        displayPresentationRecomputeScheduler.cancel()
         overlayFramePersistTask?.cancel()
         notificationRulesTask?.cancel()
         localNetworkProbeTask?.cancel()
@@ -773,13 +902,67 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
         max(300, min(4_000, Int(range.duration.rounded(.up)) + 300))
     }
 
+    private func scheduleDisplayPresentationRecompute() {
+        displayPresentationRecomputeScheduler.schedule { [weak self] in
+            self?.recomputeDisplayPresentation()
+        }
+    }
+
+    private func updateConfiguredHostsIfNeeded(_ snapshot: RuntimeSnapshot) {
+        if configuredHosts != snapshot.hosts {
+            configuredHosts = snapshot.hosts
+        }
+        if configuredPrimaryHostID != snapshot.primaryHostID {
+            configuredPrimaryHostID = snapshot.primaryHostID
+        }
+    }
+
     private func recomputeDisplayPresentation(visibleHistorySamples: [PingResult]? = nil) {
-        displayPresentation = PingScopeDisplayPresentation(
-            snapshot: snapshot,
+        if let visibleHistorySamples {
+            presentationVisibleHistorySamples = visibleHistorySamples
+        }
+        let now = Date()
+        let includesAllHosts = overlayShowsAllHosts || popoverShowsAllHosts
+        let liveSamples = presenter.visibleSamples(in: snapshot.primarySeries, range: selectedRange, now: now)
+        let mergedVisibleSamples = presenter.mergedSamples(
+            history: presentationVisibleHistorySamples,
+            live: liveSamples,
+            range: selectedRange,
+            now: now
+        )
+        let allHostVisibleSamples: [UUID: [PingResult]]? = if includesAllHosts {
+            Dictionary(uniqueKeysWithValues: snapshot.hosts.lazy.filter(\.isEnabled).map { host in
+                (
+                    host.id,
+                    self.snapshot.samplesByHost[host.id]?.samples(
+                        since: now.addingTimeInterval(-self.selectedRange.duration)
+                    ) ?? []
+                )
+            })
+        } else {
+            nil
+        }
+        let inputKey = DisplayPresentationInputKey(
+            visibleSamples: mergedVisibleSamples,
             selectedRange: selectedRange,
-            visibleHistorySamples: visibleHistorySamples ?? displayPresentation.visibleHistorySamples,
-            includesAllHosts: overlayShowsAllHosts || popoverShowsAllHosts,
-            presenter: presenter
+            includesAllHosts: includesAllHosts,
+            primaryHost: snapshot.primaryHost,
+            hosts: snapshot.hosts,
+            healthByHost: snapshot.healthByHost,
+            allHostVisibleSamples: allHostVisibleSamples
+        )
+        guard inputKey != lastDisplayPresentationInputKey else { return }
+        lastDisplayPresentationInputKey = inputKey
+
+        liveDisplay.updateDisplayPresentation(
+            PingScopeDisplayPresentation(
+                snapshot: snapshot,
+                selectedRange: selectedRange,
+                visibleHistorySamples: presentationVisibleHistorySamples,
+                includesAllHosts: includesAllHosts,
+                presenter: presenter,
+                now: now
+            )
         )
         onPresentationChanged?()
     }
@@ -791,12 +974,15 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
         } else {
             hosts.append(host)
         }
-        snapshot = RuntimeSnapshot(
-            hosts: hosts,
-            primaryHostID: snapshot.primaryHostID ?? host.id,
-            healthByHost: snapshot.healthByHost,
-            samplesByHost: snapshot.samplesByHost
+        liveDisplay.updateSnapshot(
+            RuntimeSnapshot(
+                hosts: hosts,
+                primaryHostID: snapshot.primaryHostID ?? host.id,
+                healthByHost: snapshot.healthByHost,
+                samplesByHost: snapshot.samplesByHost
+            )
         )
+        updateConfiguredHostsIfNeeded(snapshot)
         recomputeDisplayPresentation()
         persistHostState(snapshot)
         onMenuStateChanged?(menuBarState)
@@ -869,7 +1055,17 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
         pathMonitor.pathUpdateHandler = { [weak self] path in
             let status = Self.networkStatus(from: path)
             let signature = Self.networkPathSignature(from: path)
+            let interface = Self.networkInterface(from: path)
+            let capture = NetworkCaptureResolver(
+                activeInterfaceNames: Self.activeNetworkInterfaceNames,
+                wifiName: { nil },
+                cellularRadio: { nil }
+            ).snapshot(interface: interface)
+            self?.networkCaptureStore.update(capture)
             DispatchQueue.main.async { [weak self] in
+                if interface == "wifi", let name = Self.currentWiFiName() {
+                    self?.networkCaptureStore.updateName(name, ifInterfaceMatches: "wifi")
+                }
                 self?.handleNetworkPathUpdate(status: status, signature: signature)
             }
         }

@@ -1,8 +1,34 @@
 import CoreGraphics
+@testable import PingScope
 @testable import PingScopeCore
 import XCTest
 
 final class LatencyCurveTests: XCTestCase {
+    func testCachedGraphPathMatchesDirectSmoothedCurveAndReusesPath() throws {
+        let samples = [12.0, 35.0, 18.0, 42.0, 24.0].enumerated().map { index, latency in
+            PingResult.success(
+                hostID: UUID(),
+                latency: .milliseconds(latency),
+                timestamp: Date(timeIntervalSince1970: Double(index))
+            )
+        }
+        let graphData = LatencyGraphData(samples: samples)
+        let size = CGSize(width: 160, height: 80)
+        let maxValue = graphData.scale.axisMaximumMilliseconds
+        let expectedPoints = samples.enumerated().map { index, sample in
+            let x = size.width * CGFloat(index) / CGFloat(samples.count - 1)
+            let normalized = min(sample.latency!.milliseconds / maxValue, 1)
+            return CGPoint(x: x, y: size.height - size.height * CGFloat(normalized))
+        }
+        let expected = LatencyCurve.smoothedPath(points: expectedPoints, closed: false)
+
+        let first = try XCTUnwrap(graphData.smoothedPathSegments(size: size).first?.path)
+        let second = try XCTUnwrap(graphData.smoothedPathSegments(size: size).first?.path)
+
+        XCTAssertEqual(first.elements(), expected.elements())
+        XCTAssertTrue(first === second)
+    }
+
     func testSmoothedPathWithNoPointsIsEmpty() {
         let path = LatencyCurve.smoothedPath(points: [], closed: false)
 

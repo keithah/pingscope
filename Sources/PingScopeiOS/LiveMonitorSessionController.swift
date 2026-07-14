@@ -1,5 +1,6 @@
 import Foundation
 import PingScopeCore
+import PingScopeHistoryKit
 
 public typealias PingScopeIOSHistorySampleEnricher = @Sendable (PingResult) -> PingResult
 

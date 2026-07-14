@@ -6,6 +6,10 @@ SCHEME="${PING_SCOPE_IOS_SCHEME:-PingScope-iOS}"
 DERIVED_DATA_PATH="${PING_SCOPE_IOS_DERIVED_DATA_PATH:-.build/ios-validation}"
 RUN_SWIFTPM_BUILD="${PING_SCOPE_VALIDATE_IOS_SWIFTPM_BUILD:-1}"
 
+echo "== Live Activity smoke validation tests =="
+scripts/test-ios-live-activity-log-validation.sh
+
+echo
 echo "== iOS-focused Swift tests =="
 swift test --filter LiveMonitorSessionControllerTests
 

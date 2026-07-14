@@ -3,6 +3,8 @@ import SwiftUI
 
 struct StatusPopoverView: View {
     @ObservedObject var viewModel: StatusPopoverPresentationViewModel
+    @ObservedObject var liveDisplay: LiveDisplayModel
+    var onHistory: () -> Void = {}
     var onSettings: () -> Void = {}
     @EnvironmentObject private var softwareUpdateController: SoftwareUpdateController
     @State private var isShareOptionsPresented = false
@@ -77,6 +79,15 @@ struct StatusPopoverView: View {
             .buttonStyle(.plain)
             .help("Share graph")
             .accessibilityLabel("Share graph")
+            Button(action: onHistory) {
+                Image(systemName: "chart.xyaxis.line")
+                    .font(.system(size: 15, weight: .semibold))
+                    .frame(width: 30, height: 30)
+                    .background(Color(hex: "#2c2c2e"), in: Circle())
+            }
+            .buttonStyle(.plain)
+            .help("Open History")
+            .accessibilityLabel("Open History")
             settingsMenu
         }
     }
@@ -164,6 +175,7 @@ struct StatusPopoverView: View {
                 }
                 Divider()
             }
+            Button("Open History", action: onHistory)
             Button("Open Settings", action: onSettings)
         } label: {
             Image(systemName: "gearshape")

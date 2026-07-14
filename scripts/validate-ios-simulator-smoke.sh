@@ -8,6 +8,13 @@ DERIVED_DATA_PATH="${PING_SCOPE_IOS_SMOKE_DERIVED_DATA:-.build/ios-smoke}"
 SCREENSHOT_PATH="${PING_SCOPE_IOS_SMOKE_SCREENSHOT:-.build/ios-smoke/screenshots/pingscope-ios-home.png}"
 APP_BUNDLE_ID="${PING_SCOPE_IOS_BUNDLE_ID:-com.hadm.PingScope}"
 CLEAN_BUILD="${PING_SCOPE_CLEAN:-0}"
+LIVE_ACTIVITY_LOG="${PING_SCOPE_IOS_LIVE_ACTIVITY_LOG:-.build/ios-smoke/live-activity.log}"
+LIVE_ACTIVITY_SCREENSHOT="${PING_SCOPE_IOS_LIVE_ACTIVITY_SCREENSHOT:-.build/ios-smoke/screenshots/pingscope-dynamic-island.png}"
+LIVE_ACTIVITY_OBSERVATION_SECONDS="${PING_SCOPE_IOS_LIVE_ACTIVITY_OBSERVATION_SECONDS:-24}"
+LIVE_ACTIVITY_SCREENSHOT_DELAY="${PING_SCOPE_IOS_LIVE_ACTIVITY_SCREENSHOT_DELAY:-12}"
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "${ROOT_DIR}/scripts/lib/ios-live-activity-validation.sh"
 
 echo "== Build iOS app for simulator =="
 if [[ "${CLEAN_BUILD}" == "1" ]]; then
@@ -43,6 +50,7 @@ fi
 echo "== Install and launch on ${SIMULATOR_NAME} =="
 xcrun simctl uninstall "${SIM_ID}" "${APP_BUNDLE_ID}" >/dev/null 2>&1 || true
 xcrun simctl install "${SIM_ID}" "${APP_PATH}"
+LIVE_ACTIVITY_LOG_START="$(date '+%Y-%m-%d %H:%M:%S')"
 xcrun simctl launch "${SIM_ID}" "${APP_BUNDLE_ID}" >/dev/null
 
 DATA_CONTAINER="$(xcrun simctl get_app_container "${SIM_ID}" "${APP_BUNDLE_ID}" data)"
@@ -68,5 +76,27 @@ echo "Recorded ${SAMPLE_COUNT} simulator sample(s)"
 mkdir -p "$(dirname "${SCREENSHOT_PATH}")"
 xcrun simctl io "${SIM_ID}" screenshot "${SCREENSHOT_PATH}" >/dev/null
 file "${SCREENSHOT_PATH}"
+
+echo "== Exercise Live Activity on SpringBoard =="
+if (( LIVE_ACTIVITY_SCREENSHOT_DELAY >= LIVE_ACTIVITY_OBSERVATION_SECONDS )); then
+  echo "Live Activity screenshot delay must be shorter than its observation window." >&2
+  exit 1
+fi
+xcrun simctl launch "${SIM_ID}" com.apple.springboard >/dev/null
+sleep "${LIVE_ACTIVITY_SCREENSHOT_DELAY}"
+
+mkdir -p "$(dirname "${LIVE_ACTIVITY_SCREENSHOT}")"
+xcrun simctl io "${SIM_ID}" screenshot "${LIVE_ACTIVITY_SCREENSHOT}" >/dev/null
+file "${LIVE_ACTIVITY_SCREENSHOT}"
+
+sleep "$((LIVE_ACTIVITY_OBSERVATION_SECONDS - LIVE_ACTIVITY_SCREENSHOT_DELAY))"
+
+mkdir -p "$(dirname "${LIVE_ACTIVITY_LOG}")"
+xcrun simctl spawn "${SIM_ID}" log show \
+  --start "${LIVE_ACTIVITY_LOG_START}" \
+  --style compact \
+  --predicate 'process == "liveactivitiesd" OR process == "PingScope"' \
+  >"${LIVE_ACTIVITY_LOG}" 2>/dev/null
+validate_ios_live_activity_log "${LIVE_ACTIVITY_LOG}" 2
 
 echo "PASS: iOS simulator smoke passed"

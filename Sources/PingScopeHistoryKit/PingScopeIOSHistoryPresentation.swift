@@ -538,6 +538,31 @@ public struct PingScopeIOSHistoryPresentation: Equatable, Sendable {
         self.emptyState = loadResult.samples.isEmpty ? Self.monitoringFirstEmptyState : nil
     }
 
+    public func applyingNetworkSelection(
+        _ selection: HistoryNetworkSelection,
+        thresholds: LatencyThresholds = .defaults
+    ) -> PingScopeIOSHistoryPresentation {
+        guard selection != .all else { return self }
+        let selectedSamples = HistoryNetworkPresentation(
+            samples: sourceSamples,
+            selection: selection,
+            thresholds: thresholds
+        ).selectedSamples
+        let reduction = HistoryChartReduction(samples: selectedSamples)
+        return PingScopeIOSHistoryPresentation(
+            loadResult: PingScopeIOSHistoryLoadResult(
+                hostID: sourceSamples.first?.hostID ?? UUID(),
+                range: range,
+                cutoff: graphData.startDate,
+                endingAt: graphData.endDate,
+                samples: selectedSamples,
+                chartReduction: reduction,
+                isCollecting: collectingText != nil
+            ),
+            thresholds: thresholds
+        )
+    }
+
     private static let monitoringFirstEmptyState = PingScopeIOSHistoryEmptyState(
         title: "Start monitoring to build history",
         message: "Latency trends and sessions will appear here as samples are collected."

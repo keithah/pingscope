@@ -20,7 +20,10 @@ final class HistoryStoreTests: XCTestCase {
             hostID: host.id,
             latency: .milliseconds(12),
             timestamp: base,
-            location: location
+            location: location,
+            networkInterface: "wifi",
+            networkName: "Office Wi-Fi",
+            isVPN: true
         ).withHostMetadata(from: host))
         await store.append(.failure(
             hostID: host.id,
@@ -36,7 +39,13 @@ final class HistoryStoreTests: XCTestCase {
 
         XCTAssertEqual(samples.count, 2)
         XCTAssertEqual(samples[0].location, location)
+        XCTAssertEqual(samples[0].networkInterface, "wifi")
+        XCTAssertEqual(samples[0].networkName, "Office Wi-Fi")
+        XCTAssertTrue(samples[0].isVPN)
         XCTAssertNil(samples[1].location)
+        XCTAssertNil(samples[1].networkInterface)
+        XCTAssertNil(samples[1].networkName)
+        XCTAssertFalse(samples[1].isVPN)
     }
 
     func testSQLiteHistoryStoreMigratesLegacySchemaAndReadsOldRowsWithoutLocation() async throws {
@@ -50,9 +59,13 @@ final class HistoryStoreTests: XCTestCase {
 
         XCTAssertEqual(samples.count, 1)
         XCTAssertNil(samples[0].location)
+        XCTAssertNil(samples[0].networkInterface)
+        XCTAssertNil(samples[0].networkName)
+        XCTAssertFalse(samples[0].isVPN)
         XCTAssertEqual(try historyColumnNames(url: url).intersection([
-            "latitude", "longitude", "horizontal_accuracy", "network_name", "network_interface"
-        ]).count, 5)
+            "latitude", "longitude", "horizontal_accuracy", "network_name", "network_interface",
+            "network_interface_top", "network_name_top", "is_vpn"
+        ]).count, 8)
     }
 
     func testSQLiteHistoryStoreKeepsRowsWithPartialOrCorruptCoordinates() async throws {

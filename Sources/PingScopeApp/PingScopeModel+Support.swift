@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import PingScopeCore
+import PingScopeHistoryKit
 import UniformTypeIdentifiers
 
 struct SetupChecklistItem: Identifiable {
@@ -57,6 +58,19 @@ extension PingScopeModel {
 }
 
 extension UserDefaults {
+    var pingScopeMacHistoryRange: HistoryRange {
+        get {
+            guard let rawValue = string(forKey: "pingScopeMacHistoryRange"),
+                  let range = HistoryRange(rawValue: rawValue) else {
+                return .defaultValue
+            }
+            return range
+        }
+        set {
+            set(newValue.rawValue, forKey: "pingScopeMacHistoryRange")
+        }
+    }
+
     var overlayFrame: NSRect? {
         get {
             guard let string = string(forKey: "overlayFrame") else { return nil }

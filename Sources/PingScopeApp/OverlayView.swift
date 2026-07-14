@@ -3,6 +3,7 @@ import SwiftUI
 
 struct OverlayView: View {
     @ObservedObject var viewModel: OverlayPresentationViewModel
+    @ObservedObject var liveDisplay: LiveDisplayModel
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {

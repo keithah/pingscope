@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 import PingScopeCore
 import SwiftUI
@@ -29,12 +30,18 @@ struct LatencyGraphPoint {
     }
 }
 
+struct LatencyGraphSmoothedPathSegment {
+    let points: [CGPoint]
+    let path: CGPath
+}
+
 struct LatencyGraphData {
     let points: [LatencyGraphPoint]
     let scale: LatencyGraphScale
     let sampleCount: Int
     private let latencyCount: Int
     private let renderPointCache = LatencyGraphRenderPointCache()
+    private let smoothedPathCache = LatencyGraphSmoothedPathCache()
 
     init(samples: [PingResult]) {
         var latencyCount = 0
@@ -67,6 +74,21 @@ struct LatencyGraphData {
         renderPointCache.renderPoints(points: points, pixelWidth: pixelWidth, sampleCount: sampleCount)
     }
 
+    func smoothedPathSegments(
+        size: CGSize,
+        plotTop: CGFloat = 0,
+        plotBottom: CGFloat = 0
+    ) -> [LatencyGraphSmoothedPathSegment] {
+        smoothedPathCache.segments(
+            renderPoints: renderPoints(pixelWidth: size.width),
+            sampleCount: sampleCount,
+            size: size,
+            axisMaximumMilliseconds: scale.axisMaximumMilliseconds,
+            plotTop: plotTop,
+            plotBottom: plotBottom
+        )
+    }
+
     var renderPointCacheEntryCount: Int {
         renderPointCache.entryCount
     }
@@ -81,9 +103,26 @@ struct DrawableHostLatencyGraphSeries {
     let points: [LatencyGraphPoint]
     let sampleCount: Int
     private let renderPointCache = LatencyGraphRenderPointCache()
+    private let smoothedPathCache = LatencyGraphSmoothedPathCache()
 
     func renderPoints(pixelWidth: CGFloat) -> [LatencyGraphPoint] {
         renderPointCache.renderPoints(points: points, pixelWidth: pixelWidth, sampleCount: sampleCount)
+    }
+
+    func smoothedPathSegments(
+        size: CGSize,
+        scale: LatencyGraphScale,
+        plotTop: CGFloat = 0,
+        plotBottom: CGFloat = 0
+    ) -> [LatencyGraphSmoothedPathSegment] {
+        smoothedPathCache.segments(
+            renderPoints: renderPoints(pixelWidth: size.width),
+            sampleCount: sampleCount,
+            size: size,
+            axisMaximumMilliseconds: scale.axisMaximumMilliseconds,
+            plotTop: plotTop,
+            plotBottom: plotBottom
+        )
     }
 
     var renderPointCacheEntryCount: Int {
@@ -210,6 +249,109 @@ private final class LatencyGraphRenderPointCache {
     }
 
     private func markRecentlyUsed(_ key: Int) {
+        recentKeys.removeAll { $0 == key }
+        recentKeys.append(key)
+    }
+
+    private func evictIfNeeded() {
+        while recentKeys.count > maximumEntryCount {
+            let evicted = recentKeys.removeFirst()
+            cache.removeValue(forKey: evicted)
+        }
+    }
+}
+
+private final class LatencyGraphSmoothedPathCache {
+    private struct Key: Hashable {
+        let width: UInt64
+        let height: UInt64
+        let axisMaximum: UInt64
+        let plotTop: UInt64
+        let plotBottom: UInt64
+
+        init(
+            size: CGSize,
+            axisMaximumMilliseconds: Double,
+            plotTop: CGFloat,
+            plotBottom: CGFloat
+        ) {
+            width = Double(size.width).bitPattern
+            height = Double(size.height).bitPattern
+            axisMaximum = axisMaximumMilliseconds.bitPattern
+            self.plotTop = Double(plotTop).bitPattern
+            self.plotBottom = Double(plotBottom).bitPattern
+        }
+    }
+
+    private let maximumEntryCount = 4
+    private let lock = NSLock()
+    private var cache: [Key: [LatencyGraphSmoothedPathSegment]] = [:]
+    private var recentKeys: [Key] = []
+
+    func segments(
+        renderPoints: @autoclosure () -> [LatencyGraphPoint],
+        sampleCount: Int,
+        size: CGSize,
+        axisMaximumMilliseconds: Double,
+        plotTop: CGFloat,
+        plotBottom: CGFloat
+    ) -> [LatencyGraphSmoothedPathSegment] {
+        let key = Key(
+            size: size,
+            axisMaximumMilliseconds: axisMaximumMilliseconds,
+            plotTop: plotTop,
+            plotBottom: plotBottom
+        )
+        if let cached = lock.withLock({ cachedSegments(for: key) }) {
+            return cached
+        }
+
+        let evaluatedPoints = renderPoints()
+        return lock.withLock {
+            if let cached = cachedSegments(for: key) {
+                return cached
+            }
+
+            let plotHeight = max(size.height - plotTop - plotBottom, 1)
+            var pointSegments: [[CGPoint]] = []
+            var current: [CGPoint] = []
+            for pointValue in evaluatedPoints {
+                let x = pointValue.xPosition(sampleCount: sampleCount, width: size.width)
+                guard let latency = pointValue.latencyMilliseconds else {
+                    if !current.isEmpty {
+                        pointSegments.append(current)
+                        current.removeAll(keepingCapacity: true)
+                    }
+                    continue
+                }
+                let normalized = min(latency / axisMaximumMilliseconds, 1)
+                let y = plotTop + plotHeight - plotHeight * CGFloat(normalized)
+                current.append(CGPoint(x: x, y: y))
+            }
+            if !current.isEmpty {
+                pointSegments.append(current)
+            }
+
+            let segments = pointSegments.map { points in
+                LatencyGraphSmoothedPathSegment(
+                    points: points,
+                    path: LatencyCurve.smoothedPath(points: points, closed: false)
+                )
+            }
+            cache[key] = segments
+            markRecentlyUsed(key)
+            evictIfNeeded()
+            return segments
+        }
+    }
+
+    private func cachedSegments(for key: Key) -> [LatencyGraphSmoothedPathSegment]? {
+        guard let cached = cache[key] else { return nil }
+        markRecentlyUsed(key)
+        return cached
+    }
+
+    private func markRecentlyUsed(_ key: Key) {
         recentKeys.removeAll { $0 == key }
         recentKeys.append(key)
     }

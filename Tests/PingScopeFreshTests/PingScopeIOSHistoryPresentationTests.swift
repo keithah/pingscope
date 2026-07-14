@@ -1,6 +1,6 @@
 import XCTest
 @testable import PingScopeCore
-@testable import PingScopeiOS
+@testable import PingScopeHistoryKit
 
 final class PingScopeIOSHistoryPresentationTests: XCTestCase {
     func testHistoryRangesExposeRawValuesDurationsCutoffsAndQueryLimits() {

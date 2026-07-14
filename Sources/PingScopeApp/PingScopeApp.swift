@@ -14,6 +14,12 @@ struct PingScopeApp: App {
                 .frame(width: 700, height: 680)
         }
         .commands {
+            CommandGroup(after: .newItem) {
+                Button("History") {
+                    appDelegate.openHistory()
+                }
+                .keyboardShortcut("h", modifiers: [.command, .shift])
+            }
             CommandGroup(replacing: .appSettings) {
                 Button("Settings...") {
                     appDelegate.openSettings()
@@ -38,6 +44,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private var detachedPopoverWindow: NSWindow?
     private var overlayController: NSWindowController?
     private var settingsWindowController: NSWindowController?
+    private var historyWindowController: NSWindowController?
     private var lastExpandedOverlayFrame: NSRect?
     private var instanceLockFD: Int32 = -1
     private var wakeObserver: NSObjectProtocol?
@@ -127,10 +134,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         settingsWindowController?.window?.makeKeyAndOrderFront(nil)
     }
 
+    func openHistory() {
+        if historyWindowController == nil {
+            let window = NSWindow(
+                contentRect: NSRect(x: 0, y: 0, width: 960, height: 760),
+                styleMask: [.titled, .closable, .miniaturizable, .resizable],
+                backing: .buffered,
+                defer: false
+            )
+            window.title = "PingScope History"
+            window.minSize = NSSize(width: 760, height: 580)
+            window.isReleasedWhenClosed = false
+            window.contentView = NSHostingView(rootView: HistoryWindowView(model: model))
+            window.center()
+            historyWindowController = NSWindowController(window: window)
+        }
+        model.prepareHistorySurface()
+        historyWindowController?.showWindow(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        historyWindowController?.window?.makeKeyAndOrderFront(nil)
+    }
+
     func showOverlay() {
         DebugLog.write("AppDelegate.showOverlay called overlayControllerNil=\(overlayController == nil)")
         if overlayController == nil {
-            let view = OverlayView(viewModel: overlayViewModel)
+            let view = OverlayView(viewModel: overlayViewModel, liveDisplay: model.liveDisplay)
             let window = OverlayWindow(contentRect: model.overlayFrame)
             window.contentView = OverlayContainerView(
                 rootView: view,
@@ -276,7 +304,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
 
     private func refreshOverlayContent() {
         overlayController?.window?.contentView = OverlayContainerView(
-            rootView: OverlayView(viewModel: overlayViewModel),
+            rootView: OverlayView(viewModel: overlayViewModel, liveDisplay: model.liveDisplay),
             isCompact: { [weak self] in self?.overlayViewModel.presentation.compactMode ?? false },
             hostOptions: { [weak self] in self?.overlayHostOptions() ?? [] },
             onToggleCompact: { [weak self] in self?.toggleOverlayCompactMode() },
@@ -387,6 +415,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         let controller = NSHostingController(
             rootView: StatusPopoverView(
                 viewModel: statusPopoverViewModel,
+                liveDisplay: model.liveDisplay,
+                onHistory: { [weak self] in
+                    self?.openHistoryFromStatusContent()
+                },
                 onSettings: { [weak self] in
                     self?.openSettingsFromStatusContent()
                 }
@@ -407,6 +439,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             detachedPopoverWindow?.close()
         }
         openSettings()
+    }
+
+    private func openHistoryFromStatusContent() {
+        popover?.performClose(nil)
+        if detachedPopoverWindow?.isVisible == true {
+            detachedPopoverWindow?.close()
+        }
+        openHistory()
     }
 
     private func showPopover(relativeTo anchorView: NSView) {
@@ -477,6 +517,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private func showContextMenu(from view: NSView) {
         let menu = NSMenu()
         menu.addItem(NSMenuItem(title: "Show Overlay", action: #selector(openOverlayFromMenu), keyEquivalent: ""))
+        menu.addItem(NSMenuItem(title: "History...", action: #selector(openHistoryFromMenu), keyEquivalent: ""))
         #if !APPSTORE
             if softwareUpdateController.isAvailable {
                 menu.addItem(NSMenuItem(title: "Check for Updates...", action: #selector(checkForUpdatesFromMenu), keyEquivalent: ""))
@@ -495,6 +536,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
 
     @objc private func openSettingsFromMenu() {
         openSettings()
+    }
+
+    @objc private func openHistoryFromMenu() {
+        openHistory()
     }
 
     #if !APPSTORE

@@ -6,17 +6,23 @@ public struct PingScopeIOSHistoryLocationSnapshot: Equatable, Sendable {
     public var isAuthorized: Bool
     public var fix: SampleLocation?
     public var networkInterface: String?
+    public var networkName: String?
+    public var isVPN: Bool
 
     public init(
         isTaggingEnabled: Bool = false,
         isAuthorized: Bool = false,
         fix: SampleLocation? = nil,
-        networkInterface: String? = nil
+        networkInterface: String? = nil,
+        networkName: String? = nil,
+        isVPN: Bool = false
     ) {
         self.isTaggingEnabled = isTaggingEnabled
         self.isAuthorized = isAuthorized
         self.fix = fix
         self.networkInterface = networkInterface
+        self.networkName = networkName
+        self.isVPN = isVPN
     }
 }
 
@@ -51,45 +57,54 @@ public final class PingScopeIOSHistoryLocationSnapshotStore: @unchecked Sendable
         lock.withLock { value.networkInterface = interface }
     }
 
+    public func updateNetwork(interface: String?, name: String?, isVPN: Bool) {
+        lock.withLock {
+            value.networkInterface = interface
+            value.networkName = name
+            value.isVPN = isVPN
+        }
+    }
+
+    public func updateNetworkName(_ name: String, ifInterfaceMatches interface: String) {
+        let normalized = NetworkInterfaceNormalizer.normalize(interface)
+        lock.withLock {
+            guard NetworkInterfaceNormalizer.normalize(value.networkInterface) == normalized else { return }
+            value.networkName = name
+        }
+    }
+
     public func makeHistorySampleEnricher() -> PingScopeIOSHistorySampleEnricher {
         { [self] result in
             let current = snapshot()
-            guard current.isTaggingEnabled,
-                  current.isAuthorized,
-                  let fix = current.fix else { return result }
-            let normalizedInterface = Self.normalizedInterface(current.networkInterface)
-            guard
-                  let location = SampleLocation(
-                    latitude: fix.latitude,
-                    longitude: fix.longitude,
-                    horizontalAccuracy: fix.horizontalAccuracy,
-                    networkName: normalizedInterface.map(Self.displayName(for:)),
-                    networkInterface: normalizedInterface
-                  ) else { return result }
+            // Network label is captured on EVERY sample, independent of location
+            // tagging/authorization. Name falls back to the interface's display
+            // name when the platform did not supply an explicit name (e.g. SSID).
+            let normalizedInterface = NetworkInterfaceNormalizer.normalize(current.networkInterface)
+            let resolvedName = current.networkName ?? normalizedInterface.map(NetworkInterfaceNormalizer.displayName(for:))
+
             var enriched = result
-            enriched.location = location
+            enriched.networkInterface = normalizedInterface
+            enriched.networkName = resolvedName
+            enriched.isVPN = current.isVPN
+
+            // A coordinate is only attached when tagging is enabled, authorized,
+            // and a fix is available; otherwise only the network label is stamped.
+            if current.isTaggingEnabled,
+               current.isAuthorized,
+               let fix = current.fix,
+               let location = SampleLocation(
+                   latitude: fix.latitude,
+                   longitude: fix.longitude,
+                   horizontalAccuracy: fix.horizontalAccuracy,
+                   networkName: resolvedName,
+                   networkInterface: normalizedInterface
+               ) {
+                enriched.location = location
+            }
             return enriched
         }
     }
 
-    private static func normalizedInterface(_ value: String?) -> String? {
-        guard let value else { return nil }
-        return switch value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
-        case "wifi": "wifi"
-        case "cellular": "cellular"
-        case "wired": "wired"
-        default: "other"
-        }
-    }
-
-    private static func displayName(for interface: String) -> String {
-        switch interface {
-        case "wifi": "Wi-Fi"
-        case "cellular": "Cellular"
-        case "wired": "Wired"
-        default: "Other"
-        }
-    }
 }
 
 public struct PingScopeIOSHistoryLocationFixCandidate: Equatable, Sendable {

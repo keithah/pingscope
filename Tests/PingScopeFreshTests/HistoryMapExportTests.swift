@@ -1,6 +1,7 @@
 import Foundation
 import XCTest
 @testable import PingScopeCore
+@testable import PingScopeHistoryKit
 @testable import PingScopeiOS
 
 @MainActor

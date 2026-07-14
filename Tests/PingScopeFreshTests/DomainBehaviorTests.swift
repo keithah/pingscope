@@ -2,6 +2,64 @@ import XCTest
 @testable import PingScopeCore
 
 final class DomainBehaviorTests: XCTestCase {
+    func testPingResultNetworkFieldsDefaultAndDecodeLegacyJSON() throws {
+        let original = PingResult.success(hostID: UUID(), latency: .milliseconds(12))
+
+        XCTAssertNil(original.networkInterface)
+        XCTAssertNil(original.networkName)
+        XCTAssertFalse(original.isVPN)
+
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(original)) as? [String: Any])
+        object.removeValue(forKey: "networkInterface")
+        object.removeValue(forKey: "networkName")
+        object.removeValue(forKey: "isVPN")
+
+        let decoded = try JSONDecoder().decode(PingResult.self, from: JSONSerialization.data(withJSONObject: object))
+
+        XCTAssertNil(decoded.networkInterface)
+        XCTAssertNil(decoded.networkName)
+        XCTAssertFalse(decoded.isVPN)
+    }
+
+    func testPingResultInitializersFactoriesAndMetadataCopyCarryNetworkFields() {
+        let host = HostConfig(displayName: "Example", address: "example.com", method: .https)
+        let direct = PingResult(
+            hostID: host.id,
+            latency: .milliseconds(8),
+            failureReason: nil,
+            networkInterface: " WiFi ",
+            networkName: "Office Wi-Fi",
+            isVPN: true
+        )
+        let success = PingResult.success(
+            hostID: host.id,
+            latency: .milliseconds(9),
+            networkInterface: "cellular",
+            networkName: "Cellular · 5G",
+            isVPN: false
+        )
+        let failure = PingResult.failure(
+            hostID: host.id,
+            reason: .timeout,
+            networkInterface: "wired",
+            networkName: "Wired",
+            isVPN: true
+        )
+
+        XCTAssertEqual(direct.networkInterface, "wifi")
+        XCTAssertEqual(direct.networkName, "Office Wi-Fi")
+        XCTAssertTrue(direct.isVPN)
+        XCTAssertEqual(success.networkInterface, "cellular")
+        XCTAssertEqual(success.networkName, "Cellular · 5G")
+        XCTAssertFalse(success.isVPN)
+        XCTAssertEqual(failure.networkInterface, "wired")
+        XCTAssertEqual(failure.networkName, "Wired")
+        XCTAssertTrue(failure.isVPN)
+        XCTAssertEqual(direct.withHostMetadata(from: host).networkInterface, "wifi")
+        XCTAssertEqual(direct.withHostMetadata(from: host).networkName, "Office Wi-Fi")
+        XCTAssertTrue(direct.withHostMetadata(from: host).isVPN)
+    }
+
     func testSampleLocationAcceptsValidCoordinatesAndNormalizesInterface() throws {
         let location = try XCTUnwrap(SampleLocation(
             latitude: 37.3349,
@@ -112,11 +170,14 @@ final class DomainBehaviorTests: XCTestCase {
     func testHistoryExportRangePresetsIncludeMaxAndDefaultToOneHour() {
         XCTAssertEqual(HistoryExportRangePreset.default, .oneHour)
         XCTAssertEqual(HistoryExportRangePreset.allCases.map(\.rawValue), ["1m", "5m", "10m", "1h", "Max", "Custom"])
-        XCTAssertEqual(HistoryExportRangePreset.max.resolvedDuration(customValue: "99", customUnit: .days), 604_800)
+        XCTAssertEqual(PingHistoryRetention.maximumDays, 30)
+        XCTAssertEqual(PingHistoryRetention.maximumDuration, .days(30))
+        XCTAssertEqual(HistoryExportRangePreset.maximumDuration, 2_592_000)
+        XCTAssertEqual(HistoryExportRangePreset.max.resolvedDuration(customValue: "99", customUnit: .days), 2_592_000)
         XCTAssertNil(HistoryExportRangePreset.custom.resolvedDuration(customValue: "abc", customUnit: .hours))
         XCTAssertEqual(HistoryExportRangePreset.custom.resolvedDuration(customValue: "2", customUnit: .hours), 7_200)
         XCTAssertEqual(HistoryExportRangePreset.custom.resolvedDuration(customValue: "1.5", customUnit: .days), 129_600)
-        XCTAssertEqual(HistoryExportRangePreset.custom.resolvedDuration(customValue: "99", customUnit: .days), 604_800)
+        XCTAssertEqual(HistoryExportRangePreset.custom.resolvedDuration(customValue: "99", customUnit: .days), 2_592_000)
         XCTAssertEqual(HistoryExportRangePreset.custom.filenameComponent(customValue: "2", customUnit: .hours), "2h")
         XCTAssertEqual(HistoryExportRangePreset.max.filenameComponent(customValue: "2", customUnit: .hours), "max")
     }

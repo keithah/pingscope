@@ -1,5 +1,6 @@
 import Foundation
 import PingScopeCore
+import PingScopeHistoryKit
 import SwiftUI
 
 public enum PingScopeIOSRunControlAction: Equatable, Sendable {

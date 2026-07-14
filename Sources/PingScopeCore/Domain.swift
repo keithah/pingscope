@@ -473,7 +473,7 @@ public struct SampleLocation: Codable, Equatable, Sendable {
             self.horizontalAccuracy = nil
         }
         self.networkName = networkName
-        self.networkInterface = Self.normalizedInterface(networkInterface)
+        self.networkInterface = NetworkInterfaceNormalizer.normalize(networkInterface)
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -508,15 +508,6 @@ public struct SampleLocation: Codable, Equatable, Sendable {
         self = normalized
     }
 
-    private static func normalizedInterface(_ value: String?) -> String? {
-        guard let value else { return nil }
-        return switch value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
-        case "wifi": "wifi"
-        case "cellular": "cellular"
-        case "wired": "wired"
-        default: "other"
-        }
-    }
 }
 
 public struct PingResult: Identifiable, Codable, Equatable, Sendable {
@@ -530,6 +521,9 @@ public struct PingResult: Identifiable, Codable, Equatable, Sendable {
     public var failureReason: FailureReason?
     public var metadata: ProbeMetadata
     public var location: SampleLocation?
+    public var networkInterface: String?
+    public var networkName: String?
+    public var isVPN: Bool
 
     private enum CodingKeys: String, CodingKey {
         case id
@@ -542,6 +536,9 @@ public struct PingResult: Identifiable, Codable, Equatable, Sendable {
         case failureReason
         case metadata
         case location
+        case networkInterface
+        case networkName
+        case isVPN
     }
 
     public init(
@@ -554,7 +551,10 @@ public struct PingResult: Identifiable, Codable, Equatable, Sendable {
         latency: Duration?,
         failureReason: FailureReason?,
         metadata: ProbeMetadata = ProbeMetadata(),
-        location: SampleLocation? = nil
+        location: SampleLocation? = nil,
+        networkInterface: String? = nil,
+        networkName: String? = nil,
+        isVPN: Bool = false
     ) {
         self.id = id
         self.hostID = hostID
@@ -566,6 +566,9 @@ public struct PingResult: Identifiable, Codable, Equatable, Sendable {
         self.failureReason = failureReason
         self.metadata = metadata
         self.location = location
+        self.networkInterface = NetworkInterfaceNormalizer.normalize(networkInterface)
+        self.networkName = networkName
+        self.isVPN = isVPN
     }
 
     public init(from decoder: Decoder) throws {
@@ -580,6 +583,11 @@ public struct PingResult: Identifiable, Codable, Equatable, Sendable {
         failureReason = try container.decodeIfPresent(FailureReason.self, forKey: .failureReason)
         metadata = try container.decode(ProbeMetadata.self, forKey: .metadata)
         location = (try? container.decodeIfPresent(SampleLocation.self, forKey: .location)) ?? nil
+        networkInterface = NetworkInterfaceNormalizer.normalize(
+            try container.decodeIfPresent(String.self, forKey: .networkInterface)
+        )
+        networkName = try container.decodeIfPresent(String.self, forKey: .networkName)
+        isVPN = try container.decodeIfPresent(Bool.self, forKey: .isVPN) ?? false
     }
 
     public var isSuccess: Bool {
@@ -591,7 +599,10 @@ public struct PingResult: Identifiable, Codable, Equatable, Sendable {
         latency: Duration,
         timestamp: Date = Date(),
         metadata: ProbeMetadata = ProbeMetadata(),
-        location: SampleLocation? = nil
+        location: SampleLocation? = nil,
+        networkInterface: String? = nil,
+        networkName: String? = nil,
+        isVPN: Bool = false
     ) -> PingResult {
         PingResult(
             hostID: hostID,
@@ -599,7 +610,10 @@ public struct PingResult: Identifiable, Codable, Equatable, Sendable {
             latency: latency,
             failureReason: nil,
             metadata: metadata,
-            location: location
+            location: location,
+            networkInterface: networkInterface,
+            networkName: networkName,
+            isVPN: isVPN
         )
     }
 
@@ -608,7 +622,10 @@ public struct PingResult: Identifiable, Codable, Equatable, Sendable {
         reason: FailureReason,
         timestamp: Date = Date(),
         metadata: ProbeMetadata = ProbeMetadata(),
-        location: SampleLocation? = nil
+        location: SampleLocation? = nil,
+        networkInterface: String? = nil,
+        networkName: String? = nil,
+        isVPN: Bool = false
     ) -> PingResult {
         PingResult(
             hostID: hostID,
@@ -616,7 +633,10 @@ public struct PingResult: Identifiable, Codable, Equatable, Sendable {
             latency: nil,
             failureReason: reason,
             metadata: metadata,
-            location: location
+            location: location,
+            networkInterface: networkInterface,
+            networkName: networkName,
+            isVPN: isVPN
         )
     }
 

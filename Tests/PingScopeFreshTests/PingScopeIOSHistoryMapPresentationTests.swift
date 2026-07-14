@@ -1,6 +1,7 @@
 import Foundation
 import PingScopeCore
 import XCTest
+@testable import PingScopeHistoryKit
 @testable import PingScopeiOS
 
 final class PingScopeIOSHistoryMapPresentationTests: XCTestCase {

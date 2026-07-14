@@ -159,6 +159,14 @@ public enum HistoryExportRangeUnit: String, CaseIterable, Identifiable, Sendable
     }
 }
 
+/// The longest History window retained and exposed by first-party PingScope apps.
+/// Derive both store retention and export cutoffs from this policy to keep them aligned.
+public enum PingHistoryRetention {
+    public static let maximumDays: Double = 30
+    public static let maximumDuration: Duration = .days(maximumDays)
+    public static let maximumTimeInterval: TimeInterval = maximumDuration.seconds
+}
+
 public enum HistoryExportRangePreset: String, CaseIterable, Identifiable, Sendable {
     case oneMinute = "1m"
     case fiveMinutes = "5m"
@@ -167,7 +175,7 @@ public enum HistoryExportRangePreset: String, CaseIterable, Identifiable, Sendab
     case max = "Max"
     case custom = "Custom"
 
-    public static let maximumDuration: TimeInterval = 604_800
+    public static let maximumDuration = PingHistoryRetention.maximumTimeInterval
     public static let `default`: Self = .oneHour
 
     public var id: String { rawValue }

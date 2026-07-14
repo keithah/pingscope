@@ -1,9 +1,85 @@
+import Combine
 import XCTest
 @testable import PingScope
 import PingScopeCore
 
 @MainActor
 final class PingScopePresentationViewModelTests: XCTestCase {
+    func testLiveDisplayUpdatesDoNotPublishThroughSettingsModel() {
+        let model = PingScopeModel()
+        var modelChangeCount = 0
+        var liveDisplayChangeCount = 0
+        let modelCancellable = model.objectWillChange.sink {
+            modelChangeCount += 1
+        }
+        let liveDisplayCancellable = model.liveDisplay.objectWillChange.sink {
+            liveDisplayChangeCount += 1
+        }
+        let host = HostConfig(displayName: "Edge", address: "1.1.1.1")
+
+        model.liveDisplay.updateSnapshot(
+            RuntimeSnapshot(
+                hosts: [host],
+                primaryHostID: host.id,
+                healthByHost: [:],
+                samplesByHost: [:]
+            )
+        )
+        model.liveDisplay.updateDisplayPresentation(PingScopeDisplayPresentation())
+
+        XCTAssertEqual(liveDisplayChangeCount, 2)
+        XCTAssertEqual(modelChangeCount, 0)
+        withExtendedLifetime((modelCancellable, liveDisplayCancellable)) {}
+    }
+
+    func testDisplayPresentationRecomputeSchedulerCoalescesBurst() async {
+        let scheduler = DisplayPresentationRecomputeScheduler(delay: .milliseconds(10))
+        let recomputed = expectation(description: "presentation recomputed")
+        var recomputeCount = 0
+
+        for _ in 0..<5 {
+            scheduler.schedule {
+                recomputeCount += 1
+                recomputed.fulfill()
+            }
+        }
+
+        await fulfillment(of: [recomputed], timeout: 1)
+        XCTAssertEqual(recomputeCount, 1)
+    }
+
+    func testDisplayPresentationInputKeyTracksVisibleInputs() {
+        let host = HostConfig(displayName: "Primary", address: "1.1.1.1")
+        let sample = PingResult.success(
+            hostID: host.id,
+            latency: .milliseconds(12),
+            timestamp: Date(timeIntervalSince1970: 100)
+        )
+        let baseline = DisplayPresentationInputKey(
+            visibleSamples: [sample],
+            selectedRange: .fiveMinutes,
+            includesAllHosts: false,
+            primaryHost: host,
+            hosts: [host],
+            healthByHost: [:],
+            allHostVisibleSamples: nil
+        )
+
+        XCTAssertEqual(baseline, baseline)
+        XCTAssertNotEqual(
+            baseline,
+            DisplayPresentationInputKey(
+                visibleSamples: [],
+                selectedRange: .fiveMinutes,
+                includesAllHosts: false,
+                primaryHost: host,
+                hosts: [host],
+                healthByHost: [:],
+                allHostVisibleSamples: nil
+            )
+        )
+    }
+
     func testOverlayPresentationViewModelRefreshesOverlayPreferences() {
         let oldShowsAllHosts = UserDefaults.standard.overlayShowsAllHosts
         let oldShowsLegend = UserDefaults.standard.overlayShowsLegend

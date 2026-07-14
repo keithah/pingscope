@@ -13,11 +13,19 @@ let package = Package(
             targets: ["PingScopeCore"]
         ),
         .library(
+            name: "PingScopeCloudSync",
+            targets: ["PingScopeCloudSync"]
+        ),
+        .library(
+            name: "PingScopeHistoryKit",
+            targets: ["PingScopeHistoryKit"]
+        ),
+        .library(
             name: "PingScopeiOS",
             targets: ["PingScopeiOS"]
         ),
         .executable(
-            name: "PingScope",
+            name: "PingScopePackage",
             targets: ["PingScope"]
         ),
         .executable(
@@ -40,13 +48,23 @@ let package = Package(
             ]
         ),
         .target(
-            name: "PingScopeiOS",
+            name: "PingScopeCloudSync",
             dependencies: ["PingScopeCore"],
+            path: "Sources/PingScopeCloudSync"
+        ),
+        .target(
+            name: "PingScopeHistoryKit",
+            dependencies: ["PingScopeCore"],
+            path: "Sources/PingScopeHistoryKit"
+        ),
+        .target(
+            name: "PingScopeiOS",
+            dependencies: ["PingScopeCore", "PingScopeHistoryKit"],
             path: "Sources/PingScopeiOS"
         ),
         .executableTarget(
             name: "PingScope",
-            dependencies: ["PingScopeCore"],
+            dependencies: ["PingScopeCore", "PingScopeHistoryKit"],
             path: "Sources/PingScopeApp"
         ),
         .executableTarget(
@@ -61,7 +79,7 @@ let package = Package(
         ),
         .testTarget(
             name: "PingScopeTests",
-            dependencies: ["PingScopeCore", "PingScopeiOS", "PingScope"],
+            dependencies: ["PingScopeCore", "PingScopeCloudSync", "PingScopeHistoryKit", "PingScopeiOS", "PingScope"],
             path: "Tests/PingScopeFreshTests"
         )
     ]

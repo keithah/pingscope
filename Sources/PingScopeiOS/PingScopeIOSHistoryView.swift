@@ -1,4 +1,5 @@
 import PingScopeCore
+import PingScopeHistoryKit
 import SwiftUI
 
 #if os(iOS)

@@ -1,6 +1,7 @@
 import Combine
 import Foundation
 import PingScopeCore
+import PingScopeHistoryKit
 
 public struct HistorySharePayload: Identifiable, Equatable, Sendable {
     public let id: UUID

@@ -273,6 +273,9 @@ private final class SQLiteHistoryWorker: @unchecked Sendable {
             try addColumnIfNeeded(table: "ping_samples", column: "horizontal_accuracy", definition: "REAL")
             try addColumnIfNeeded(table: "ping_samples", column: "network_name", definition: "TEXT")
             try addColumnIfNeeded(table: "ping_samples", column: "network_interface", definition: "TEXT")
+            try addColumnIfNeeded(table: "ping_samples", column: "network_interface_top", definition: "TEXT")
+            try addColumnIfNeeded(table: "ping_samples", column: "network_name_top", definition: "TEXT")
+            try addColumnIfNeeded(table: "ping_samples", column: "is_vpn", definition: "INTEGER")
             try execute("CREATE INDEX IF NOT EXISTS ping_samples_host_time ON ping_samples(host_id, timestamp);")
             try execute("CREATE INDEX IF NOT EXISTS ping_samples_timestamp ON ping_samples(timestamp);")
         } catch {
@@ -300,8 +303,9 @@ private final class SQLiteHistoryWorker: @unchecked Sendable {
         let sql = """
         INSERT OR REPLACE INTO ping_samples
         (id, host_id, address, method, port, timestamp, latency_ms, failure_reason, metadata_note, metadata_json,
-         latitude, longitude, horizontal_accuracy, network_name, network_interface)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+         latitude, longitude, horizontal_accuracy, network_name, network_interface,
+         network_interface_top, network_name_top, is_vpn)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
         """
         let shouldWrapInTransaction = true
         if shouldWrapInTransaction {
@@ -385,12 +389,24 @@ private final class SQLiteHistoryWorker: @unchecked Sendable {
                 sqlite3_bind_null(statement, Int32(index))
             }
         }
+        if let networkInterface = result.networkInterface {
+            bindText(networkInterface, to: 16, in: statement)
+        } else {
+            sqlite3_bind_null(statement, 16)
+        }
+        if let networkName = result.networkName {
+            bindText(networkName, to: 17, in: statement)
+        } else {
+            sqlite3_bind_null(statement, 17)
+        }
+        sqlite3_bind_int(statement, 18, result.isVPN ? 1 : 0)
     }
 
     private func query(hostID: UUID, since: Date, limit: Int) throws -> [PingResult] {
         let sql = """
         SELECT id, host_id, address, method, port, timestamp, latency_ms, failure_reason, metadata_note, metadata_json,
-               latitude, longitude, horizontal_accuracy, network_name, network_interface
+               latitude, longitude, horizontal_accuracy, network_name, network_interface,
+               network_interface_top, network_name_top, is_vpn
         FROM ping_samples
         WHERE host_id = ? AND timestamp >= ?
         ORDER BY timestamp ASC
@@ -419,7 +435,8 @@ private final class SQLiteHistoryWorker: @unchecked Sendable {
     private func queryLatest(hostID: UUID, since: Date, limit: Int) throws -> [PingResult] {
         let sql = """
         SELECT id, host_id, address, method, port, timestamp, latency_ms, failure_reason, metadata_note, metadata_json,
-               latitude, longitude, horizontal_accuracy, network_name, network_interface
+               latitude, longitude, horizontal_accuracy, network_name, network_interface,
+               network_interface_top, network_name_top, is_vpn
         FROM ping_samples
         WHERE host_id = ? AND timestamp >= ?
         ORDER BY timestamp DESC
@@ -448,7 +465,8 @@ private final class SQLiteHistoryWorker: @unchecked Sendable {
     private func streamSamples(hostID: UUID, since: Date, to writer: HistoryExportSampleWriter) throws -> Int {
         let sql = """
         SELECT id, host_id, address, method, port, timestamp, latency_ms, failure_reason, metadata_note, metadata_json,
-               latitude, longitude, horizontal_accuracy, network_name, network_interface
+               latitude, longitude, horizontal_accuracy, network_name, network_interface,
+               network_interface_top, network_name_top, is_vpn
         FROM ping_samples
         WHERE host_id = ? AND timestamp >= ?
         ORDER BY timestamp ASC;
@@ -630,7 +648,11 @@ private final class SQLiteHistoryWorker: @unchecked Sendable {
             latency: latency,
             failureReason: failureReason,
             metadata: metadata,
-            location: location
+            location: location,
+            networkInterface: text(at: 15, in: statement),
+            networkName: text(at: 16, in: statement),
+            isVPN: sqlite3_column_type(statement, 17) != SQLITE_NULL
+                && sqlite3_column_int(statement, 17) != 0
         )
     }
 

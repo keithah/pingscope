@@ -1,4 +1,5 @@
 import Foundation
+import PingScopeHistoryKit
 
 public struct HistoryMapExportCoordinate: Equatable, Sendable {
     public let latitude: Double

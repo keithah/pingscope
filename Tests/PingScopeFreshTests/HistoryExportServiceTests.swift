@@ -1,6 +1,7 @@
 import Foundation
 import XCTest
 @testable import PingScopeCore
+@testable import PingScopeHistoryKit
 @testable import PingScopeiOS
 
 @MainActor
@@ -26,6 +27,8 @@ final class HistoryExportServiceTests: XCTestCase {
         XCTAssertEqual(report.lossPercent, 0)
         XCTAssertEqual(report.uptimePercent, 100)
         XCTAssertEqual(report.graphPresentation.averageLineSegments.flatMap { $0 }.count, 2)
+        XCTAssertEqual(report.networkPresentation.cards.count, 1)
+        XCTAssertEqual(report.sessions, HistorySession.sessionize(samples))
     }
 
     func testEmptyReportDoesNotFabricateMetricValues() {
@@ -39,6 +42,8 @@ final class HistoryExportServiceTests: XCTestCase {
         XCTAssertNil(report.lossPercent)
         XCTAssertNil(report.uptimePercent)
         XCTAssertTrue(report.graphPresentation.averageLineSegments.isEmpty)
+        XCTAssertTrue(report.networkPresentation.cards.isEmpty)
+        XCTAssertTrue(report.sessions.isEmpty)
     }
 
     func testMixedReportUsesHistoryMetricsSemantics() throws {

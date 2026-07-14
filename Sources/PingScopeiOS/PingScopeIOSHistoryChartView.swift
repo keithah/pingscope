@@ -1,10 +1,12 @@
 import PingScopeCore
+import PingScopeHistoryKit
 import SwiftUI
 
 #if os(iOS)
 public struct PingScopeIOSHistoryChartView: View {
     public let selectedRange: HistoryRange
     public let resolvedPresentation: PingScopeIOSResolvedHistoryPresentation
+    @State private var networkSelection: HistoryNetworkSelection = .all
 
     public init(
         selectedRange: HistoryRange,
@@ -32,6 +34,11 @@ public struct PingScopeIOSHistoryChartView: View {
 
     @ViewBuilder
     private func historyContent(_ presentation: PingScopeIOSHistoryPresentation) -> some View {
+        let networkPresentation = HistoryNetworkPresentation(
+            samples: presentation.sourceSamples,
+            selection: networkSelection
+        )
+        let visiblePresentation = presentation.applyingNetworkSelection(networkSelection)
         VStack(alignment: .leading, spacing: 16) {
             if let collectingText = presentation.collectingText {
                 Label(collectingText, systemImage: "clock.badge.checkmark")
@@ -43,15 +50,27 @@ public struct PingScopeIOSHistoryChartView: View {
                 emptyCard(emptyState)
             } else {
                 HistoryLatencyGraphCard(
-                    renderData: presentation.graphData,
-                    graphPresentation: presentation.graphPresentation,
+                    renderData: visiblePresentation.graphData,
+                    graphPresentation: visiblePresentation.graphPresentation,
                     endpointLabelStyle: selectedRange.endpointLabelStyle,
-                    status: overallStatus(presentation)
+                    status: overallStatus(visiblePresentation)
                 )
                 .frame(height: 218)
 
-                statisticsStrip(presentation)
-                sessionsSection(presentation)
+                statisticsStrip(visiblePresentation)
+                networksSection(networkPresentation)
+                sessionsSection(visiblePresentation)
+            }
+        }
+        .onChange(of: selectedRange) { _, _ in
+            networkSelection = .all
+        }
+        .onChange(of: presentation.sourceSamples.first?.hostID) { _, _ in
+            networkSelection = .all
+        }
+        .onChange(of: networkPresentation.cards.map(\.key)) { _, keys in
+            if case let .network(key) = networkSelection, !keys.contains(key) {
+                networkSelection = .all
             }
         }
     }
@@ -99,6 +118,40 @@ public struct PingScopeIOSHistoryChartView: View {
         }
     }
 
+    private func networksSection(_ presentation: HistoryNetworkPresentation) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("By network")
+                    .font(.headline)
+                Spacer()
+                Button {
+                    networkSelection = .all
+                } label: {
+                    Label("All networks", systemImage: networkSelection == .all ? "checkmark.circle.fill" : "circle")
+                        .font(.caption.weight(.semibold))
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(networkSelection == .all ? .blue : .secondary)
+                .accessibilityHint("Show all network samples in the graph and statistics")
+            }
+
+            ForEach(presentation.cards) { card in
+                Button {
+                    networkSelection = .network(card.key)
+                } label: {
+                    HistoryNetworkCard(
+                        presentation: card,
+                        isSelected: networkSelection == .network(card.key)
+                    )
+                }
+                .buttonStyle(.plain)
+                .accessibilityHint("Filter the graph and statistics to this network")
+            }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("By network")
+    }
+
     private func emptyCard(_ state: PingScopeIOSHistoryEmptyState) -> some View {
         VStack(spacing: 12) {
             Image(systemName: "waveform.path.ecg")
@@ -128,6 +181,124 @@ public struct PingScopeIOSHistoryChartView: View {
         case .degraded: 2
         case .down: 3
         }
+    }
+}
+
+private struct HistoryNetworkCard: View {
+    let presentation: HistoryNetworkCardPresentation
+    let isSelected: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 10) {
+                Circle()
+                    .fill(statusColor)
+                    .frame(width: 9, height: 9)
+                    .accessibilityHidden(true)
+                Image(systemName: presentation.systemImage)
+                    .frame(width: 18)
+                    .foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(presentation.label)
+                        .font(.subheadline.weight(.semibold))
+                        .lineLimit(1)
+                    Text("\(presentation.interfaceLabel) · \(presentation.sampleCountText)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 6)
+                if presentation.hasVPN {
+                    Text("VPN")
+                        .font(.caption2.weight(.bold))
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 3)
+                        .background(Color.purple.opacity(0.14), in: Capsule())
+                        .foregroundStyle(.purple)
+                }
+                Image(systemName: isSelected ? "checkmark.circle.fill" : "chevron.right")
+                    .foregroundStyle(isSelected ? Color.blue : Color.secondary.opacity(0.55))
+            }
+
+            HistoryNetworkSparkline(
+                samples: presentation.sparklineSamples,
+                color: statusColor
+            )
+            .frame(height: 28)
+
+            HStack(spacing: 0) {
+                metric("AVG", presentation.averageText)
+                metric("P95", presentation.p95Text)
+                metric("LOSS", presentation.lossText)
+                metric("UPTIME", presentation.uptimeText)
+            }
+        }
+        .padding(14)
+        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16))
+        .overlay {
+            RoundedRectangle(cornerRadius: 16)
+                .stroke(isSelected ? Color.blue : Color.primary.opacity(0.05), lineWidth: isSelected ? 1.5 : 1)
+        }
+        .contentShape(RoundedRectangle(cornerRadius: 16))
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(presentation.label), \(presentation.interfaceLabel), \(presentation.sampleCountText)")
+        .accessibilityValue("Average \(presentation.averageText), p95 \(presentation.p95Text), loss \(presentation.lossText), uptime \(presentation.uptimeText)\(presentation.hasVPN ? ", VPN" : "")")
+    }
+
+    private var statusColor: Color {
+        Color(iosStatusColor: presentation.status.iosStatusColor)
+    }
+
+    private func metric(_ label: String, _ value: String) -> some View {
+        VStack(spacing: 3) {
+            Text(label)
+                .font(.system(size: 9, weight: .bold, design: .rounded))
+                .foregroundStyle(.secondary)
+            Text(value)
+                .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+        }
+        .frame(maxWidth: .infinity)
+    }
+}
+
+private struct HistoryNetworkSparkline: View {
+    let samples: [PingResult]
+    let color: Color
+
+    var body: some View {
+        Canvas { context, size in
+            let successes = samples.compactMap { sample -> (Date, Double)? in
+                guard sample.isSuccess,
+                      let latency = sample.latency?.milliseconds,
+                      latency.isFinite else { return nil }
+                return (sample.timestamp, latency)
+            }
+            guard let start = samples.map(\.timestamp).min(),
+                  let end = samples.map(\.timestamp).max(),
+                  !successes.isEmpty else { return }
+            let duration = max(end.timeIntervalSince(start), 1)
+            let maximum = max(successes.map(\.1).max() ?? 1, 1)
+            let points = successes.map { timestamp, latency in
+                CGPoint(
+                    x: size.width * CGFloat(timestamp.timeIntervalSince(start) / duration),
+                    y: size.height - size.height * CGFloat(latency / maximum)
+                )
+            }
+            if points.count > 1 {
+                context.stroke(
+                    Path(LatencyCurve.smoothedPath(points: points, closed: false)),
+                    with: .color(color),
+                    style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round)
+                )
+            } else if let point = points.first {
+                context.fill(
+                    Path(ellipseIn: CGRect(x: point.x - 2, y: point.y - 2, width: 4, height: 4)),
+                    with: .color(color)
+                )
+            }
+        }
+        .accessibilityHidden(true)
     }
 }
 

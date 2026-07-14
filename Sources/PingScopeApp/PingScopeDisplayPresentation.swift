@@ -1,5 +1,13 @@
 import Foundation
 import PingScopeCore
+#if DEBUG
+import os
+
+private let displayPresentationPointsOfInterestLog = OSLog(
+    subsystem: "tv.kodi.pingscope",
+    category: .pointsOfInterest
+)
+#endif
 
 struct PingScopeDisplayPresentation {
     let visibleHistorySamples: [PingResult]
@@ -32,6 +40,23 @@ struct PingScopeDisplayPresentation {
         presenter: DisplayStatePresenter,
         now: Date = Date()
     ) {
+        #if DEBUG
+        let signpostID = OSSignpostID(log: displayPresentationPointsOfInterestLog)
+        os_signpost(
+            .begin,
+            log: displayPresentationPointsOfInterestLog,
+            name: "PingScopeDisplayPresentation.init",
+            signpostID: signpostID
+        )
+        defer {
+            os_signpost(
+                .end,
+                log: displayPresentationPointsOfInterestLog,
+                name: "PingScopeDisplayPresentation.init",
+                signpostID: signpostID
+            )
+        }
+        #endif
         let liveSamples = presenter.visibleSamples(in: snapshot.primarySeries, range: selectedRange, now: now)
         let visibleSamples = presenter.mergedSamples(
             history: visibleHistorySamples,

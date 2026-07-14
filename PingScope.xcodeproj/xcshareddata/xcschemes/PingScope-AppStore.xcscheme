@@ -30,11 +30,11 @@
       <Testables>
          <TestableReference
             skipped = "NO"
-            parallelizable = "YES">
+            parallelizable = "NO">
             <BuildableReference
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "53AA6F432F441DAD009FEF3A"
-               BuildableName = "PingScope.xctest"
+               BuildableName = "PingScopeTests.xctest"
                BlueprintName = "PingScopeTests"
                ReferencedContainer = "container:PingScope.xcodeproj">
             </BuildableReference>

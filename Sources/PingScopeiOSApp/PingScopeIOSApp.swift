@@ -1,8 +1,12 @@
 import ActivityKit
 import Combine
 import CoreLocation
+import CoreTelephony
+import Darwin
 import Network
+import NetworkExtension
 import PingScopeCore
+import PingScopeHistoryKit
 import PingScopeiOS
 import SwiftUI
 import UIKit
@@ -329,6 +333,7 @@ private final class PingScopeIOSAppModel: ObservableObject {
             guard let self else { return }
             self.historyLocationAuthorization = authorization
             self.applyBackgroundKeepAlive()
+            self.refreshWiFiNameIfAuthorized()
         }
         applyBackgroundKeepAlive()
         startNetworkPathMonitoring()
@@ -758,20 +763,20 @@ private final class PingScopeIOSAppModel: ObservableObject {
     private func startNetworkPathMonitoring() {
         let locationSnapshotStore = historyLocationService.snapshotStore
         pathMonitor.pathUpdateHandler = { [weak self] path in
-            let interface = if path.status != .satisfied {
-                "other"
-            } else if path.usesInterfaceType(.wifi) {
-                "wifi"
-            } else if path.usesInterfaceType(.cellular) {
-                "cellular"
-            } else if path.usesInterfaceType(.wiredEthernet) {
-                "wired"
-            } else {
-                "other"
-            }
-            locationSnapshotStore.updateNetworkInterface(interface)
+            let interface = Self.networkInterface(from: path)
+            let capture = NetworkCaptureResolver(
+                activeInterfaceNames: Self.activeNetworkInterfaceNames,
+                wifiName: { nil },
+                cellularRadio: Self.currentCellularRadio
+            ).snapshot(interface: interface)
+            locationSnapshotStore.updateNetwork(
+                interface: capture.interface,
+                name: capture.name,
+                isVPN: capture.isVPN
+            )
             guard path.status == .satisfied else { return }
             Task { @MainActor [weak self] in
+                self?.refreshWiFiNameIfAuthorized()
                 self?.runLifecycleTask { model, context in
                     _ = await model.refreshDefaultGatewayHost(
                         shouldCreateIfMissing: false,
@@ -783,6 +788,70 @@ private final class PingScopeIOSAppModel: ObservableObject {
             }
         }
         pathMonitor.start(queue: pathMonitorQueue)
+    }
+
+    nonisolated private static func networkInterface(from path: Network.NWPath) -> String {
+        guard path.status == .satisfied else { return "other" }
+        if path.usesInterfaceType(.wifi) { return "wifi" }
+        if path.usesInterfaceType(.cellular) { return "cellular" }
+        if path.usesInterfaceType(.wiredEthernet) { return "wired" }
+        return "other"
+    }
+
+    nonisolated private static func activeNetworkInterfaceNames() -> [String] {
+        var interfaces: UnsafeMutablePointer<ifaddrs>?
+        guard getifaddrs(&interfaces) == 0, let first = interfaces else { return [] }
+        defer { freeifaddrs(first) }
+
+        var names: [String] = []
+        var current: UnsafeMutablePointer<ifaddrs>? = first
+        while let interface = current {
+            let flags = Int32(interface.pointee.ifa_flags)
+            if flags & IFF_UP != 0, let name = interface.pointee.ifa_name {
+                names.append(String(cString: name))
+            }
+            current = interface.pointee.ifa_next
+        }
+        return names
+    }
+
+    nonisolated private static func currentCellularRadio() -> String? {
+        guard let technology = CTTelephonyNetworkInfo()
+            .serviceCurrentRadioAccessTechnology?
+            .values
+            .first else { return nil }
+        return switch technology {
+        case CTRadioAccessTechnologyNR, CTRadioAccessTechnologyNRNSA: "5G"
+        case CTRadioAccessTechnologyLTE: "LTE"
+        case CTRadioAccessTechnologyWCDMA,
+             CTRadioAccessTechnologyHSDPA,
+             CTRadioAccessTechnologyHSUPA,
+             CTRadioAccessTechnologyCDMA1x,
+             CTRadioAccessTechnologyCDMAEVDORev0,
+             CTRadioAccessTechnologyCDMAEVDORevA,
+             CTRadioAccessTechnologyCDMAEVDORevB: "3G"
+        case CTRadioAccessTechnologyEdge, CTRadioAccessTechnologyGPRS: "2G"
+        default: nil
+        }
+    }
+
+    private func refreshWiFiNameIfAuthorized() {
+        guard historyLocationAuthorization == .whenInUse || historyLocationAuthorization == .always,
+              NetworkInterfaceNormalizer.normalize(historyLocationService.snapshotStore.snapshot().networkInterface) == "wifi"
+        else { return }
+
+        Task { @MainActor [weak self] in
+            guard let name = await Self.currentWiFiName(), !name.isEmpty else { return }
+            self?.historyLocationService.snapshotStore.updateNetworkName(name, ifInterfaceMatches: "wifi")
+        }
+    }
+
+    nonisolated private static func currentWiFiName() async -> String? {
+        await withCheckedContinuation { continuation in
+            NEHotspotNetwork.fetchCurrent { network in
+                continuation.resume(returning: network?.ssid)
+            }
+        }
     }
 
     private func refreshDefaultGatewayHost(

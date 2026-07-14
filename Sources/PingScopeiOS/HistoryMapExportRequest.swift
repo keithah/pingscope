@@ -1,5 +1,6 @@
 import Foundation
 import PingScopeCore
+import PingScopeHistoryKit
 
 public struct HistoryMapExportRegion: Equatable, Sendable {
     public let centerLatitude: Double

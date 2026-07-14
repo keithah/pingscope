@@ -611,7 +611,9 @@ final class LiveMonitorSessionControllerTests: XCTestCase {
                 isTaggingEnabled: true,
                 isAuthorized: true,
                 fix: fix,
-                networkInterface: "wifi"
+                networkInterface: "wifi",
+                networkName: "Office Wi-Fi",
+                isVPN: true
             )
         )
         let result = PingResult.success(hostID: UUID(), latency: .milliseconds(18))
@@ -621,37 +623,54 @@ final class LiveMonitorSessionControllerTests: XCTestCase {
         XCTAssertEqual(enriched.location?.latitude, fix.latitude)
         XCTAssertEqual(enriched.location?.longitude, fix.longitude)
         XCTAssertEqual(enriched.location?.horizontalAccuracy, 12)
-        XCTAssertEqual(enriched.location?.networkName, "Wi-Fi")
+        XCTAssertEqual(enriched.location?.networkName, "Office Wi-Fi")
         XCTAssertEqual(enriched.location?.networkInterface, "wifi")
+        XCTAssertEqual(enriched.networkInterface, "wifi")
+        XCTAssertEqual(enriched.networkName, "Office Wi-Fi")
+        XCTAssertTrue(enriched.isVPN)
     }
 
-    func testHistoryLocationProviderLeavesSampleUnchangedWhenTaggingDisabled() throws {
+    func testHistoryLocationProviderCapturesNetworkWhenTaggingDisabled() throws {
         let original = PingResult.success(hostID: UUID(), latency: .milliseconds(18))
         let store = PingScopeIOSHistoryLocationSnapshotStore()
         store.update(PingScopeIOSHistoryLocationSnapshot(
             isTaggingEnabled: false,
             isAuthorized: true,
             fix: try XCTUnwrap(SampleLocation(latitude: 1, longitude: 2)),
-            networkInterface: "wifi"
+            networkInterface: "wifi",
+            networkName: nil,
+            isVPN: true
         ))
 
-        XCTAssertEqual(store.makeHistorySampleEnricher()(original), original)
+        let enriched = store.makeHistorySampleEnricher()(original)
+
+        XCTAssertNil(enriched.location)
+        XCTAssertEqual(enriched.networkInterface, "wifi")
+        XCTAssertEqual(enriched.networkName, "Wi-Fi")
+        XCTAssertTrue(enriched.isVPN)
+        XCTAssertNil(original.networkInterface)
     }
 
-    func testHistoryLocationProviderLeavesSampleUnchangedWhenUnauthorized() throws {
+    func testHistoryLocationProviderCapturesNetworkWhenLocationUnauthorized() throws {
         let original = PingResult.success(hostID: UUID(), latency: .milliseconds(18))
         let store = PingScopeIOSHistoryLocationSnapshotStore()
         store.update(PingScopeIOSHistoryLocationSnapshot(
             isTaggingEnabled: true,
             isAuthorized: false,
             fix: try XCTUnwrap(SampleLocation(latitude: 1, longitude: 2)),
-            networkInterface: "wifi"
+            networkInterface: "cellular",
+            networkName: "Cellular · LTE"
         ))
 
-        XCTAssertEqual(store.makeHistorySampleEnricher()(original), original)
+        let enriched = store.makeHistorySampleEnricher()(original)
+
+        XCTAssertNil(enriched.location)
+        XCTAssertEqual(enriched.networkInterface, "cellular")
+        XCTAssertEqual(enriched.networkName, "Cellular · LTE")
+        XCTAssertFalse(enriched.isVPN)
     }
 
-    func testHistoryLocationProviderLeavesSampleUnchangedWithoutFix() {
+    func testHistoryLocationProviderCapturesNetworkWithoutLocationFix() {
         let original = PingResult.success(hostID: UUID(), latency: .milliseconds(18))
         let store = PingScopeIOSHistoryLocationSnapshotStore()
         store.update(PingScopeIOSHistoryLocationSnapshot(
@@ -661,7 +680,11 @@ final class LiveMonitorSessionControllerTests: XCTestCase {
             networkInterface: "wifi"
         ))
 
-        XCTAssertEqual(store.makeHistorySampleEnricher()(original), original)
+        let enriched = store.makeHistorySampleEnricher()(original)
+
+        XCTAssertNil(enriched.location)
+        XCTAssertEqual(enriched.networkInterface, "wifi")
+        XCTAssertEqual(enriched.networkName, "Wi-Fi")
     }
 
     func testHistoryLocationProviderEnrichesWithoutNetworkInterface() throws {
@@ -680,6 +703,32 @@ final class LiveMonitorSessionControllerTests: XCTestCase {
         XCTAssertEqual(enriched.location?.longitude, fix.longitude)
         XCTAssertNil(enriched.location?.networkName)
         XCTAssertNil(enriched.location?.networkInterface)
+        XCTAssertNil(enriched.networkName)
+        XCTAssertNil(enriched.networkInterface)
+    }
+
+    func testHistoryLocationSnapshotStoreUpdatesNetworkAtomically() {
+        let store = PingScopeIOSHistoryLocationSnapshotStore()
+
+        store.updateNetwork(interface: "wifi", name: "Office Wi-Fi", isVPN: true)
+
+        let snapshot = store.snapshot()
+        XCTAssertEqual(snapshot.networkInterface, "wifi")
+        XCTAssertEqual(snapshot.networkName, "Office Wi-Fi")
+        XCTAssertTrue(snapshot.isVPN)
+    }
+
+    func testHistoryLocationSnapshotStoreIgnoresLateWiFiNameAfterInterfaceChanges() {
+        let store = PingScopeIOSHistoryLocationSnapshotStore()
+        store.updateNetwork(interface: "wifi", name: "Wi-Fi", isVPN: true)
+        store.updateNetwork(interface: "cellular", name: "Cellular · LTE", isVPN: false)
+
+        store.updateNetworkName("Late SSID", ifInterfaceMatches: "wifi")
+
+        let snapshot = store.snapshot()
+        XCTAssertEqual(snapshot.networkInterface, "cellular")
+        XCTAssertEqual(snapshot.networkName, "Cellular · LTE")
+        XCTAssertFalse(snapshot.isVPN)
     }
 
     func testLatestValidHistoryLocationFixUsesNewestValidCandidate() throws {

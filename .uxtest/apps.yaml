@@ -21,4 +21,4 @@ apps:
         ax_identifier: pingscope.statusItem
         label: PingScope
       root_match:
-        label: Open settings
+        label: Settings
