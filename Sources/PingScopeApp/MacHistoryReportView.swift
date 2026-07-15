@@ -17,9 +17,8 @@ struct MacHistoryReportSheet: View {
                 Button("Done") { dismiss() }.keyboardShortcut(.cancelAction)
             }
 
-            ScrollView([.horizontal, .vertical]) {
-                MacHistoryReportCard(presentation: report)
-                    .frame(width: 900, height: 750)
+            ScrollView(.vertical) {
+                MacHistoryReportPreview(presentation: report)
                     .shadow(color: .black.opacity(0.14), radius: 10, y: 4)
                     .padding(16)
             }
@@ -80,6 +79,31 @@ struct MacHistoryReportSheet: View {
             .lowercased()
             .map { $0.isLetter || $0.isNumber ? $0 : "-" }
         return String(safe).split(separator: "-").joined(separator: "-")
+    }
+}
+
+private struct MacHistoryReportPreview: View {
+    let presentation: HistoryReportPresentation
+
+    var body: some View {
+        GeometryReader { geometry in
+            let previewSize = MacHistoryReportRenderer.previewSize(
+                fittingWidth: min(geometry.size.width, MacHistoryReportRenderer.size.width)
+            )
+            MacHistoryReportCard(presentation: presentation)
+                .frame(
+                    width: MacHistoryReportRenderer.size.width,
+                    height: MacHistoryReportRenderer.size.height
+                )
+                .scaleEffect(
+                    previewSize.width / MacHistoryReportRenderer.size.width,
+                    anchor: .topLeading
+                )
+        }
+        .aspectRatio(
+            MacHistoryReportRenderer.size.width / MacHistoryReportRenderer.size.height,
+            contentMode: .fit
+        )
     }
 }
 
@@ -232,6 +256,11 @@ struct MacHistoryReportCard: View {
 
 enum MacHistoryReportRenderer {
     static let size = CGSize(width: 900, height: 750)
+
+    static func previewSize(fittingWidth width: CGFloat) -> CGSize {
+        let width = max(width, 0)
+        return CGSize(width: width, height: width * size.height / size.width)
+    }
 
     @MainActor
     static func image(for presentation: HistoryReportPresentation) -> NSImage? {

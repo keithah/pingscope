@@ -19,6 +19,7 @@ final class CorePlatformImportGuardTests: XCTestCase {
             "import MapKit",
             "import UIKit",
             "import AppKit",
+            "import SwiftUI",
         ]
         var violations: [String] = []
 
@@ -40,5 +41,48 @@ final class CorePlatformImportGuardTests: XCTestCase {
         }
 
         XCTAssertEqual(violations, [], violations.joined(separator: "\n"))
+    }
+
+    func testApplicationHistoryRetentionCallSitesUseSharedPolicy() throws {
+        let repositoryRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let iOSApp = try String(
+            contentsOf: repositoryRoot.appendingPathComponent("Sources/PingScopeiOSApp/PingScopeIOSApp.swift"),
+            encoding: .utf8
+        )
+        let macApp = try String(
+            contentsOf: repositoryRoot.appendingPathComponent("Sources/PingScopeApp/PingScopeModel.swift"),
+            encoding: .utf8
+        )
+
+        XCTAssertTrue(iOSApp.contains("retention: PingHistoryRetention.maximumDuration"))
+        XCTAssertFalse(iOSApp.contains("retention: .days(30)"))
+        XCTAssertTrue(macApp.contains("historyRetention = PingHistoryRetention.maximumDuration"))
+    }
+
+    func testApplicationTargetsDeclareWiFiInfoCapability() throws {
+        let repositoryRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        for filename in [
+            "PingScope-iOS.entitlements",
+            "PingScope-AppStore.entitlements",
+            "PingScope-DeveloperID.entitlements",
+        ] {
+            let data = try Data(contentsOf: repositoryRoot
+                .appendingPathComponent("Configuration")
+                .appendingPathComponent(filename))
+            let plist = try XCTUnwrap(
+                PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any]
+            )
+            XCTAssertEqual(
+                plist["com.apple.developer.networking.wifi-info"] as? Bool,
+                true,
+                filename
+            )
+        }
     }
 }

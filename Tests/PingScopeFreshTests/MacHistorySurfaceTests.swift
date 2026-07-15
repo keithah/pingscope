@@ -147,6 +147,18 @@ final class MacHistorySurfaceTests: XCTestCase {
         XCTAssertTrue(MacHistoryReportPresentation.isActionEnabled(isLoading: false, surface: populated))
     }
 
+    func testReportPreviewUsesExportArtifactAspectRatio() {
+        let previewSize = MacHistoryReportRenderer.previewSize(fittingWidth: 720)
+
+        XCTAssertEqual(previewSize.width, 720, accuracy: 0.001)
+        XCTAssertEqual(previewSize.height, 600, accuracy: 0.001)
+        XCTAssertEqual(
+            previewSize.width / previewSize.height,
+            MacHistoryReportRenderer.size.width / MacHistoryReportRenderer.size.height,
+            accuracy: 0.000_001
+        )
+    }
+
     func testThirtyDayRetentionPrunesSamplesOlderThanThirtyDays() async throws {
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("MacHistorySurfaceTests-\(UUID().uuidString).sqlite")

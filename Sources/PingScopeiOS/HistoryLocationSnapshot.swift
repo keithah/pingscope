@@ -73,6 +73,27 @@ public final class PingScopeIOSHistoryLocationSnapshotStore: @unchecked Sendable
         }
     }
 
+    public func clearNetworkName(ifInterfaceMatches interface: String) {
+        let normalized = NetworkInterfaceNormalizer.normalize(interface)
+        lock.withLock {
+            guard NetworkInterfaceNormalizer.normalize(value.networkInterface) == normalized else { return }
+            value.networkName = nil
+        }
+    }
+
+    public func updateFetchedWiFiName(
+        _ name: String,
+        hasWiFiInfoEntitlement: Bool,
+        authorization: PingScopeIOSHistoryLocationAuthorization
+    ) {
+        guard PingScopeIOSWiFiNameReadPolicy.isAllowed(
+            hasWiFiInfoEntitlement: hasWiFiInfoEntitlement,
+            authorization: authorization,
+            networkInterface: snapshot().networkInterface
+        ) else { return }
+        updateNetworkName(name, ifInterfaceMatches: "wifi")
+    }
+
     public func makeHistorySampleEnricher() -> PingScopeIOSHistorySampleEnricher {
         { [self] result in
             let current = snapshot()
@@ -143,6 +164,18 @@ public enum PingScopeIOSHistoryLocationAuthorization: Equatable, Sendable {
     case restricted
     case whenInUse
     case always
+}
+
+public enum PingScopeIOSWiFiNameReadPolicy {
+    public static func isAllowed(
+        hasWiFiInfoEntitlement: Bool,
+        authorization: PingScopeIOSHistoryLocationAuthorization,
+        networkInterface: String?
+    ) -> Bool {
+        guard hasWiFiInfoEntitlement else { return false }
+        guard authorization == .whenInUse || authorization == .always else { return false }
+        return NetworkInterfaceNormalizer.normalize(networkInterface) == "wifi"
+    }
 }
 
 public enum PingScopeIOSHistoryLocationAccuracy: Equatable, Sendable {

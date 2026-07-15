@@ -731,6 +731,82 @@ final class LiveMonitorSessionControllerTests: XCTestCase {
         XCTAssertFalse(snapshot.isVPN)
     }
 
+    func testWiFiNameReadRequiresEntitlementLocationAuthorizationAndWiFiInterface() {
+        XCTAssertTrue(PingScopeIOSWiFiNameReadPolicy.isAllowed(
+            hasWiFiInfoEntitlement: true,
+            authorization: .whenInUse,
+            networkInterface: "wifi"
+        ))
+        XCTAssertTrue(PingScopeIOSWiFiNameReadPolicy.isAllowed(
+            hasWiFiInfoEntitlement: true,
+            authorization: .always,
+            networkInterface: "Wi-Fi"
+        ))
+        XCTAssertFalse(PingScopeIOSWiFiNameReadPolicy.isAllowed(
+            hasWiFiInfoEntitlement: false,
+            authorization: .always,
+            networkInterface: "wifi"
+        ))
+        XCTAssertFalse(PingScopeIOSWiFiNameReadPolicy.isAllowed(
+            hasWiFiInfoEntitlement: true,
+            authorization: .denied,
+            networkInterface: "wifi"
+        ))
+        XCTAssertFalse(PingScopeIOSWiFiNameReadPolicy.isAllowed(
+            hasWiFiInfoEntitlement: true,
+            authorization: .whenInUse,
+            networkInterface: "cellular"
+        ))
+    }
+
+    func testRevokedWiFiNameAuthorizationClearsCachedSSIDAndFallsBackToInterfaceLabel() {
+        let store = PingScopeIOSHistoryLocationSnapshotStore()
+        store.updateNetwork(interface: "wifi", name: "Private SSID", isVPN: false)
+
+        store.clearNetworkName(ifInterfaceMatches: "wifi")
+
+        let enriched = store.makeHistorySampleEnricher()(
+            .success(hostID: UUID(), latency: .milliseconds(12))
+        )
+        XCTAssertEqual(enriched.networkInterface, "wifi")
+        XCTAssertEqual(enriched.networkName, "Wi-Fi")
+    }
+
+    func testLateFetchedWiFiNameIsDroppedAfterAuthorizationRevocation() {
+        let store = PingScopeIOSHistoryLocationSnapshotStore()
+        store.updateNetwork(interface: "wifi", name: "Private SSID", isVPN: false)
+        store.clearNetworkName(ifInterfaceMatches: "wifi")
+
+        store.updateFetchedWiFiName(
+            "Late Private SSID",
+            hasWiFiInfoEntitlement: true,
+            authorization: .denied
+        )
+
+        let enriched = store.makeHistorySampleEnricher()(
+            .success(hostID: UUID(), latency: .milliseconds(12))
+        )
+        XCTAssertEqual(enriched.networkInterface, "wifi")
+        XCTAssertEqual(enriched.networkName, "Wi-Fi")
+    }
+
+    func testFetchedWiFiNameIsWrittenWhileConsentRemainsAuthorized() {
+        let store = PingScopeIOSHistoryLocationSnapshotStore()
+        store.updateNetwork(interface: "wifi", name: "Wi-Fi", isVPN: false)
+
+        store.updateFetchedWiFiName(
+            "Authorized SSID",
+            hasWiFiInfoEntitlement: true,
+            authorization: .whenInUse
+        )
+
+        let enriched = store.makeHistorySampleEnricher()(
+            .success(hostID: UUID(), latency: .milliseconds(12))
+        )
+        XCTAssertEqual(enriched.networkInterface, "wifi")
+        XCTAssertEqual(enriched.networkName, "Authorized SSID")
+    }
+
     func testLatestValidHistoryLocationFixUsesNewestValidCandidate() throws {
         let previous = try XCTUnwrap(SampleLocation(latitude: 1, longitude: 2))
         let candidates = [

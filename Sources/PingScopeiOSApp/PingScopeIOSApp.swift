@@ -257,7 +257,7 @@ private final class PingScopeIOSAppModel: ObservableObject {
         do {
             loadedHistoryStore = try SQLiteHistoryStore(
                 url: SQLiteHistoryStore.defaultURL(appName: "PingScope-iOS"),
-                retention: .days(30)
+                retention: PingHistoryRetention.maximumDuration
             )
         } catch {
             NSLog("PingScope iOS history store unavailable: \(String(describing: error))")
@@ -836,13 +836,26 @@ private final class PingScopeIOSAppModel: ObservableObject {
     }
 
     private func refreshWiFiNameIfAuthorized() {
-        guard historyLocationAuthorization == .whenInUse || historyLocationAuthorization == .always,
-              NetworkInterfaceNormalizer.normalize(historyLocationService.snapshotStore.snapshot().networkInterface) == "wifi"
-        else { return }
+        let isAllowed = PingScopeIOSWiFiNameReadPolicy.isAllowed(
+            // The iOS target's declared capability is pinned by
+            // CorePlatformImportGuardTests; the public API also returns nil
+            // when the signed provisioning profile lacks the entitlement.
+            hasWiFiInfoEntitlement: true,
+            authorization: historyLocationAuthorization,
+            networkInterface: historyLocationService.snapshotStore.snapshot().networkInterface
+        )
+        guard isAllowed else {
+            historyLocationService.snapshotStore.clearNetworkName(ifInterfaceMatches: "wifi")
+            return
+        }
 
         Task { @MainActor [weak self] in
-            guard let name = await Self.currentWiFiName(), !name.isEmpty else { return }
-            self?.historyLocationService.snapshotStore.updateNetworkName(name, ifInterfaceMatches: "wifi")
+            guard let name = await Self.currentWiFiName(), !name.isEmpty, let self else { return }
+            self.historyLocationService.snapshotStore.updateFetchedWiFiName(
+                name,
+                hasWiFiInfoEntitlement: true,
+                authorization: self.historyLocationAuthorization
+            )
         }
     }
 
