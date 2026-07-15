@@ -85,4 +85,20 @@ final class CorePlatformImportGuardTests: XCTestCase {
             )
         }
     }
+
+    func testIOSAppWiresPersistedNotificationRulesAndRefreshesAuthorization() throws {
+        let repositoryRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let iOSApp = try String(
+            contentsOf: repositoryRoot.appendingPathComponent("Sources/PingScopeiOSApp/PingScopeIOSApp.swift"),
+            encoding: .utf8
+        )
+
+        XCTAssertTrue(iOSApp.contains("rules: PingScopeIOSNotificationRuleSource.persistedRules()"))
+        XCTAssertTrue(iOSApp.contains("await notificationEngine.update(rules: PingScopeIOSNotificationRuleSource.persistedRules())"))
+        XCTAssertTrue(iOSApp.contains("case .active:\n            runLifecycleTask { model, context in\n                await model.refreshNotificationConfiguration()"))
+        XCTAssertTrue(iOSApp.contains("await notificationEngine.refreshAuthorization()"))
+    }
 }

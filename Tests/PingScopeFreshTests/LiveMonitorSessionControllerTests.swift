@@ -490,6 +490,37 @@ final class LiveMonitorSessionControllerTests: XCTestCase {
         XCTAssertEqual(measurementCount, 1)
     }
 
+    func testControllerPublishesMeasuredResultWithTheLiveHealthTransition() async throws {
+        let host = HostConfig(
+            id: UUID(),
+            displayName: "Cloudflare",
+            address: "1.1.1.1",
+            thresholds: LatencyThresholds(degradedMilliseconds: 100, downAfterFailures: 1)
+        )
+        let measured = PingResult.failure(hostID: host.id, reason: .timeout)
+        let probe = RecordingProbe(results: [measured])
+        let observation = IOSMeasurementObservationBox()
+        let clock = ManualClock()
+        let controller = LiveMonitorSessionController(
+            host: host,
+            probeFactory: StaticProbeFactory(probe: probe),
+            policy: MonitorSessionPolicy(probeInterval: .milliseconds(10)),
+            clock: clock,
+            now: { clock.currentDate },
+            measurementObserver: { result, previousStatus, currentStatus in
+                await observation.record(result, previousStatus: previousStatus, currentStatus: currentStatus)
+            }
+        )
+
+        await controller.start(duration: .thirtySeconds, at: clock.baseDate)
+        try await clock.waitForSleepers(atLeast: 1)
+
+        let recorded = await observation.value()
+        XCTAssertEqual(recorded?.result.id, measured.id)
+        XCTAssertEqual(recorded?.previousStatus, HealthStatus.noData)
+        XCTAssertEqual(recorded?.currentStatus, HealthStatus.down)
+    }
+
     func testControllerDefaultStartUsesInjectedDateProvider() async throws {
         let host = HostConfig(id: UUID(), displayName: "Cloudflare", address: "1.1.1.1")
         let probe = RecordingProbe(results: [
@@ -2257,6 +2288,24 @@ private actor ExpirationObservationBox {
     }
 }
 
+private actor IOSMeasurementObservationBox {
+    struct Value: Sendable {
+        let result: PingResult
+        let previousStatus: HealthStatus
+        let currentStatus: HealthStatus
+    }
+
+    private var recorded: Value?
+
+    func record(_ result: PingResult, previousStatus: HealthStatus, currentStatus: HealthStatus) {
+        recorded = Value(result: result, previousStatus: previousStatus, currentStatus: currentStatus)
+    }
+
+    func value() -> Value? {
+        recorded
+    }
+}
+
 private actor RecordingIOSAllHostsControllerFactory: PingScopeIOSMultiHostSessionControllerFactory {
     private let statuses: [UUID: HealthStatus]
     private let snapshotHosts: [UUID: HostConfig]
@@ -2297,7 +2346,8 @@ private actor RecordingIOSAllHostsControllerFactory: PingScopeIOSMultiHostSessio
     func makeController(
         for host: HostConfig,
         historyStore: (any PingHistoryStore)?,
-        historySampleEnricher: @escaping PingScopeIOSHistorySampleEnricher
+        historySampleEnricher: @escaping PingScopeIOSHistorySampleEnricher,
+        measurementObserver: @escaping PingScopeIOSMeasurementObserver
     ) async -> any PingScopeIOSMultiHostSessionControlling {
         receivedEnrichedLocations.append(historySampleEnricher(.success(hostID: host.id, latency: .milliseconds(1))).location)
         nextControllerToken += 1

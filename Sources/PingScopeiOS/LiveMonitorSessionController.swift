@@ -3,6 +3,11 @@ import PingScopeCore
 import PingScopeHistoryKit
 
 public typealias PingScopeIOSHistorySampleEnricher = @Sendable (PingResult) -> PingResult
+public typealias PingScopeIOSMeasurementObserver = @Sendable (
+    _ result: PingResult,
+    _ previousStatus: HealthStatus,
+    _ currentStatus: HealthStatus
+) async -> Void
 
 public struct LiveMonitorSessionSnapshot: Equatable, Sendable {
     public var host: HostConfig
@@ -28,6 +33,7 @@ public actor LiveMonitorSessionController {
     private let clock: any Clock<Duration>
     private let now: @Sendable () -> Date
     private let historySampleEnricher: PingScopeIOSHistorySampleEnricher
+    private let measurementObserver: PingScopeIOSMeasurementObserver
     private var session: MonitorSessionState?
     private var health: HostHealth
     private var series: SampleSeries
@@ -44,7 +50,8 @@ public actor LiveMonitorSessionController {
         historyStore: (any PingHistoryStore)? = nil,
         clock: any Clock<Duration> = ContinuousClock(),
         now: @escaping @Sendable () -> Date = { Date() },
-        historySampleEnricher: @escaping PingScopeIOSHistorySampleEnricher = { $0 }
+        historySampleEnricher: @escaping PingScopeIOSHistorySampleEnricher = { $0 },
+        measurementObserver: @escaping PingScopeIOSMeasurementObserver = { _, _, _ in }
     ) {
         self.host = BuildFlavor.appStore.normalizedHost(host)
         self.probeFactory = probeFactory
@@ -55,6 +62,7 @@ public actor LiveMonitorSessionController {
         self.clock = clock
         self.now = now
         self.historySampleEnricher = historySampleEnricher
+        self.measurementObserver = measurementObserver
         self.health = HostHealth(hostID: self.host.id, thresholds: self.host.thresholds)
         self.series = SampleSeries(hostID: self.host.id)
     }
@@ -140,9 +148,12 @@ public actor LiveMonitorSessionController {
     }
 
     private func ingest(_ result: PingResult) async {
+        let previousStatus = health.status
         health.ingest(result)
+        let currentStatus = health.status
         series.append(result)
         session = session?.updating(with: result)
+        await measurementObserver(result, previousStatus, currentStatus)
         await historyWriter?.append(historySampleEnricher(result))
     }
 

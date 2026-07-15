@@ -11,6 +11,61 @@ import PingScopeiOS
 import SwiftUI
 import UIKit
 import WidgetKit
+@preconcurrency import UserNotifications
+
+private final class PingScopeIOSUserNotificationCenter: NSObject, PingScopeIOSNotificationScheduling, UNUserNotificationCenterDelegate, @unchecked Sendable {
+    private let center: UNUserNotificationCenter
+
+    override init() {
+        self.center = .current()
+        super.init()
+        center.delegate = self
+    }
+
+    func authorizationStatus() async -> PingScopeIOSNotificationAuthorization {
+        switch await center.notificationSettings().authorizationStatus {
+        case .authorized:
+            .authorized
+        case .provisional, .ephemeral:
+            .provisional
+        case .notDetermined:
+            .notDetermined
+        case .denied:
+            .denied
+        @unknown default:
+            .unknown
+        }
+    }
+
+    func requestAuthorization() async -> Bool {
+        do {
+            return try await center.requestAuthorization(options: [.alert, .sound])
+        } catch {
+            NSLog("PingScope iOS notification authorization failed: \(error.localizedDescription)")
+            return false
+        }
+    }
+
+    func schedule(_ request: PingScopeIOSNotificationRequest) async throws {
+        let content = UNMutableNotificationContent()
+        content.title = request.title
+        content.body = request.body
+        content.sound = .default
+        content.threadIdentifier = "pingscope-monitoring"
+        try await center.add(UNNotificationRequest(
+            identifier: "pingscope-\(UUID().uuidString)",
+            content: content,
+            trigger: nil
+        ))
+    }
+
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        willPresent notification: UNNotification
+    ) async -> UNNotificationPresentationOptions {
+        [.banner, .list, .sound]
+    }
+}
 
 @MainActor
 private struct ActivityKitLiveActivityDirectory: PingScopeIOSLiveActivityDirectory {
@@ -227,6 +282,7 @@ private final class PingScopeIOSAppModel: ObservableObject {
     private let presenter = DisplayStatePresenter()
     private let backgroundRuntime: LiveMonitorBackgroundRuntime
     private let multiHostCoordinator: PingScopeIOSMultiHostSessionCoordinator
+    private let notificationEngine: PingScopeIOSNotificationEngine
     private let historyLocationService: HistoryLocationService
     private var historyExportCoordinator: HistoryExportCoordinator?
     private var historyExportObservation: AnyCancellable?
@@ -250,6 +306,11 @@ private final class PingScopeIOSAppModel: ObservableObject {
 
     init() {
         self.hostStore = PingScopeIOSHostStore()
+        let notificationEngine = PingScopeIOSNotificationEngine(
+            center: PingScopeIOSUserNotificationCenter(),
+            rules: PingScopeIOSNotificationRuleSource.persistedRules()
+        )
+        self.notificationEngine = notificationEngine
         let locationService = HistoryLocationService()
         let historySampleEnricher = locationService.snapshotStore.makeHistorySampleEnricher()
         self.historyLocationService = locationService
@@ -269,7 +330,14 @@ private final class PingScopeIOSAppModel: ObservableObject {
         self.historyStore = loadedHistoryStore
         self.multiHostCoordinator = PingScopeIOSMultiHostSessionCoordinator(
             historyStore: loadedHistoryStore,
-            historySampleEnricher: historySampleEnricher
+            historySampleEnricher: historySampleEnricher,
+            measurementObserver: { result, previousStatus, currentStatus in
+                await notificationEngine.ingest(
+                    result,
+                    previousStatus: previousStatus,
+                    currentStatus: currentStatus
+                )
+            }
         )
         self.backgroundRuntime = LiveMonitorBackgroundRuntime(client: UIApplicationBackgroundTaskClient())
         self.backgroundKeepAliveEnabled = UserDefaults.standard.bool(forKey: Self.backgroundKeepAliveEnabledKey)
@@ -292,7 +360,14 @@ private final class PingScopeIOSAppModel: ObservableObject {
         self.controller = LiveMonitorSessionController(
             host: host,
             historyStore: loadedHistoryStore,
-            historySampleEnricher: historySampleEnricher
+            historySampleEnricher: historySampleEnricher,
+            measurementObserver: { result, previousStatus, currentStatus in
+                await notificationEngine.ingest(
+                    result,
+                    previousStatus: previousStatus,
+                    currentStatus: currentStatus
+                )
+            }
         )
         self.snapshot = LiveMonitorSessionSnapshot(
             host: host,
@@ -310,6 +385,8 @@ private final class PingScopeIOSAppModel: ObservableObject {
         }
         Task { @MainActor [weak self] in
             self?.runLifecycleTask { model, context in
+                await model.configureNotificationScope(requestAuthorization: true)
+                guard model.isCurrentLifecycle(context) else { return }
                 // Nothing owns an activity yet at launch, so anything the system
                 // still shows is an orphan from a crashed or force-quit process;
                 // left alone it lingers frozen for hours and a fresh request
@@ -636,6 +713,8 @@ private final class PingScopeIOSAppModel: ObservableObject {
         switch phase {
         case .active:
             runLifecycleTask { model, context in
+                await model.refreshNotificationConfiguration()
+                guard model.isCurrentLifecycle(context) else { return }
                 await model.backgroundRuntime.end()
                 guard model.isCurrentLifecycle(context) else { return }
                 guard await model.refreshDefaultGatewayHost(
@@ -981,13 +1060,16 @@ private final class PingScopeIOSAppModel: ObservableObject {
         controller = LiveMonitorSessionController(
             host: host,
             historyStore: historyStore,
-            historySampleEnricher: historyLocationService.snapshotStore.makeHistorySampleEnricher()
+            historySampleEnricher: historyLocationService.snapshotStore.makeHistorySampleEnricher(),
+            measurementObserver: notificationMeasurementObserver()
         )
         snapshot = LiveMonitorSessionSnapshot(
             host: host,
             session: nil,
             health: HostHealth(hostID: host.id, thresholds: host.thresholds)
         )
+        await configureNotificationScope()
+        guard isCurrentLifecycle(context) else { return }
         await refreshHistory(force: true)
         guard isCurrentLifecycle(context) else { return }
         if let restartDuration {
@@ -1028,6 +1110,8 @@ private final class PingScopeIOSAppModel: ObservableObject {
         guard isCurrentLifecycle(context) else { return }
 
         hostScope = .allHosts
+        await configureNotificationScope()
+        guard isCurrentLifecycle(context) else { return }
         persistHostSelection()
         await multiHostCoordinator.reconcile(hosts: hosts)
         guard isCurrentLifecycle(context) else { return }
@@ -1054,7 +1138,8 @@ private final class PingScopeIOSAppModel: ObservableObject {
         controller = LiveMonitorSessionController(
             host: host,
             historyStore: historyStore,
-            historySampleEnricher: historyLocationService.snapshotStore.makeHistorySampleEnricher()
+            historySampleEnricher: historyLocationService.snapshotStore.makeHistorySampleEnricher(),
+            measurementObserver: notificationMeasurementObserver()
         )
         snapshot = LiveMonitorSessionSnapshot(
             host: host,
@@ -1070,6 +1155,8 @@ private final class PingScopeIOSAppModel: ObservableObject {
     }
 
     private func reconcileAllHostsAndRestorePostconditions(context: LifecycleContext?) async -> Bool {
+        await configureNotificationScope()
+        guard isCurrentLifecycle(context) else { return false }
         await multiHostCoordinator.reconcile(hosts: hosts)
         guard isCurrentLifecycle(context) else { return false }
         await refreshSnapshot()
@@ -1093,6 +1180,7 @@ private final class PingScopeIOSAppModel: ObservableObject {
     }
 
     private func startMonitoring(duration: MonitorSessionDuration) async {
+        await configureNotificationScope(requestAuthorization: true)
         if hostScope == .allHosts {
             await multiHostCoordinator.reconcile(hosts: hosts)
             await multiHostCoordinator.start(duration: duration)
@@ -1106,6 +1194,36 @@ private final class PingScopeIOSAppModel: ObservableObject {
             await multiHostCoordinator.stop(reason: reason)
         } else {
             await controller.stop(reason: reason)
+        }
+    }
+
+    private func configureNotificationScope(requestAuthorization: Bool = false) async {
+        let monitoredHosts = hostScope == .allHosts ? hosts : [snapshot.host]
+        await notificationEngine.update(rules: PingScopeIOSNotificationRuleSource.persistedRules())
+        await notificationEngine.update(
+            hosts: monitoredHosts,
+            includesAllHosts: hostScope == .allHosts
+        )
+        if requestAuthorization {
+            _ = await notificationEngine.requestAuthorizationIfNeeded()
+        } else {
+            await notificationEngine.refreshAuthorization()
+        }
+    }
+
+    private func refreshNotificationConfiguration() async {
+        await notificationEngine.update(rules: PingScopeIOSNotificationRuleSource.persistedRules())
+        await notificationEngine.refreshAuthorization()
+    }
+
+    private func notificationMeasurementObserver() -> PingScopeIOSMeasurementObserver {
+        let notificationEngine = notificationEngine
+        return { result, previousStatus, currentStatus in
+            await notificationEngine.ingest(
+                result,
+                previousStatus: previousStatus,
+                currentStatus: currentStatus
+            )
         }
     }
 
