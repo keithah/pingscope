@@ -3,6 +3,37 @@ import XCTest
 import PingScopeCore
 
 final class HostConfigPersistenceTests: XCTestCase {
+    func testMacPersistenceMigratesLegacyHostsToSharedStoreOnSuccessfulPersist() throws {
+        let suiteName = "HostConfigPersistenceTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let hosts = [
+            HostConfig(id: UUID(), displayName: "Router", address: "192.168.1.1", tier: .localGateway),
+            HostConfig(id: UUID(), displayName: "Office", address: "office.example", tier: .remoteService),
+            HostConfig(id: UUID(), displayName: "DNS", address: "9.9.9.9", tier: .upstream)
+        ]
+        defaults.set(try JSONEncoder().encode(hosts), forKey: SharedHostStoreKeys.macHosts)
+        defaults.primaryHostID = hosts[1].id
+        let persistence = HostConfigPersistence(defaults: defaults)
+
+        let loaded = persistence.loadInitialConfiguration { _ in }
+
+        XCTAssertEqual(loaded.hosts, hosts)
+        XCTAssertEqual(loaded.primaryHostID, hosts[1].id)
+        XCTAssertNil(defaults.data(forKey: SharedHostStoreKeys.current))
+
+        persistence.persist(
+            RuntimeSnapshot(hosts: hosts, primaryHostID: hosts[1].id, healthByHost: [:], samplesByHost: [:])
+        ) { _ in }
+
+        let sharedData = try XCTUnwrap(defaults.data(forKey: SharedHostStoreKeys.current))
+        XCTAssertEqual(
+            try SharedHostStoreCodec.decode(sharedData),
+            SharedHostStoreState(hosts: hosts, primaryHostID: hosts[1].id)
+        )
+        XCTAssertNotNil(defaults.data(forKey: SharedHostStoreKeys.macHosts))
+    }
+
     func testLegacyDefaultHostsGainGoogleDNSOnce() throws {
         let suiteName = "HostConfigPersistenceTests.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))

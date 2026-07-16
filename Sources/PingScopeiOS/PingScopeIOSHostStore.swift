@@ -41,19 +41,20 @@ public final class PingScopeIOSHostStore: @unchecked Sendable {
 
     private let defaults: UserDefaults
     private let defaultHosts: [HostConfig]
-    private let hostsKey = "PingScope.iOS.hosts"
-    private let selectedHostIDKey = "PingScope.iOS.selectedHostID"
+    private let sharedStore: UserDefaultsSharedHostStore
     private let hostScopeKey = "PingScope.iOS.hostScope"
 
     public init(defaults: UserDefaults = .standard, defaultHosts: [HostConfig] = PingScopeIOSHostStore.defaultHosts) {
         self.defaults = defaults
+        sharedStore = UserDefaultsSharedHostStore(defaults: defaults, legacyPlatform: .iOS)
         let sanitizedDefaults = HostConfig.sanitizedHosts(defaultHosts)
         self.defaultHosts = sanitizedDefaults.isEmpty ? BuildFlavor.appStore.normalizedHosts(HostConfig.defaultHosts()) : sanitizedDefaults
     }
 
     public func load() -> PingScopeIOSHostState {
-        let hosts = loadHosts()
-        let selectedID = defaults.string(forKey: selectedHostIDKey).flatMap(UUID.init(uuidString:))
+        let loaded = loadHosts()
+        let hosts = loaded.hosts
+        let selectedID = loaded.selectedHostID
         let selectedHost = selectedID.flatMap { id in
             hosts.first { $0.id == id }
         } ?? hosts[0]
@@ -69,9 +70,14 @@ public final class PingScopeIOSHostStore: @unchecked Sendable {
         let normalizedHosts = sanitizedHosts.isEmpty ? defaultHosts : sanitizedHosts
         let selectedID = normalizedHosts.contains { $0.id == selectedHostID } ? selectedHostID : normalizedHosts[0].id
         do {
-            let data = try JSONEncoder().encode(normalizedHosts)
-            defaults.set(data, forKey: hostsKey)
-            defaults.set(selectedID.uuidString, forKey: selectedHostIDKey)
+            let existingPrimaryHostID = sharedStore.load().state?.primaryHostID
+            try sharedStore.save(
+                SharedHostStoreState(
+                    hosts: normalizedHosts,
+                    primaryHostID: existingPrimaryHostID,
+                    selectedHostID: selectedID
+                )
+            )
             defaults.set(hostScope.rawValue, forKey: hostScopeKey)
         } catch {
             NSLog("PingScope iOS host encode failed: \(error.localizedDescription)")
@@ -82,22 +88,18 @@ public final class PingScopeIOSHostStore: @unchecked Sendable {
         defaults.string(forKey: hostScopeKey).flatMap(PingScopeIOSHostScope.init(rawValue:)) ?? .focused
     }
 
-    private func loadHosts() -> [HostConfig] {
-        let stored = defaults.data(forKey: hostsKey)
-        if let stored {
-            do {
-                let decoded = try JSONDecoder().decode([HostConfig].self, from: stored)
-                // Mirror save(): a corrupt blob (duplicate IDs, invalid hosts) must
-                // not flow into UI/coordinator keying. Sanitizing here does not
-                // write back, so the stored blob stays intact either way.
-                let hosts = HostConfig.sanitizedHosts(decoded)
-                if !hosts.isEmpty {
-                    return hosts
-                }
-                NSLog("PingScope iOS host decode produced no hosts")
-            } catch {
-                NSLog("PingScope iOS host decode failed: \(error.localizedDescription)")
+    private func loadHosts() -> (hosts: [HostConfig], selectedHostID: UUID?) {
+        let loaded = sharedStore.load()
+        if let state = loaded.state {
+            // Mirror save(): duplicate IDs and invalid hosts must not flow into
+            // UI/coordinator keying. This does not rewrite stored bytes.
+            let hosts = HostConfig.sanitizedHosts(state.hosts)
+            if !hosts.isEmpty {
+                return (hosts, state.selectedHostID)
             }
+            NSLog("PingScope iOS host decode produced no hosts")
+        } else if loaded.source == .unreadable {
+            NSLog("PingScope iOS host decode failed")
         }
         // First launch: persist the generated defaults immediately so their IDs
         // are stable across launches. History rows are keyed by host ID, so
@@ -106,14 +108,15 @@ public final class PingScopeIOSHostStore: @unchecked Sendable {
         // stored, though: a blob that merely fails to decode (written by a
         // newer app version, or transiently corrupt) must be left intact, or
         // the user's saved hosts would be destroyed on the first failed read.
-        if stored == nil {
+        if loaded.source == .missing {
             do {
-                let data = try JSONEncoder().encode(defaultHosts)
-                defaults.set(data, forKey: hostsKey)
+                try sharedStore.save(
+                    SharedHostStoreState(hosts: defaultHosts, selectedHostID: defaultHosts.first?.id)
+                )
             } catch {
                 NSLog("PingScope iOS default host encode failed: \(error.localizedDescription)")
             }
         }
-        return defaultHosts
+        return (defaultHosts, nil)
     }
 }

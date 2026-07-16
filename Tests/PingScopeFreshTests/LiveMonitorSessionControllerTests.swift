@@ -1267,6 +1267,10 @@ final class LiveMonitorSessionControllerTests: XCTestCase {
 
         XCTAssertEqual(state.hosts, hosts)
         XCTAssertEqual(state.selectedHost.id, hosts[1].id)
+        let sharedData = defaults.data(forKey: SharedHostStoreKeys.current)
+        XCTAssertNotNil(sharedData)
+        let sharedState = sharedData.flatMap { try? SharedHostStoreCodec.decode($0) }
+        XCTAssertEqual(sharedState, SharedHostStoreState(hosts: hosts, selectedHostID: hosts[1].id))
     }
 
     func testIOSHostStorePersistsAllHostsIndependentlyFromConcreteSelection() {

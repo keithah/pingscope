@@ -95,14 +95,20 @@ extension UserDefaults {
             }
         }
         set {
-            let data = try? JSONEncoder().encode(newValue)
-            set(data, forKey: "hostConfigs")
+            try? setHostConfigs(newValue)
         }
     }
 
     func setHostConfigs(_ hosts: [HostConfig]) throws {
-        let data = try JSONEncoder().encode(hosts)
-        set(data, forKey: "hostConfigs")
+        let store = UserDefaultsSharedHostStore(defaults: self, legacyPlatform: .macOS)
+        let existing = store.load().state
+        try store.save(
+            SharedHostStoreState(
+                hosts: hosts,
+                primaryHostID: existing?.primaryHostID ?? primaryHostID,
+                selectedHostID: existing?.selectedHostID
+            )
+        )
     }
 
     func storedHostConfigs() -> StoredHostConfigs {
