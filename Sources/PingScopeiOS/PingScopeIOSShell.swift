@@ -287,6 +287,9 @@ public struct PingScopeIOSRootView: View {
     @State private var editingHost: HostConfig?
     @State private var isHostSwitcherPresented = false
     @State private var isMonitorSettingsPresented = false
+    @State private var isOnboardingPresented = false
+    @State private var includesSensitiveDiagnostics = false
+    @State private var showsWidgetInstructions = false
     @State private var scrubbedLatencyMilliseconds: Double?
 
     public var hosts: [HostConfig]
@@ -314,6 +317,9 @@ public struct PingScopeIOSRootView: View {
     public var monitorInsights: PingScopeIOSMonitorInsightsPresentation
     public var allHostsPresentationEndDate: Date
     public var selectedHostID: UUID
+    public var onboardingPresentation: PingScopeIOSOnboardingPresentation
+    public var diagnosticsMetadata: PingScopeIOSDiagnosticsMetadata
+    public var diagnosticsLogText: String
     public var onSelectDisplayMode: (PingScopeIOSDisplayMode) -> Void
     public var onSelectAllHosts: () -> Void
     public var onSelectHost: (UUID) -> Void
@@ -333,6 +339,10 @@ public struct PingScopeIOSRootView: View {
     public var onRequestBackgroundKeepAlivePermission: () -> Void
     public var onStart: (MonitorSessionDuration) -> Void
     public var onStop: () -> Void
+    public var onRefreshDiagnostics: () async -> Void
+    public var onShareDiagnostics: (Bool) -> Void
+    public var onDismissOnboarding: () -> Void
+    public var onOpenAppSettings: () -> Void
 
     public init(
         hosts: [HostConfig] = PingScopeIOSHostStore.defaultHosts,
@@ -360,6 +370,18 @@ public struct PingScopeIOSRootView: View {
         monitorInsights: PingScopeIOSMonitorInsightsPresentation = .init(snapshots: []),
         allHostsPresentationEndDate: Date? = nil,
         selectedHostID: UUID? = nil,
+        onboardingPresentation: PingScopeIOSOnboardingPresentation = .init(
+            inputs: .init(
+                notificationAuthorization: .unknown,
+                localNetworkCapability: .notRequired,
+                locationAuthorization: .undetermined,
+                isLocationTaggingEnabled: false,
+                hasConfiguredWidget: false
+            ),
+            hasBeenSeen: true
+        ),
+        diagnosticsMetadata: PingScopeIOSDiagnosticsMetadata = .init(appName: "PingScope", version: "--", build: "--", buildFlavor: "--"),
+        diagnosticsLogText: String = "",
         onSelectDisplayMode: @escaping (PingScopeIOSDisplayMode) -> Void = { _ in },
         onSelectAllHosts: @escaping () -> Void = {},
         onSelectHost: @escaping (UUID) -> Void = { _ in },
@@ -378,7 +400,11 @@ public struct PingScopeIOSRootView: View {
         onSetBackgroundKeepAlive: @escaping (Bool) -> Void = { _ in },
         onRequestBackgroundKeepAlivePermission: @escaping () -> Void = {},
         onStart: @escaping (MonitorSessionDuration) -> Void = { _ in },
-        onStop: @escaping () -> Void = {}
+        onStop: @escaping () -> Void = {},
+        onRefreshDiagnostics: @escaping () async -> Void = {},
+        onShareDiagnostics: @escaping (Bool) -> Void = { _ in },
+        onDismissOnboarding: @escaping () -> Void = {},
+        onOpenAppSettings: @escaping () -> Void = {}
     ) {
         self.hosts = hosts
         self.host = host
@@ -409,6 +435,9 @@ public struct PingScopeIOSRootView: View {
         self.monitorInsights = monitorInsights
         self.allHostsPresentationEndDate = allHostsPresentationEndDate ?? resolvedGraphPresentation.renderData.endDate
         self.selectedHostID = resolvedSelectedHostID
+        self.onboardingPresentation = onboardingPresentation
+        self.diagnosticsMetadata = diagnosticsMetadata
+        self.diagnosticsLogText = diagnosticsLogText
         self.onSelectDisplayMode = onSelectDisplayMode
         self.onSelectAllHosts = onSelectAllHosts
         self.onSelectHost = onSelectHost
@@ -428,6 +457,10 @@ public struct PingScopeIOSRootView: View {
         self.onRequestBackgroundKeepAlivePermission = onRequestBackgroundKeepAlivePermission
         self.onStart = onStart
         self.onStop = onStop
+        self.onRefreshDiagnostics = onRefreshDiagnostics
+        self.onShareDiagnostics = onShareDiagnostics
+        self.onDismissOnboarding = onDismissOnboarding
+        self.onOpenAppSettings = onOpenAppSettings
     }
 
     public var body: some View {
@@ -476,6 +509,31 @@ public struct PingScopeIOSRootView: View {
             .sheet(isPresented: $isMonitorSettingsPresented) {
                 monitorSettings
                     .presentationDetents([.medium])
+            }
+            .fullScreenCover(isPresented: $isOnboardingPresented) {
+                PingScopeIOSOnboardingView(
+                    presentation: onboardingPresentation,
+                    onSelectDestination: { destination in
+                        switch destination {
+                        case .appSettings: onOpenAppSettings()
+                        case .widgetInstructions: showsWidgetInstructions = true
+                        }
+                    },
+                    onDismiss: {
+                        onDismissOnboarding()
+                        isOnboardingPresented = false
+                    }
+                )
+            }
+            .alert("Add a Widget", isPresented: $showsWidgetInstructions) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text("Touch and hold the Home Screen, tap Edit, then Add Widget and choose PingScope.")
+            }
+            .task {
+                if onboardingPresentation.shouldPresentOnLaunch {
+                    isOnboardingPresented = true
+                }
             }
         }
     }
@@ -945,6 +1003,34 @@ public struct PingScopeIOSRootView: View {
                     Text(session?.phase().rawValue.capitalized ?? "Ready")
                     Text(remainingText)
                         .font(.system(.body, design: .monospaced))
+                }
+                Section("Setup") {
+                    Button {
+                        isOnboardingPresented = true
+                    } label: {
+                        Label(
+                            onboardingPresentation.overallStatus == .allSet ? "Setup Complete" : "Finish Setup",
+                            systemImage: onboardingPresentation.overallStatus == .allSet ? "checkmark.circle.fill" : "checklist"
+                        )
+                    }
+                }
+                Section("Diagnostics") {
+                    LabeledContent("Version", value: "\(diagnosticsMetadata.version) (\(diagnosticsMetadata.build))")
+                    Text(diagnosticsLogText.isEmpty ? "No recent log entries." : diagnosticsLogText)
+                        .font(.caption.monospaced())
+                        .foregroundStyle(.secondary)
+                        .lineLimit(6)
+                    Toggle("Include location and network names", isOn: $includesSensitiveDiagnostics)
+                    Button("Refresh Log") {
+                        Task { await onRefreshDiagnostics() }
+                    }
+                    Button("Share Diagnostics") {
+                        onShareDiagnostics(includesSensitiveDiagnostics)
+                    }
+                    Menu("Export History") {
+                        Button("CSV") { onShareHistory(.csv) }
+                        Button("JSON") { onShareHistory(.json) }
+                    }
                 }
             }
             .navigationTitle("Monitor")

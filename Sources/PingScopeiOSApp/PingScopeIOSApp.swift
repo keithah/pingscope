@@ -138,6 +138,9 @@ struct PingScopeIOSApp: App {
                 monitorInsights: model.monitorInsights,
                 allHostsPresentationEndDate: model.allHostsPresentationEndDate,
                 selectedHostID: model.snapshot.host.id,
+                onboardingPresentation: model.onboardingPresentation,
+                diagnosticsMetadata: model.diagnosticsMetadata,
+                diagnosticsLogText: model.diagnosticsLogText,
                 onSelectDisplayMode: { mode in
                     model.displayMode = mode
                 },
@@ -194,6 +197,19 @@ struct PingScopeIOSApp: App {
                 },
                 onStop: {
                     model.stop()
+                },
+                onRefreshDiagnostics: {
+                    await model.refreshDiagnosticsLog()
+                },
+                onShareDiagnostics: { includesSensitiveDetails in
+                    model.requestDiagnosticsExport(includesSensitiveDetails: includesSensitiveDetails)
+                },
+                onDismissOnboarding: {
+                    model.markOnboardingSeen()
+                },
+                onOpenAppSettings: {
+                    guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
+                    UIApplication.shared.open(url)
                 }
             )
             .onAppear {
@@ -203,13 +219,13 @@ struct PingScopeIOSApp: App {
                 model.handleScenePhase(phase)
             }
             .sheet(item: Binding(
-                get: { model.historySharePayload },
+                get: { model.activeSharePayload },
                 set: { payload in
-                    if payload == nil { model.historyShareSheetDismissed() }
+                    if payload == nil { model.shareSheetDismissed() }
                 }
             )) { payload in
                 HistoryActivityViewController(files: payload.files) { completed in
-                    model.historyShareActivityDidFinish(completed: completed)
+                    model.shareActivityDidFinish(completed: completed)
                 }
             }
             .alert(
@@ -275,6 +291,10 @@ private final class PingScopeIOSAppModel: ObservableObject {
             UserDefaults.standard.pingScopeIOSDisplayMode = displayMode
         }
     }
+    @Published private(set) var notificationAuthorization: PingScopeIOSNotificationAuthorization = .unknown
+    @Published private(set) var hasConfiguredWidget = false
+    @Published private(set) var diagnosticsLogText = ""
+    @Published private var diagnosticsSharePayload: HistorySharePayload?
 
     private let hostStore: PingScopeIOSHostStore
     private let historyStore: (any PingHistoryStore)?
@@ -305,6 +325,7 @@ private final class PingScopeIOSAppModel: ObservableObject {
     private var lastPublishedWidgetSnapshot: WidgetSnapshot?
     private var lastWidgetTimelineReloadAt: Date?
     private let widgetPublishPolicy = WidgetSnapshotPublishPolicy()
+    private let onboardingStore = PingScopeIOSOnboardingStore()
 
     init() {
         self.hostStore = PingScopeIOSHostStore()
@@ -334,6 +355,9 @@ private final class PingScopeIOSAppModel: ObservableObject {
             historyStore: loadedHistoryStore,
             historySampleEnricher: historySampleEnricher,
             measurementObserver: { result, previousStatus, currentStatus in
+                if !result.isSuccess {
+                    DebugLog.write("iOS probe failed host=\(result.hostID.uuidString) reason=\(String(describing: result.failureReason))")
+                }
                 await notificationEngine.ingest(
                     result,
                     previousStatus: previousStatus,
@@ -364,6 +388,9 @@ private final class PingScopeIOSAppModel: ObservableObject {
             historyStore: loadedHistoryStore,
             historySampleEnricher: historySampleEnricher,
             measurementObserver: { result, previousStatus, currentStatus in
+                if !result.isSuccess {
+                    DebugLog.write("iOS probe failed host=\(result.hostID.uuidString) reason=\(String(describing: result.failureReason))")
+                }
                 await notificationEngine.ingest(
                     result,
                     previousStatus: previousStatus,
@@ -404,6 +431,8 @@ private final class PingScopeIOSAppModel: ObservableObject {
                     guard model.isCurrentLifecycle(context) else { return }
                 }
                 await model.refreshHistory(force: true)
+                await model.refreshDiagnosticsLog()
+                await model.refreshWidgetConfiguration()
             }
         }
         locationService.onStatusChange = { [weak self] status in
@@ -430,6 +459,43 @@ private final class PingScopeIOSAppModel: ObservableObject {
 
     var historySharePayload: HistorySharePayload? {
         historyExportCoordinator?.sharePayload
+    }
+
+    var activeSharePayload: HistorySharePayload? {
+        diagnosticsSharePayload ?? historySharePayload
+    }
+
+    var diagnosticsMetadata: PingScopeIOSDiagnosticsMetadata {
+        let info = Bundle.main.infoDictionary ?? [:]
+        return PingScopeIOSDiagnosticsMetadata(
+            appName: (info["CFBundleDisplayName"] as? String) ?? (info["CFBundleName"] as? String) ?? "PingScope",
+            version: (info["CFBundleShortVersionString"] as? String) ?? "--",
+            build: (info["CFBundleVersion"] as? String) ?? "--",
+            buildFlavor: {
+                switch BuildFlavor.current {
+                case .appStore: "App Store"
+                case .developerID: "Developer ID"
+                }
+            }()
+        )
+    }
+
+    var onboardingPresentation: PingScopeIOSOnboardingPresentation {
+        PingScopeIOSOnboardingPresentation(
+            inputs: PingScopeIOSOnboardingInputs(
+                notificationAuthorization: notificationAuthorization,
+                localNetworkCapability: localNetworkCapability,
+                locationAuthorization: historyLocationAuthorization,
+                isLocationTaggingEnabled: historyLocationTaggingEnabled,
+                hasConfiguredWidget: hasConfiguredWidget
+            ),
+            hasBeenSeen: onboardingStore.hasBeenSeen
+        )
+    }
+
+    private var localNetworkCapability: PingScopeIOSLocalNetworkCapability {
+        let liveSamples = snapshot.series.samples + allHostRows.flatMap(\.samples)
+        return .derive(hosts: hosts, samples: liveSamples)
     }
 
     var historyExportErrorMessage: String? {
@@ -529,6 +595,70 @@ private final class PingScopeIOSAppModel: ObservableObject {
 
     func historyShareSheetDismissed() {
         historyExportCoordinator?.activityDidFinish(completed: false)
+    }
+
+    func shareActivityDidFinish(completed: Bool) {
+        if let payload = diagnosticsSharePayload {
+            payload.files.forEach { try? FileManager.default.removeItem(at: $0) }
+            diagnosticsSharePayload = nil
+        } else {
+            historyShareActivityDidFinish(completed: completed)
+        }
+    }
+
+    func shareSheetDismissed() {
+        if let payload = diagnosticsSharePayload {
+            payload.files.forEach { try? FileManager.default.removeItem(at: $0) }
+            diagnosticsSharePayload = nil
+        } else {
+            historyShareSheetDismissed()
+        }
+    }
+
+    func refreshDiagnosticsLog() async {
+        diagnosticsLogText = await DebugLog.recentText(maxBytes: 32 * 1024)
+    }
+
+    func requestDiagnosticsExport(includesSensitiveDetails: Bool) {
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            let log = await DebugLog.recentText()
+            let samples = Array((historySamples + snapshot.series.samples + allHostRows.flatMap(\.samples)).suffix(100))
+            let text = PingScopeIOSDiagnosticsBundle.text(
+                metadata: diagnosticsMetadata,
+                logText: log,
+                hosts: hosts,
+                recentSamples: samples,
+                privacy: .init(
+                    includesLocation: includesSensitiveDetails,
+                    includesNetworkNames: includesSensitiveDetails
+                )
+            )
+            let url = FileManager.default.temporaryDirectory
+                .appendingPathComponent("PingScope-Diagnostics-\(UUID().uuidString).txt")
+            do {
+                try Data(text.utf8).write(to: url, options: .atomic)
+                diagnosticsSharePayload = HistorySharePayload(files: [url])
+            } catch {
+                DebugLog.write("iOS diagnostics export failed: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    func markOnboardingSeen() {
+        onboardingStore.markSeen()
+        objectWillChange.send()
+    }
+
+    func refreshWidgetConfiguration() async {
+        hasConfiguredWidget = await withCheckedContinuation { continuation in
+            WidgetCenter.shared.getCurrentConfigurations { result in
+                switch result {
+                case let .success(configurations): continuation.resume(returning: !configurations.isEmpty)
+                case .failure: continuation.resume(returning: false)
+                }
+            }
+        }
     }
 
     func dismissHistoryExportError() {
@@ -718,6 +848,10 @@ private final class PingScopeIOSAppModel: ObservableObject {
         case .active:
             runLifecycleTask { model, context in
                 await model.refreshNotificationConfiguration()
+                guard model.isCurrentLifecycle(context) else { return }
+                await model.refreshWidgetConfiguration()
+                guard model.isCurrentLifecycle(context) else { return }
+                await model.refreshDiagnosticsLog()
                 guard model.isCurrentLifecycle(context) else { return }
                 await model.backgroundRuntime.end()
                 guard model.isCurrentLifecycle(context) else { return }
@@ -1212,19 +1346,23 @@ private final class PingScopeIOSAppModel: ObservableObject {
         )
         if requestAuthorization {
             _ = await notificationEngine.requestAuthorizationIfNeeded()
+            notificationAuthorization = await notificationEngine.refreshAuthorization()
         } else {
-            await notificationEngine.refreshAuthorization()
+            notificationAuthorization = await notificationEngine.refreshAuthorization()
         }
     }
 
     private func refreshNotificationConfiguration() async {
         await notificationEngine.update(rules: PingScopeIOSNotificationRuleSource.persistedRules())
-        await notificationEngine.refreshAuthorization()
+        notificationAuthorization = await notificationEngine.refreshAuthorization()
     }
 
     private func notificationMeasurementObserver() -> PingScopeIOSMeasurementObserver {
         let notificationEngine = notificationEngine
         return { result, previousStatus, currentStatus in
+            if !result.isSuccess {
+                DebugLog.write("iOS probe failed host=\(result.hostID.uuidString) reason=\(String(describing: result.failureReason))")
+            }
             await notificationEngine.ingest(
                 result,
                 previousStatus: previousStatus,

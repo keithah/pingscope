@@ -1,4 +1,5 @@
 import AppKit
+import PingScopeCore
 import SwiftUI
 
 final class OverlayWindow: NSWindow {

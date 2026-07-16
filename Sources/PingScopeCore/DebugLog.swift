@@ -1,7 +1,7 @@
 import Foundation
 
-enum DebugLog {
-    static let fileURL: URL = {
+public enum DebugLog {
+    public static let fileURL: URL = {
         let baseURL = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
             ?? URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
         return baseURL
@@ -16,13 +16,13 @@ enum DebugLog {
     private nonisolated(unsafe) static var currentFileSize: UInt64?
     private nonisolated(unsafe) static var directoryReady = false
 
-    nonisolated static func write(_ message: String) {
+    public nonisolated static func write(_ message: String) {
         queue.async {
             writeLine(message)
         }
     }
 
-    nonisolated static func flush() async {
+    public nonisolated static func flush() async {
         await withCheckedContinuation { continuation in
             queue.async {
                 continuation.resume()
@@ -103,12 +103,12 @@ enum DebugLog {
         }
     }
 
-    nonisolated static func redacted(_ value: String?) -> String {
+    public nonisolated static func redacted(_ value: String?) -> String {
         guard let value, !value.isEmpty else { return "nil" }
         return "<redacted:\(UInt(bitPattern: value.hashValue))>"
     }
 
-    nonisolated static func clear() {
+    public nonisolated static func clear() {
         queue.async {
             do {
                 try? handle?.close()
@@ -124,6 +124,20 @@ enum DebugLog {
             } catch {
                 directoryReady = false
                 reportInternalFailure("clear failed: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    public nonisolated static func recentText(maxBytes: Int = 256 * 1024) async -> String {
+        await flush()
+        return await withCheckedContinuation { continuation in
+            queue.async {
+                guard let data = try? Data(contentsOf: fileURL) else {
+                    continuation.resume(returning: "")
+                    return
+                }
+                let suffix = data.suffix(max(0, maxBytes))
+                continuation.resume(returning: String(decoding: suffix, as: UTF8.self))
             }
         }
     }
