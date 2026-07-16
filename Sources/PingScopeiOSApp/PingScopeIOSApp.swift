@@ -219,6 +219,7 @@ struct PingScopeIOSApp: App {
                 }
             )
             .onAppear {
+                model.handlePendingIntentAction()
                 model.startInitialSessionIfNeeded()
             }
             .onChange(of: scenePhase) { _, phase in
@@ -340,6 +341,7 @@ private final class PingScopeIOSAppModel: ObservableObject {
     private var lastWidgetTimelineReloadAt: Date?
     private let widgetPublishPolicy = WidgetSnapshotPublishPolicy()
     private let onboardingStore = PingScopeIOSOnboardingStore()
+    private let intentCommandStore = PingScopeIOSIntentCommandStore()
 
     init() {
         self.hostStore = PingScopeIOSHostStore()
@@ -869,6 +871,38 @@ private final class PingScopeIOSAppModel: ObservableObject {
         }
     }
 
+    func handlePendingIntentAction() {
+        guard let request = intentCommandStore.takePending() else { return }
+        initialSessionCoordinator.markExplicitSessionAction()
+        if case let .start(hostID?) = request,
+           !hosts.contains(where: { $0.id == hostID }) {
+            return
+        }
+        let state = PingScopeIOSIntentMonitoringState(
+            scope: hostScope,
+            selectedHostID: snapshot.host.id,
+            isMonitoring: isMonitoringActive
+        )
+        switch PingScopeIOSIntentActionDecision.decide(request: request, current: state) {
+        case let .startFocused(hostID):
+            if hostScope != .focused || snapshot.host.id != hostID {
+                selectHost(hostID)
+            }
+            start(duration: .continuous)
+        case .startAllHosts:
+            if hostScope != .allHosts {
+                selectAllHosts()
+            }
+            start(duration: .continuous)
+        case let .switchToFocused(hostID):
+            selectHost(hostID)
+        case .stop:
+            stop()
+        case .none:
+            break
+        }
+    }
+
     func stop() {
         initialSessionCoordinator.markExplicitSessionAction()
         runLifecycleTask { model, context in
@@ -905,6 +939,7 @@ private final class PingScopeIOSAppModel: ObservableObject {
         case .active:
             runLifecycleTask { model, context in
                 await model.refreshNotificationConfiguration()
+                model.handlePendingIntentAction()
                 guard model.isCurrentLifecycle(context) else { return }
                 await model.refreshWidgetConfiguration()
                 guard model.isCurrentLifecycle(context) else { return }
@@ -1642,6 +1677,10 @@ private final class PingScopeIOSAppModel: ObservableObject {
         guard publishDecision.shouldSave else { return }
         lastPublishedWidgetSnapshot = widgetSnapshot
         guard await widgetSnapshotStore.save(widgetSnapshot) else { return }
+        if #available(iOS 18.0, *) {
+            ControlCenter.shared.reloadControls(ofKind: PingScopeIOSControlKind.monitoring)
+            ControlCenter.shared.reloadControls(ofKind: PingScopeIOSControlKind.status)
+        }
         if publishDecision.shouldReloadTimeline {
             lastWidgetTimelineReloadAt = widgetSnapshot.generatedAt
             WidgetCenter.shared.reloadAllTimelines()
@@ -1681,7 +1720,8 @@ private final class PingScopeIOSAppModel: ObservableObject {
             ],
             recentSamples: recentResults.map(WidgetSample.init(result:)),
             networkStatus: .connected,
-            generatedAt: Date()
+            generatedAt: Date(),
+            monitoring: WidgetMonitoringContext(isActive: isMonitoringActive, scope: .focused)
         )
     }
 
@@ -1716,7 +1756,8 @@ private final class PingScopeIOSAppModel: ObservableObject {
             health: health,
             recentSamples: recentResults.map(WidgetSample.init(result:)),
             networkStatus: .connected,
-            generatedAt: Date()
+            generatedAt: Date(),
+            monitoring: WidgetMonitoringContext(isActive: isMonitoringActive, scope: .allHosts)
         )
     }
 

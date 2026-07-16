@@ -20,6 +20,7 @@
 		53A200000000000000000003 /* SwiftUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 53D2B0B62F45A1A300E65EEE /* SwiftUI.framework */; };
 		53A200000000000000000004 /* ActivityKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 53A20000000000000000000F /* ActivityKit.framework */; };
 		53D2B0B82F45A1A300E65EF1 /* PingScopeCore in Frameworks */ = {isa = PBXBuildFile; productRef = 53F100000000000000000002 /* PingScopeCore */; };
+		53D2B0B82F45A1A300E65EF2 /* PingScopeiOS in Frameworks */ = {isa = PBXBuildFile; productRef = 53F100000000000000000005 /* PingScopeiOS */; };
 		53D2B0B52F45A1A300E65EEE /* WidgetKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 53D2B0B42F45A1A300E65EEE /* WidgetKit.framework */; };
 		53D2B0B72F45A1A300E65EEE /* SwiftUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 53D2B0B62F45A1A300E65EEE /* SwiftUI.framework */; };
 		53D2B0C42F45A1A600E65EEE /* widgetExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 53D2B0B22F45A1A300E65EEE /* widgetExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
@@ -233,6 +234,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				53D2B0B82F45A1A300E65EF1 /* PingScopeCore in Frameworks */,
+				53D2B0B82F45A1A300E65EF2 /* PingScopeiOS in Frameworks */,
 				53D2B0B72F45A1A300E65EEE /* SwiftUI.framework in Frameworks */,
 				53D2B0B52F45A1A300E65EEE /* WidgetKit.framework in Frameworks */,
 			);
@@ -429,6 +431,7 @@
 			name = widgetExtension;
 			packageProductDependencies = (
 				53F100000000000000000002 /* PingScopeCore */,
+				53F100000000000000000005 /* PingScopeiOS */,
 			);
 			productName = widgetExtension;
 			productReference = 53D2B0B22F45A1A300E65EEE /* widgetExtension.appex */;

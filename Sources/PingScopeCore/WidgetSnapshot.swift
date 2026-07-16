@@ -8,6 +8,7 @@ public struct WidgetSnapshot: Codable, Equatable, Sendable {
     public var recentSamples: [WidgetSample]
     public var networkStatus: NetworkConnectivityStatus
     public var generatedAt: Date
+    public var monitoring: WidgetMonitoringContext?
 
     public init(
         version: Int = 1,
@@ -16,7 +17,8 @@ public struct WidgetSnapshot: Codable, Equatable, Sendable {
         health: [WidgetHostHealth],
         recentSamples: [WidgetSample],
         networkStatus: NetworkConnectivityStatus,
-        generatedAt: Date = Date()
+        generatedAt: Date = Date(),
+        monitoring: WidgetMonitoringContext? = nil
     ) {
         self.version = version
         self.primaryHostID = primaryHostID
@@ -25,6 +27,7 @@ public struct WidgetSnapshot: Codable, Equatable, Sendable {
         self.recentSamples = recentSamples
         self.networkStatus = networkStatus
         self.generatedAt = generatedAt
+        self.monitoring = monitoring
     }
 
     public static func make(
@@ -103,6 +106,22 @@ public struct WidgetSnapshot: Codable, Equatable, Sendable {
             && health.count == other.health.count
             && zip(health, other.health).allSatisfy { $0.hasSameWidgetState(as: $1) }
             && networkStatus == other.networkStatus
+            && monitoring == other.monitoring
+    }
+}
+
+public enum WidgetMonitoringScope: String, Codable, Equatable, Sendable {
+    case focused
+    case allHosts
+}
+
+public struct WidgetMonitoringContext: Codable, Equatable, Sendable {
+    public var isActive: Bool
+    public var scope: WidgetMonitoringScope
+
+    public init(isActive: Bool, scope: WidgetMonitoringScope) {
+        self.isActive = isActive
+        self.scope = scope
     }
 }
 
