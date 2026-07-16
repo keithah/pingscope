@@ -135,6 +135,7 @@ struct PingScopeIOSApp: App {
                 hostScope: model.hostScope,
                 allHostRows: model.allHostRows,
                 allHostGraphSeries: model.allHostGraphSeries,
+                monitorInsights: model.monitorInsights,
                 allHostsPresentationEndDate: model.allHostsPresentationEndDate,
                 selectedHostID: model.snapshot.host.id,
                 onSelectDisplayMode: { mode in
@@ -237,6 +238,7 @@ private final class PingScopeIOSAppModel: ObservableObject {
     @Published var hostScope: PingScopeIOSHostScope
     @Published var allHostRows: [PingScopeIOSHostRowSnapshot] = []
     @Published var allHostGraphSeries: [PingScopeIOSHostGraphSeries] = []
+    @Published var monitorInsights: PingScopeIOSMonitorInsightsPresentation
     @Published var allHostsPresentationEndDate = Date()
     @Published private var allHostsSession: MonitorSessionState?
     @Published var historySamples: [PingResult] = []
@@ -369,11 +371,13 @@ private final class PingScopeIOSAppModel: ObservableObject {
                 )
             }
         )
-        self.snapshot = LiveMonitorSessionSnapshot(
+        let initialSnapshot = LiveMonitorSessionSnapshot(
             host: host,
             session: nil,
             health: HostHealth(hostID: host.id, thresholds: host.thresholds)
         )
+        self.snapshot = initialSnapshot
+        self.monitorInsights = PingScopeIOSMonitorInsightsPresentation(snapshots: [initialSnapshot])
         self.graphPresentation = PingScopeIOSGraphPresentation(samples: snapshot.series.samples, range: selectedGraphRange)
         let exportCoordinator = HistoryExportCoordinator(
             store: loadedHistoryStore,
@@ -1068,6 +1072,7 @@ private final class PingScopeIOSAppModel: ObservableObject {
             session: nil,
             health: HostHealth(hostID: host.id, thresholds: host.thresholds)
         )
+        monitorInsights = PingScopeIOSMonitorInsightsPresentation(snapshots: [snapshot])
         await configureNotificationScope()
         guard isCurrentLifecycle(context) else { return }
         await refreshHistory(force: true)
@@ -1146,6 +1151,7 @@ private final class PingScopeIOSAppModel: ObservableObject {
             session: nil,
             health: HostHealth(hostID: host.id, thresholds: host.thresholds)
         )
+        monitorInsights = PingScopeIOSMonitorInsightsPresentation(snapshots: [snapshot])
     }
 
     private func reconcileAllHostsAfterMutation() {
@@ -1238,6 +1244,7 @@ private final class PingScopeIOSAppModel: ObservableObject {
             // a stale snapshot must not overwrite the new host's state.
             guard activeController === controller else { return }
             snapshot = refreshedSnapshot
+            monitorInsights = PingScopeIOSMonitorInsightsPresentation(snapshots: [refreshedSnapshot])
             rebuildGraphSamples()
             await publishWidgetSnapshot()
         }
@@ -1292,6 +1299,7 @@ private final class PingScopeIOSAppModel: ObservableObject {
         allHostGraphSeries = snapshots.map { snapshot in
             PingScopeIOSHostGraphSeries(hostID: snapshot.host.id, samples: snapshot.series.samples)
         }
+        monitorInsights = PingScopeIOSMonitorInsightsPresentation(snapshots: snapshots)
         allHostsPresentationEndDate = presentationEndDate
         // The widget must keep updating in All Hosts scope too; without this the
         // app-group snapshot freezes at the moment of the scope switch.

@@ -20,6 +20,7 @@ final class CorePlatformImportGuardTests: XCTestCase {
             "import UIKit",
             "import AppKit",
             "import SwiftUI",
+            "import UserNotifications",
         ]
         var violations: [String] = []
 
@@ -100,5 +101,37 @@ final class CorePlatformImportGuardTests: XCTestCase {
         XCTAssertTrue(iOSApp.contains("await notificationEngine.update(rules: PingScopeIOSNotificationRuleSource.persistedRules())"))
         XCTAssertTrue(iOSApp.contains("case .active:\n            runLifecycleTask { model, context in\n                await model.refreshNotificationConfiguration()"))
         XCTAssertTrue(iOSApp.contains("await notificationEngine.refreshAuthorization()"))
+    }
+
+    func testMacOSAndIOSNetworkInsightViewsDelegateToSharedPresentationSource() throws {
+        let repositoryRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let macView = try String(
+            contentsOf: repositoryRoot.appendingPathComponent("Sources/PingScopeApp/PopoverViews.swift"),
+            encoding: .utf8
+        )
+        let iosPresentation = try String(
+            contentsOf: repositoryRoot.appendingPathComponent(
+                "Sources/PingScopeiOS/PingScopeIOSNetworkDiagnosisPresentation.swift"
+            ),
+            encoding: .utf8
+        )
+
+        for source in [macView, iosPresentation] {
+            XCTAssertTrue(source.contains("NetworkDiagnosisPresentation"))
+            XCTAssertTrue(source.contains("StarlinkTelemetryPresentation"))
+        }
+        for duplicatedLiteral in [
+            "\"network.slash\"",
+            "\"wifi.exclamationmark\"",
+            "\"exclamationmark.triangle.fill\"",
+            "\"speedometer\"",
+            "\"checkmark.circle.fill\"",
+        ] {
+            XCTAssertFalse(macView.contains(duplicatedLiteral), duplicatedLiteral)
+            XCTAssertFalse(iosPresentation.contains(duplicatedLiteral), duplicatedLiteral)
+        }
     }
 }

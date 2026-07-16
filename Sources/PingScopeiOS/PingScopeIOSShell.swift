@@ -311,6 +311,7 @@ public struct PingScopeIOSRootView: View {
     public var hostScope: PingScopeIOSHostScope
     public var allHostRows: [PingScopeIOSHostRowSnapshot]
     public var allHostGraphSeries: [PingScopeIOSHostGraphSeries]
+    public var monitorInsights: PingScopeIOSMonitorInsightsPresentation
     public var allHostsPresentationEndDate: Date
     public var selectedHostID: UUID
     public var onSelectDisplayMode: (PingScopeIOSDisplayMode) -> Void
@@ -356,6 +357,7 @@ public struct PingScopeIOSRootView: View {
         hostScope: PingScopeIOSHostScope = .focused,
         allHostRows: [PingScopeIOSHostRowSnapshot] = [],
         allHostGraphSeries: [PingScopeIOSHostGraphSeries] = [],
+        monitorInsights: PingScopeIOSMonitorInsightsPresentation = .init(snapshots: []),
         allHostsPresentationEndDate: Date? = nil,
         selectedHostID: UUID? = nil,
         onSelectDisplayMode: @escaping (PingScopeIOSDisplayMode) -> Void = { _ in },
@@ -404,6 +406,7 @@ public struct PingScopeIOSRootView: View {
         self.hostScope = hostScope
         self.allHostRows = allHostRows
         self.allHostGraphSeries = allHostGraphSeries
+        self.monitorInsights = monitorInsights
         self.allHostsPresentationEndDate = allHostsPresentationEndDate ?? resolvedGraphPresentation.renderData.endDate
         self.selectedHostID = resolvedSelectedHostID
         self.onSelectDisplayMode = onSelectDisplayMode
@@ -486,6 +489,7 @@ public struct PingScopeIOSRootView: View {
                     .frame(height: 206)
                 rangePicker
                 statsStrip
+                monitorInsightsSection
                 runControl
                 monitorHostRows
             }
@@ -647,6 +651,20 @@ public struct PingScopeIOSRootView: View {
         }
         .padding(.vertical, 14)
         .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 18))
+    }
+
+    @ViewBuilder
+    private var monitorInsightsSection: some View {
+        if monitorInsights.hasContent {
+            VStack(alignment: .leading, spacing: 10) {
+                if let diagnosis = monitorInsights.diagnosis {
+                    PingScopeIOSDiagnosisCard(presentation: diagnosis)
+                }
+                ForEach(monitorInsights.starlink) { presentation in
+                    PingScopeIOSStarlinkCard(presentation: presentation)
+                }
+            }
+        }
     }
 
     private func iosStat(_ title: String, _ value: String) -> some View {
@@ -1566,6 +1584,88 @@ private struct PingScopeIOSSparkline: View {
     }
 }
 
+private struct PingScopeIOSDiagnosisCard: View {
+    let presentation: PingScopeIOSDiagnosisPresentation
+
+    var body: some View {
+        let tint = Color(iosDiagnosisTone: presentation.tone)
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: presentation.systemImage)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(tint)
+                .frame(width: 18)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(presentation.label)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(tint)
+                Text(presentation.detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(12)
+        .background(tint.opacity(0.10), in: RoundedRectangle(cornerRadius: 12))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(tint.opacity(0.24), lineWidth: 1)
+        )
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(presentation.accessibilityLabel)
+    }
+}
+
+private struct PingScopeIOSStarlinkCard: View {
+    let presentation: PingScopeIOSStarlinkPresentation
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(starlinkTitle)
+                .font(.subheadline.weight(.semibold))
+            LazyVGrid(
+                columns: Array(repeating: GridItem(.flexible(), alignment: .leading), count: 3),
+                alignment: .leading,
+                spacing: 10
+            ) {
+                item("State", presentation.state)
+                item("Drop", presentation.dropRate)
+                item("Obstructed", presentation.obstruction)
+                item("Down", presentation.downlinkThroughput)
+                item("Up", presentation.uplinkThroughput)
+                item("Uptime", presentation.uptime)
+            }
+            if let alerts = presentation.alerts {
+                Text(alerts)
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                    .lineLimit(2)
+            }
+        }
+        .padding(14)
+        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16))
+        .accessibilityElement(children: .combine)
+    }
+
+    private var starlinkTitle: String {
+        presentation.hostName.localizedCaseInsensitiveCompare("Starlink") == .orderedSame
+            ? "Starlink"
+            : "Starlink · \(presentation.hostName)"
+    }
+
+    private func item(_ label: String, _ value: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(label.uppercased())
+                .font(.system(size: 10, weight: .semibold))
+                .tracking(0.4)
+                .foregroundStyle(.secondary)
+            Text(value)
+                .font(.caption.monospacedDigit())
+                .lineLimit(1)
+                .minimumScaleFactor(0.72)
+        }
+    }
+}
+
 private struct PingScopeIOSHostEditor: View {
     @State private var draft: PingScopeIOSHostDraft
 
@@ -1690,6 +1790,16 @@ extension Color {
         case .gray: self = .gray
         case .green: self = .green
         case .yellow: self = .yellow
+        case .red: self = .red
+        }
+    }
+
+    init(iosDiagnosisTone: PingScopeIOSDiagnosisTone) {
+        switch iosDiagnosisTone {
+        case .gray: self = .gray
+        case .green: self = .green
+        case .yellow: self = .yellow
+        case .orange: self = .orange
         case .red: self = .red
         }
     }

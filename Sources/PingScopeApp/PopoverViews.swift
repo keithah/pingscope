@@ -1,4 +1,5 @@
 import PingScopeCore
+import PingScopeHistoryKit
 import SwiftUI
 
 struct StatusPopoverView: View {
@@ -27,7 +28,9 @@ struct StatusPopoverView: View {
                 }
 
                 if let telemetry = presentation.displayPresentation.latestStarlinkTelemetry {
-                    StarlinkTelemetrySummary(telemetry: telemetry)
+                    StarlinkTelemetrySummary(
+                        presentation: StarlinkTelemetryPresentation(telemetry: telemetry)
+                    )
                 }
                 if presentation.popoverShowsAllHosts {
                     allHostStatusSummary
@@ -550,12 +553,7 @@ struct StatusPopoverView: View {
 
     private var degradationReason: NetworkPerspectiveDiagnosis? {
         let diagnosis = viewModel.presentation.networkDiagnosis
-        switch diagnosis.scope {
-        case .localNetwork, .upstream, .remoteService, .partialDegradation:
-            return diagnosis
-        case .noData, .allReachable:
-            return nil
-        }
+        return NetworkDiagnosisPresentation(diagnosis: diagnosis).showsCompactRow ? diagnosis : nil
     }
 }
 
@@ -608,18 +606,22 @@ private struct AllHostStatusRow: View {
 private struct CompactDiagnosisReasonRow: View {
     let diagnosis: NetworkPerspectiveDiagnosis
 
+    private var presentation: NetworkDiagnosisPresentation {
+        NetworkDiagnosisPresentation(diagnosis: diagnosis)
+    }
+
     var body: some View {
         HStack(spacing: 9) {
-            Image(systemName: iconName)
+            Image(systemName: presentation.systemImage)
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(tint)
                 .frame(width: 15)
             VStack(alignment: .leading, spacing: 2) {
-                Text(diagnosis.title)
+                Text(presentation.label)
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(tint)
                     .lineLimit(1)
-                Text(reasonText)
+                Text(presentation.detail)
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
@@ -634,64 +636,28 @@ private struct CompactDiagnosisReasonRow: View {
                 .stroke(tint.opacity(0.24), lineWidth: 1)
         )
         .accessibilityElement(children: .combine)
-        .accessibilityLabel(accessibilityText)
-        .help(accessibilityText)
-    }
-
-    private var reasonText: String {
-        if let evidenceNote = diagnosis.evidenceNote, !evidenceNote.isEmpty {
-            "\(diagnosis.detail) \(evidenceNote)."
-        } else {
-            diagnosis.detail
-        }
-    }
-
-    private var accessibilityText: String {
-        var parts = [diagnosis.title, diagnosis.detail]
-        if let evidenceNote = diagnosis.evidenceNote {
-            parts.append(evidenceNote)
-        }
-        if diagnosis.confidence == .tentative {
-            parts.append(diagnosis.confidence.displayName)
-        }
-        return parts.joined(separator: ". ")
-    }
-
-    private var iconName: String {
-        switch diagnosis.scope {
-        case .localNetwork:
-            "network.slash"
-        case .upstream:
-            "wifi.exclamationmark"
-        case .remoteService:
-            "exclamationmark.triangle.fill"
-        case .partialDegradation:
-            "speedometer"
-        case .noData:
-            "circle"
-        case .allReachable:
-            "checkmark.circle.fill"
-        }
+        .accessibilityLabel(presentation.accessibilityLabel)
+        .help(presentation.accessibilityLabel)
     }
 
     private var tint: Color {
-        switch diagnosis.scope {
-        case .localNetwork:
+        switch presentation.tone {
+        case .red:
             .red
-        case .upstream:
+        case .orange:
             .orange
-        case .remoteService, .partialDegradation:
+        case .yellow:
             .yellow
-        case .noData:
+        case .gray:
             .secondary
-        case .allReachable:
+        case .green:
             .green
         }
     }
 }
 
 private struct StarlinkTelemetrySummary: View {
-    let telemetry: StarlinkTelemetry
+    let presentation: StarlinkTelemetryPresentation
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -703,15 +669,15 @@ private struct StarlinkTelemetrySummary: View {
                 GridItem(.flexible(), alignment: .leading),
                 GridItem(.flexible(), alignment: .leading)
             ], alignment: .leading, spacing: 8) {
-                item("State", telemetry.state ?? "--")
-                item("Drop", percent(telemetry.popPingDropRate))
-                item("Obstructed", percent(telemetry.fractionObstructed))
-                item("Down", throughput(telemetry.downlinkThroughputBps))
-                item("Up", throughput(telemetry.uplinkThroughputBps))
-                item("Uptime", uptime(telemetry.uptimeSeconds))
+                item("State", presentation.state)
+                item("Drop", presentation.dropRate)
+                item("Obstructed", presentation.obstruction)
+                item("Down", presentation.downlinkThroughput)
+                item("Up", presentation.uplinkThroughput)
+                item("Uptime", presentation.uptime)
             }
-            if !telemetry.activeAlerts.isEmpty {
-                Text(telemetry.activeAlerts.joined(separator: ", "))
+            if let alerts = presentation.alerts {
+                Text(alerts)
                     .font(.caption)
                     .foregroundStyle(.orange)
                     .lineLimit(1)
@@ -732,22 +698,4 @@ private struct StarlinkTelemetrySummary: View {
         }
     }
 
-    private func percent(_ value: Double?) -> String {
-        guard let value else { return "--" }
-        return "\(Int((value * 100).rounded()))%"
-    }
-
-    private func throughput(_ value: Double?) -> String {
-        guard let value else { return "--" }
-        return "\(Int((value / 1_000_000).rounded())) Mbps"
-    }
-
-    private func uptime(_ value: Double?) -> String {
-        guard let value else { return "--" }
-        let hours = Int(value / 3_600)
-        if hours >= 24 {
-            return "\(hours / 24)d \(hours % 24)h"
-        }
-        return "\(hours)h"
-    }
 }
