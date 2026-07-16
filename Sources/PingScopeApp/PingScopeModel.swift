@@ -3,6 +3,7 @@ import Combine
 import Foundation
 @preconcurrency import Network
 import PingScopeCore
+import PingScopeCloudSync
 import PingScopeHistoryKit
 import ServiceManagement
 import WidgetKit
@@ -229,6 +230,13 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
     @Published var historySurfacePresentation: MacHistorySurfacePresentation?
     @Published var isLoadingHistorySurface = false
     @Published private(set) var diagnosticsMessage: String?
+    @Published var isCloudSyncEnabled: Bool {
+        didSet {
+            UserDefaults.standard.set(isCloudSyncEnabled, forKey: PingScopeCloudSyncPreference.enabledKey)
+            configureCloudSync()
+        }
+    }
+    @Published private(set) var cloudSyncStatusText = "Off"
     @Published var overlayFrame: NSRect
 
     let presenter = DisplayStatePresenter()
@@ -264,6 +272,9 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
     var lastWidgetTimelineReloadAt: Date?
     let widgetPublishPolicy = WidgetSnapshotPublishPolicy()
     private let hostConfigPersistence: HostConfigPersistence
+    private let cloudSyncService: PingScopeCloudSyncService?
+    private var lastCloudSyncHostIDs: Set<UUID> = []
+    private var lastCloudSyncHostsByID: [UUID: HostConfig] = [:]
     let historySurfaceStore: (any PingHistoryStore)?
     let historySurfaceLoader = MacHistorySurfaceLoader()
     private var lastObservedGateway: String?
@@ -282,6 +293,7 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
         let networkCaptureStore = NetworkCaptureSnapshotStore()
         self.networkCaptureStore = networkCaptureStore
         let historyStore: (any PingHistoryStore)?
+        let cloudSyncService: PingScopeCloudSyncService?
         do {
             let sqliteHistoryStore = try SQLiteHistoryStore(
                 url: SQLiteHistoryStore.defaultURL(),
@@ -290,13 +302,19 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
                     DebugLog.write(message)
                 }
             )
+            let service = PingScopeCloudSyncService(
+                historyStore: sqliteHistoryStore,
+                hostStore: UserDefaultsSharedHostStore(legacyPlatform: .macOS)
+            )
             historyStore = NetworkCapturedHistoryStore(
-                destination: sqliteHistoryStore,
+                destination: CloudSyncingHistoryStore(destination: sqliteHistoryStore, service: service),
                 networkCaptureStore: networkCaptureStore
             )
+            cloudSyncService = service
         } catch {
             DebugLog.write("history store unavailable: \(error)")
             historyStore = nil
+            cloudSyncService = nil
         }
         let allowsLocalNetworkProbes = UserDefaults.standard.allowsLocalNetworkProbes
         UserDefaults.standard.migrateNoisyNetworkStatusAlertDefaults()
@@ -314,6 +332,7 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
             }
         )
         self.historySurfaceStore = historyStore
+        self.cloudSyncService = cloudSyncService
         self.hostConfigPersistence = hostConfigPersistence
         self.hostTester = HostTester(probeFactory: probeFactory)
         self.gatewayEndpointResolver = DefaultGatewayEndpointResolver(probeFactory: probeFactory)
@@ -334,8 +353,12 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
             UserDefaults.standard.widgetsEnabled = false
         }
         self.widgetsEnabled = widgetsEnabled
+        self.isCloudSyncEnabled = PingScopeCloudSyncPreference.isEnabled()
+        self.lastCloudSyncHostIDs = Set(loadedHosts.hosts.map(\.id))
+        self.lastCloudSyncHostsByID = Dictionary(uniqueKeysWithValues: loadedHosts.hosts.map { ($0.id, $0) })
         self.overlayFrame = UserDefaults.standard.overlayFrame ?? NSRect(x: 80, y: 620, width: 240, height: 96)
         super.init()
+        configureCloudSync()
     }
 
     var primaryHost: HostConfig? {
@@ -1007,6 +1030,42 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
 
     private func persistHostState(_ snapshot: RuntimeSnapshot) {
         hostConfigPersistence.persist(snapshot, logger: DebugLog.write)
+        guard let cloudSyncService else { return }
+        let hostsByID = Dictionary(uniqueKeysWithValues: snapshot.hosts.map { ($0.id, $0) })
+        guard hostsByID != lastCloudSyncHostsByID else { return }
+        let currentIDs = Set(snapshot.hosts.map(\.id))
+        let deletedIDs = lastCloudSyncHostIDs.subtracting(currentIDs)
+        lastCloudSyncHostIDs = currentIDs
+        lastCloudSyncHostsByID = hostsByID
+        Task {
+            await cloudSyncService.uploadHosts(snapshot.hosts)
+            for id in deletedIDs { await cloudSyncService.deleteHost(id: id) }
+        }
+    }
+
+    private func configureCloudSync() {
+        guard let cloudSyncService else {
+            cloudSyncStatusText = "Unavailable"
+            return
+        }
+        let enabled = isCloudSyncEnabled
+        let hosts = configuredHosts
+        Task { [weak self] in
+            await cloudSyncService.setEnabled(enabled, hosts: hosts)
+            let status = await cloudSyncService.status()
+            await MainActor.run { self?.cloudSyncStatusText = Self.cloudSyncStatusText(for: status) }
+        }
+    }
+
+    private static func cloudSyncStatusText(for status: PingScopeCloudSyncStatus) -> String {
+        switch status {
+        case .off: "Off"
+        case .checkingAccount: "Checking iCloud account…"
+        case .idle: "Up to date"
+        case .syncing: "Syncing…"
+        case .accountUnavailable: "Private iCloud account unavailable"
+        case let .failed(message): "Sync error: \(message)"
+        }
     }
 
     private func performUserHostMutation(_ mutation: @escaping @Sendable (PingRuntime) async -> Void) {

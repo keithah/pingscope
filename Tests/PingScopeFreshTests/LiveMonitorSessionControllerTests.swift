@@ -3,6 +3,19 @@ import PingScopeCore
 import PingScopeiOS
 
 final class LiveMonitorSessionControllerTests: XCTestCase {
+    func testIOSHostEditorDraftAcceptsAndRoundTripsHTTPSWithDefaultPort() {
+        var draft = PingScopeIOSHostDraft(
+            host: HostConfig(displayName: "Web", address: "example.com", method: .tcp, port: 80)
+        )
+
+        draft.apply(method: .https)
+
+        XCTAssertTrue(PingMethod.appStoreAvailableCases.contains(.https))
+        XCTAssertEqual(draft.method, .https)
+        XCTAssertEqual(draft.portText, "443")
+        XCTAssertEqual(draft.finalizedHost.method, .https)
+        XCTAssertEqual(draft.finalizedHost.port, 443)
+    }
     func testIOSLiveActivityUpdatePolicySuppressesDuplicateContentUntilItChanges() {
         var policy = PingScopeIOSLiveActivityUpdatePolicy(minimumUpdateInterval: 10)
         let start = Date(timeIntervalSince1970: 1_000)

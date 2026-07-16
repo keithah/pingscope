@@ -34,6 +34,9 @@
 		53F400000000000000000002 /* PingScopeiOS in Frameworks */ = {isa = PBXBuildFile; productRef = 53F100000000000000000005 /* PingScopeiOS */; };
 		53F400000000000000000003 /* PingScopeHistoryKit in Frameworks */ = {isa = PBXBuildFile; productRef = 53F300000000000000000001 /* PingScopeHistoryKit */; };
 		53F400000000000000000004 /* PingScopeCloudSync in Frameworks */ = {isa = PBXBuildFile; productRef = 53F400000000000000000005 /* PingScopeCloudSync */; };
+		53F400000000000000000006 /* PingScopeCloudSync in Frameworks */ = {isa = PBXBuildFile; productRef = 53F400000000000000000005 /* PingScopeCloudSync */; };
+		53F400000000000000000007 /* PingScopeCloudSync in Frameworks */ = {isa = PBXBuildFile; productRef = 53F400000000000000000005 /* PingScopeCloudSync */; };
+		53F400000000000000000008 /* PingScopeCloudSync in Frameworks */ = {isa = PBXBuildFile; productRef = 53F400000000000000000005 /* PingScopeCloudSync */; };
 		53F200000000000000000001 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = 53F200000000000000000003 /* Sparkle */; };
 /* End PBXBuildFile section */
 
@@ -190,6 +193,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				53F400000000000000000006 /* PingScopeCloudSync in Frameworks */,
 				53F100000000000000000001 /* PingScopeCore in Frameworks */,
 				53F300000000000000000002 /* PingScopeHistoryKit in Frameworks */,
 				53F200000000000000000001 /* Sparkle in Frameworks */,
@@ -211,6 +215,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				53F400000000000000000007 /* PingScopeCloudSync in Frameworks */,
 				53E500000000000000000001 /* PingScopeCore in Frameworks */,
 				53F300000000000000000003 /* PingScopeHistoryKit in Frameworks */,
 			);
@@ -237,6 +242,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				53F400000000000000000008 /* PingScopeCloudSync in Frameworks */,
 				53A100000000000000000001 /* PingScopeiOS in Frameworks */,
 				53F300000000000000000004 /* PingScopeHistoryKit in Frameworks */,
 			);
@@ -319,6 +325,7 @@
 			);
 			name = PingScopeApp;
 			packageProductDependencies = (
+				53F400000000000000000005 /* PingScopeCloudSync */,
 				53F100000000000000000002 /* PingScopeCore */,
 				53F300000000000000000001 /* PingScopeHistoryKit */,
 				53F200000000000000000003 /* Sparkle */,
@@ -373,6 +380,7 @@
 			);
 			name = PingScopeAppStore;
 			packageProductDependencies = (
+				53F400000000000000000005 /* PingScopeCloudSync */,
 				53F100000000000000000002 /* PingScopeCore */,
 				53F300000000000000000001 /* PingScopeHistoryKit */,
 			);
@@ -446,6 +454,7 @@
 			);
 			name = PingScopeiOSApp;
 			packageProductDependencies = (
+				53F400000000000000000005 /* PingScopeCloudSync */,
 				53F100000000000000000005 /* PingScopeiOS */,
 				53F300000000000000000001 /* PingScopeHistoryKit */,
 			);

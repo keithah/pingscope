@@ -5,6 +5,21 @@ import SwiftUI
 extension SettingsRootView {
     var history: some View {
         SettingsPane {
+            SettingsSection("iCloud Sync") {
+                SettingsRow(systemImage: "icloud", tint: .blue, title: "Sync History & Hosts") {
+                    Toggle("", isOn: $model.isCloudSyncEnabled)
+                        .labelsHidden()
+                }
+                Text(model.cloudSyncStatusText)
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.secondary)
+                    .padding(.leading, 30)
+                Text("Off by default. History and host settings leave this Mac only after you enable sync, and are stored in your private iCloud database.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.leading, 30)
+            }
+
             SettingsSection("Export") {
                 SettingsRow(systemImage: "server.rack", tint: .blue, title: "Host") {
                     // An optional selection avoids minting a fresh UUID() on

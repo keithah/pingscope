@@ -64,7 +64,7 @@ let package = Package(
         ),
         .executableTarget(
             name: "PingScope",
-            dependencies: ["PingScopeCore", "PingScopeHistoryKit"],
+            dependencies: ["PingScopeCore", "PingScopeCloudSync", "PingScopeHistoryKit"],
             path: "Sources/PingScopeApp"
         ),
         .executableTarget(

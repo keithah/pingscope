@@ -21,7 +21,7 @@ The compact overlay shows the current latency and a live graph for the selected 
 - iStat-style menu bar status: colored dot with latency text underneath.
 - Live popover with host selector, time range picker, graph, recent samples, packet loss, and min/avg/max stats.
 - Floating overlay with resizable full mode, compact graph mode, right-click host selector, settings, popover, and close actions.
-- Host management for TCP, UDP, and Developer ID ICMP.
+- Host management for TCP, UDP, HTTPS, and Developer ID ICMP.
 - Default gateway detection.
 - Per-host settings for method, port, interval, timeout, degraded threshold, down-after failures, enabled state, and notification policy.
 - Notifications for host down, recovery, high latency, internet loss, and selected network status states. Network-change alerts are available but off by default to keep things quiet.
@@ -38,6 +38,7 @@ PingScope measures latency with fresh work for every sample.
 - **TCP** opens a new TCP connection to the configured host and port. This is the default because it works in sandboxed builds and reflects application-level reachability.
 - **UDP** sends a fresh UDP datagram to the configured host and port. The current implementation validates the datagram send/readiness path; it does not require a remote UDP echo response.
 - **ICMP** uses the system ping tool in Developer ID builds. ICMP is hidden in App Store builds.
+- **HTTPS** performs a fresh HTTPS round trip to the configured host and port (443 by default).
 
 The UI labels the method so users know whether they are seeing TCP connection latency, UDP send latency, or ICMP round-trip behavior.
 
@@ -45,7 +46,9 @@ On iOS, PingScope uses the App Store-safe probe set and monitors continuously wh
 
 The iOS app also includes an advanced opt-in Background Keep Alive setting. When enabled, PingScope requests Always Location permission and starts background location updates only while monitoring is active. This may reduce battery life and remains subject to iOS background execution limits and App Store review.
 
-History (including any stored coordinates, Wi-Fi network name, and network labels) stays local on your device and is never transmitted automatically. It leaves your device only when you explicitly share an export. Any cross-device iCloud Sync is off by default, opt-in with a disclosure, and syncs only through your own private iCloud to your own devices.
+While iCloud Sync is off, History (including any stored coordinates, Wi-Fi network name, and network labels) stays local and leaves your device only when you explicitly share an export. Cross-device iCloud Sync is off by default and requires an explicit in-app opt-in. When enabled, retained history and host settings sync automatically through your own private iCloud database; disabling it stops further sync activity.
+
+CloudKit provisioning is a manual release step: create `iCloud.com.hadm.PingScope`, enable iCloud/CloudKit and Push for the macOS (including Developer ID) and iOS identifiers, and regenerate the matching provisioning profiles.
 
 ## Install
 

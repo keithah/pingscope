@@ -163,6 +163,22 @@ public struct NetworkCapturedHistoryStore: PingHistoryStore {
         try await destination.appendAndWait(results.map(stamped))
     }
 
+    public func upsertRemoteSamples(_ results: [PingResult]) async throws {
+        try await destination.upsertRemoteSamples(results)
+    }
+
+    public func deleteSamples(ids: [UUID]) async throws {
+        try await destination.deleteSamples(ids: ids)
+    }
+
+    public func unsyncedSamples(limit: Int) async throws -> [PingResult] {
+        try await destination.unsyncedSamples(limit: limit)
+    }
+
+    public func markSamplesSynced(ids: [UUID]) async throws {
+        try await destination.markSamplesSynced(ids: ids)
+    }
+
     public func samples(hostID: UUID, since: Date, limit: Int) async -> [PingResult] {
         await destination.samples(hostID: hostID, since: since, limit: limit)
     }

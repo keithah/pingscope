@@ -63,6 +63,30 @@ final class MacHistorySurfaceTests: XCTestCase {
         }
     }
 
+    func testWeeklyDigestLoadsTheEntireSevenDayWindowBeyondRowCap() async throws {
+        let host = HostConfig(id: UUID(), displayName: "High rate", address: "example.com")
+        let now = Date(timeIntervalSince1970: 8_000_000)
+        let samples = (0...50_000).map { index in
+            PingResult.success(
+                hostID: host.id,
+                latency: .milliseconds(10),
+                timestamp: now.addingTimeInterval(-Double(index))
+            )
+        }
+
+        let loadedOptional = await MacHistorySurfaceLoader().load(
+            store: MacHistoryTestStore(results: samples),
+            hostID: host.id,
+            range: .h1,
+            host: host,
+            allHosts: [host],
+            now: now
+        )
+        let loaded = try XCTUnwrap(loadedOptional)
+
+        XCTAssertEqual(loaded.weeklyDigest?.sampleCount, samples.count)
+    }
+
     func testSurfaceLoaderDropsSupersededHostAndRangeResult() async throws {
         let oldHostID = UUID()
         let newHostID = UUID()

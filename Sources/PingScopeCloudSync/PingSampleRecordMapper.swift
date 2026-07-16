@@ -7,8 +7,6 @@ public enum PingSampleRecordMapper {
     // Int64 ports and booleans, Double milliseconds, enum raw strings, and JSON
     // text for structured metadata keep CloudKit and SQLite encodings stable.
     private static let maximumLatencyMilliseconds = 3_600_000.0
-    private static let metadataEncoder = JSONEncoder()
-    private static let metadataDecoder = JSONDecoder()
 
     public static func record(
         from result: PingResult,
@@ -36,7 +34,7 @@ public enum PingSampleRecordMapper {
             record[fields.metadataNote] = note as CKRecordValue
         }
         if result.metadata.starlink != nil,
-           let data = try? metadataEncoder.encode(result.metadata),
+           let data = try? metadataEncoder().encode(result.metadata),
            let json = String(data: data, encoding: .utf8) {
             record[fields.metadataJSON] = json as CKRecordValue
         }
@@ -122,14 +120,34 @@ public enum PingSampleRecordMapper {
         let note = record[fields.metadataNote] as? String
         if let json = record[fields.metadataJSON] as? String,
            let data = json.data(using: .utf8),
-           let metadata = try? metadataDecoder.decode(ProbeMetadata.self, from: data) {
+           let metadata = try? metadataDecoder().decode(ProbeMetadata.self, from: data) {
             return metadata
         }
         if let data = record[fields.metadataJSON] as? Data,
-           let metadata = try? metadataDecoder.decode(ProbeMetadata.self, from: data) {
+           let metadata = try? metadataDecoder().decode(ProbeMetadata.self, from: data) {
             return metadata
         }
         return ProbeMetadata(note: note)
+    }
+
+    private static func metadataEncoder() -> JSONEncoder {
+        let encoder = JSONEncoder()
+        encoder.nonConformingFloatEncodingStrategy = .convertToString(
+            positiveInfinity: "+Infinity",
+            negativeInfinity: "-Infinity",
+            nan: "NaN"
+        )
+        return encoder
+    }
+
+    private static func metadataDecoder() -> JSONDecoder {
+        let decoder = JSONDecoder()
+        decoder.nonConformingFloatDecodingStrategy = .convertFromString(
+            positiveInfinity: "+Infinity",
+            negativeInfinity: "-Infinity",
+            nan: "NaN"
+        )
+        return decoder
     }
 
     private static func location(from record: CKRecord) -> SampleLocation? {

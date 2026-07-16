@@ -2,6 +2,11 @@ import XCTest
 @testable import PingScopeCore
 
 final class BuildFlavorDetectionTests: XCTestCase {
+    func testMacHostEditorMethodSourceIncludesHTTPSWithDefaultPort() {
+        XCTAssertTrue(BuildFlavor.developerID.availableMethods.contains(.https))
+        XCTAssertTrue(BuildFlavor.appStore.availableMethods.contains(.https))
+        XCTAssertEqual(PingMethod.https.defaultPort, 443)
+    }
     private let bundleURL = URL(fileURLWithPath: "/Applications/PingScope.app", isDirectory: true)
 
     private func detect(

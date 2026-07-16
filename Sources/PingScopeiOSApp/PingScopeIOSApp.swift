@@ -5,6 +5,7 @@ import CoreTelephony
 import Darwin
 import Network
 import NetworkExtension
+import PingScopeCloudSync
 import PingScopeCore
 import PingScopeHistoryKit
 import PingScopeiOS
@@ -141,6 +142,8 @@ struct PingScopeIOSApp: App {
                 onboardingPresentation: model.onboardingPresentation,
                 diagnosticsMetadata: model.diagnosticsMetadata,
                 diagnosticsLogText: model.diagnosticsLogText,
+                cloudSyncEnabled: model.isCloudSyncEnabled,
+                cloudSyncStatusText: model.cloudSyncStatusText,
                 onSelectDisplayMode: { mode in
                     model.displayMode = mode
                 },
@@ -210,6 +213,9 @@ struct PingScopeIOSApp: App {
                 onOpenAppSettings: {
                     guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
                     UIApplication.shared.open(url)
+                },
+                onSetCloudSyncEnabled: { enabled in
+                    model.setCloudSyncEnabled(enabled)
                 }
             )
             .onAppear {
@@ -295,9 +301,17 @@ private final class PingScopeIOSAppModel: ObservableObject {
     @Published private(set) var hasConfiguredWidget = false
     @Published private(set) var diagnosticsLogText = ""
     @Published private var diagnosticsSharePayload: HistorySharePayload?
+    @Published var isCloudSyncEnabled = PingScopeCloudSyncPreference.isEnabled() {
+        didSet {
+            UserDefaults.standard.set(isCloudSyncEnabled, forKey: PingScopeCloudSyncPreference.enabledKey)
+            configureCloudSync()
+        }
+    }
+    @Published private(set) var cloudSyncStatusText = "Off"
 
     private let hostStore: PingScopeIOSHostStore
     private let historyStore: (any PingHistoryStore)?
+    private let cloudSyncService: PingScopeCloudSyncService?
     private let historyLoader = PingScopeIOSHistoryLoader()
     private let widgetSnapshotStore = WidgetSnapshotStore()
     private let gatewayDetector = PingScopeIOSGatewayDetector()
@@ -338,19 +352,28 @@ private final class PingScopeIOSAppModel: ObservableObject {
         let historySampleEnricher = locationService.snapshotStore.makeHistorySampleEnricher()
         self.historyLocationService = locationService
         let loadedHistoryStore: (any PingHistoryStore)?
+        let cloudSyncService: PingScopeCloudSyncService?
         do {
-            loadedHistoryStore = try SQLiteHistoryStore(
+            let sqliteHistoryStore = try SQLiteHistoryStore(
                 url: SQLiteHistoryStore.defaultURL(appName: "PingScope-iOS"),
                 retention: PingHistoryRetention.maximumDuration
             )
+            let service = PingScopeCloudSyncService(
+                historyStore: sqliteHistoryStore,
+                hostStore: UserDefaultsSharedHostStore(legacyPlatform: .iOS)
+            )
+            loadedHistoryStore = CloudSyncingHistoryStore(destination: sqliteHistoryStore, service: service)
+            cloudSyncService = service
         } catch {
             NSLog("PingScope iOS history store unavailable: \(String(describing: error))")
             #if DEBUG
             print("PingScope iOS history store unavailable: \(error)")
             #endif
             loadedHistoryStore = nil
+            cloudSyncService = nil
         }
         self.historyStore = loadedHistoryStore
+        self.cloudSyncService = cloudSyncService
         self.multiHostCoordinator = PingScopeIOSMultiHostSessionCoordinator(
             historyStore: loadedHistoryStore,
             historySampleEnricher: historySampleEnricher,
@@ -447,6 +470,7 @@ private final class PingScopeIOSAppModel: ObservableObject {
         }
         applyBackgroundKeepAlive()
         startNetworkPathMonitoring()
+        configureCloudSync()
     }
 
     var presentedSession: MonitorSessionState? {
@@ -712,6 +736,10 @@ private final class PingScopeIOSAppModel: ObservableObject {
         } else {
             hosts.append(normalizedHost)
         }
+        if let cloudSyncService {
+            let hosts = hosts
+            Task { await cloudSyncService.uploadHosts(hosts) }
+        }
         guard hostScope == .allHosts else {
             hostStore.save(hosts: hosts, selectedHostID: normalizedHost.id, hostScope: .focused)
             selectHost(normalizedHost.id)
@@ -728,6 +756,9 @@ private final class PingScopeIOSAppModel: ObservableObject {
     func deleteHost(_ hostID: UUID) {
         guard hosts.count > 1 else { return }
         hosts.removeAll { $0.id == hostID }
+        if let cloudSyncService {
+            Task { await cloudSyncService.deleteHost(id: hostID) }
+        }
         let replacement = hosts.first ?? HostConfig.defaultInternet
         guard hostScope == .allHosts else {
             hostStore.save(hosts: hosts, selectedHostID: replacement.id, hostScope: .focused)
@@ -747,6 +778,32 @@ private final class PingScopeIOSAppModel: ObservableObject {
         persistHostSelection()
         if hostScope == .allHosts {
             reconcileAllHostsAfterMutation()
+        }
+    }
+
+    func setCloudSyncEnabled(_ enabled: Bool) {
+        isCloudSyncEnabled = enabled
+    }
+
+    private func configureCloudSync() {
+        guard let cloudSyncService else {
+            cloudSyncStatusText = "Unavailable"
+            return
+        }
+        let enabled = isCloudSyncEnabled
+        let hosts = hosts
+        Task { [weak self] in
+            await cloudSyncService.setEnabled(enabled, hosts: hosts)
+            let status = await cloudSyncService.status()
+            guard let self else { return }
+            cloudSyncStatusText = switch status {
+            case .off: "Off"
+            case .checkingAccount: "Checking iCloud account…"
+            case .idle: "Up to date"
+            case .syncing: "Syncing…"
+            case .accountUnavailable: "Private iCloud account unavailable"
+            case let .failed(message): "Sync error: \(message)"
+            }
         }
     }
 
@@ -1512,9 +1569,34 @@ private final class PingScopeIOSAppModel: ObservableObject {
 
         guard snapshot.host.id == selection.hostID,
               historyRange == selection.range else { return }
-        let thresholds = snapshot.host.thresholds
+        let selectedHost = snapshot.host
+        let thresholds = selectedHost.thresholds
+        let allHosts = hosts
+        var weeklySamples: [UUID: [PingResult]] = [:]
+        if let historyStore {
+            let weeklyCutoff = now.addingTimeInterval(-HistoryWeeklyDigest.windowDuration)
+            for host in allHosts {
+                weeklySamples[host.id] = await historyStore.latestSamples(
+                    hostID: host.id,
+                    since: weeklyCutoff,
+                    limit: Int.max
+                )
+            }
+        }
+        guard snapshot.host.id == selection.hostID,
+              historyRange == selection.range else { return }
         let presentation = await Task.detached(priority: .userInitiated) {
-            PingScopeIOSHistoryPresentation(loadResult: result, thresholds: thresholds)
+            let digest = HistoryWeeklyDigest.make(
+                hosts: allHosts,
+                samplesByHost: weeklySamples,
+                endingAt: now
+            )
+            return PingScopeIOSHistoryPresentation(
+                loadResult: result,
+                host: selectedHost,
+                weeklyDigest: digest,
+                thresholds: thresholds
+            )
         }.value
         // Host or range may change while the detached presentation work runs.
         guard snapshot.host.id == selection.hostID,

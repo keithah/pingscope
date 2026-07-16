@@ -102,6 +102,45 @@ struct HistoryWindowView: View {
 
             metricStrip(presentation.metrics)
 
+            if let digest = presentation.weeklyDigest {
+                historySection("Weekly digest") {
+                    HStack(spacing: 0) {
+                        metric("Uptime", percent(digest.uptimePercent))
+                        metric("Incidents", "\(digest.incidentCount)")
+                        metric("Downtime", duration(digest.totalDowntime))
+                        metric("Busiest", digest.busiestInterfaceLabel ?? "--")
+                    }
+                    .padding(.vertical, 12)
+                    .background(.quaternary.opacity(0.22), in: RoundedRectangle(cornerRadius: 12))
+                }
+            }
+
+            if !presentation.incidentLog.incidents.isEmpty {
+                historySection("Incidents") {
+                    VStack(spacing: 0) {
+                        ForEach(presentation.incidentLog.incidents) { incident in
+                            HStack(spacing: 10) {
+                                Image(systemName: incident.isOngoing ? "exclamationmark.circle.fill" : "checkmark.circle")
+                                    .foregroundStyle(incident.isOngoing ? .red : .secondary)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(incident.isOngoing ? "Ongoing outage" : "Recovered outage")
+                                        .font(.caption.weight(.semibold))
+                                    Text(incident.startDate.formatted(date: .abbreviated, time: .shortened))
+                                        .font(.caption2).foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                Text("\(incident.sampleCount) samples · \(duration(incident.duration))")
+                                    .font(.caption.monospacedDigit())
+                            }
+                            .padding(.vertical, 9)
+                            if incident.id != presentation.incidentLog.incidents.last?.id { Divider() }
+                        }
+                    }
+                    .padding(.horizontal, 14)
+                    .background(.quaternary.opacity(0.22), in: RoundedRectangle(cornerRadius: 12))
+                }
+            }
+
             historySection("Sessions") {
                 VStack(spacing: 0) {
                     ForEach(Array(presentation.sessions.enumerated()), id: \.offset) { _, session in
@@ -156,6 +195,13 @@ struct HistoryWindowView: View {
 
     private func percent(_ value: Double) -> String {
         String(format: value.rounded() == value ? "%.0f%%" : "%.1f%%", value)
+    }
+
+    private func duration(_ interval: TimeInterval) -> String {
+        let seconds = max(0, Int(interval.rounded()))
+        if seconds >= 3_600 { return "\(seconds / 3_600)h \((seconds % 3_600) / 60)m" }
+        if seconds >= 60 { return "\(seconds / 60)m \(seconds % 60)s" }
+        return "\(seconds)s"
     }
 }
 

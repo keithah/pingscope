@@ -242,4 +242,17 @@ final class CloudSyncRecordMapperTests: XCTestCase {
         ) as CKRecordValue
         XCTAssertNil(MonitoredHostRecordMapper.monitoredHost(from: record))
     }
+
+    func testMonitoredHostMapperIsNaNSafe() throws {
+        let host = HostConfig(
+            displayName: "Legacy thresholds",
+            address: "example.com",
+            thresholds: LatencyThresholds(degradedMilliseconds: .nan, downAfterFailures: 3)
+        )
+
+        let record = try MonitoredHostRecordMapper.record(from: host, modifiedAt: .now)
+        let decoded = try XCTUnwrap(MonitoredHostRecordMapper.monitoredHost(from: record))
+        XCTAssertTrue(decoded.config.thresholds.degradedMilliseconds.isNaN)
+        XCTAssertEqual(decoded.config.thresholds.downAfterFailures, 3)
+    }
 }

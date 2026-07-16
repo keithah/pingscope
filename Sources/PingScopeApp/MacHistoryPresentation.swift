@@ -20,9 +20,15 @@ struct MacHistorySurfacePresentation: Equatable, Sendable {
     let metrics: HistoryMetrics
     let sessions: [HistorySession]
     let networkTable: MacHistoryNetworkTablePresentation
+    let incidentLog: HistoryIncidentLog
+    let weeklyDigest: HistoryWeeklyDigest?
     let isCollecting: Bool
 
-    nonisolated init(loadResult: PingScopeIOSHistoryLoadResult) {
+    nonisolated init(
+        loadResult: PingScopeIOSHistoryLoadResult,
+        host: HostConfig? = nil,
+        weeklyDigest: HistoryWeeklyDigest? = nil
+    ) {
         hostID = loadResult.hostID
         range = loadResult.range
         cutoff = loadResult.cutoff
@@ -32,6 +38,14 @@ struct MacHistorySurfacePresentation: Equatable, Sendable {
         metrics = HistoryMetrics(samples: loadResult.samples)
         sessions = HistorySession.sessionize(loadResult.samples)
         networkTable = MacHistoryNetworkTablePresentation(samples: loadResult.samples)
+        incidentLog = HistoryIncidentLog(samples: loadResult.samples, endingAt: loadResult.endingAt)
+        self.weeklyDigest = weeklyDigest ?? host.flatMap {
+            HistoryWeeklyDigest.make(
+                hosts: [$0],
+                samplesByHost: [$0.id: loadResult.samples],
+                endingAt: loadResult.endingAt
+            )
+        }
         isCollecting = loadResult.isCollecting
     }
 }
@@ -72,12 +86,28 @@ actor MacHistorySurfaceLoader {
         store: any PingHistoryStore,
         hostID: UUID,
         range: HistoryRange,
+        host: HostConfig? = nil,
+        allHosts: [HostConfig] = [],
         now: Date = Date()
     ) async -> MacHistorySurfacePresentation? {
         guard let result = await loader.load(store: store, hostID: hostID, range: range, now: now) else {
             return nil
         }
-        return MacHistorySurfacePresentation(loadResult: result)
+        var weeklySamples: [UUID: [PingResult]] = [:]
+        let weeklyCutoff = now.addingTimeInterval(-HistoryWeeklyDigest.windowDuration)
+        for monitoredHost in allHosts {
+            weeklySamples[monitoredHost.id] = await store.latestSamples(
+                hostID: monitoredHost.id,
+                since: weeklyCutoff,
+                limit: Int.max
+            )
+        }
+        let digest = HistoryWeeklyDigest.make(
+            hosts: allHosts,
+            samplesByHost: weeklySamples,
+            endingAt: now
+        )
+        return MacHistorySurfacePresentation(loadResult: result, host: host, weeklyDigest: digest)
     }
 }
 
@@ -106,12 +136,16 @@ extension PingScopeModel {
             return
         }
         let range = historySurfaceRange
+        let host = historySurfaceHost
+        let allHosts = configuredHosts
         isLoadingHistorySurface = true
         historySurfaceTask = Task { [weak self, historySurfaceLoader] in
             let loaded = await historySurfaceLoader.load(
                 store: store,
                 hostID: hostID,
                 range: range,
+                host: host,
+                allHosts: allHosts,
                 now: Date()
             )
             guard let self, !Task.isCancelled,

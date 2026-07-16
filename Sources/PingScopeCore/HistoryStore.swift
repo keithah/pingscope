@@ -5,6 +5,10 @@ public protocol PingHistoryStore: Sendable {
     func append(_ result: PingResult) async
     func append(_ results: [PingResult]) async
     func appendAndWait(_ results: [PingResult]) async throws
+    func upsertRemoteSamples(_ results: [PingResult]) async throws
+    func deleteSamples(ids: [UUID]) async throws
+    func unsyncedSamples(limit: Int) async throws -> [PingResult]
+    func markSamplesSynced(ids: [UUID]) async throws
     func samples(hostID: UUID, since: Date, limit: Int) async -> [PingResult]
     func latestSamples(hostID: UUID, since: Date, limit: Int) async -> [PingResult]
     func exportSamples(host: HostConfig, since: Date, format: HistoryExportFormat, to url: URL) async throws -> Int
@@ -22,6 +26,15 @@ public extension PingHistoryStore {
     func appendAndWait(_ results: [PingResult]) async throws {
         await append(results)
     }
+
+    func upsertRemoteSamples(_ results: [PingResult]) async throws {
+        try await appendAndWait(results)
+    }
+
+    func deleteSamples(ids: [UUID]) async throws {}
+
+    func unsyncedSamples(limit: Int) async throws -> [PingResult] { [] }
+    func markSamplesSynced(ids: [UUID]) async throws {}
 
     func exportSamples(host: HostConfig, since: Date, format: HistoryExportFormat, to url: URL) async throws -> Int {
         let exportedSamples = await samples(hostID: host.id, since: since, limit: 100_000)
@@ -59,6 +72,22 @@ public final class SQLiteHistoryStore: PingHistoryStore, @unchecked Sendable {
 
     public func appendAndWait(_ results: [PingResult]) async throws {
         try await worker.appendAndWait(results)
+    }
+
+    public func upsertRemoteSamples(_ results: [PingResult]) async throws {
+        try await worker.upsertRemoteSamples(results)
+    }
+
+    public func deleteSamples(ids: [UUID]) async throws {
+        try await worker.deleteSamples(ids: ids)
+    }
+
+    public func unsyncedSamples(limit: Int) async throws -> [PingResult] {
+        try await worker.unsyncedSamples(limit: limit)
+    }
+
+    public func markSamplesSynced(ids: [UUID]) async throws {
+        try await worker.markSamplesSynced(ids: ids)
     }
 
     public func samples(hostID: UUID, since: Date, limit: Int = 10_000) async -> [PingResult] {
@@ -128,7 +157,7 @@ private final class SQLiteHistoryWorker: @unchecked Sendable {
     private func appendAndWaitSync(_ results: [PingResult]) throws {
         guard !results.isEmpty else { return }
         try openIfNeeded()
-        try insert(results)
+        try insert(results, synced: false)
         if let newestTimestamp = results.max(by: { $0.timestamp < $1.timestamp })?.timestamp,
            shouldPrune(at: newestTimestamp) {
             // Clamp to the wall clock so a single future-stamped sample (forward
@@ -137,6 +166,37 @@ private final class SQLiteHistoryWorker: @unchecked Sendable {
             let pruneAnchor = min(newestTimestamp, Date())
             try pruneSync(olderThan: pruneAnchor.addingTimeInterval(-retention.seconds))
             lastPruneAttempt = newestTimestamp
+        }
+    }
+
+    func upsertRemoteSamples(_ results: [PingResult]) async throws {
+        guard !results.isEmpty else { return }
+        try await performWithSQLiteRetry {
+            try self.openIfNeeded()
+            try self.insert(results, synced: true)
+        }
+    }
+
+    func unsyncedSamples(limit: Int) async throws -> [PingResult] {
+        try await performWithSQLiteRetry {
+            try self.openIfNeeded()
+            return try self.queryUnsynced(limit: max(1, limit))
+        }
+    }
+
+    func markSamplesSynced(ids: [UUID]) async throws {
+        guard !ids.isEmpty else { return }
+        try await performWithSQLiteRetry {
+            try self.openIfNeeded()
+            try self.withStatement("UPDATE ping_samples SET synced = 1 WHERE id = ?;") { statement in
+                for id in ids {
+                    self.bindText(id.uuidString, to: 1, in: statement)
+                    let result = sqlite3_step(statement)
+                    guard result == SQLITE_DONE else { throw self.sqliteError(.stepFailed, code: result) }
+                    sqlite3_reset(statement)
+                    sqlite3_clear_bindings(statement)
+                }
+            }
         }
     }
 
@@ -200,6 +260,31 @@ private final class SQLiteHistoryWorker: @unchecked Sendable {
         } catch {
             logger?("history delete failed: \(error)")
             return
+        }
+    }
+
+    func deleteSamples(ids: [UUID]) async throws {
+        guard !ids.isEmpty else { return }
+        try await performWithSQLiteRetry {
+            try self.openIfNeeded()
+            try self.execute("BEGIN IMMEDIATE;")
+            do {
+                try self.withStatement("DELETE FROM ping_samples WHERE id = ?;") { statement in
+                    for id in ids {
+                        self.bindText(id.uuidString, to: 1, in: statement)
+                        let result = sqlite3_step(statement)
+                        guard result == SQLITE_DONE else {
+                            throw self.sqliteError(.stepFailed, code: result)
+                        }
+                        sqlite3_reset(statement)
+                        sqlite3_clear_bindings(statement)
+                    }
+                }
+                try self.execute("COMMIT;")
+            } catch {
+                try? self.execute("ROLLBACK;")
+                throw error
+            }
         }
     }
 
@@ -276,6 +361,7 @@ private final class SQLiteHistoryWorker: @unchecked Sendable {
             try addColumnIfNeeded(table: "ping_samples", column: "network_interface_top", definition: "TEXT")
             try addColumnIfNeeded(table: "ping_samples", column: "network_name_top", definition: "TEXT")
             try addColumnIfNeeded(table: "ping_samples", column: "is_vpn", definition: "INTEGER")
+            try addColumnIfNeeded(table: "ping_samples", column: "synced", definition: "INTEGER NOT NULL DEFAULT 0")
             try execute("CREATE INDEX IF NOT EXISTS ping_samples_host_time ON ping_samples(host_id, timestamp);")
             try execute("CREATE INDEX IF NOT EXISTS ping_samples_timestamp ON ping_samples(timestamp);")
         } catch {
@@ -299,13 +385,13 @@ private final class SQLiteHistoryWorker: @unchecked Sendable {
         return sqliteError.isTransient
     }
 
-    private func insert(_ results: [PingResult]) throws {
+    private func insert(_ results: [PingResult], synced: Bool) throws {
         let sql = """
         INSERT OR REPLACE INTO ping_samples
         (id, host_id, address, method, port, timestamp, latency_ms, failure_reason, metadata_note, metadata_json,
          latitude, longitude, horizontal_accuracy, network_name, network_interface,
-         network_interface_top, network_name_top, is_vpn)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+         network_interface_top, network_name_top, is_vpn, synced)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
         """
         let shouldWrapInTransaction = true
         if shouldWrapInTransaction {
@@ -315,6 +401,7 @@ private final class SQLiteHistoryWorker: @unchecked Sendable {
             try withStatement(sql) { statement in
                 for result in results {
                     try bindInsert(result, to: statement)
+                    sqlite3_bind_int(statement, 19, synced ? 1 : 0)
                     let stepResult = sqlite3_step(statement)
                     guard stepResult == SQLITE_DONE else {
                         throw sqliteError(.stepFailed, code: stepResult)
@@ -458,6 +545,29 @@ private final class SQLiteHistoryWorker: @unchecked Sendable {
             guard stepResult == SQLITE_DONE else {
                 throw sqliteError(.stepFailed, code: stepResult)
             }
+        }
+        return results
+    }
+
+    private func queryUnsynced(limit: Int) throws -> [PingResult] {
+        let sql = """
+        SELECT id, host_id, address, method, port, timestamp, latency_ms, failure_reason, metadata_note, metadata_json,
+               latitude, longitude, horizontal_accuracy, network_name, network_interface,
+               network_interface_top, network_name_top, is_vpn
+        FROM ping_samples
+        WHERE synced = 0
+        ORDER BY timestamp DESC
+        LIMIT ?;
+        """
+        var results: [PingResult] = []
+        try withStatement(sql) { statement in
+            sqlite3_bind_int64(statement, 1, Int64(limit))
+            var stepResult = sqlite3_step(statement)
+            while stepResult == SQLITE_ROW {
+                if let result = result(from: statement) { results.append(result) }
+                stepResult = sqlite3_step(statement)
+            }
+            guard stepResult == SQLITE_DONE else { throw sqliteError(.stepFailed, code: stepResult) }
         }
         return results
     }

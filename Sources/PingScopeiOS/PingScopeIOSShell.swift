@@ -320,6 +320,8 @@ public struct PingScopeIOSRootView: View {
     public var onboardingPresentation: PingScopeIOSOnboardingPresentation
     public var diagnosticsMetadata: PingScopeIOSDiagnosticsMetadata
     public var diagnosticsLogText: String
+    public var cloudSyncEnabled: Bool
+    public var cloudSyncStatusText: String
     public var onSelectDisplayMode: (PingScopeIOSDisplayMode) -> Void
     public var onSelectAllHosts: () -> Void
     public var onSelectHost: (UUID) -> Void
@@ -343,6 +345,7 @@ public struct PingScopeIOSRootView: View {
     public var onShareDiagnostics: (Bool) -> Void
     public var onDismissOnboarding: () -> Void
     public var onOpenAppSettings: () -> Void
+    public var onSetCloudSyncEnabled: (Bool) -> Void
 
     public init(
         hosts: [HostConfig] = PingScopeIOSHostStore.defaultHosts,
@@ -382,6 +385,8 @@ public struct PingScopeIOSRootView: View {
         ),
         diagnosticsMetadata: PingScopeIOSDiagnosticsMetadata = .init(appName: "PingScope", version: "--", build: "--", buildFlavor: "--"),
         diagnosticsLogText: String = "",
+        cloudSyncEnabled: Bool = false,
+        cloudSyncStatusText: String = "Off",
         onSelectDisplayMode: @escaping (PingScopeIOSDisplayMode) -> Void = { _ in },
         onSelectAllHosts: @escaping () -> Void = {},
         onSelectHost: @escaping (UUID) -> Void = { _ in },
@@ -404,7 +409,8 @@ public struct PingScopeIOSRootView: View {
         onRefreshDiagnostics: @escaping () async -> Void = {},
         onShareDiagnostics: @escaping (Bool) -> Void = { _ in },
         onDismissOnboarding: @escaping () -> Void = {},
-        onOpenAppSettings: @escaping () -> Void = {}
+        onOpenAppSettings: @escaping () -> Void = {},
+        onSetCloudSyncEnabled: @escaping (Bool) -> Void = { _ in }
     ) {
         self.hosts = hosts
         self.host = host
@@ -438,6 +444,8 @@ public struct PingScopeIOSRootView: View {
         self.onboardingPresentation = onboardingPresentation
         self.diagnosticsMetadata = diagnosticsMetadata
         self.diagnosticsLogText = diagnosticsLogText
+        self.cloudSyncEnabled = cloudSyncEnabled
+        self.cloudSyncStatusText = cloudSyncStatusText
         self.onSelectDisplayMode = onSelectDisplayMode
         self.onSelectAllHosts = onSelectAllHosts
         self.onSelectHost = onSelectHost
@@ -461,6 +469,7 @@ public struct PingScopeIOSRootView: View {
         self.onShareDiagnostics = onShareDiagnostics
         self.onDismissOnboarding = onDismissOnboarding
         self.onOpenAppSettings = onOpenAppSettings
+        self.onSetCloudSyncEnabled = onSetCloudSyncEnabled
     }
 
     public var body: some View {
@@ -1013,6 +1022,18 @@ public struct PingScopeIOSRootView: View {
                             systemImage: onboardingPresentation.overallStatus == .allSet ? "checkmark.circle.fill" : "checklist"
                         )
                     }
+                }
+                Section("iCloud Sync") {
+                    Toggle("Sync History & Hosts", isOn: Binding(
+                        get: { cloudSyncEnabled },
+                        set: { onSetCloudSyncEnabled($0) }
+                    ))
+                    Text(cloudSyncStatusText)
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.secondary)
+                    Text("Off by default. History and host settings leave this iPhone only after you enable sync, and are stored in your private iCloud database.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
                 Section("Diagnostics") {
                     LabeledContent("Version", value: "\(diagnosticsMetadata.version) (\(diagnosticsMetadata.build))")

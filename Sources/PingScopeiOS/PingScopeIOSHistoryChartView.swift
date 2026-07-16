@@ -58,6 +58,12 @@ public struct PingScopeIOSHistoryChartView: View {
                 .frame(height: 218)
 
                 statisticsStrip(visiblePresentation)
+                if let digest = presentation.weeklyDigest {
+                    weeklyDigestSection(digest)
+                }
+                if !presentation.incidentLog.incidents.isEmpty {
+                    incidentsSection(presentation.incidentLog)
+                }
                 networksSection(networkPresentation)
                 sessionsSection(visiblePresentation)
             }
@@ -116,6 +122,62 @@ public struct PingScopeIOSHistoryChartView: View {
                 HistorySessionCard(presentation: session)
             }
         }
+    }
+
+    private func weeklyDigestSection(_ digest: HistoryWeeklyDigest) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Weekly digest").font(.headline)
+            HStack(spacing: 0) {
+                digestMetric("Uptime", percentage(digest.uptimePercent))
+                digestMetric("Incidents", "\(digest.incidentCount)")
+                digestMetric("Downtime", duration(digest.totalDowntime))
+                digestMetric("Network", digest.busiestInterfaceLabel ?? "--")
+            }
+            .padding(.vertical, 13)
+            .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16))
+        }
+    }
+
+    private func incidentsSection(_ log: HistoryIncidentLog) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Incidents").font(.headline)
+            ForEach(log.incidents) { incident in
+                HStack(spacing: 10) {
+                    Image(systemName: incident.isOngoing ? "exclamationmark.circle.fill" : "checkmark.circle")
+                        .foregroundStyle(incident.isOngoing ? .red : .secondary)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(incident.isOngoing ? "Ongoing outage" : "Recovered outage")
+                            .font(.subheadline.weight(.semibold))
+                        Text(incident.startDate.formatted(date: .abbreviated, time: .shortened))
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Text("\(incident.sampleCount) · \(duration(incident.duration))")
+                        .font(.caption.monospacedDigit())
+                }
+                .padding(13)
+                .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16))
+            }
+        }
+    }
+
+    private func digestMetric(_ label: String, _ value: String) -> some View {
+        VStack(spacing: 4) {
+            Text(label).font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
+            Text(value).font(.system(size: 12, weight: .semibold, design: .monospaced)).lineLimit(1)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private func percentage(_ value: Double) -> String {
+        String(format: value.rounded() == value ? "%.0f%%" : "%.1f%%", value)
+    }
+
+    private func duration(_ interval: TimeInterval) -> String {
+        let seconds = max(0, Int(interval.rounded()))
+        if seconds >= 3_600 { return "\(seconds / 3_600)h \((seconds % 3_600) / 60)m" }
+        if seconds >= 60 { return "\(seconds / 60)m \(seconds % 60)s" }
+        return "\(seconds)s"
     }
 
     private func networksSection(_ presentation: HistoryNetworkPresentation) -> some View {

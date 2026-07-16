@@ -496,11 +496,15 @@ public struct PingScopeIOSHistoryPresentation: Equatable, Sendable {
     public let mapPresentation: HistoryMapPresentation
     public let statistics: [PingScopeIOSHistoryStatistic]
     public let sessions: [PingScopeIOSHistorySessionPresentation]
+    public let incidentLog: HistoryIncidentLog
+    public let weeklyDigest: HistoryWeeklyDigest?
     public let collectingText: String?
     public let emptyState: PingScopeIOSHistoryEmptyState?
 
     public init(
         loadResult: PingScopeIOSHistoryLoadResult?,
+        host: HostConfig? = nil,
+        weeklyDigest: HistoryWeeklyDigest? = nil,
         thresholds: LatencyThresholds = .defaults
     ) {
         guard let loadResult else {
@@ -512,6 +516,8 @@ public struct PingScopeIOSHistoryPresentation: Equatable, Sendable {
             self.mapPresentation = HistoryMapPresentation(samples: [])
             self.statistics = Self.statistics(for: HistoryMetrics(samples: []))
             self.sessions = []
+            self.incidentLog = HistoryIncidentLog(samples: [], endingAt: epoch)
+            self.weeklyDigest = nil
             self.collectingText = nil
             self.emptyState = Self.monitoringFirstEmptyState
             return
@@ -532,6 +538,17 @@ public struct PingScopeIOSHistoryPresentation: Equatable, Sendable {
             loadResult.samples,
             thresholds: thresholds
         ).map(PingScopeIOSHistorySessionPresentation.init)
+        self.incidentLog = HistoryIncidentLog(
+            samples: loadResult.samples,
+            endingAt: loadResult.endingAt
+        )
+        self.weeklyDigest = weeklyDigest ?? host.flatMap {
+            HistoryWeeklyDigest.make(
+                hosts: [$0],
+                samplesByHost: [$0.id: loadResult.samples],
+                endingAt: loadResult.endingAt
+            )
+        }
         self.collectingText = loadResult.isCollecting
             ? "Collecting data for the full \(loadResult.range.rawValue) window"
             : nil
@@ -559,6 +576,8 @@ public struct PingScopeIOSHistoryPresentation: Equatable, Sendable {
                 chartReduction: reduction,
                 isCollecting: collectingText != nil
             ),
+            host: nil,
+            weeklyDigest: weeklyDigest,
             thresholds: thresholds
         )
     }
