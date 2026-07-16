@@ -3,6 +3,10 @@ import XCTest
 import PingScopeCore
 @testable import PingScopeCloudSync
 
+// SwiftPM tests cover CKSyncEngineBoundary orchestration through an injected
+// CloudKitEngineHosting edge. The production adapter's entitled CKContainer,
+// live send/fetch, and subscription deletion require an on-device/Xcode smoke.
+
 final class CloudSyncCoordinatorTests: XCTestCase {
     func testCloudSyncPreferenceDefaultsOff() {
         let suiteName = "CloudSyncPreferenceTests-\(UUID().uuidString)"
@@ -42,6 +46,123 @@ final class CloudSyncCoordinatorTests: XCTestCase {
         XCTAssertEqual(stats.stopCount, 2)
         XCTAssertEqual(recordCount, 2)
         XCTAssertEqual(stats.uploadedRecordCount, 2)
+    }
+
+    func testDisablingTearsDownSubscriptionExactlyOnceBeforeStoppingWithoutUploading() async {
+        let boundary = FakeCloudSyncBoundary(availability: .privateAccount)
+        let builder = CountingCloudSyncRecordBuilder()
+        let coordinator = PingScopeCloudSyncCoordinator(boundary: boundary, recordBuilder: builder)
+
+        await coordinator.setEnabled(true)
+        await coordinator.setEnabled(false)
+
+        let stats = await boundary.stats()
+        let recordCount = await builder.count()
+        let status = await coordinator.status
+        XCTAssertEqual(stats.subscriptionTeardownCount, 1)
+        XCTAssertEqual(stats.stopCount, 1)
+        XCTAssertEqual(stats.lifecycleEvents, [.tearDownSubscription, .stop])
+        XCTAssertEqual(stats.uploadedRecordCount, 0)
+        XCTAssertEqual(recordCount, 0)
+        XCTAssertEqual(status, .off)
+    }
+
+    func testSubscriptionTeardownFailureStillStopsAndLeavesSyncDisabled() async {
+        let boundary = FakeCloudSyncBoundary(
+            availability: .privateAccount,
+            subscriptionTeardownError: FakeCloudSyncBoundaryError.teardownFailed
+        )
+        let coordinator = PingScopeCloudSyncCoordinator(boundary: boundary)
+
+        await coordinator.setEnabled(true)
+        await coordinator.setEnabled(false)
+
+        let stats = await boundary.stats()
+        let status = await coordinator.status
+        XCTAssertEqual(stats.subscriptionTeardownCount, 1)
+        XCTAssertEqual(stats.stopCount, 1)
+        XCTAssertEqual(stats.lifecycleEvents, [.tearDownSubscription, .stop])
+        XCTAssertEqual(stats.uploadedRecordCount, 0)
+        XCTAssertEqual(status, .off)
+    }
+
+    func testRepeatedDisableCallsStopWithoutStartingOrUploading() async {
+        let boundary = FakeCloudSyncBoundary(availability: .privateAccount)
+        let coordinator = PingScopeCloudSyncCoordinator(boundary: boundary)
+
+        await coordinator.setEnabled(false)
+        await coordinator.setEnabled(false)
+
+        let stats = await boundary.stats()
+        let status = await coordinator.status
+        XCTAssertEqual(stats.stopCount, 2)
+        XCTAssertEqual(stats.startCount, 0)
+        XCTAssertEqual(stats.uploadedRecordCount, 0)
+        XCTAssertEqual(status, .off)
+    }
+
+    func testRealBoundaryNeverEnabledStopDoesNotConstructCloudKitResourcesOrTouchHost() async throws {
+        // This default production boundary would SIGTRAP under SwiftPM if stop
+        // or teardown accidentally constructed its CKContainer.
+        let productionBoundary = CKSyncEngineBoundary(
+            stateKey: "CloudSyncBoundaryTests-\(UUID().uuidString)"
+        )
+        await productionBoundary.stop()
+        try await productionBoundary.tearDownSubscriptions()
+
+        let fixture = makeRealBoundaryFixture()
+
+        await fixture.boundary.stop()
+        try await fixture.boundary.tearDownSubscriptions()
+
+        let events = await fixture.host.events()
+        XCTAssertEqual(events, [])
+    }
+
+    func testRealBoundaryStartedStopDeletesStableSubscriptionOnceReleasesEngineAndBecomesInactive() async throws {
+        let fixture = makeRealBoundaryFixture()
+
+        try await fixture.boundary.start()
+        await fixture.boundary.stop()
+
+        let events = await fixture.host.events()
+        XCTAssertEqual(events, [
+            .prepareResources,
+            .createEngine(subscriptionID: fixture.subscriptionID),
+            .addDatabaseChanges,
+            .sendChanges,
+            .fetchChanges,
+            .cancel,
+            .deleteSubscription(fixture.subscriptionID),
+            .release
+        ])
+        await assertBoundaryIsInactive(fixture.boundary)
+    }
+
+    func testRealBoundaryUnknownSubscriptionIsIdempotentSuccessAndReleasesEngine() async throws {
+        let fixture = makeRealBoundaryFixture(deleteError: CKError(.unknownItem))
+
+        try await fixture.boundary.start()
+        await fixture.boundary.stop()
+
+        let deletedIDs = await fixture.host.deletedSubscriptionIDs()
+        XCTAssertEqual(deletedIDs, [fixture.subscriptionID])
+        let events = await fixture.host.events()
+        XCTAssertEqual(events.filter { $0 == .release }.count, 1)
+        await assertBoundaryIsInactive(fixture.boundary)
+    }
+
+    func testRealBoundarySubscriptionDeleteFailureIsContainedAndReleasesEngine() async throws {
+        let fixture = makeRealBoundaryFixture(deleteError: CKError(.networkFailure))
+
+        try await fixture.boundary.start()
+        await fixture.boundary.stop()
+
+        let deletedIDs = await fixture.host.deletedSubscriptionIDs()
+        XCTAssertEqual(deletedIDs, [fixture.subscriptionID])
+        let events = await fixture.host.events()
+        XCTAssertEqual(events.filter { $0 == .release }.count, 1)
+        await assertBoundaryIsInactive(fixture.boundary)
     }
 
     func testUnavailableOrNonPrivateAccountBailsOutWithoutSyncOrRecordCreation() async throws {
@@ -508,25 +629,204 @@ private actor RecordingCloudSyncBoundary: CloudSyncEngineBoundary {
     }
 }
 
+private enum FakeCloudSyncBoundaryError: Error {
+    case teardownFailed
+}
+
+private struct RealBoundaryFixture {
+    let boundary: CKSyncEngineBoundary
+    let host: RecordingCloudKitEngineHost
+    let subscriptionID: CKSubscription.ID
+}
+
+private func makeRealBoundaryFixture(deleteError: CKError? = nil) -> RealBoundaryFixture {
+    let subscriptionID = "PingScope.CloudSync.PrivateDatabase"
+    let host = RecordingCloudKitEngineHost(deleteError: deleteError)
+    let boundary = CKSyncEngineBoundary(
+        engineHost: host,
+        stateKey: "CloudSyncBoundaryTests-\(UUID().uuidString)",
+        subscriptionID: subscriptionID
+    )
+    return RealBoundaryFixture(boundary: boundary, host: host, subscriptionID: subscriptionID)
+}
+
+private func assertBoundaryIsInactive(
+    _ boundary: CKSyncEngineBoundary,
+    file: StaticString = #filePath,
+    line: UInt = #line
+) async {
+    do {
+        try await boundary.upload(records: [], deletions: [])
+        XCTFail("Expected stopped boundary to reject upload", file: file, line: line)
+    } catch {
+        // Any thrown error proves the real boundary released its active handle.
+    }
+}
+
+private enum RecordingCloudKitEngineHostEvent: Equatable, Sendable {
+    case prepareResources
+    case createEngine(subscriptionID: CKSubscription.ID)
+    case addDatabaseChanges
+    case addRecordChanges
+    case sendChanges
+    case fetchChanges
+    case cancel
+    case deleteSubscription(CKSubscription.ID)
+    case release
+}
+
+private final class RecordingCloudKitEngineHost: CloudKitEngineHosting, @unchecked Sendable {
+    private let deleteError: CKError?
+    private let lock = NSLock()
+    private var recordedEvents: [RecordingCloudKitEngineHostEvent] = []
+    private var activeHandles: Set<CloudKitEngineHandle> = []
+
+    init(deleteError: CKError?) {
+        self.deleteError = deleteError
+    }
+
+    func prepareResources() {
+        lock.withLock {
+            recordedEvents.append(.prepareResources)
+        }
+    }
+
+    func accountAvailability() async -> CloudSyncAccountAvailability {
+        .privateAccount
+    }
+
+    func createEngine(
+        stateSerialization: CKSyncEngine.State.Serialization?,
+        delegate: any CKSyncEngineDelegate,
+        subscriptionID: CKSubscription.ID
+    ) -> CloudKitEngineHandle {
+        let handle = CloudKitEngineHandle()
+        lock.withLock {
+            activeHandles.insert(handle)
+            recordedEvents.append(.createEngine(subscriptionID: subscriptionID))
+        }
+        return handle
+    }
+
+    func addPendingDatabaseChanges(
+        _ changes: [CKSyncEngine.PendingDatabaseChange],
+        to handle: CloudKitEngineHandle
+    ) {
+        lock.withLock {
+            guard activeHandles.contains(handle) else { return }
+            recordedEvents.append(.addDatabaseChanges)
+        }
+    }
+
+    func addPendingRecordZoneChanges(
+        _ changes: [CKSyncEngine.PendingRecordZoneChange],
+        to handle: CloudKitEngineHandle
+    ) {
+        lock.withLock {
+            guard activeHandles.contains(handle) else { return }
+            recordedEvents.append(.addRecordChanges)
+        }
+    }
+
+    func sendChanges(on handle: CloudKitEngineHandle) async throws {
+        lock.withLock {
+            guard activeHandles.contains(handle) else { return }
+            recordedEvents.append(.sendChanges)
+        }
+    }
+
+    func fetchChanges(on handle: CloudKitEngineHandle) async throws {
+        lock.withLock {
+            guard activeHandles.contains(handle) else { return }
+            recordedEvents.append(.fetchChanges)
+        }
+    }
+
+    func cancelOperations(on handle: CloudKitEngineHandle) async {
+        lock.withLock {
+            guard activeHandles.contains(handle) else { return }
+            recordedEvents.append(.cancel)
+        }
+    }
+
+    func deleteSubscription(withID subscriptionID: CKSubscription.ID) async throws {
+        lock.withLock {
+            recordedEvents.append(.deleteSubscription(subscriptionID))
+        }
+        if let deleteError { throw deleteError }
+    }
+
+    func releaseEngine(_ handle: CloudKitEngineHandle) {
+        lock.withLock {
+            guard activeHandles.remove(handle) != nil else { return }
+            recordedEvents.append(.release)
+        }
+    }
+
+    func events() async -> [RecordingCloudKitEngineHostEvent] {
+        lock.withLock { recordedEvents }
+    }
+
+    func deletedSubscriptionIDs() async -> [CKSubscription.ID] {
+        lock.withLock {
+            recordedEvents.compactMap { event in
+                guard case let .deleteSubscription(id) = event else { return nil }
+                return id
+            }
+        }
+    }
+}
+
+private enum FakeCloudSyncBoundaryLifecycleEvent: Equatable, Sendable {
+    case tearDownSubscription
+    case stop
+}
+
 private actor FakeCloudSyncBoundary: CloudSyncEngineBoundary {
     let availability: CloudSyncAccountAvailability
+    let subscriptionTeardownError: (any Error)?
     private(set) var startCount = 0
     private(set) var stopCount = 0
+    private(set) var subscriptionTeardownCount = 0
     private(set) var uploadedRecordCount = 0
+    private(set) var lifecycleEvents: [FakeCloudSyncBoundaryLifecycleEvent] = []
 
-    init(availability: CloudSyncAccountAvailability) {
+    init(
+        availability: CloudSyncAccountAvailability,
+        subscriptionTeardownError: (any Error)? = nil
+    ) {
         self.availability = availability
+        self.subscriptionTeardownError = subscriptionTeardownError
     }
 
     func accountAvailability() async -> CloudSyncAccountAvailability { availability }
     func start() async throws { startCount += 1 }
-    func stop() async { stopCount += 1 }
+    func tearDownSubscriptions() async throws {
+        subscriptionTeardownCount += 1
+        lifecycleEvents.append(.tearDownSubscription)
+        if let subscriptionTeardownError { throw subscriptionTeardownError }
+    }
+    func stop() async {
+        do {
+            try await tearDownSubscriptions()
+        } catch {
+            // Mirrors the live boundary's best-effort stop semantics.
+        }
+        stopCount += 1
+        lifecycleEvents.append(.stop)
+    }
     func upload(records: [CKRecord], deletions: [CKRecord.ID]) async throws {
         uploadedRecordCount += records.count
     }
 
-    func stats() -> (startCount: Int, stopCount: Int, uploadedRecordCount: Int) {
-        (startCount, stopCount, uploadedRecordCount)
+    func stats() -> (
+        startCount: Int,
+        stopCount: Int,
+        subscriptionTeardownCount: Int,
+        uploadedRecordCount: Int,
+        lifecycleEvents: [FakeCloudSyncBoundaryLifecycleEvent]
+    ) {
+        (startCount, stopCount, subscriptionTeardownCount, uploadedRecordCount, lifecycleEvents)
     }
 }
 
