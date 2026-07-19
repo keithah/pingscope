@@ -38,8 +38,9 @@ public enum MonitoredHostRecordMapper {
               let id = UUID(uuidString: record.recordID.recordName),
               let data = record[PingScopeCloudKitModel.MonitoredHostField.configJSON] as? Data,
               let modifiedAt = record[PingScopeCloudKitModel.MonitoredHostField.modifiedAt] as? Date,
-              let config = try? hostDecoder().decode(HostConfig.self, from: data),
-              config.id == id else {
+              let decodedConfig = try? hostDecoder().decode(HostConfig.self, from: data),
+              decodedConfig.id == id,
+              let config = decodedConfig.sanitizedForStorage() else {
             return nil
         }
         return MonitoredHostRecord(config: config, modifiedAt: modifiedAt)

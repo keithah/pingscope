@@ -13,6 +13,7 @@ struct CloudKitEngineHandle: Hashable, Sendable {
 protocol CloudKitEngineHosting: Sendable {
     func prepareResources()
     func accountAvailability() async -> CloudSyncAccountAvailability
+    func setAccountChangeHandler(_ handler: (@Sendable () async -> Void)?)
     func createEngine(
         stateSerialization: CKSyncEngine.State.Serialization?,
         delegate: any CKSyncEngineDelegate,
@@ -33,8 +34,42 @@ protocol CloudKitEngineHosting: Sendable {
     func releaseEngine(_ handle: CloudKitEngineHandle)
 }
 
+private final class CloudKitAccountChangeObserver: @unchecked Sendable {
+    private let notificationCenter: NotificationCenter
+    private let lock = NSLock()
+    private var handler: (@Sendable () async -> Void)?
+    private var observer: NSObjectProtocol?
+
+    init(notificationCenter: NotificationCenter = .default) {
+        self.notificationCenter = notificationCenter
+        observer = notificationCenter.addObserver(
+            forName: .CKAccountChanged,
+            object: nil,
+            queue: nil
+        ) { [weak self] _ in
+            self?.notify()
+        }
+    }
+
+    deinit {
+        if let observer {
+            notificationCenter.removeObserver(observer)
+        }
+    }
+
+    func setHandler(_ handler: (@Sendable () async -> Void)?) {
+        lock.withLock { self.handler = handler }
+    }
+
+    private func notify() {
+        guard let handler = lock.withLock({ handler }) else { return }
+        Task { await handler() }
+    }
+}
+
 private final class LiveCloudKitEngineHost: CloudKitEngineHosting, @unchecked Sendable {
     private let containerIdentifier: String
+    private let accountChangeObserver = CloudKitAccountChangeObserver()
     private let lock = NSLock()
     private var resources: Resources?
     private var engines: [CloudKitEngineHandle: CKSyncEngine] = [:]
@@ -59,6 +94,10 @@ private final class LiveCloudKitEngineHost: CloudKitEngineHosting, @unchecked Se
         } catch {
             return .unavailable
         }
+    }
+
+    func setAccountChangeHandler(_ handler: (@Sendable () async -> Void)?) {
+        accountChangeObserver.setHandler(handler)
     }
 
     func createEngine(
@@ -146,18 +185,43 @@ public struct CloudSyncRemoteDeletion: Equatable, Sendable {
     }
 }
 
+enum PingScopeCKSyncAccountChangePolicy {
+    enum Disposition: Equatable {
+        case continueSync
+        case stopSync
+    }
+
+    static func disposition(
+        for changeType: CKSyncEngine.Event.AccountChange.ChangeType
+    ) -> Disposition {
+        switch changeType {
+        case .signIn:
+            .continueSync
+        case .signOut, .switchAccounts:
+            .stopSync
+        @unknown default:
+            .stopSync
+        }
+    }
+}
+
 /// The live CloudKit edge. CloudKit resources are created lazily, only after
 /// the coordinator has passed the opt-in gate and checks account availability.
 public actor CKSyncEngineBoundary: CloudSyncEngineBoundary {
     public typealias RemoteChangeHandler = @Sendable ([CKRecord], [CloudSyncRemoteDeletion]) async -> Void
+    typealias SyncEngineCancellation = @Sendable (CKSyncEngine) async -> Void
 
     private let stateKey: String
     private let subscriptionID: CKSubscription.ID
     private let engineHost: any CloudKitEngineHosting
     private let onRemoteChanges: RemoteChangeHandler
+    private let cancelSyncEngine: SyncEngineCancellation
     private var resourcesInitialized = false
     private var delegate: PingScopeCKSyncEngineDelegate?
     private var engineHandle: CloudKitEngineHandle?
+    private var accountChangeHandler: (@Sendable () async -> Void)?
+    private var isHandlingAccountChange = false
+    private var hasPendingAccountChange = false
 
     public init(
         containerIdentifier: String = PingScopeCloudKitModel.containerIdentifier,
@@ -169,24 +233,36 @@ public actor CKSyncEngineBoundary: CloudSyncEngineBoundary {
         self.subscriptionID = subscriptionID
         self.engineHost = LiveCloudKitEngineHost(containerIdentifier: containerIdentifier)
         self.onRemoteChanges = onRemoteChanges
+        self.cancelSyncEngine = { await $0.cancelOperations() }
     }
 
     init(
         engineHost: any CloudKitEngineHosting,
         stateKey: String,
         subscriptionID: CKSubscription.ID,
-        onRemoteChanges: @escaping RemoteChangeHandler = { _, _ in }
+        onRemoteChanges: @escaping RemoteChangeHandler = { _, _ in },
+        cancelSyncEngine: @escaping SyncEngineCancellation = { await $0.cancelOperations() }
     ) {
         self.stateKey = stateKey
         self.subscriptionID = subscriptionID
         self.engineHost = engineHost
         self.onRemoteChanges = onRemoteChanges
+        self.cancelSyncEngine = cancelSyncEngine
     }
 
     public func accountAvailability() async -> CloudSyncAccountAvailability {
         engineHost.prepareResources()
         resourcesInitialized = true
         return await engineHost.accountAvailability()
+    }
+
+    public func setAccountChangeHandler(_ handler: (@Sendable () async -> Void)?) async {
+        accountChangeHandler = handler
+        // Keep observing after opt-out so an account switch cannot leave the
+        // previous account's serialized CKSyncEngine state on disk.
+        engineHost.setAccountChangeHandler { [weak self] in
+            await self?.accountDidChange()
+        }
     }
 
     public func start() async throws {
@@ -224,7 +300,7 @@ public actor CKSyncEngineBoundary: CloudSyncEngineBoundary {
     public func stop() async {
         guard resourcesInitialized else { return }
         if let delegate {
-            await delegate.setActive(false)
+            await delegate.awaitDeferredCancellation()
         }
         if let engineHandle {
             await engineHost.cancelOperations(on: engineHandle)
@@ -238,6 +314,7 @@ public actor CKSyncEngineBoundary: CloudSyncEngineBoundary {
             engineHost.releaseEngine(engineHandle)
         }
         self.engineHandle = nil
+        self.delegate = nil
     }
 
     public func tearDownSubscriptions() async throws {
@@ -252,12 +329,21 @@ public actor CKSyncEngineBoundary: CloudSyncEngineBoundary {
         }
     }
 
-    public func upload(records: [CKRecord], deletions: [CKRecord.ID]) async throws {
-        guard let engineHandle, let delegate, await delegate.isActive() else {
+    public func upload(
+        records: [CKRecord],
+        deletions: [CKRecord.ID]
+    ) async throws -> CloudSyncUploadConfirmation {
+        guard let engineHandle, let delegate,
+              await delegate.prepare(records: records, deletions: deletions),
+              self.engineHandle == engineHandle,
+              self.delegate === delegate else {
             throw CloudSyncBoundaryError.inactive
         }
-        await delegate.stage(records: records)
-        await delegate.prepare(deletions: deletions)
+        guard await delegate.stage(records: records),
+              self.engineHandle == engineHandle,
+              self.delegate === delegate else {
+            throw CloudSyncBoundaryError.inactive
+        }
         engineHost.addPendingRecordZoneChanges(
             records.map { .saveRecord($0.recordID) }
                 + deletions.map(CKSyncEngine.PendingRecordZoneChange.deleteRecord),
@@ -267,16 +353,33 @@ public actor CKSyncEngineBoundary: CloudSyncEngineBoundary {
         if let failure = await delegate.deleteFailure(for: deletions) {
             throw failure
         }
+        return await delegate.consumeSaveConfirmation(for: records.map(\.recordID))
     }
 
     private func ensureDelegate() -> PingScopeCKSyncEngineDelegate {
         if let delegate { return delegate }
         let delegate = PingScopeCKSyncEngineDelegate(
             stateKey: stateKey,
-            onRemoteChanges: onRemoteChanges
+            onRemoteChanges: onRemoteChanges,
+            onAccountChange: { [weak self] in
+                Task { await self?.accountDidChange() }
+            },
+            cancelSyncEngine: cancelSyncEngine
         )
         self.delegate = delegate
         return delegate
+    }
+
+    private func accountDidChange() async {
+        hasPendingAccountChange = true
+        guard !isHandlingAccountChange else { return }
+        isHandlingAccountChange = true
+        defer { isHandlingAccountChange = false }
+        while hasPendingAccountChange {
+            hasPendingAccountChange = false
+            UserDefaults.standard.removeObject(forKey: stateKey)
+            await accountChangeHandler?()
+        }
     }
 }
 
@@ -284,16 +387,50 @@ private enum CloudSyncBoundaryError: Error {
     case inactive
 }
 
-private actor PingScopeCKSyncEngineDelegateState {
+actor PingScopeCKSyncEngineDelegateState {
     private var active = false
+    private var acceptsDeferredCancellation = true
+    private var deferredCancellation: Task<Void, Never>?
     private var stagedRecords: [CKRecord.ID: CKRecord] = [:]
+    private var awaitingRecordSaveIDs: Set<CKRecord.ID> = []
+    private var confirmedRecordSaveIDs: Set<CKRecord.ID> = []
+    private var failedRecordSaves: [CKRecord.ID: CKError] = [:]
     private var failedDeletions: [CKRecord.ID: CKError] = [:]
 
-    func setActive(_ value: Bool) { active = value }
+    func setActive(_ value: Bool) {
+        active = value
+        if value {
+            acceptsDeferredCancellation = true
+        }
+    }
 
-    func stage(_ records: [CKRecord]) {
-        guard active else { return }
+    func scheduleCancellation(operation: @escaping @Sendable () async -> Void) {
+        active = false
+        guard acceptsDeferredCancellation else { return }
+        let previousCancellation = deferredCancellation
+        deferredCancellation = Task {
+            await previousCancellation?.value
+            await operation()
+        }
+    }
+
+    func deactivateAndAwaitDeferredCancellation() async {
+        active = false
+        acceptsDeferredCancellation = false
+        await deferredCancellation?.value
+        deferredCancellation = nil
+        stagedRecords.removeAll(keepingCapacity: false)
+        awaitingRecordSaveIDs.removeAll(keepingCapacity: false)
+        confirmedRecordSaveIDs.removeAll(keepingCapacity: false)
+        failedRecordSaves.removeAll(keepingCapacity: false)
+        failedDeletions.removeAll(keepingCapacity: false)
+    }
+
+    @discardableResult
+    func stage(_ records: [CKRecord]) -> Bool {
+        guard active else { return false }
         for record in records { stagedRecords[record.recordID] = record }
+        return true
     }
 
     func record(for id: CKRecord.ID) -> CKRecord? {
@@ -305,11 +442,51 @@ private actor PingScopeCKSyncEngineDelegateState {
         for id in ids { stagedRecords[id] = nil }
     }
 
-    func prepare(deletions: [CKRecord.ID]) {
+    @discardableResult
+    func prepare(records: [CKRecord], deletions: [CKRecord.ID]) -> Bool {
+        guard active else { return false }
+        for id in records.map(\.recordID) {
+            awaitingRecordSaveIDs.insert(id)
+            confirmedRecordSaveIDs.remove(id)
+            failedRecordSaves[id] = nil
+        }
         for id in deletions { failedDeletions[id] = nil }
+        return true
+    }
+
+    func recordSaveResults(savedRecordIDs: [CKRecord.ID], failures: [CKRecord.ID: CKError]) {
+        guard active else { return }
+        for id in savedRecordIDs where awaitingRecordSaveIDs.contains(id) {
+            confirmedRecordSaveIDs.insert(id)
+            failedRecordSaves[id] = nil
+        }
+        for (id, error) in failures where awaitingRecordSaveIDs.contains(id) {
+            confirmedRecordSaveIDs.remove(id)
+            failedRecordSaves[id] = error
+        }
+    }
+
+    func consumeSaveConfirmation(for ids: [CKRecord.ID]) -> CloudSyncUploadConfirmation {
+        let requestedIDs = Set(ids)
+        let confirmedIDs = confirmedRecordSaveIDs.intersection(requestedIDs)
+        let failures = Dictionary(uniqueKeysWithValues: requestedIDs.compactMap { id in
+            failedRecordSaves[id].map { (id, $0) }
+        })
+        awaitingRecordSaveIDs.subtract(requestedIDs)
+        confirmedRecordSaveIDs.subtract(requestedIDs)
+        for id in requestedIDs {
+            stagedRecords[id] = nil
+            failedRecordSaves[id] = nil
+        }
+        return CloudSyncUploadConfirmation(
+            requestedRecordIDs: requestedIDs,
+            confirmedRecordIDs: confirmedIDs,
+            failedRecordSaveErrors: failures
+        )
     }
 
     func recordDeleteFailures(_ failures: [CKRecord.ID: CKError]) {
+        guard active else { return }
         for (id, error) in failures { failedDeletions[id] = error }
     }
 
@@ -318,19 +495,43 @@ private actor PingScopeCKSyncEngineDelegateState {
     }
 
     func isActive() -> Bool { active }
+
+    func cacheCounts() -> (
+        stagedRecords: Int,
+        awaitingRecordSaves: Int,
+        confirmedRecordSaves: Int,
+        failedRecordSaves: Int,
+        failedDeletions: Int
+    ) {
+        (
+            stagedRecords.count,
+            awaitingRecordSaveIDs.count,
+            confirmedRecordSaveIDs.count,
+            failedRecordSaves.count,
+            failedDeletions.count
+        )
+    }
 }
 
-private final class PingScopeCKSyncEngineDelegate: CKSyncEngineDelegate, @unchecked Sendable {
+final class PingScopeCKSyncEngineDelegate: CKSyncEngineDelegate, @unchecked Sendable {
     private let state = PingScopeCKSyncEngineDelegateState()
     private let stateKey: String
     private let onRemoteChanges: CKSyncEngineBoundary.RemoteChangeHandler
+    private let onAccountChange: @Sendable () -> Void
+    private let cancelSyncEngine: CKSyncEngineBoundary.SyncEngineCancellation
 
     init(
         stateKey: String,
-        onRemoteChanges: @escaping CKSyncEngineBoundary.RemoteChangeHandler
+        onRemoteChanges: @escaping CKSyncEngineBoundary.RemoteChangeHandler,
+        onAccountChange: @escaping @Sendable () -> Void,
+        cancelSyncEngine: @escaping CKSyncEngineBoundary.SyncEngineCancellation = {
+            await $0.cancelOperations()
+        }
     ) {
         self.stateKey = stateKey
         self.onRemoteChanges = onRemoteChanges
+        self.onAccountChange = onAccountChange
+        self.cancelSyncEngine = cancelSyncEngine
     }
 
     func restoredStateSerialization() -> CKSyncEngine.State.Serialization? {
@@ -339,12 +540,43 @@ private final class PingScopeCKSyncEngineDelegate: CKSyncEngineDelegate, @unchec
     }
 
     func setActive(_ active: Bool) async { await state.setActive(active) }
+    func awaitDeferredCancellation() async { await state.deactivateAndAwaitDeferredCancellation() }
     func isActive() async -> Bool { await state.isActive() }
-    func stage(records: [CKRecord]) async { await state.stage(records) }
-    func prepare(deletions: [CKRecord.ID]) async { await state.prepare(deletions: deletions) }
+    func stage(records: [CKRecord]) async -> Bool { await state.stage(records) }
+    func prepare(records: [CKRecord], deletions: [CKRecord.ID]) async -> Bool {
+        await state.prepare(records: records, deletions: deletions)
+    }
+    func consumeSaveConfirmation(for ids: [CKRecord.ID]) async -> CloudSyncUploadConfirmation {
+        await state.consumeSaveConfirmation(for: ids)
+    }
+    func recordSaveResultsForTesting(
+        savedRecordIDs: [CKRecord.ID],
+        failures: [CKRecord.ID: CKError]
+    ) async {
+        await state.recordSaveResults(savedRecordIDs: savedRecordIDs, failures: failures)
+        await state.remove(savedRecordIDs)
+    }
     func deleteFailure(for ids: [CKRecord.ID]) async -> CKError? { await state.deleteFailure(for: ids) }
 
     func handleEvent(_ event: CKSyncEngine.Event, syncEngine: CKSyncEngine) async {
+        if case let .accountChange(change) = event {
+            switch PingScopeCKSyncAccountChangePolicy.disposition(for: change.changeType) {
+            case .continueSync:
+                // Retire the old engine even for sign-in. CKSyncEngine resets
+                // account-scoped pending state, and the coordinator rebuilds
+                // only after revalidating the new private account.
+                await state.setActive(false)
+            case .stopSync:
+                // CKSyncEngine traps if this callback directly awaits an
+                // operation that can reenter the delegate. The state actor owns
+                // the deferred task so boundary shutdown can await its lifetime.
+                await state.scheduleCancellation(operation: { [cancelSyncEngine] in
+                    await cancelSyncEngine(syncEngine)
+                })
+            }
+            onAccountChange()
+            return
+        }
         guard await state.isActive() else { return }
         switch event {
         case let .stateUpdate(update):
@@ -358,6 +590,12 @@ private final class PingScopeCKSyncEngineDelegate: CKSyncEngineDelegate, @unchec
             }
             await onRemoteChanges(records, deletions)
         case let .sentRecordZoneChanges(changes):
+            await state.recordSaveResults(
+                savedRecordIDs: changes.savedRecords.map(\.recordID),
+                failures: Dictionary(uniqueKeysWithValues: changes.failedRecordSaves.map {
+                    ($0.record.recordID, $0.error)
+                })
+            )
             await state.remove(changes.savedRecords.map(\.recordID) + changes.deletedRecordIDs)
             let confirmedAbsent = changes.failedRecordDeletes.compactMap { recordID, error in
                 error.code == .unknownItem ? recordID : nil
@@ -370,12 +608,6 @@ private final class PingScopeCKSyncEngineDelegate: CKSyncEngineDelegate, @unchec
             await state.recordDeleteFailures(
                 changes.failedRecordDeletes.filter { $0.value.code != .unknownItem }
             )
-        case .accountChange:
-            // Account switches invalidate private-database ownership and all
-            // in-flight work. A later explicit enable/account refresh creates
-            // a fresh engine after the coordinator rechecks availability.
-            await state.setActive(false)
-            await syncEngine.cancelOperations()
         case let .fetchedDatabaseChanges(changes):
             if changes.deletions.contains(where: { $0.zoneID == PingScopeCloudKitModel.zoneID }) {
                 syncEngine.state.add(pendingDatabaseChanges: [

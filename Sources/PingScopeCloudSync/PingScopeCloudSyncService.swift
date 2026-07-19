@@ -15,13 +15,18 @@ private actor CloudSyncHostVersionRegistry {
     private static let configDefaultsKey = "PingScope.CloudSync.HostConfig"
     private static let pendingDeletionDefaultsKey = "PingScope.CloudSync.PendingHostDeletions"
     private let defaults: UserDefaults
+    private let onPersist: @Sendable () -> Void
     private var modifiedAtByID: [UUID: Date]
     private var configByID: [UUID: HostConfig]
     private var pendingDeletionIDs: Set<UUID>
 
-    init(suiteName: String? = nil) {
+    init(
+        suiteName: String? = nil,
+        onPersist: @escaping @Sendable () -> Void = {}
+    ) {
         let defaults = suiteName.flatMap(UserDefaults.init(suiteName:)) ?? .standard
         self.defaults = defaults
+        self.onPersist = onPersist
         let persisted = defaults.dictionary(forKey: Self.defaultsKey) as? [String: Double] ?? [:]
         self.modifiedAtByID = Dictionary(uniqueKeysWithValues: persisted.compactMap { key, value in
             UUID(uuidString: key).map { ($0, Date(timeIntervalSince1970: value)) }
@@ -82,6 +87,23 @@ private actor CloudSyncHostVersionRegistry {
         persist()
     }
 
+    func applyBatch(
+        _ versions: [CloudSyncHostVersion],
+        confirmingDeletions deletionIDs: Set<UUID>
+    ) {
+        guard !versions.isEmpty || !deletionIDs.isEmpty else { return }
+        for version in versions {
+            modifiedAtByID[version.config.id] = version.modifiedAt
+            configByID[version.config.id] = version.config
+        }
+        for id in deletionIDs {
+            pendingDeletionIDs.remove(id)
+            modifiedAtByID[id] = nil
+            configByID[id] = nil
+        }
+        persist()
+    }
+
     func confirmDeletion(_ id: UUID) {
         pendingDeletionIDs.remove(id)
         modifiedAtByID[id] = nil
@@ -108,6 +130,7 @@ private actor CloudSyncHostVersionRegistry {
             pendingDeletionIDs.map(\.uuidString).sorted(),
             forKey: Self.pendingDeletionDefaultsKey
         )
+        onPersist()
     }
 }
 
@@ -133,27 +156,34 @@ private actor CloudSyncRemoteReceiver {
         try? await CloudSyncRemoteChangeApplier.apply(sampleRecords: sampleRecords, to: historyStore)
 
         var hostState = hostStore.load().state ?? SharedHostStoreState(hosts: [])
-        var didChangeHosts = false
+        let originalHostState = hostState
+        let sanitizedLocalHosts = HostConfig.sanitizedHosts(hostState.hosts, limit: 64)
+        var hostOrder = sanitizedLocalHosts.map(\.id)
+        var hostsByID = Dictionary(uniqueKeysWithValues: sanitizedLocalHosts.map { ($0.id, $0) })
+        var acceptedVersionsByID: [UUID: CloudSyncHostVersion] = [:]
         for record in records where record.recordType == PingScopeCloudKitModel.RecordType.monitoredHost {
             guard let remote = MonitoredHostRecordMapper.monitoredHost(from: record) else { continue }
             guard !(await versions.isPendingDeletion(remote.config.id)) else { continue }
             let remoteVersion = CloudSyncHostVersion(config: remote.config, modifiedAt: remote.modifiedAt)
-            if let localConfig = hostState.hosts.first(where: { $0.id == remote.config.id }) {
+            if let localConfig = hostsByID[remote.config.id] {
+                let localModifiedAt: Date
+                if let acceptedVersion = acceptedVersionsByID[localConfig.id] {
+                    localModifiedAt = acceptedVersion.modifiedAt
+                } else {
+                    localModifiedAt = await versions.modifiedAt(for: localConfig.id) ?? .distantPast
+                }
                 let localVersion = CloudSyncHostVersion(
                     config: localConfig,
-                    modifiedAt: await versions.modifiedAt(for: localConfig.id) ?? .distantPast
+                    modifiedAt: localModifiedAt
                 )
                 guard CloudSyncConflictResolver.resolve(local: localVersion, remote: remoteVersion) == remoteVersion else {
                     continue
                 }
             }
-            if let index = hostState.hosts.firstIndex(where: { $0.id == remote.config.id }) {
-                hostState.hosts[index] = remote.config
-            } else {
-                hostState.hosts.append(remote.config)
+            if hostsByID.updateValue(remote.config, forKey: remote.config.id) == nil {
+                hostOrder.append(remote.config.id)
             }
-            await versions.set(remoteVersion)
-            didChangeHosts = true
+            acceptedVersionsByID[remote.config.id] = remoteVersion
         }
 
         let sampleDeletionIDs = deletions
@@ -161,28 +191,67 @@ private actor CloudSyncRemoteReceiver {
             .map(\.recordID)
         try? await CloudSyncRemoteChangeApplier.deleteSampleRecordIDs(sampleDeletionIDs, from: historyStore)
 
-        for deletion in deletions where deletion.recordType == PingScopeCloudKitModel.RecordType.monitoredHost {
-            guard let id = UUID(uuidString: deletion.recordID.recordName) else { continue }
-            let previousCount = hostState.hosts.count
-            hostState.hosts.removeAll { $0.id == id }
-            if hostState.primaryHostID == id { hostState.primaryHostID = nil }
-            if hostState.selectedHostID == id { hostState.selectedHostID = nil }
-            await versions.confirmDeletion(id)
-            didChangeHosts = didChangeHosts || previousCount != hostState.hosts.count
+        let confirmedDeletionIDs = Set(deletions.compactMap { deletion -> UUID? in
+            guard deletion.recordType == PingScopeCloudKitModel.RecordType.monitoredHost else { return nil }
+            return UUID(uuidString: deletion.recordID.recordName)
+        })
+        for id in confirmedDeletionIDs {
+            hostsByID[id] = nil
+            acceptedVersionsByID[id] = nil
         }
-        if didChangeHosts {
-            try? hostStore.save(hostState)
+
+        hostOrder.removeAll { hostsByID[$0] == nil }
+        let finalHostIDs = Array(hostOrder.prefix(64))
+        let finalHostIDSet = Set(finalHostIDs)
+        hostState.hosts = finalHostIDs.compactMap { hostsByID[$0] }
+        if let primaryHostID = hostState.primaryHostID, !finalHostIDSet.contains(primaryHostID) {
+            hostState.primaryHostID = nil
         }
+        if let selectedHostID = hostState.selectedHostID, !finalHostIDSet.contains(selectedHostID) {
+            hostState.selectedHostID = nil
+        }
+        let acceptedVersions = finalHostIDs.compactMap { acceptedVersionsByID[$0] }
+
+        if hostState != originalHostState {
+            do {
+                try hostStore.save(hostState)
+            } catch {
+                return
+            }
+        }
+        await versions.applyBatch(acceptedVersions, confirmingDeletions: confirmedDeletionIDs)
     }
 }
 
 public actor PingScopeCloudSyncService {
+    private static let sampleUploadBatchLimit = 300
+    private static let acknowledgementRetryLimit = 3
+    private static let sampleDrainAccumulationDelay = Duration.milliseconds(10)
+    private static let defaultSampleRetryDelay = Duration.seconds(1)
+    private static let maximumSampleRetryDelay = 60_000.0
+
     private let historyStore: any PingHistoryStore
     private let hostStore: any SharedHostStoring
     private let receiver: CloudSyncRemoteReceiver
     private let coordinator: PingScopeCloudSyncCoordinator
     private let versions: CloudSyncHostVersionRegistry
-    private var isDrainingBacklog = false
+    private let sleep: @Sendable (Duration) async throws -> Void
+    private let beforeDisableCoordinatorTeardown: @Sendable () async -> Void
+    private let afterDisableAuthorizationTeardown: @Sendable () async -> Void
+    private var requestedSyncEnabled = false
+    private var requestedHosts: [HostConfig] = []
+    private var isSyncEnabled = false
+    private var lifecycleGeneration: UInt = 0
+    private var drainGeneration: UInt = 0
+    private var drainRequested = false
+    private var drainTask: Task<Void, Never>?
+    private var accumulationTask: Task<Void, Never>?
+    private var accumulationGeneration: UInt = 0
+    private var retryTask: Task<Void, Never>?
+    private var retryGeneration: UInt = 0
+    private var consecutiveRetryCount = 0
+    private var sampleIDsAwaitingLocalAcknowledgement: [UUID] = []
+    private var lastDrainReachedEmptyQueue = false
 
     public init(
         historyStore: any PingHistoryStore,
@@ -202,6 +271,9 @@ public actor PingScopeCloudSyncService {
         self.receiver = receiver
         self.versions = versions
         self.coordinator = PingScopeCloudSyncCoordinator(boundary: boundary)
+        self.sleep = { try await Task.sleep(for: $0) }
+        self.beforeDisableCoordinatorTeardown = {}
+        self.afterDisableAuthorizationTeardown = {}
     }
 
     init(
@@ -209,9 +281,18 @@ public actor PingScopeCloudSyncService {
         hostStore: any SharedHostStoring,
         boundary: any CloudSyncEngineBoundary,
         recordBuilder: any CloudSyncRecordBuilding,
-        registrySuiteName: String
+        registrySuiteName: String,
+        registryPersistenceObserver: @escaping @Sendable () -> Void = {},
+        beforeDisableCoordinatorTeardown: @escaping @Sendable () async -> Void = {},
+        afterDisableAuthorizationTeardown: @escaping @Sendable () async -> Void = {},
+        sleep: @escaping @Sendable (Duration) async throws -> Void = {
+            try await Task.sleep(for: $0)
+        }
     ) {
-        let versions = CloudSyncHostVersionRegistry(suiteName: registrySuiteName)
+        let versions = CloudSyncHostVersionRegistry(
+            suiteName: registrySuiteName,
+            onPersist: registryPersistenceObserver
+        )
         let receiver = CloudSyncRemoteReceiver(
             historyStore: historyStore,
             hostStore: hostStore,
@@ -225,6 +306,9 @@ public actor PingScopeCloudSyncService {
             boundary: boundary,
             recordBuilder: recordBuilder
         )
+        self.sleep = sleep
+        self.beforeDisableCoordinatorTeardown = beforeDisableCoordinatorTeardown
+        self.afterDisableAuthorizationTeardown = afterDisableAuthorizationTeardown
     }
 
     func applyRemoteChanges(records: [CKRecord], deletions: [CloudSyncRemoteDeletion] = []) async {
@@ -232,37 +316,131 @@ public actor PingScopeCloudSyncService {
     }
 
     public func setEnabled(_ enabled: Bool, hosts: [HostConfig]) async {
-        await coordinator.setEnabled(enabled)
-        guard enabled else { return }
+        requestedSyncEnabled = enabled
+        requestedHosts = hosts
+        lifecycleGeneration &+= 1
+        let transition = lifecycleGeneration
+        guard enabled else {
+            let cancelledDrain = beginStoppingSampleDrain()
+            await beforeDisableCoordinatorTeardown()
+            await coordinator.setRecoveryHandler(nil)
+            guard isCurrentTransition(transition) else { return }
+            await coordinator.setAccountRecoveryAuthorizationHandler { false }
+            guard isCurrentTransition(transition) else { return }
+            await afterDisableAuthorizationTeardown()
+            guard isCurrentTransition(transition) else { return }
+            await coordinator.setAccountChangeHandler(nil)
+            guard isCurrentTransition(transition) else { return }
+            await coordinator.setEnabled(false, serviceLifecycleGeneration: transition)
+            guard isCurrentTransition(transition) else { return }
+            await cancelledDrain?.value
+            return
+        }
+        await coordinator.setAccountChangeHandler { [weak self] in
+            await self?.suspendSampleDrainForAccountChange()
+        }
+        guard isCurrentTransition(transition), requestedSyncEnabled else { return }
+        await coordinator.setAccountRecoveryAuthorizationHandler { [weak self] in
+            await self?.isSyncRequested() ?? false
+        }
+        guard isCurrentTransition(transition), requestedSyncEnabled else { return }
+        await coordinator.setRecoveryHandler { [weak self] in
+            await self?.resumeAfterCoordinatorAccountRecovery()
+        }
+        guard isCurrentTransition(transition), requestedSyncEnabled else { return }
+        guard !isSyncEnabled else {
+            await drainPendingHostDeletions()
+            guard isCurrentLifecycle(transition) else { return }
+            await uploadHosts(hosts)
+            guard isCurrentLifecycle(transition) else { return }
+            requestSampleDrain()
+            return
+        }
+        await coordinator.setEnabled(enabled, serviceLifecycleGeneration: transition)
+        let coordinatorStatus = await coordinator.status
+        guard transition == lifecycleGeneration, coordinatorStatus == .idle else {
+            guard transition == lifecycleGeneration else { return }
+            isSyncEnabled = false
+            return
+        }
+        isSyncEnabled = true
         await drainPendingHostDeletions()
+        guard isCurrentLifecycle(transition) else { return }
         // start() fetches and applies remote changes first. Read the reconciled
         // shared store afterward so a remote edit/deletion is not overwritten by
         // the pre-fetch app snapshot captured when enable began.
         let pendingDeletionIDs = await versions.pendingDeletions()
+        guard isCurrentLifecycle(transition) else { return }
         let reconciledHosts = (hostStore.load().state?.hosts ?? hosts).filter {
             !pendingDeletionIDs.contains($0.id)
         }
         await uploadInitialHosts(reconciledHosts)
-        await drainBacklog()
+        guard isCurrentLifecycle(transition) else { return }
+        _ = await flushSampleDrain()
+    }
+
+    private func resumeAfterCoordinatorAccountRecovery() async {
+        guard requestedSyncEnabled else { return }
+        guard await coordinator.status == .idle, requestedSyncEnabled else { return }
+        resetRetryState()
+        let transition = lifecycleGeneration
+        isSyncEnabled = true
+        await drainPendingHostDeletions()
+        guard isCurrentLifecycle(transition), requestedSyncEnabled else { return }
+        let pendingDeletionIDs = await versions.pendingDeletions()
+        guard isCurrentLifecycle(transition), requestedSyncEnabled else { return }
+        let hosts = (hostStore.load().state?.hosts ?? requestedHosts).filter {
+            !pendingDeletionIDs.contains($0.id)
+        }
+        await uploadInitialHosts(hosts)
+        guard isCurrentLifecycle(transition), requestedSyncEnabled else { return }
+        _ = await flushSampleDrain()
+    }
+
+    private func suspendSampleDrainForAccountChange() {
+        guard requestedSyncEnabled else { return }
+        lifecycleGeneration &+= 1
+        isSyncEnabled = false
+        drainGeneration &+= 1
+        drainRequested = false
+        cancelAccumulatedSampleDrain()
+        resetRetryState()
+        let task = drainTask
+        drainTask = nil
+        task?.cancel()
+        sampleIDsAwaitingLocalAcknowledgement.removeAll(keepingCapacity: false)
+        lastDrainReachedEmptyQueue = false
+    }
+
+    private func isSyncRequested() -> Bool {
+        requestedSyncEnabled
     }
 
     @discardableResult
     public func uploadSamples(_ samples: [PingResult]) async -> Bool {
-        let uploaded = await uploadSampleBatch(samples)
-        if uploaded {
+        _ = samples
+        let drained = await flushSampleDrain()
+        if drained {
             await drainPendingHostDeletions()
-            await drainBacklog()
         }
-        return uploaded
+        return drained
     }
 
-    private func uploadSampleBatch(_ samples: [PingResult]) async -> Bool {
+    private enum SampleUploadResult {
+        case confirmation(CloudSyncUploadConfirmation)
+        case failure(CKError?)
+    }
+
+    private func uploadSampleBatch(_ samples: [PingResult]) async -> SampleUploadResult {
         do {
-            let uploaded = try await coordinator.upload(samples: samples, hosts: [])
-            if uploaded { try await historyStore.markSamplesSynced(ids: samples.map(\.id)) }
-            return uploaded
+            guard let confirmation = try await coordinator.uploadWithConfirmation(samples: samples, hosts: []) else {
+                return .failure(nil)
+            }
+            return .confirmation(confirmation)
+        } catch let error as CKError {
+            return .failure(error)
         } catch {
-            return false
+            return .failure(nil)
         }
     }
 
@@ -286,13 +464,318 @@ public actor PingScopeCloudSyncService {
         await versions.set(initialVersions)
     }
 
-    private func drainBacklog() async {
-        guard !isDrainingBacklog else { return }
-        isDrainingBacklog = true
-        defer { isDrainingBacklog = false }
-        while let samples = try? await historyStore.unsyncedSamples(limit: 300), !samples.isEmpty {
-            guard await uploadSampleBatch(samples) else { return }
+    func samplesDidBecomeDurable() {
+        guard isSyncEnabled else { return }
+        if drainTask != nil {
+            drainRequested = true
+            cancelAccumulatedSampleDrain()
+            return
         }
+        scheduleAccumulatedSampleDrain()
+    }
+
+    private func requestSampleDrain() {
+        guard isSyncEnabled else { return }
+        cancelAccumulatedSampleDrain()
+        drainRequested = true
+        guard drainTask == nil else { return }
+        startSampleDrain()
+    }
+
+    private func startSampleDrain() {
+        guard isSyncEnabled, drainTask == nil else { return }
+        drainRequested = false
+        lastDrainReachedEmptyQueue = false
+        let generation = drainGeneration
+        let retryEpoch = retryGeneration
+        drainTask = Task { [weak self] in
+            await self?.runSampleDrain(generation: generation, retryEpoch: retryEpoch)
+        }
+    }
+
+    private func flushSampleDrain() async -> Bool {
+        guard isSyncEnabled else { return false }
+        requestSampleDrain()
+        while let task = drainTask {
+            await task.value
+        }
+        return lastDrainReachedEmptyQueue
+    }
+
+    private func beginStoppingSampleDrain() -> Task<Void, Never>? {
+        isSyncEnabled = false
+        drainGeneration &+= 1
+        drainRequested = false
+        cancelAccumulatedSampleDrain()
+        resetRetryState()
+        let task = drainTask
+        drainTask = nil
+        task?.cancel()
+        sampleIDsAwaitingLocalAcknowledgement.removeAll(keepingCapacity: false)
+        lastDrainReachedEmptyQueue = false
+        return task
+    }
+
+    private func runSampleDrain(generation: UInt, retryEpoch: UInt) async {
+        var reachedEmptyQueue = false
+        var scheduledRetryDelay: Duration?
+        var shouldStopDrain = false
+        while isCurrentDrain(generation) {
+            if !sampleIDsAwaitingLocalAcknowledgement.isEmpty {
+                guard await acknowledgeConfirmedSamples(generation: generation) else { break }
+                if scheduledRetryDelay != nil || shouldStopDrain { break }
+            }
+            guard isCurrentDrain(generation) else { break }
+            guard let samples = try? await historyStore.unsyncedSamples(
+                limit: Self.sampleUploadBatchLimit
+            ) else {
+                break
+            }
+            guard isCurrentDrain(generation) else { break }
+            guard !samples.isEmpty else {
+                reachedEmptyQueue = true
+                break
+            }
+            let upload = await uploadSampleBatch(samples)
+            guard isCurrentDrain(generation) else { break }
+            switch upload {
+            case let .failure(error):
+                if let error, isRetryableSampleSaveError(error) {
+                    scheduledRetryDelay = retryDelay(for: error)
+                } else {
+                    shouldStopDrain = true
+                }
+            case let .confirmation(confirmation):
+                let requestedIDs = Set(samples.map(\.id))
+                let confirmedIDs = Set(confirmation.confirmedRecordIDs.compactMap {
+                    UUID(uuidString: $0.recordName)
+                }).intersection(requestedIDs)
+                let failedErrors = [UUID: CKError](uniqueKeysWithValues: confirmation.failedRecordSaveErrors.compactMap {
+                    guard let id = UUID(uuidString: $0.key.recordName), requestedIDs.contains(id) else {
+                        return nil
+                    }
+                    return (id, $0.value)
+                })
+                let terminalIDs = Set(failedErrors.compactMap { id, error in
+                    sampleSaveDisposition(for: error) == .terminal ? id : nil
+                })
+                let transientErrors = failedErrors.values.filter {
+                    sampleSaveDisposition(for: $0) == .retry
+                }
+                if failedErrors.values.contains(where: {
+                    sampleSaveDisposition(for: $0) == .deferred
+                }) {
+                    shouldStopDrain = true
+                }
+                let unknownIDs = requestedIDs
+                    .subtracting(confirmedIDs)
+                    .subtracting(Set(failedErrors.keys))
+                sampleIDsAwaitingLocalAcknowledgement = samples.map(\.id).filter {
+                    confirmedIDs.contains($0) || terminalIDs.contains($0)
+                }
+                if !transientErrors.isEmpty || !unknownIDs.isEmpty {
+                    var retryCandidates = transientErrors.map { retryDelay(for: $0) }
+                    if !unknownIDs.isEmpty {
+                        retryCandidates.append(Self.defaultSampleRetryDelay)
+                    }
+                    scheduledRetryDelay = retryCandidates.max()
+                }
+                if sampleIDsAwaitingLocalAcknowledgement.isEmpty { break }
+            }
+
+            if sampleIDsAwaitingLocalAcknowledgement.isEmpty,
+               shouldStopDrain || scheduledRetryDelay != nil {
+                break
+            }
+        }
+
+        guard generation == drainGeneration else { return }
+        lastDrainReachedEmptyQueue = reachedEmptyQueue
+        drainTask = nil
+        if reachedEmptyQueue {
+            resetRetryState()
+        }
+        if drainRequested, isSyncEnabled {
+            cancelScheduledSampleDrainRetry()
+            startSampleDrain()
+        } else if let scheduledRetryDelay,
+                  isSyncEnabled,
+                  retryEpoch == retryGeneration {
+            consecutiveRetryCount = min(consecutiveRetryCount + 1, 6)
+            scheduleSampleDrainRetry(
+                after: scheduledRetryDelay,
+                lifecycleGeneration: lifecycleGeneration,
+                drainGeneration: generation
+            )
+        }
+    }
+
+    private func acknowledgeConfirmedSamples(generation: UInt) async -> Bool {
+        let ids = sampleIDsAwaitingLocalAcknowledgement
+        for attempt in 0..<Self.acknowledgementRetryLimit {
+            guard isCurrentDrain(generation) else { return false }
+            do {
+                try await historyStore.markSamplesSynced(ids: ids)
+                guard isCurrentDrain(generation),
+                      sampleIDsAwaitingLocalAcknowledgement == ids else {
+                    return false
+                }
+                sampleIDsAwaitingLocalAcknowledgement.removeAll(keepingCapacity: true)
+                return true
+            } catch {
+                guard attempt + 1 < Self.acknowledgementRetryLimit else { return false }
+                let delay = Duration.milliseconds(10 * (1 << attempt))
+                do {
+                    try await Task.sleep(for: delay)
+                } catch {
+                    return false
+                }
+            }
+        }
+        return false
+    }
+
+    private enum SampleSaveDisposition {
+        case retry
+        case terminal
+        case deferred
+    }
+
+    private func sampleSaveDisposition(for error: CKError) -> SampleSaveDisposition {
+        switch error.code {
+        case .networkUnavailable, .networkFailure, .serviceUnavailable, .requestRateLimited,
+             .zoneBusy, .batchRequestFailed:
+            .retry
+        case .invalidArguments, .constraintViolation, .serverRejectedRequest,
+             .assetFileNotFound, .permissionFailure:
+            .terminal
+        default:
+            // Account/lifecycle and unfamiliar failures are not proof that a
+            // record itself is poison. Keep it in the outbox without spinning;
+            // a later lifecycle or durable-sample signal can try it again.
+            .deferred
+        }
+    }
+
+    private func isRetryableSampleSaveError(_ error: CKError) -> Bool {
+        sampleSaveDisposition(for: error) == .retry
+    }
+
+    private func retryDelay(for error: CKError) -> Duration {
+        let fallbackSeconds = min(1 << min(consecutiveRetryCount, 6), 60)
+        guard let retryAfter = (error.userInfo[CKErrorRetryAfterKey] as? NSNumber)?.doubleValue,
+              retryAfter.isFinite,
+              retryAfter > 0 else {
+            return .seconds(fallbackSeconds)
+        }
+        let milliseconds = min(
+            max(retryAfter, Double(fallbackSeconds)) * 1_000,
+            Self.maximumSampleRetryDelay
+        )
+        return .milliseconds(Int64(milliseconds.rounded(.up)))
+    }
+
+    private func scheduleSampleDrainRetry(
+        after delay: Duration,
+        lifecycleGeneration: UInt,
+        drainGeneration: UInt
+    ) {
+        cancelScheduledSampleDrainRetry()
+        retryGeneration &+= 1
+        let retryID = retryGeneration
+        retryTask = Task { [weak self] in
+            do {
+                try await self?.sleep(delay)
+            } catch {
+                return
+            }
+            await self?.fireSampleDrainRetry(
+                retryID: retryID,
+                lifecycleGeneration: lifecycleGeneration,
+                drainGeneration: drainGeneration
+            )
+        }
+    }
+
+    private func fireSampleDrainRetry(
+        retryID: UInt,
+        lifecycleGeneration: UInt,
+        drainGeneration: UInt
+    ) {
+        guard retryID == retryGeneration,
+              lifecycleGeneration == self.lifecycleGeneration,
+              drainGeneration == self.drainGeneration,
+              isSyncEnabled,
+              !Task.isCancelled else {
+            return
+        }
+        retryTask = nil
+        requestSampleDrain()
+    }
+
+    private func cancelScheduledSampleDrainRetry() {
+        retryGeneration &+= 1
+        retryTask?.cancel()
+        retryTask = nil
+    }
+
+    private func resetRetryState() {
+        consecutiveRetryCount = 0
+        cancelScheduledSampleDrainRetry()
+    }
+
+    private func scheduleAccumulatedSampleDrain() {
+        guard accumulationTask == nil else { return }
+        accumulationGeneration &+= 1
+        let accumulationID = accumulationGeneration
+        let lifecycle = lifecycleGeneration
+        let drain = drainGeneration
+        accumulationTask = Task { [weak self] in
+            do {
+                try await self?.sleep(Self.sampleDrainAccumulationDelay)
+            } catch {
+                return
+            }
+            await self?.fireAccumulatedSampleDrain(
+                accumulationID: accumulationID,
+                lifecycleGeneration: lifecycle,
+                drainGeneration: drain
+            )
+        }
+    }
+
+    private func fireAccumulatedSampleDrain(
+        accumulationID: UInt,
+        lifecycleGeneration: UInt,
+        drainGeneration: UInt
+    ) {
+        guard accumulationID == accumulationGeneration,
+              lifecycleGeneration == self.lifecycleGeneration,
+              drainGeneration == self.drainGeneration,
+              isSyncEnabled,
+              !Task.isCancelled else {
+            return
+        }
+        accumulationTask = nil
+        requestSampleDrain()
+    }
+
+    private func cancelAccumulatedSampleDrain() {
+        accumulationGeneration &+= 1
+        accumulationTask?.cancel()
+        accumulationTask = nil
+    }
+
+    private func isCurrentDrain(_ generation: UInt) -> Bool {
+        isSyncEnabled && generation == drainGeneration && !Task.isCancelled
+    }
+
+    private func isCurrentLifecycle(_ generation: UInt) -> Bool {
+        isSyncEnabled && generation == lifecycleGeneration
+    }
+
+    private func isCurrentTransition(_ generation: UInt) -> Bool {
+        generation == lifecycleGeneration
     }
 
     private func drainPendingHostDeletions() async {
@@ -335,17 +818,17 @@ public struct CloudSyncingHistoryStore: PingHistoryStore {
 
     public func append(_ result: PingResult) async {
         await destination.append(result)
-        await service.uploadSamples([result])
+        await service.samplesDidBecomeDurable()
     }
 
     public func append(_ results: [PingResult]) async {
         await destination.append(results)
-        await service.uploadSamples(results)
+        await service.samplesDidBecomeDurable()
     }
 
     public func appendAndWait(_ results: [PingResult]) async throws {
         try await destination.appendAndWait(results)
-        await service.uploadSamples(results)
+        await service.samplesDidBecomeDurable()
     }
 
     public func upsertRemoteSamples(_ results: [PingResult]) async throws {
@@ -370,6 +853,18 @@ public struct CloudSyncingHistoryStore: PingHistoryStore {
 
     public func latestSamples(hostID: UUID, since: Date, limit: Int) async -> [PingResult] {
         await destination.latestSamples(hostID: hostID, since: since, limit: limit)
+    }
+
+    public func weeklyDigestSamples(
+        hostIDs: [UUID],
+        since: Date,
+        through: Date
+    ) async -> [HistoryWeeklyDigestSample] {
+        await destination.weeklyDigestSamples(hostIDs: hostIDs, since: since, through: through)
+    }
+
+    public func historyRevision() async -> UInt64 {
+        await destination.historyRevision()
     }
 
     public func exportSamples(host: HostConfig, since: Date, format: HistoryExportFormat, to url: URL) async throws -> Int {
