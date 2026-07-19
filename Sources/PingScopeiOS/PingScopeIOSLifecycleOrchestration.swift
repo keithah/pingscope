@@ -1,4 +1,90 @@
 import Foundation
+import PingScopeCore
+
+public struct PingScopeIOSBackgroundExpirationPlan: Equatable, Sendable {
+    public let cancelRefreshLoop: Bool
+    public let stopMonitoring: Bool
+    public let publishPausedLiveActivity: Bool
+    public let endLiveActivity: Bool
+    public let continueLiveActivityUpdates: Bool
+
+    public static func make(keepAliveActive: Bool) -> Self {
+        if keepAliveActive {
+            return Self(
+                cancelRefreshLoop: false,
+                stopMonitoring: false,
+                publishPausedLiveActivity: false,
+                endLiveActivity: false,
+                continueLiveActivityUpdates: true
+            )
+        }
+        return Self(
+            cancelRefreshLoop: true,
+            stopMonitoring: true,
+            publishPausedLiveActivity: true,
+            endLiveActivity: false,
+            continueLiveActivityUpdates: false
+        )
+    }
+}
+
+public struct PingScopeIOSPausedLiveActivityState: Equatable, Sendable {
+    public static let staleInterval: TimeInterval = 5 * 60
+
+    public let contentState: PingScopeLiveActivityAttributes.ContentState
+    public let staleDate: Date
+
+    public static func make(
+        from state: PingScopeLiveActivityAttributes.ContentState,
+        at date: Date = Date()
+    ) -> Self {
+        let staleRows = state.hostRows.map { row in
+            var row = row
+            row.isStale = true
+            return row
+        }
+        return Self(
+            contentState: PingScopeLiveActivityAttributes.ContentState(
+                latencyMilliseconds: state.latencyMilliseconds,
+                status: state.status,
+                lastUpdatedAt: state.lastUpdatedAt,
+                remainingSeconds: state.remainingSeconds,
+                isStale: true,
+                failureMessage: "Monitoring paused — reopen PingScope to resume",
+                mode: state.mode,
+                hostRows: staleRows
+            ),
+            staleDate: date.addingTimeInterval(staleInterval)
+        )
+    }
+}
+
+public enum PingScopeIOSForegroundLiveActivityDecision: Equatable, Sendable {
+    case none
+    case request
+    case resumeExisting
+    case end
+
+    public static func decide(
+        hasActivity: Bool,
+        wasPausedForBackground: Bool,
+        monitoringResumed: Bool
+    ) -> Self {
+        if hasActivity {
+            return wasPausedForBackground && monitoringResumed ? .resumeExisting : .end
+        }
+        return monitoringResumed ? .request : .none
+    }
+}
+
+public enum PingScopeIOSLiveActivityEndDecision: Equatable, Sendable {
+    case pause
+    case end
+
+    public static func decide(reason: MonitorSessionEndReason) -> Self {
+        reason == .backgroundRuntimeExpired ? .pause : .end
+    }
+}
 
 public struct PingScopeIOSLiveActivityUpdatePolicy: Sendable {
     private let minimumUpdateInterval: TimeInterval

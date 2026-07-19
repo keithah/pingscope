@@ -331,6 +331,7 @@ private final class PingScopeIOSAppModel: ObservableObject {
     private var liveActivity: Activity<PingScopeLiveActivityAttributes>?
     private var liveActivityLease: PingScopeIOSActivityOwnershipLease?
     private var liveActivityUpdatePolicy = PingScopeIOSLiveActivityUpdatePolicy()
+    private var liveActivityPausedForBackgroundRuntime = false
     private var initialSessionCoordinator = PingScopeIOSInitialSessionCoordinator()
     private var lastGatewayAddress: String?
     @Published private(set) var historyLocationTaggingEnabled: Bool
@@ -1821,14 +1822,35 @@ private final class PingScopeIOSAppModel: ObservableObject {
     }
 
     private func expireForBackgroundRuntime(context: LifecycleContext? = nil) async {
-        cancelRefreshLoop()
-        await stopMonitoring(reason: .backgroundRuntimeExpired)
+        applyBackgroundKeepAlive()
+        let keepAliveActive = PingScopeIOSHistoryLocationPolicy.reduce(
+            keepAliveEnabled: backgroundKeepAliveEnabled,
+            taggingEnabled: historyLocationTaggingEnabled,
+            monitoringActive: isMonitoringActive,
+            authorization: historyLocationAuthorization
+        ).backgroundActive
+        let plan = PingScopeIOSBackgroundExpirationPlan.make(keepAliveActive: keepAliveActive)
+        if plan.continueLiveActivityUpdates {
+            if !refreshLoopDriver.isRunning {
+                startRefreshLoop()
+            }
+            await updateLiveActivity()
+            return
+        }
+        if plan.cancelRefreshLoop {
+            cancelRefreshLoop()
+        }
+        if plan.stopMonitoring {
+            await stopMonitoring(reason: .backgroundRuntimeExpired)
+        }
         guard isCurrentLifecycle(context) else { return }
         await refreshSnapshot()
         guard isCurrentLifecycle(context) else { return }
         await refreshHistory(force: true)
         guard isCurrentLifecycle(context) else { return }
-        await endLiveActivity()
+        if plan.publishPausedLiveActivity {
+            await pauseLiveActivityForBackgroundRuntime()
+        }
         guard isCurrentLifecycle(context) else { return }
         applyBackgroundKeepAlive()
     }
@@ -1865,6 +1887,7 @@ private final class PingScopeIOSAppModel: ObservableObject {
             let lease = await lifecycleHarness.claimActivity()
             liveActivity = requestedActivity
             liveActivityLease = lease
+            liveActivityPausedForBackgroundRuntime = false
             _ = liveActivityUpdatePolicy.shouldPublish(state)
         } catch {
             NSLog("PingScope live activity request failed: \(String(describing: error))")
@@ -1877,6 +1900,22 @@ private final class PingScopeIOSAppModel: ObservableObject {
         let state = liveActivityContentState(session: session)
         guard liveActivityUpdatePolicy.shouldPublish(state) else { return }
         await liveActivity.update(ActivityContent(state: state, staleDate: session.scheduledEndAt))
+        liveActivityPausedForBackgroundRuntime = false
+    }
+
+    private func pauseLiveActivityForBackgroundRuntime(at date: Date = Date()) async {
+        await releaseLiveActivityIfDefunct()
+        guard let liveActivity, let session = presentedSession else { return }
+        let paused = PingScopeIOSPausedLiveActivityState.make(
+            from: liveActivityContentState(session: session, at: date),
+            at: date
+        )
+        liveActivityUpdatePolicy.reset()
+        _ = liveActivityUpdatePolicy.shouldPublish(paused.contentState, at: date)
+        await liveActivity.update(
+            ActivityContent(state: paused.contentState, staleDate: paused.staleDate)
+        )
+        liveActivityPausedForBackgroundRuntime = true
     }
 
     /// A user-dismissed or system-ended activity never notifies us; holding its
@@ -1927,20 +1966,35 @@ private final class PingScopeIOSAppModel: ObservableObject {
               session.endReason == .backgroundRuntimeExpired else {
             return
         }
-        await endLiveActivity()
+        let activityDecision = PingScopeIOSForegroundLiveActivityDecision.decide(
+            hasActivity: liveActivity != nil,
+            wasPausedForBackground: liveActivityPausedForBackgroundRuntime,
+            monitoringResumed: true
+        )
+        if activityDecision == .end {
+            await endLiveActivity()
+        }
         guard isCurrentLifecycle(context) else { return }
         invalidateLifecycleSession()
         await startMonitoring(duration: .continuous)
         guard isCurrentLifecycle(context) else { return }
         await refreshSnapshot()
         guard isCurrentLifecycle(context) else { return }
-        await startLiveActivity(duration: .continuous)
+        switch activityDecision {
+        case .resumeExisting:
+            await updateLiveActivity()
+        case .request, .end:
+            await startLiveActivity(duration: .continuous)
+        case .none:
+            break
+        }
         guard isCurrentLifecycle(context) else { return }
         applyBackgroundKeepAlive()
         startRefreshLoop()
     }
 
     private func endLiveActivity() async {
+        liveActivityPausedForBackgroundRuntime = false
         guard let endingActivity = liveActivity else { return }
         let endingLease = liveActivityLease
         if let session = presentedSession {

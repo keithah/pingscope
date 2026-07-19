@@ -133,6 +133,68 @@ final class LiveMonitorSessionControllerTests: XCTestCase {
         )
     }
 
+    func testBackgroundExpirationWithKeepAlivePreservesMonitoringAndLiveActivityUpdates() {
+        let plan = PingScopeIOSBackgroundExpirationPlan.make(keepAliveActive: true)
+
+        XCTAssertFalse(plan.cancelRefreshLoop)
+        XCTAssertFalse(plan.stopMonitoring)
+        XCTAssertFalse(plan.publishPausedLiveActivity)
+        XCTAssertTrue(plan.continueLiveActivityUpdates)
+    }
+
+    func testBackgroundExpirationWithoutKeepAlivePublishesPausedStaleActivityWithoutEndingIt() {
+        let now = Date(timeIntervalSince1970: 1_000)
+        let row = PingScopeLiveActivityHostRow(
+            hostID: UUID(),
+            displayName: "Cloudflare",
+            endpointCaption: "TCP 1.1.1.1",
+            status: .healthy,
+            latestLatencyMilliseconds: 18,
+            samples: [18],
+            isStale: false
+        )
+        let liveState = PingScopeLiveActivityAttributes.ContentState(
+            latencyMilliseconds: 18,
+            status: .healthy,
+            lastUpdatedAt: now,
+            remainingSeconds: 0,
+            isStale: false,
+            hostRows: [row]
+        )
+
+        let plan = PingScopeIOSBackgroundExpirationPlan.make(keepAliveActive: false)
+        let paused = PingScopeIOSPausedLiveActivityState.make(from: liveState, at: now)
+
+        XCTAssertTrue(plan.cancelRefreshLoop)
+        XCTAssertTrue(plan.stopMonitoring)
+        XCTAssertTrue(plan.publishPausedLiveActivity)
+        XCTAssertFalse(plan.endLiveActivity)
+        XCTAssertTrue(paused.contentState.isStale)
+        XCTAssertEqual(paused.contentState.failureMessage, "Monitoring paused — reopen PingScope to resume")
+        XCTAssertTrue(paused.contentState.hostRows.allSatisfy(\.isStale))
+        XCTAssertEqual(paused.staleDate, now.addingTimeInterval(5 * 60))
+    }
+
+    func testForegroundAfterBackgroundPauseReusesSameLiveActivity() {
+        XCTAssertEqual(
+            PingScopeIOSForegroundLiveActivityDecision.decide(
+                hasActivity: true,
+                wasPausedForBackground: true,
+                monitoringResumed: true
+            ),
+            .resumeExisting
+        )
+    }
+
+    func testExplicitStopAndFiniteCompletionStillEndLiveActivity() {
+        XCTAssertEqual(PingScopeIOSLiveActivityEndDecision.decide(reason: .userStopped), .end)
+        XCTAssertEqual(PingScopeIOSLiveActivityEndDecision.decide(reason: .completed), .end)
+        XCTAssertEqual(
+            PingScopeIOSLiveActivityEndDecision.decide(reason: .backgroundRuntimeExpired),
+            .pause
+        )
+    }
+
     @MainActor
     func testIOSLifecycleQueueCompletesBlockedScopeTransitionBeforeBackgroundAndActive() async {
         let host = HostConfig(id: UUID(), displayName: "Cloudflare", address: "1.1.1.1")
