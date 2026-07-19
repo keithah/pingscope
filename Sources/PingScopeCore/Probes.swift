@@ -345,31 +345,90 @@ public struct TimeoutProbe: PingProbe {
     }
 
     public func measure(_ host: HostConfig) async -> PingResult {
-        let race = AsyncFirstResult<PingResult>()
-        let measurementTask = Task {
-            await race.finish(await wrapped.measure(host))
+        let race = SynchronousFirstResult<PingResult>()
+        let measurementTask = BoundedTaskLifetime {
+            race.finish(await wrapped.measure(host))
         }
-        let timeoutTask = Task {
+        let timeoutTask = BoundedTaskLifetime {
             do {
                 try await Task.sleep(for: host.timeout)
-                await race.finish(.failure(hostID: host.id, reason: .timeout).withHostMetadata(from: host))
+                race.finish(.failure(hostID: host.id, reason: .timeout).withHostMetadata(from: host))
             } catch {
-                await race.finish(.failure(hostID: host.id, reason: .cancelled).withHostMetadata(from: host))
+                race.finish(.failure(hostID: host.id, reason: .cancelled).withHostMetadata(from: host))
             }
         }
 
         let result = await withTaskCancellationHandler {
             await race.value()
         } onCancel: {
-            measurementTask.cancel()
-            timeoutTask.cancel()
-            Task {
-                await race.finish(.failure(hostID: host.id, reason: .cancelled).withHostMetadata(from: host))
+            // Claim cancellation before propagating it to either child. A
+            // wrapped probe may synchronously return from its own cancellation
+            // handler, but it must not publish success for a cancelled owner.
+            race.finish(.failure(hostID: host.id, reason: .cancelled).withHostMetadata(from: host))
+            measurementTask.task.cancel()
+            timeoutTask.task.cancel()
+        }
+        await BoundedTaskLifetime.cancelAndJoin([measurementTask, timeoutTask])
+        return result
+    }
+}
+
+/// A first-result cell whose winner can be claimed synchronously from a task
+/// cancellation handler. Actor hops are deliberately avoided so cancellation
+/// ordering cannot be inverted by executor scheduling.
+private final class SynchronousFirstResult<Value: Sendable>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var result: Value?
+    private var continuations: [CheckedContinuation<Value, Never>] = []
+
+    func finish(_ value: Value) {
+        let waiting = lock.withLock { () -> [CheckedContinuation<Value, Never>] in
+            guard result == nil else { return [] }
+            result = value
+            let waiting = continuations
+            continuations.removeAll()
+            return waiting
+        }
+        waiting.forEach { $0.resume(returning: value) }
+    }
+
+    func value() async -> Value {
+        await withCheckedContinuation { continuation in
+            let completed = lock.withLock { () -> Value? in
+                if let result {
+                    return result
+                }
+                continuations.append(continuation)
+                return nil
+            }
+            if let completed {
+                continuation.resume(returning: completed)
             }
         }
-        measurementTask.cancel()
-        timeoutTask.cancel()
-        return result
+    }
+}
+
+/// Owns a task and provides a cancellation-insensitive join. Awaiting a
+/// `Task<Void, Never>.value` does not use the cancelled owner's state as a
+/// completion signal: the owned operation itself must actually return.
+struct BoundedTaskLifetime: Sendable {
+    let task: Task<Void, Never>
+
+    init(operation: @escaping @Sendable () async -> Void) {
+        task = Task {
+            await operation()
+        }
+    }
+
+    func waitForCompletion() async {
+        await task.value
+    }
+
+    static func cancelAndJoin(_ lifetimes: [BoundedTaskLifetime]) async {
+        lifetimes.forEach { $0.task.cancel() }
+        for lifetime in lifetimes {
+            await lifetime.waitForCompletion()
+        }
     }
 }
 

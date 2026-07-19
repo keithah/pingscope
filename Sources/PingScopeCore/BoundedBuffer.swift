@@ -2,7 +2,7 @@ import Foundation
 
 public struct BoundedBuffer<Element: Codable & Equatable & Sendable>: Codable, Equatable, Sendable {
     public private(set) var capacity: Int
-    private var storage: [Element]
+    private var storage: [Element?]
     private var startIndex: Int
     private var storedCount: Int
     public private(set) var droppedCount: Int
@@ -10,7 +10,7 @@ public struct BoundedBuffer<Element: Codable & Equatable & Sendable>: Codable, E
     public var elements: [Element] {
         guard storedCount > 0 else { return [] }
         return (0..<storedCount).map { offset in
-            storage[(startIndex + offset) % storage.count]
+            storage[(startIndex + offset) % capacity]!
         }
     }
 
@@ -27,7 +27,7 @@ public struct BoundedBuffer<Element: Codable & Equatable & Sendable>: Codable, E
         guard count > 0 else { return [] }
         let firstOffset = storedCount - count
         return (firstOffset..<storedCount).map { offset in
-            storage[(startIndex + offset) % storage.count]
+            storage[(startIndex + offset) % capacity]!
         }
     }
 
@@ -36,7 +36,7 @@ public struct BoundedBuffer<Element: Codable & Equatable & Sendable>: Codable, E
         var matches: [Element] = []
         matches.reserveCapacity(storedCount)
         for offset in 0..<storedCount {
-            let element = storage[(startIndex + offset) % storage.count]
+            let element = storage[(startIndex + offset) % capacity]!
             if isIncluded(element) {
                 matches.append(element)
             }
@@ -48,7 +48,7 @@ public struct BoundedBuffer<Element: Codable & Equatable & Sendable>: Codable, E
         guard storedCount > 0 else { return [] }
         var matches: [Element] = []
         for offset in (0..<storedCount).reversed() {
-            let element = storage[(startIndex + offset) % storage.count]
+            let element = storage[(startIndex + offset) % capacity]!
             guard isIncluded(element) else { break }
             matches.append(element)
         }
@@ -57,7 +57,7 @@ public struct BoundedBuffer<Element: Codable & Equatable & Sendable>: Codable, E
 
     public init(capacity: Int) {
         self.capacity = max(1, capacity)
-        self.storage = []
+        self.storage = Array(repeating: nil, count: self.capacity)
         self.startIndex = 0
         self.storedCount = 0
         self.droppedCount = 0
@@ -65,69 +65,61 @@ public struct BoundedBuffer<Element: Codable & Equatable & Sendable>: Codable, E
 
     public init(elements: [Element], capacity: Int) {
         self.capacity = max(1, capacity)
-        self.storage = Array(elements.suffix(self.capacity))
+        self.storage = Array(repeating: nil, count: self.capacity)
         self.startIndex = 0
-        self.storedCount = storage.count
+        let retainedElements = elements.suffix(self.capacity)
+        self.storedCount = retainedElements.count
         self.droppedCount = 0
+        for (index, element) in retainedElements.enumerated() {
+            self.storage[index] = element
+        }
     }
 
     @discardableResult
     public mutating func append(_ element: Element) -> Int {
-        normalizeCapacityIfNeeded()
-
         if storedCount < capacity {
-            if storage.count == capacity {
-                let insertionIndex = (startIndex + storedCount) % storage.count
-                storage[insertionIndex] = element
-                storedCount += 1
-                return 0
-            }
-
-            storage.append(element)
+            let insertionIndex = (startIndex + storedCount) % capacity
+            storage[insertionIndex] = element
             storedCount += 1
             return 0
         }
 
         storage[startIndex] = element
-        startIndex = (startIndex + 1) % storage.count
+        startIndex = (startIndex + 1) % capacity
         droppedCount += 1
         return 1
     }
 
     public mutating func removeAll() {
-        storage.removeAll()
+        for index in storage.indices {
+            storage[index] = nil
+        }
         startIndex = 0
         storedCount = 0
     }
 
     public mutating func prepend(contentsOf newElements: [Element]) {
         guard !newElements.isEmpty else { return }
-        normalizeCapacityIfNeeded()
 
         if newElements.count >= capacity {
             droppedCount += storedCount + newElements.count - capacity
-            storage = Array(newElements.prefix(capacity))
+            for index in storage.indices {
+                storage[index] = nil
+            }
             startIndex = 0
-            storedCount = storage.count
-            return
-        }
-
-        guard storage.count == capacity else {
-            let combined = newElements + elements
-            let kept = Array(combined.prefix(capacity))
-            droppedCount += max(0, combined.count - kept.count)
-            storage = kept
-            startIndex = 0
-            storedCount = kept.count
+            storedCount = capacity
+            for (index, element) in newElements.prefix(capacity).enumerated() {
+                storage[index] = element
+            }
             return
         }
 
         let overwrittenCount = max(0, newElements.count - (capacity - storedCount))
         droppedCount += overwrittenCount
         storedCount = min(capacity, storedCount + newElements.count)
-        startIndex = (startIndex - newElements.count + storage.count) % storage.count
+        startIndex = (startIndex - newElements.count + capacity) % capacity
         for (offset, element) in newElements.enumerated() {
-            storage[(startIndex + offset) % storage.count] = element
+            storage[(startIndex + offset) % capacity] = element
         }
     }
 
@@ -137,29 +129,32 @@ public struct BoundedBuffer<Element: Codable & Equatable & Sendable>: Codable, E
         var batch: [Element] = []
         batch.reserveCapacity(prefixCount)
         for offset in 0..<prefixCount {
-            batch.append(storage[(startIndex + offset) % storage.count])
+            let index = (startIndex + offset) % capacity
+            batch.append(storage[index]!)
+            storage[index] = nil
         }
 
-        let remainingCount = storedCount - prefixCount
-        if remainingCount == 0 {
-            storage.removeAll(keepingCapacity: true)
+        storedCount -= prefixCount
+        if storedCount == 0 {
             startIndex = 0
-            storedCount = 0
-            return batch
+        } else {
+            startIndex = (startIndex + prefixCount) % capacity
         }
-
-        storage = (prefixCount..<storedCount).map { offset in
-            storage[(startIndex + offset) % storage.count]
-        }
-        storage.reserveCapacity(capacity)
-        startIndex = 0
-        storedCount = remainingCount
         return batch
     }
 
     public mutating func setCapacity(_ newCapacity: Int) {
-        capacity = max(1, newCapacity)
-        normalizeCapacityIfNeeded()
+        let normalizedCapacity = max(1, newCapacity)
+        guard normalizedCapacity != capacity else { return }
+
+        let retainedElements = Array(elements.suffix(normalizedCapacity))
+        capacity = normalizedCapacity
+        storage = Array(repeating: nil, count: capacity)
+        startIndex = 0
+        storedCount = retainedElements.count
+        for (index, element) in retainedElements.enumerated() {
+            storage[index] = element
+        }
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -187,19 +182,4 @@ public struct BoundedBuffer<Element: Codable & Equatable & Sendable>: Codable, E
         lhs.capacity == rhs.capacity && lhs.elements == rhs.elements && lhs.droppedCount == rhs.droppedCount
     }
 
-    private mutating func normalizeCapacityIfNeeded() {
-        let normalizedCapacity = max(1, capacity)
-        // Re-linearize when the buffer is wrapped (startIndex != 0) but no longer
-        // physically full — this only happens after capacity grows, and leaving it
-        // wrapped would make the next storage.append insert out of logical order.
-        let needsRelinearize = startIndex != 0 && storage.count < normalizedCapacity
-        guard normalizedCapacity != capacity || storage.count > normalizedCapacity || needsRelinearize else {
-            return
-        }
-
-        capacity = normalizedCapacity
-        storage = Array(elements.suffix(capacity))
-        startIndex = 0
-        storedCount = storage.count
-    }
 }
