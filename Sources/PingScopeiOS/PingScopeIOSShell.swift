@@ -836,7 +836,7 @@ public struct PingScopeIOSRootView: View {
             }
         case .ring:
             if hostScope == .allHosts {
-                PingScopeIOSAllHostsRingGrid(rows: allHostsMonitorRows, onSelectHost: onSelectHost)
+                PingScopeIOSAllHostsConcentricRingHero(rows: allHostsMonitorRows, onSelectHost: onSelectHost)
             } else {
                 PingScopeIOSRingHero(
                     latencyMilliseconds: scrubbedLatencyMilliseconds.wrappedValue ?? health.latestResult?.latency?.milliseconds,

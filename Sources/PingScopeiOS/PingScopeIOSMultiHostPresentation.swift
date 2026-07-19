@@ -112,13 +112,17 @@ public struct PingScopeIOSAllHostsRingCell: Identifiable, Equatable, Sendable {
     public let latencyText: String
     public let ringProgress: Double
     public let status: HealthStatus
+    public let colorIndex: Int
+    public let ringIndex: Int
 
     public var id: UUID { hostID }
 }
 
 public enum PingScopeIOSAllHostsRingGridPresentation {
+    public static let paletteCount = 6
+
     public static func cells(from rows: [PingScopeIOSHostRowSnapshot]) -> [PingScopeIOSAllHostsRingCell] {
-        rows.map { row in
+        rows.enumerated().map { ringIndex, row in
             let presentation = PingScopeIOSAllHostsMonitorPresentation.rowPresentation(for: row)
             let latency = row.isStale ? nil : row.latestLatencyMilliseconds
             let threshold = max(row.degradedThresholdMilliseconds, 1)
@@ -127,13 +131,41 @@ public enum PingScopeIOSAllHostsRingGridPresentation {
                 displayName: presentation.displayName,
                 latencyText: presentation.latencyText,
                 ringProgress: latency.map { min(max($0 / threshold, 0), 1) } ?? 0,
-                status: presentation.displayStatus
+                status: presentation.displayStatus,
+                colorIndex: PingScopeIOSAllHostsMonitorPresentation.stableColorIndex(
+                    for: row.hostID,
+                    paletteCount: paletteCount
+                ),
+                ringIndex: ringIndex
             )
         }
     }
 
     static func latencyText(for latency: Double?) -> String {
         PingScopeIOSHostRowSnapshot.latencyText(for: latency)
+    }
+}
+
+public struct PingScopeIOSAllHostsConcentricRingPresentation: Equatable, Sendable {
+    public static let maximumRingCount = 4
+    public static let paletteCount = PingScopeIOSAllHostsRingGridPresentation.paletteCount
+
+    public let rings: [PingScopeIOSAllHostsRingCell]
+    public let legendRows: [PingScopeIOSAllHostsRingCell]
+    public let overflowCount: Int
+
+    public var overflowLabel: String {
+        overflowCount > 0 ? "+\(overflowCount) more" : ""
+    }
+
+    public init(rows: [PingScopeIOSHostRowSnapshot]) {
+        let visibleCells = Array(
+            PingScopeIOSAllHostsRingGridPresentation.cells(from: rows)
+                .prefix(Self.maximumRingCount)
+        )
+        rings = visibleCells
+        legendRows = visibleCells
+        overflowCount = max(rows.count - visibleCells.count, 0)
     }
 }
 
@@ -176,6 +208,20 @@ final class PingScopeIOSAllHostsRingGridContentMemo {
     ) -> [PingScopeIOSAllHostsRingCell] {
         cache.resolve(PingScopeIOSAllHostsRingRowsFingerprint(rows)) {
             build(rows)
+        }
+    }
+}
+
+@MainActor
+final class PingScopeIOSAllHostsConcentricRingContentMemo {
+    private var cache = BoundedMemo<
+        PingScopeIOSAllHostsRingRowsFingerprint,
+        PingScopeIOSAllHostsConcentricRingPresentation
+    >(capacity: 1)
+
+    func resolve(_ rows: [PingScopeIOSHostRowSnapshot]) -> PingScopeIOSAllHostsConcentricRingPresentation {
+        cache.resolve(PingScopeIOSAllHostsRingRowsFingerprint(rows)) {
+            PingScopeIOSAllHostsConcentricRingPresentation(rows: rows)
         }
     }
 }
