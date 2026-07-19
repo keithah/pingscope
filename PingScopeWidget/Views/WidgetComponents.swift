@@ -1,5 +1,5 @@
 import SwiftUI
-import PingScopeCore
+import PingScopeExtensionSupport
 #if os(iOS)
 import UIKit
 #endif
@@ -117,7 +117,7 @@ struct WidgetLatencySparkline: View {
                 let y = size.height - (size.height * CGFloat(normalized))
                 return CGPoint(x: x, y: min(max(y, 1), size.height - 1))
             }
-            let path = Path(LatencyCurve.smoothedPath(points: points, closed: false))
+            let path = Path(ExtensionLatencyCurve.smoothedPath(points: points, closed: false))
 
             context.stroke(path, with: .color(color), lineWidth: 1.6)
         }

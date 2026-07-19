@@ -21,9 +21,11 @@ struct PingScopeWidget: Widget {
 struct PingScopeWidgetBundle: WidgetBundle {
     var body: some Widget {
         PingScopeWidget()
+#if os(iOS)
         if #available(iOS 18.0, *) {
             PingScopeMonitoringControl()
             PingScopeStatusControl()
         }
+#endif
     }
 }

@@ -1,5 +1,4 @@
 import Foundation
-import PingScopeCore
 
 #if os(iOS) && canImport(ActivityKit)
 import ActivityKit
@@ -10,8 +9,39 @@ public enum PingScopeLiveActivityMode: String, Codable, Hashable, Sendable {
     case allHosts
 }
 
+public enum PingScopeLiveActivityHealthStatus: String, CaseIterable, Codable, Hashable, Sendable {
+    case noData
+    case healthy
+    case degraded
+    case down
+}
+
+public enum PingScopeLiveActivityMethod: String, CaseIterable, Codable, Hashable, Sendable {
+    case https
+    case tcp
+    case udp
+    case icmp
+    case starlink
+
+    public var displayName: String {
+        switch self {
+        case .https: "HTTPS"
+        case .tcp: "TCP"
+        case .udp: "UDP"
+        case .icmp: "ICMP"
+        case .starlink: "Starlink"
+        }
+    }
+}
+
+public enum PingScopeLiveActivityDuration: String, CaseIterable, Codable, Hashable, Sendable {
+    case continuous
+    case thirtySeconds
+    case oneMinute
+}
+
 public struct PingScopeLiveActivityHostRow: Codable, Hashable, Sendable {
-    public static let sampleLimit = PingScopeIOSLatencySampleReducer.defaultLimit
+    public static let sampleLimit = 12
     // These retain room for three rows, twelve Int samples each, and scalar state.
     public static let displayNameCharacterLimit = 24
     public static let displayNameUTF8ByteLimit = 72
@@ -21,7 +51,7 @@ public struct PingScopeLiveActivityHostRow: Codable, Hashable, Sendable {
     public var hostID: UUID
     public let displayName: String
     public let endpointCaption: String
-    public var status: HealthStatus
+    public var status: PingScopeLiveActivityHealthStatus
     public var latestLatencyMilliseconds: Int?
     public let samples: [Int]
     public var isStale: Bool
@@ -31,7 +61,7 @@ public struct PingScopeLiveActivityHostRow: Codable, Hashable, Sendable {
         hostID: UUID,
         displayName: String,
         endpointCaption: String,
-        status: HealthStatus,
+        status: PingScopeLiveActivityHealthStatus,
         latestLatencyMilliseconds: Int?,
         samples: [Int],
         isStale: Bool,
@@ -55,20 +85,6 @@ public struct PingScopeLiveActivityHostRow: Codable, Hashable, Sendable {
         self.isDefaultGateway = isDefaultGateway
     }
 
-    public init(snapshot: PingScopeIOSHostRowSnapshot) {
-        self.init(
-            hostID: snapshot.hostID,
-            displayName: snapshot.displayName,
-            endpointCaption: snapshot.endpointCaption,
-            status: snapshot.status,
-            latestLatencyMilliseconds: snapshot.latestLatencyMilliseconds.map { Int($0.rounded()) },
-            samples: PingScopeIOSLatencySampleReducer.reduce(snapshot.samples, limit: Self.sampleLimit)
-                .compactMap { $0.latency.map { Int($0.milliseconds.rounded()) } },
-            isStale: snapshot.isStale,
-            isDefaultGateway: snapshot.isDefaultGateway
-        )
-    }
-
     private enum CodingKeys: String, CodingKey {
         case hostID
         case displayName
@@ -86,7 +102,7 @@ public struct PingScopeLiveActivityHostRow: Codable, Hashable, Sendable {
             hostID: try container.decode(UUID.self, forKey: .hostID),
             displayName: try container.decode(String.self, forKey: .displayName),
             endpointCaption: try container.decode(String.self, forKey: .endpointCaption),
-            status: try container.decode(HealthStatus.self, forKey: .status),
+            status: try container.decode(PingScopeLiveActivityHealthStatus.self, forKey: .status),
             latestLatencyMilliseconds: try container.decodeIfPresent(Int.self, forKey: .latestLatencyMilliseconds),
             samples: try container.decode([Int].self, forKey: .samples),
             isStale: try container.decode(Bool.self, forKey: .isStale),
@@ -103,12 +119,12 @@ public struct PingScopeLiveActivityAttributes: Codable, Sendable {
     public static let addressUTF8ByteLimit = 384
 
     public struct ContentState: Codable, Hashable, Sendable {
-        public static let hostRowLimit = PingScopeIOSHostScopePresentation.activityHostLimit
+        public static let hostRowLimit = 3
         public static let failureMessageCharacterLimit = 64
         public static let failureMessageUTF8ByteLimit = 192
 
         public var latencyMilliseconds: Int?
-        public var status: HealthStatus
+        public var status: PingScopeLiveActivityHealthStatus
         public var lastUpdatedAt: Date?
         public var remainingSeconds: Int
         public var isStale: Bool
@@ -118,7 +134,7 @@ public struct PingScopeLiveActivityAttributes: Codable, Sendable {
 
         public init(
             latencyMilliseconds: Int?,
-            status: HealthStatus,
+            status: PingScopeLiveActivityHealthStatus,
             lastUpdatedAt: Date?,
             remainingSeconds: Int,
             isStale: Bool,
@@ -142,18 +158,6 @@ public struct PingScopeLiveActivityAttributes: Codable, Sendable {
             self.hostRows = Array(hostRows.prefix(Self.hostRowLimit))
         }
 
-        public init(session: MonitorSessionState, health: HostHealth?, at date: Date = Date()) {
-            let latestResult = session.latestResult ?? health?.latestResult
-            self.init(
-                latencyMilliseconds: latestResult?.latency.map { Int($0.milliseconds.rounded()) },
-                status: health?.status ?? .noData,
-                lastUpdatedAt: latestResult?.timestamp,
-                remainingSeconds: session.duration == .continuous ? 0 : Int(session.remainingDuration(at: date).seconds.rounded(.down)),
-                isStale: session.phase(at: date) != .live,
-                failureMessage: latestResult?.failureReason?.userMessage
-            )
-        }
-
         private enum CodingKeys: String, CodingKey {
             case latencyMilliseconds
             case status
@@ -169,7 +173,7 @@ public struct PingScopeLiveActivityAttributes: Codable, Sendable {
             let container = try decoder.container(keyedBy: CodingKeys.self)
             self.init(
                 latencyMilliseconds: try container.decodeIfPresent(Int.self, forKey: .latencyMilliseconds),
-                status: try container.decode(HealthStatus.self, forKey: .status),
+                status: try container.decode(PingScopeLiveActivityHealthStatus.self, forKey: .status),
                 lastUpdatedAt: try container.decodeIfPresent(Date.self, forKey: .lastUpdatedAt),
                 remainingSeconds: try container.decode(Int.self, forKey: .remainingSeconds),
                 isStale: try container.decode(Bool.self, forKey: .isStale),
@@ -183,25 +187,15 @@ public struct PingScopeLiveActivityAttributes: Codable, Sendable {
     public let hostID: UUID
     public let hostName: String
     public let address: String
-    public let method: PingMethod
-    public let duration: MonitorSessionDuration
+    public let method: PingScopeLiveActivityMethod
+    public let duration: PingScopeLiveActivityDuration
 
-    public init(host: HostConfig, duration: MonitorSessionDuration) {
-        self.init(
-            hostID: host.id,
-            hostName: host.displayName,
-            address: host.address,
-            method: host.method,
-            duration: duration
-        )
-    }
-
-    private init(
+    public init(
         hostID: UUID,
         hostName: String,
         address: String,
-        method: PingMethod,
-        duration: MonitorSessionDuration
+        method: PingScopeLiveActivityMethod,
+        duration: PingScopeLiveActivityDuration
     ) {
         self.hostID = hostID
         self.hostName = boundedActivityPayloadString(
@@ -232,8 +226,8 @@ public struct PingScopeLiveActivityAttributes: Codable, Sendable {
             hostID: try container.decode(UUID.self, forKey: .hostID),
             hostName: try container.decode(String.self, forKey: .hostName),
             address: try container.decode(String.self, forKey: .address),
-            method: try container.decode(PingMethod.self, forKey: .method),
-            duration: try container.decode(MonitorSessionDuration.self, forKey: .duration)
+            method: try container.decode(PingScopeLiveActivityMethod.self, forKey: .method),
+            duration: try container.decode(PingScopeLiveActivityDuration.self, forKey: .duration)
         )
     }
 }

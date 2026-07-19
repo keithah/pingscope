@@ -24,6 +24,11 @@ let package = Package(
             name: "PingScopeiOS",
             targets: ["PingScopeiOS"]
         ),
+        .library(
+            name: "PingScopeLiveActivitySupport",
+            targets: ["PingScopeLiveActivitySupport"]
+        ),
+        .library(name: "PingScopeExtensionSupport", targets: ["PingScopeExtensionSupport"]),
         .executable(
             name: "PingScopePackage",
             targets: ["PingScope"]
@@ -39,6 +44,10 @@ let package = Package(
     ],
     dependencies: [],
     targets: [
+        .target(
+            name: "PingScopeExtensionSupport",
+            path: "Sources/PingScopeExtensionSupport"
+        ),
         .target(
             name: "PingScopeCore",
             dependencies: [],
@@ -58,8 +67,13 @@ let package = Package(
             path: "Sources/PingScopeHistoryKit"
         ),
         .target(
+            name: "PingScopeLiveActivitySupport",
+            dependencies: ["PingScopeExtensionSupport"],
+            path: "Sources/PingScopeLiveActivitySupport"
+        ),
+        .target(
             name: "PingScopeiOS",
-            dependencies: ["PingScopeCore", "PingScopeHistoryKit"],
+            dependencies: ["PingScopeCore", "PingScopeHistoryKit", "PingScopeLiveActivitySupport"],
             path: "Sources/PingScopeiOS"
         ),
         .executableTarget(
@@ -78,9 +92,39 @@ let package = Package(
             path: "Sources/PingScopeProbeValidate"
         ),
         .testTarget(
-            name: "PingScopeTests",
-            dependencies: ["PingScopeCore", "PingScopeCloudSync", "PingScopeHistoryKit", "PingScopeiOS", "PingScope"],
-            path: "Tests/PingScopeFreshTests"
+            name: "PingScopeCoreTests",
+            dependencies: ["PingScopeCore"],
+            path: "Tests/PingScopeFreshTests/Core"
+        ),
+        .testTarget(
+            name: "PingScopeHistoryKitTests",
+            dependencies: ["PingScopeCore", "PingScopeHistoryKit"],
+            path: "Tests/PingScopeFreshTests/History"
+        ),
+        .testTarget(
+            name: "PingScopeCloudSyncTests",
+            dependencies: ["PingScopeCore", "PingScopeCloudSync"],
+            path: "Tests/PingScopeFreshTests/Cloud"
+        ),
+        .testTarget(
+            name: "PingScopeiOSTests",
+            dependencies: ["PingScopeCore", "PingScopeHistoryKit", "PingScopeiOS"],
+            path: "Tests/PingScopeFreshTests/iOS"
+        ),
+        .testTarget(
+            name: "PingScopeMacAppTests",
+            dependencies: ["PingScopeCore", "PingScopeHistoryKit", "PingScope"],
+            path: "Tests/PingScopeFreshTests/MacApp"
+        ),
+        .testTarget(
+            name: "PingScopeExtensionSupportTests",
+            dependencies: ["PingScopeCore", "PingScopeExtensionSupport"],
+            path: "Tests/PingScopeFreshTests/ExtensionSupport"
+        ),
+        .testTarget(
+            name: "PingScopeBuildGraphTests",
+            dependencies: [],
+            path: "Tests/PingScopeFreshTests/BuildGraph"
         )
     ]
 )

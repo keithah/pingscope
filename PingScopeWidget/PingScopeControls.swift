@@ -1,12 +1,12 @@
 import AppIntents
-import PingScopeCore
-import PingScopeiOS
+import PingScopeExtensionSupport
 import SwiftUI
 import WidgetKit
 
+#if os(iOS)
 @available(iOS 18.0, *)
 struct PingScopeMonitoringControl: ControlWidget {
-    static let kind = PingScopeIOSControlKind.monitoring
+    static let kind = PingScopeExtensionControlKind.monitoring
 
     var body: some ControlWidgetConfiguration {
         StaticControlConfiguration(kind: Self.kind, provider: PingScopeControlValueProvider()) { state in
@@ -28,7 +28,7 @@ struct PingScopeMonitoringControl: ControlWidget {
 
 @available(iOS 18.0, *)
 struct PingScopeStatusControl: ControlWidget {
-    static let kind = PingScopeIOSControlKind.status
+    static let kind = PingScopeExtensionControlKind.status
 
     var body: some ControlWidgetConfiguration {
         StaticControlConfiguration(kind: Self.kind, provider: PingScopeControlValueProvider()) { state in
@@ -43,15 +43,14 @@ struct PingScopeStatusControl: ControlWidget {
 
 @available(iOS 18.0, *)
 private struct PingScopeControlValueProvider: ControlValueProvider {
-    let previewValue = PingScopeIOSControlStateProjection(
+    let previewValue = PingScopeExtensionControlStateProjection(
         isMonitoring: false,
         statusText: "Monitoring Off",
         symbolName: "wave.3.right.circle"
     )
 
-    func currentValue() async throws -> PingScopeIOSControlStateProjection {
-        let snapshot = await WidgetSnapshotStore().load()
-        return PingScopeIOSControlStateProjection(snapshot: snapshot)
+    func currentValue() async throws -> PingScopeExtensionControlStateProjection {
+        PingScopeExtensionControlStateProjection.load()
     }
 }
 
@@ -66,8 +65,8 @@ private struct SetPingScopeMonitoringIntent: SetValueIntent {
     init() {}
 
     func perform() async throws -> some IntentResult {
-        let request: PingScopeIOSIntentRequest = value ? .start(hostID: nil) : .stop
-        guard PingScopeIOSIntentCommandStore().enqueue(request) else {
+        let request: PingScopeExtensionIntentRequest = value ? .start : .stop
+        guard PingScopeExtensionIntentCommandStore().enqueue(request) else {
             throw PingScopeControlError.commandUnavailable
         }
         return .result()
@@ -91,3 +90,4 @@ private enum PingScopeControlError: LocalizedError {
         "PingScope could not save the monitoring request."
     }
 }
+#endif

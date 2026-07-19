@@ -1,6 +1,5 @@
 import CoreGraphics
 import Foundation
-import PingScopeCore
 
 public enum PingScopeLiveActivityLayout {
     public static let lockScreenActivityHeightLimit: CGFloat = 160
@@ -71,7 +70,7 @@ public struct PingScopeLiveActivityRowPresentation: Equatable, Sendable {
     public let hostID: UUID
     public let displayName: String
     public let endpointCaption: String
-    public let status: HealthStatus
+    public let status: PingScopeLiveActivityHealthStatus
     public let statusAccessibilityDescription: String
     public let latencyMilliseconds: Int?
     public let samples: [Int]
@@ -162,7 +161,7 @@ public enum PingScopeLiveActivityPresentation {
     }
 
     public static func sessionText(
-        duration: MonitorSessionDuration,
+        duration: PingScopeLiveActivityDuration,
         remainingSeconds: Int,
         isStale: Bool = false
     ) -> String {
@@ -177,7 +176,7 @@ public enum PingScopeLiveActivityPresentation {
 
     public static func aggregateStatus(
         contentState: PingScopeLiveActivityAttributes.ContentState
-    ) -> HealthStatus {
+    ) -> PingScopeLiveActivityHealthStatus {
         displayStatus(contentState.status, isStale: contentState.isStale)
     }
 
@@ -189,7 +188,7 @@ public enum PingScopeLiveActivityPresentation {
 
     public static func dynamicIslandAggregateStatus(
         contentState: PingScopeLiveActivityAttributes.ContentState
-    ) -> HealthStatus {
+    ) -> PingScopeLiveActivityHealthStatus {
         guard contentState.mode == .allHosts else {
             return aggregateStatus(contentState: contentState)
         }
@@ -213,7 +212,7 @@ public enum PingScopeLiveActivityPresentation {
 
     private static func visibleLatency(
         _ latencyMilliseconds: Int?,
-        status: HealthStatus,
+        status: PingScopeLiveActivityHealthStatus,
         isStale: Bool
     ) -> Int? {
         guard !isStale, status != .noData, status != .down else {
@@ -222,12 +221,15 @@ public enum PingScopeLiveActivityPresentation {
         return latencyMilliseconds
     }
 
-    private static func displayStatus(_ status: HealthStatus, isStale: Bool) -> HealthStatus {
+    private static func displayStatus(
+        _ status: PingScopeLiveActivityHealthStatus,
+        isStale: Bool
+    ) -> PingScopeLiveActivityHealthStatus {
         isStale ? .noData : status
     }
 
     private static func accessibilityStatusDescription(
-        _ status: HealthStatus,
+        _ status: PingScopeLiveActivityHealthStatus,
         isStale: Bool
     ) -> String {
         isStale ? "Stale" : status.accessibilityDescription
@@ -257,7 +259,7 @@ public enum PingScopeLiveActivitySparklinePresentation {
     }
 }
 
-private extension HealthStatus {
+private extension PingScopeLiveActivityHealthStatus {
     var accessibilityDescription: String {
         switch self {
         case .noData: "No data"

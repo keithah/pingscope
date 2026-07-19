@@ -1,7 +1,6 @@
 import ActivityKit
 import CoreGraphics
-import PingScopeCore
-import PingScopeiOS
+import PingScopeLiveActivitySupport
 import SwiftUI
 import WidgetKit
 
@@ -83,7 +82,7 @@ struct PingScopeLiveActivityWidget: Widget {
 
     private func aggregateStatus(
         for context: ActivityViewContext<PingScopeLiveActivityAttributes>
-    ) -> HealthStatus {
+    ) -> PingScopeLiveActivityHealthStatus {
         PingScopeLiveActivityPresentation.dynamicIslandAggregateStatus(contentState: context.state)
     }
 
@@ -121,7 +120,7 @@ private struct PingScopeLiveActivityView: View {
 private struct PingScopeLiveActivityRowsView: View {
     let rows: [PingScopeLiveActivityRowPresentation]
     let sessionText: String
-    let aggregateStatus: HealthStatus
+    let aggregateStatus: PingScopeLiveActivityHealthStatus
     let density: PingScopeLiveActivityRowDensity
 
     var body: some View {
@@ -198,7 +197,7 @@ private struct PingScopeLiveActivitySparkline: View {
                 in: proxy.size
             )
             if points.count > 1 {
-                Path(LatencyCurve.smoothedPath(points: points, closed: false))
+                Path(ExtensionLatencyCurve.smoothedPath(points: points, closed: false))
                     .stroke(
                         color,
                         style: StrokeStyle(lineWidth: 1.5, lineCap: .round, lineJoin: .round)
@@ -305,13 +304,13 @@ private enum PingScopeLiveActivityRowDensity {
     }
 }
 
-private func statusDot(_ status: HealthStatus, diameter: CGFloat = 10) -> some View {
+private func statusDot(_ status: PingScopeLiveActivityHealthStatus, diameter: CGFloat = 10) -> some View {
     Circle()
         .fill(color(for: status))
         .frame(width: diameter, height: diameter)
 }
 
-private func color(for status: HealthStatus) -> Color {
+private func color(for status: PingScopeLiveActivityHealthStatus) -> Color {
     switch status {
     case .noData: .gray
     case .healthy: .green
