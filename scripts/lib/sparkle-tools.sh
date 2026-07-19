@@ -19,10 +19,8 @@ find_sparkle_tool() {
     [[ -x "${tool}" ]] && { printf '%s' "${tool}"; return 0; }
   done
 
-  if [[ "${SPARKLE_SEARCH_BUILD_ARTIFACTS:-0}" == "1" ]]; then
-    tool=$(find .build -path "*/SourcePackages/artifacts/sparkle/Sparkle/bin/${tool_name}" -type f -perm -111 -print -quit 2>/dev/null || true)
-    [[ -n "${tool}" && -x "${tool}" ]] && { printf '%s' "${tool}"; return 0; }
-  fi
+  tool=$(find .build -path "*/SourcePackages/artifacts/sparkle/Sparkle/bin/${tool_name}" -type f -perm -111 -print -quit 2>/dev/null || true)
+  [[ -n "${tool}" && -x "${tool}" ]] && { printf '%s' "${tool}"; return 0; }
 
   return 1
 }

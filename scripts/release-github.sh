@@ -13,6 +13,7 @@ NOTARY_KEY="${NOTARY_KEY:-}"
 NOTARY_KEY_ID="${NOTARY_KEY_ID:-}"
 NOTARY_ISSUER="${NOTARY_ISSUER:-}"
 SIGN_APP_IDENTITY="${CODESIGN_IDENTITY:-Developer ID Application: Keith Herrington (6R7S5GA944)}"
+PROVISIONING_PROFILE="${PING_SCOPE_DEVELOPER_ID_PROFILE:-}"
 SPARKLE_KEY_ACCOUNT="${SPARKLE_KEY_ACCOUNT:-pingscope-ed25519}"
 RELEASE_NOTES=""
 DRY_RUN=0
@@ -59,12 +60,14 @@ Usage:
   scripts/release-github.sh --version <x.y.z> [--release-notes <file>] [--dry-run]
                             [--notary-profile <profile>]
                             [--notary-key <AuthKey.p8> --notary-key-id <key-id> --notary-issuer <issuer-id>]
+                            --provisioning-profile <DeveloperID.provisionprofile>
 
 Builds the Developer ID app, signs and notarizes a DMG, generates Sparkle
 appcast.xml, and publishes a GitHub release with gh.
 
 Required local credentials:
   - Developer ID Application certificate in login keychain.
+  - Developer ID provisioning profile authorizing PingScope CloudKit, passed with --provisioning-profile.
   - notarytool keychain profile, default: NotarytoolProfile, or App Store Connect API key auth.
   - Sparkle EdDSA private key in Keychain, default account: pingscope-ed25519.
 
@@ -137,6 +140,8 @@ while [[ $# -gt 0 ]]; do
       NOTARY_ISSUER="${2-}"; shift 2 ;;
     --sign-app)
       SIGN_APP_IDENTITY="${2-}"; shift 2 ;;
+    --provisioning-profile)
+      PROVISIONING_PROFILE="${2-}"; shift 2 ;;
     --release-notes)
       RELEASE_NOTES="${2-}"; shift 2 ;;
     --dry-run)
@@ -158,6 +163,10 @@ fi
 if ! validate_version "${VERSION}"; then
   echo "Invalid release version: ${VERSION}" >&2
   exit 64
+fi
+if [[ -z "${PROVISIONING_PROFILE}" || ! -f "${PROVISIONING_PROFILE}" ]]; then
+  echo "A Developer ID provisioning profile is required; pass --provisioning-profile or set PING_SCOPE_DEVELOPER_ID_PROFILE." >&2
+  exit 66
 fi
 
 if [[ "${DRY_RUN}" -eq 0 ]]; then
@@ -210,6 +219,7 @@ deploy/sign-notarize.sh \
   --version "${VERSION}" \
   --app "${BUILD_DIR}/PingScope.app" \
   --sign-app "${SIGN_APP_IDENTITY}" \
+  --provisioning-profile "${PROVISIONING_PROFILE}" \
   "${NOTARY_ARGS[@]}"
 
 ARTIFACT_DIR="/private/tmp/artifacts/PingScope-v${VERSION}"

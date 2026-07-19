@@ -8,6 +8,7 @@ Usage:
     --version <x.y.z> \
     --app <path/to/PingScope.app> \
     --sign-app "Developer ID Application: ..." \
+    --provisioning-profile <DeveloperID.provisionprofile> \
     [--sign-installer "Developer ID Installer: ..."] \
     [--notary-profile "NotarytoolProfile"] \
     [--notary-key <AuthKey.p8> --notary-key-id <key-id> --notary-issuer <issuer-id>]
@@ -26,6 +27,7 @@ NOTARY_PROFILE="NotarytoolProfile"
 NOTARY_KEY=""
 NOTARY_KEY_ID=""
 NOTARY_ISSUER=""
+PROVISIONING_PROFILE="${PING_SCOPE_DEVELOPER_ID_PROFILE:-}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -35,6 +37,8 @@ while [[ $# -gt 0 ]]; do
       APP_PATH="$2"; shift 2 ;;
     --sign-app)
       SIGN_APP_IDENTITY="$2"; shift 2 ;;
+    --provisioning-profile)
+      PROVISIONING_PROFILE="$2"; shift 2 ;;
     --sign-installer)
       SIGN_INSTALLER_IDENTITY="$2"; shift 2 ;;
     --notary-profile)
@@ -55,7 +59,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if [[ -z "${VERSION}" || -z "${APP_PATH}" || -z "${SIGN_APP_IDENTITY}" ]]; then
+if [[ -z "${VERSION}" || -z "${APP_PATH}" || -z "${SIGN_APP_IDENTITY}" || -z "${PROVISIONING_PROFILE}" ]]; then
   usage
   exit 2
 fi
@@ -114,6 +118,9 @@ fi
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 source "${PROJECT_ROOT}/scripts/lib/codesign-macos.sh"
+# shellcheck source=../scripts/lib/developer-id-profile.sh
+source "${PROJECT_ROOT}/scripts/lib/developer-id-profile.sh"
+validate_developer_id_profile "${PROVISIONING_PROFILE}" "com.hadm.PingScope"
 ARTIFACT_DIR="/private/tmp/artifacts/PingScope-v${VERSION}"
 case "${ARTIFACT_DIR}" in
   /private/tmp/artifacts/PingScope-v*) ;;
@@ -137,6 +144,7 @@ cd "${ARTIFACT_DIR}"
 echo "Signing app: ${SIGN_APP_IDENTITY}"
 SIGN_COMMON=("--force" "--options" "runtime" "--timestamp" "--sign" "${SIGN_APP_IDENTITY}")
 
+embed_developer_id_profile "${PROVISIONING_PROFILE}" "PingScope.app"
 codesign_sign_macos_bundle_contents "PingScope.app" "${PROJECT_ROOT}"
 
 codesign_run --identifier "com.hadm.PingScope" --entitlements "${PROJECT_ROOT}/Configuration/PingScope-DeveloperID.entitlements" "PingScope.app"
