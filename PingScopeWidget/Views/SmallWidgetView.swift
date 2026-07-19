@@ -1,5 +1,6 @@
 import SwiftUI
 import WidgetKit
+import PingScopeExtensionSupport
 
 struct SmallWidgetView: View {
     let entry: WidgetEntry
@@ -39,6 +40,11 @@ struct SmallWidgetView: View {
         }
         .aspectRatio(1, contentMode: .fit)
         .padding(8)
+        .overlay(alignment: .topTrailing) {
+            if WidgetFamilyRenderPolicy.forFamily(.small).showsStalenessMarker, entry.isStale {
+                WidgetStaleBadge(isStale: entry.isStale, label: entry.statusLabel)
+            }
+        }
         .opacity(entry.isStale ? 0.6 : 1.0)
         .containerBackground(for: .widget) {
             WidgetStatusStyle.backgroundColor

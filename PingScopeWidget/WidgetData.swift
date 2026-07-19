@@ -42,7 +42,11 @@ struct WidgetData: Codable, Equatable, Sendable {
     )
 
     var isStale: Bool {
-        Date().timeIntervalSince(lastUpdate) > WidgetFreshness.staleInterval
+        isStale(at: Date())
+    }
+
+    func isStale(at date: Date) -> Bool {
+        date.timeIntervalSince(lastUpdate) >= WidgetFreshness.staleInterval
     }
 }
 
@@ -129,11 +133,19 @@ struct WidgetSnapshotData: Codable, Equatable, Sendable {
     }
 
     var isStale: Bool {
-        Date().timeIntervalSince(generatedAt) > WidgetFreshness.staleInterval
+        isStale(at: Date())
     }
 
     var statusLabel: String {
-        if isStale { return "Stale" }
+        statusLabel(at: Date())
+    }
+
+    func isStale(at date: Date) -> Bool {
+        date.timeIntervalSince(generatedAt) >= WidgetFreshness.staleInterval
+    }
+
+    func statusLabel(at date: Date) -> String {
+        if isStale(at: date) { return "Stale" }
         switch networkStatus {
         case "connected": return "Live"
         case "noInternet": return "No Internet"

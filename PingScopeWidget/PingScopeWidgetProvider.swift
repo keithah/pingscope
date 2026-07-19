@@ -1,5 +1,6 @@
 import WidgetKit
 import SwiftUI
+import PingScopeExtensionSupport
 
 struct Provider: TimelineProvider {
     // Must match WidgetSnapshotStore.defaultSuiteName in PingScopeCore (the
@@ -20,11 +21,20 @@ struct Provider: TimelineProvider {
     }
 
     func getTimeline(in context: Context, completion: @escaping (Timeline<WidgetEntry>) -> Void) {
-        let entry = makeEntry()
-
-        // Next update in 10 minutes (respects 40-70/day budget)
-        let nextUpdate = Calendar.current.date(byAdding: .minute, value: 10, to: Date())!
-        let timeline = Timeline(entries: [entry], policy: .after(nextUpdate))
+        let now = Date()
+        let snapshot = loadSnapshotData()
+        let legacyData = snapshot == nil ? loadLegacyData() : nil
+        let entryDates = WidgetTimelineSchedule.entryDates(
+            now: now,
+            contentGeneratedAt: snapshot?.generatedAt ?? legacyData?.lastUpdate
+        )
+        let entries = entryDates.map {
+            WidgetEntry(date: $0, data: legacyData, snapshot: snapshot)
+        }
+        let timeline = Timeline(
+            entries: entries,
+            policy: .after(WidgetTimelineSchedule.reloadDate(after: entryDates))
+        )
 
         completion(timeline)
     }

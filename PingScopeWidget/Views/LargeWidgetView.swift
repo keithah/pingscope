@@ -1,5 +1,6 @@
 import SwiftUI
 import WidgetKit
+import PingScopeExtensionSupport
 
 struct LargeWidgetView: View {
     let entry: WidgetEntry
@@ -13,17 +14,19 @@ struct LargeWidgetView: View {
                 Spacer()
 
                 if let snapshot = entry.snapshot {
-                    WidgetStaleBadge(isStale: snapshot.isStale, label: snapshot.statusLabel)
-                } else if let data = entry.data {
-                    WidgetStaleBadge(isStale: data.isStale, label: data.isStale ? "Stale" : "Live")
+                    WidgetStaleBadge(isStale: entry.isStale, label: entry.statusLabel)
+                } else if entry.data != nil {
+                    WidgetStaleBadge(isStale: entry.isStale, label: entry.statusLabel)
                 }
             }
 
             if let snapshot = entry.snapshot {
                 let healthByHostID = snapshot.healthByHostID
-                WidgetLatencySparkline(samples: snapshot.recentSamples, color: .blue)
-                    .frame(height: 42)
-                    .padding(.vertical, 2)
+                if WidgetFamilyRenderPolicy.forFamily(.large).showsSparkline {
+                    WidgetLatencySparkline(samples: snapshot.recentSamples, color: .blue)
+                        .frame(height: 42)
+                        .padding(.vertical, 2)
+                }
 
                 ForEach(snapshot.hosts, id: \.id) { host in
                     let health = healthByHostID[host.id]

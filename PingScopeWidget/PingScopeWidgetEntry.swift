@@ -25,6 +25,10 @@ struct WidgetEntry: TimelineEntry {
     }
 
     var isStale: Bool {
-        snapshot?.isStale ?? data?.isStale ?? false
+        snapshot?.isStale(at: date) ?? data?.isStale(at: date) ?? false
+    }
+
+    var statusLabel: String {
+        snapshot?.statusLabel(at: date) ?? (isStale ? "Stale" : "Live")
     }
 }

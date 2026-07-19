@@ -1,5 +1,6 @@
 import SwiftUI
 import WidgetKit
+import PingScopeExtensionSupport
 
 struct MediumWidgetView: View {
     let entry: WidgetEntry
@@ -31,9 +32,11 @@ struct MediumWidgetView: View {
                 }
 
                 HStack(spacing: 8) {
-                    WidgetLatencySparkline(samples: snapshot.recentSamples, color: .blue)
-                        .frame(height: 28)
-                    WidgetStaleBadge(isStale: snapshot.isStale, label: snapshot.statusLabel)
+                    if WidgetFamilyRenderPolicy.forFamily(.medium).showsSparkline {
+                        WidgetLatencySparkline(samples: snapshot.recentSamples, color: .blue)
+                            .frame(height: 28)
+                    }
+                    WidgetStaleBadge(isStale: entry.isStale, label: entry.statusLabel)
                 }
             } else if let data = entry.data {
                 HStack(alignment: .top, spacing: 10) {
@@ -64,7 +67,7 @@ struct MediumWidgetView: View {
                 }
 
                 Spacer(minLength: 0)
-                WidgetStaleBadge(isStale: data.isStale, label: data.isStale ? "Stale" : "Live")
+                WidgetStaleBadge(isStale: entry.isStale, label: entry.statusLabel)
             }
         }
         .opacity(entry.isStale ? 0.6 : 1.0)
