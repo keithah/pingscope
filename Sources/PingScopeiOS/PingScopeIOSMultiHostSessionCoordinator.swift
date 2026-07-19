@@ -219,6 +219,8 @@ public actor PingScopeIOSMultiHostSessionCoordinator {
     private var controllers: [UUID: ControllerEntry] = [:]
     private var orderedHostIDs: [UUID] = []
     private var aggregateSession: PingScopeIOSMultiHostSessionState?
+    private var seriesPreservedForScopeRoundTrip: [UUID: SampleSeries] = [:]
+    private var isSuspendedForScopeChange = false
 
     public init(
         historyStore: (any PingHistoryStore)? = nil,
@@ -246,6 +248,12 @@ public actor PingScopeIOSMultiHostSessionCoordinator {
         }
     }
 
+    public func suspendForScopeChange() async {
+        await lifecycleTransactions.perform { [weak self] in
+            await self?.suspendForScopeChangeTransaction()
+        }
+    }
+
     public func reconcile(hosts: [HostConfig]) async {
         await lifecycleTransactions.perform { [weak self] in
             await self?.reconcileTransaction(hosts: hosts)
@@ -253,6 +261,10 @@ public actor PingScopeIOSMultiHostSessionCoordinator {
     }
 
     private func startTransaction(duration: MonitorSessionDuration) async {
+        if !isSuspendedForScopeChange {
+            seriesPreservedForScopeRoundTrip.removeAll(keepingCapacity: true)
+        }
+        isSuspendedForScopeChange = false
         let startedAt = now()
         aggregateSession = PingScopeIOSMultiHostSessionState(duration: duration, startedAt: startedAt)
         let orderedEntries = orderedHostIDs.compactMap { controllers[$0] }
@@ -266,6 +278,22 @@ public actor PingScopeIOSMultiHostSessionCoordinator {
     }
 
     private func stopTransaction(reason: MonitorSessionEndReason) async {
+        isSuspendedForScopeChange = false
+        seriesPreservedForScopeRoundTrip.removeAll(keepingCapacity: true)
+        await stopControllers(reason: reason)
+    }
+
+    private func suspendForScopeChangeTransaction() async {
+        let snapshots = await orderedSnapshots()
+        seriesPreservedForScopeRoundTrip = Dictionary(
+            snapshots.map { ($0.host.id, $0.series) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        isSuspendedForScopeChange = true
+        await stopControllers(reason: .userStopped)
+    }
+
+    private func stopControllers(reason: MonitorSessionEndReason) async {
         let stoppedAt = now()
         let orderedEntries = orderedHostIDs.compactMap { controllers[$0] }
         await withTaskGroup(of: Void.self) { group in
@@ -297,7 +325,15 @@ public actor PingScopeIOSMultiHostSessionCoordinator {
             for await (index, snapshot) in group {
                 snapshots[index] = snapshot
             }
-            return snapshots.compactMap { $0 }
+            var resolved = snapshots.compactMap { $0 }
+            for index in resolved.indices {
+                let hostID = resolved[index].host.id
+                guard let preserved = seriesPreservedForScopeRoundTrip[hostID] else { continue }
+                let merged = mergePreservedSeries(preserved, with: resolved[index].series)
+                resolved[index].series = merged
+                seriesPreservedForScopeRoundTrip[hostID] = merged
+            }
+            return resolved
         }
     }
 
@@ -388,6 +424,19 @@ public actor PingScopeIOSMultiHostSessionCoordinator {
         guard let entry = controllers[hostID] else { return }
         await entry.controller.stop(reason: .userStopped, at: date)
         controllers.removeValue(forKey: hostID)
+        seriesPreservedForScopeRoundTrip.removeValue(forKey: hostID)
+    }
+
+    private func mergePreservedSeries(_ preserved: SampleSeries, with current: SampleSeries) -> SampleSeries {
+        var seenIDs = Set<UUID>()
+        let samples = (preserved.samples + current.samples)
+            .sorted { $0.timestamp < $1.timestamp }
+            .filter { seenIDs.insert($0.id).inserted }
+        var merged = SampleSeries(hostID: current.hostID, capacity: current.capacity)
+        for sample in samples {
+            merged.append(sample)
+        }
+        return merged
     }
 }
 

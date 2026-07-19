@@ -1867,6 +1867,41 @@ final class LiveMonitorSessionControllerTests: XCTestCase {
         XCTAssertEqual(session?.remainingDuration(at: startedAt), .seconds(60))
     }
 
+    func testIOSAllHostsScopeRoundTripPreservesEveryHostsGraphSeries() async {
+        let hosts = [
+            HostConfig(id: UUID(), displayName: "Cloudflare", address: "1.1.1.1"),
+            HostConfig(id: UUID(), displayName: "Google", address: "8.8.8.8"),
+            HostConfig(id: UUID(), displayName: "Gateway", address: "192.168.1.1")
+        ]
+        let factory = RecordingIOSAllHostsControllerFactory()
+        let coordinator = PingScopeIOSMultiHostSessionCoordinator(controllerFactory: factory)
+        let baseDate = Date(timeIntervalSince1970: 30_000)
+
+        await coordinator.reconcile(hosts: hosts)
+        await coordinator.start(duration: .continuous)
+        for (index, host) in hosts.enumerated() {
+            await factory.setSnapshotSamples([
+                .success(
+                    hostID: host.id,
+                    latency: .milliseconds(Double(10 + index)),
+                    timestamp: baseDate.addingTimeInterval(Double(index))
+                )
+            ], for: host.id)
+        }
+
+        await coordinator.suspendForScopeChange()
+        await coordinator.reconcile(hosts: hosts)
+        await coordinator.start(duration: .continuous)
+
+        let restored = await coordinator.orderedSnapshots()
+        XCTAssertEqual(restored.map(\.host.id), hosts.map(\.id))
+        XCTAssertEqual(restored.map { $0.series.samples.count }, [1, 1, 1])
+        XCTAssertEqual(
+            restored.compactMap { $0.series.samples.first?.latency?.milliseconds },
+            [10, 11, 12]
+        )
+    }
+
     func testIOSAllHostsCoordinatorStartsIndependentControllersConcurrentlyAndKeepsSnapshotOrder() async throws {
         let hostA = HostConfig(id: UUID(), displayName: "Cloudflare", address: "1.1.1.1")
         let hostB = HostConfig(id: UUID(), displayName: "Google", address: "8.8.8.8")
@@ -2553,6 +2588,7 @@ private actor RecordingIOSAllHostsControllerFactory: PingScopeIOSMultiHostSessio
     private(set) var stopRecords: [IOSAllHostsStopRecord] = []
     private(set) var events: [IOSAllHostsControllerEvent] = []
     private(set) var receivedEnrichedLocations: [SampleLocation?] = []
+    private var snapshotSamples: [UUID: [PingResult]] = [:]
 
     init(
         statuses: [UUID: HealthStatus] = [:],
@@ -2595,6 +2631,7 @@ private actor RecordingIOSAllHostsControllerFactory: PingScopeIOSMultiHostSessio
     }
 
     func recordStart(hostID: UUID, controllerToken: Int, duration: MonitorSessionDuration, at date: Date) async {
+        snapshotSamples[hostID] = []
         startedHostIDs.append(hostID)
         startedDurations.append(duration)
         startRecords.append(IOSAllHostsStartRecord(hostID: hostID, duration: duration, date: date))
@@ -2624,6 +2661,10 @@ private actor RecordingIOSAllHostsControllerFactory: PingScopeIOSMultiHostSessio
         runningByControllerToken[controllerToken] ?? false
     }
 
+    func setSnapshotSamples(_ samples: [PingResult], for hostID: UUID) {
+        snapshotSamples[hostID] = samples
+    }
+
     func snapshot(for host: HostConfig) async -> LiveMonitorSessionSnapshot {
         if await snapshotGate?.recordSnapshot() == true {
             await snapshotGate?.waitForRelease()
@@ -2634,7 +2675,11 @@ private actor RecordingIOSAllHostsControllerFactory: PingScopeIOSMultiHostSessio
         var health = HostHealth(hostID: snapshotHost.id, thresholds: snapshotHost.thresholds)
         health.status = statuses[host.id] ?? .noData
         await snapshotOrderGate?.recordCompletion(hostID: host.id)
-        return LiveMonitorSessionSnapshot(host: snapshotHost, session: nil, health: health)
+        var series = SampleSeries(hostID: snapshotHost.id)
+        for sample in snapshotSamples[host.id, default: []] {
+            series.append(sample)
+        }
+        return LiveMonitorSessionSnapshot(host: snapshotHost, session: nil, health: health, series: series)
     }
 }
 

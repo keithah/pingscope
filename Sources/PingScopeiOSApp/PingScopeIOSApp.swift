@@ -1291,7 +1291,7 @@ private final class PingScopeIOSAppModel: ObservableObject {
         await backgroundRuntime.end()
         guard isCurrentLifecycle(context) else { return }
         if previousScope == .allHosts {
-            await multiHostCoordinator.stop(reason: .userStopped)
+            await multiHostCoordinator.suspendForScopeChange()
         } else {
             await controller.stop(reason: .userStopped)
         }
