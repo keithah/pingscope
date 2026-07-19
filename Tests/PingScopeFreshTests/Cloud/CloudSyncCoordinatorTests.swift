@@ -8,6 +8,109 @@ import PingScopeCore
 // live send/fetch, and subscription deletion require an on-device/Xcode smoke.
 
 final class CloudSyncCoordinatorTests: XCTestCase {
+    func testAccountAvailabilityFailureBecomesFailedStatusWithoutStartingEngine() async {
+        let boundary = ThrowingAvailabilityCloudSyncBoundary()
+        let coordinator = PingScopeCloudSyncCoordinator(boundary: boundary)
+
+        await coordinator.setEnabled(true)
+
+        let status = await coordinator.status
+        let startCallCount = await boundary.startCallCount()
+        XCTAssertEqual(status, .failed("missingContainerEntitlement"))
+        XCTAssertEqual(startCallCount, 0)
+    }
+
+    func testLiveCloudKitHostPropagatesDefaultContainerProviderFailure() {
+        let host = LiveCloudKitEngineHost(
+            containerIdentifier: "iCloud.com.example.Missing",
+            containerProvider: ThrowingCloudKitContainerProvider()
+        )
+
+        XCTAssertThrowsError(try host.prepareResources()) { error in
+            XCTAssertEqual(
+                error as? CloudSyncBoundaryError,
+                .missingContainerEntitlement("iCloud.com.example.Missing")
+            )
+        }
+    }
+
+    func testDefaultContainerProviderRejectsUnavailableICloudBeforeCreatingContainer() {
+        var didCreateContainer = false
+        let provider = DefaultCloudKitContainerProvider(
+            isICloudAvailable: { false },
+            makeDefaultContainer: {
+                didCreateContainer = true
+                return CKContainer.default()
+            }
+        )
+
+        XCTAssertThrowsError(try provider.defaultContainer()) { error in
+            XCTAssertEqual(
+                error as? CloudSyncBoundaryError,
+                .missingContainerEntitlement("iCloud account or container entitlement unavailable")
+            )
+        }
+        XCTAssertFalse(didCreateContainer)
+    }
+
+    func testPersistedEnabledLaunchFailureParksSyncDisabledWithVisibleError() async {
+        let suiteName = "CloudSyncLaunchFailureTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defaults.set(true, forKey: PingScopeCloudSyncPreference.enabledKey)
+        let boundary = ThrowingAvailabilityCloudSyncBoundary()
+        let service = PingScopeCloudSyncService(
+            historyStore: InMemoryHistoryStore(),
+            hostStore: LockedSharedHostStore(state: SharedHostStoreState(hosts: [])),
+            boundary: boundary,
+            recordBuilder: DefaultCloudSyncRecordBuilder(),
+            registrySuiteName: suiteName
+        )
+        let activation = PingScopeCloudSyncActivationController(
+            service: service,
+            defaultsSuiteName: suiteName
+        )
+
+        let state = await activation.activatePersisted(hosts: [])
+
+        XCTAssertFalse(state.isEnabled)
+        XCTAssertFalse(defaults.bool(forKey: PingScopeCloudSyncPreference.enabledKey))
+        XCTAssertEqual(defaults.integer(forKey: PingScopeCloudSyncPreference.automaticStartFailureCountKey), 1)
+        XCTAssertTrue(state.statusText.contains("turned off"))
+        XCTAssertTrue(state.statusText.contains("missingContainerEntitlement"))
+    }
+
+    func testRepeatedAutomaticStartFailuresStopFuturePersistedAutoEnable() async {
+        let suiteName = "CloudSyncLaunchGuardTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defaults.set(true, forKey: PingScopeCloudSyncPreference.enabledKey)
+        defaults.set(
+            PingScopeCloudSyncActivationController.defaultMaximumAutomaticStartFailures,
+            forKey: PingScopeCloudSyncPreference.automaticStartFailureCountKey
+        )
+        let boundary = ThrowingAvailabilityCloudSyncBoundary()
+        let service = PingScopeCloudSyncService(
+            historyStore: InMemoryHistoryStore(),
+            hostStore: LockedSharedHostStore(state: SharedHostStoreState(hosts: [])),
+            boundary: boundary,
+            recordBuilder: DefaultCloudSyncRecordBuilder(),
+            registrySuiteName: suiteName
+        )
+        let activation = PingScopeCloudSyncActivationController(
+            service: service,
+            defaultsSuiteName: suiteName
+        )
+
+        let state = await activation.activatePersisted(hosts: [])
+        let availabilityCallCount = await boundary.accountAvailabilityCallCount()
+
+        XCTAssertFalse(state.isEnabled)
+        XCTAssertFalse(defaults.bool(forKey: PingScopeCloudSyncPreference.enabledKey))
+        XCTAssertEqual(availabilityCallCount, 0)
+        XCTAssertTrue(state.statusText.contains("repeated startup failures"))
+    }
+
     func testSignInAccountChangeRestartsAfterStopAndResumesUpload() async throws {
         let boundary = AccountChangingCloudSyncBoundary(availability: .privateAccount)
         let coordinator = PingScopeCloudSyncCoordinator(boundary: boundary)
@@ -1609,6 +1712,42 @@ final class CloudSyncCoordinatorTests: XCTestCase {
         let repeatedDeletionIDs = await fixture.boundary.attemptedDeletionIDs()
         XCTAssertEqual(repeatedDeletionIDs, [])
     }
+}
+
+private struct ThrowingCloudKitContainerProvider: CloudKitContainerProviding {
+    func defaultContainer() throws -> CKContainer {
+        throw CloudSyncBoundaryError.missingContainerEntitlement("iCloud.com.example.Missing")
+    }
+}
+
+private enum ThrowingAvailabilityCloudSyncBoundaryError: Error {
+    case missingContainerEntitlement
+}
+
+private actor ThrowingAvailabilityCloudSyncBoundary: CloudSyncEngineBoundary {
+    private var starts = 0
+    private var availabilityCalls = 0
+
+    func accountAvailability() async throws -> CloudSyncAccountAvailability {
+        availabilityCalls += 1
+        throw ThrowingAvailabilityCloudSyncBoundaryError.missingContainerEntitlement
+    }
+
+    func start() async throws {
+        starts += 1
+    }
+
+    func stop() async {}
+
+    func upload(
+        records: [CKRecord],
+        deletions: [CKRecord.ID]
+    ) async throws -> CloudSyncUploadConfirmation {
+        CloudSyncUploadConfirmation(confirming: records)
+    }
+
+    func startCallCount() -> Int { starts }
+    func accountAvailabilityCallCount() -> Int { availabilityCalls }
 }
 
 private struct CloudSyncServiceFixture {

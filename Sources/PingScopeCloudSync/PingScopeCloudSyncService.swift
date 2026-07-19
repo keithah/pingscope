@@ -4,6 +4,7 @@ import PingScopeCore
 
 public enum PingScopeCloudSyncPreference {
     public static let enabledKey = "PingScope.CloudSync.Enabled"
+    public static let automaticStartFailureCountKey = "PingScope.CloudSync.AutomaticStartFailureCount"
 
     public static func isEnabled(in defaults: UserDefaults = .standard) -> Bool {
         defaults.bool(forKey: enabledKey)

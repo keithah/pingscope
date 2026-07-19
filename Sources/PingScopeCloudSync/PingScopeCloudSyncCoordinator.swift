@@ -53,7 +53,7 @@ public struct CloudSyncUploadConfirmation: @unchecked Sendable {
 }
 
 public protocol CloudSyncEngineBoundary: Sendable {
-    func accountAvailability() async -> CloudSyncAccountAvailability
+    func accountAvailability() async throws -> CloudSyncAccountAvailability
     func setAccountChangeHandler(_ handler: (@Sendable () async -> Void)?) async
     func start() async throws
     func stop() async
@@ -239,7 +239,16 @@ public actor PingScopeCloudSyncCoordinator {
     @discardableResult
     private func startAfterAccountRevalidation(transition: UInt) async -> Bool {
         status = .checkingAccount
-        guard await boundary.accountAvailability() == .privateAccount else {
+        let availability: CloudSyncAccountAvailability
+        do {
+            availability = try await boundary.accountAvailability()
+        } catch {
+            guard transition == lifecycleGeneration else { return false }
+            hasStarted = false
+            status = .failed(String(describing: error))
+            return false
+        }
+        guard availability == .privateAccount else {
             guard transition == lifecycleGeneration else { return false }
             hasStarted = false
             status = .accountUnavailable

@@ -2,6 +2,11 @@
 import Foundation
 import PingScopeCore
 
+enum CloudSyncBoundaryError: Error, Equatable {
+    case inactive
+    case missingContainerEntitlement(String)
+}
+
 struct CloudKitEngineHandle: Hashable, Sendable {
     fileprivate let id: UUID
 
@@ -11,14 +16,14 @@ struct CloudKitEngineHandle: Hashable, Sendable {
 }
 
 protocol CloudKitEngineHosting: Sendable {
-    func prepareResources()
-    func accountAvailability() async -> CloudSyncAccountAvailability
+    func prepareResources() throws
+    func accountAvailability() async throws -> CloudSyncAccountAvailability
     func setAccountChangeHandler(_ handler: (@Sendable () async -> Void)?)
     func createEngine(
         stateSerialization: CKSyncEngine.State.Serialization?,
         delegate: any CKSyncEngineDelegate,
         subscriptionID: CKSubscription.ID
-    ) -> CloudKitEngineHandle
+    ) throws -> CloudKitEngineHandle
     func addPendingDatabaseChanges(
         _ changes: [CKSyncEngine.PendingDatabaseChange],
         to handle: CloudKitEngineHandle
@@ -32,6 +37,34 @@ protocol CloudKitEngineHosting: Sendable {
     func cancelOperations(on handle: CloudKitEngineHandle) async
     func deleteSubscription(withID subscriptionID: CKSubscription.ID) async throws
     func releaseEngine(_ handle: CloudKitEngineHandle)
+}
+
+protocol CloudKitContainerProviding: Sendable {
+    func defaultContainer() throws -> CKContainer
+}
+
+struct DefaultCloudKitContainerProvider: CloudKitContainerProviding, @unchecked Sendable {
+    private let isICloudAvailable: () -> Bool
+    private let makeDefaultContainer: () -> CKContainer
+
+    init(
+        isICloudAvailable: @escaping () -> Bool = {
+            FileManager.default.ubiquityIdentityToken != nil
+        },
+        makeDefaultContainer: @escaping () -> CKContainer = { CKContainer.default() }
+    ) {
+        self.isICloudAvailable = isICloudAvailable
+        self.makeDefaultContainer = makeDefaultContainer
+    }
+
+    func defaultContainer() throws -> CKContainer {
+        guard isICloudAvailable() else {
+            throw CloudSyncBoundaryError.missingContainerEntitlement(
+                "iCloud account or container entitlement unavailable"
+            )
+        }
+        return makeDefaultContainer()
+    }
 }
 
 private final class CloudKitAccountChangeObserver: @unchecked Sendable {
@@ -67,8 +100,9 @@ private final class CloudKitAccountChangeObserver: @unchecked Sendable {
     }
 }
 
-private final class LiveCloudKitEngineHost: CloudKitEngineHosting, @unchecked Sendable {
+final class LiveCloudKitEngineHost: CloudKitEngineHosting, @unchecked Sendable {
     private let containerIdentifier: String
+    private let containerProvider: any CloudKitContainerProviding
     private let accountChangeObserver = CloudKitAccountChangeObserver()
     private let lock = NSLock()
     private var resources: Resources?
@@ -79,16 +113,20 @@ private final class LiveCloudKitEngineHost: CloudKitEngineHosting, @unchecked Se
         let database: CKDatabase
     }
 
-    init(containerIdentifier: String) {
+    init(
+        containerIdentifier: String,
+        containerProvider: any CloudKitContainerProviding = DefaultCloudKitContainerProvider()
+    ) {
         self.containerIdentifier = containerIdentifier
+        self.containerProvider = containerProvider
     }
 
-    func prepareResources() {
-        _ = ensureResources()
+    func prepareResources() throws {
+        _ = try ensureResources()
     }
 
-    func accountAvailability() async -> CloudSyncAccountAvailability {
-        let resources = ensureResources()
+    func accountAvailability() async throws -> CloudSyncAccountAvailability {
+        let resources = try ensureResources()
         do {
             return try await resources.container.accountStatus() == .available ? .privateAccount : .unavailable
         } catch {
@@ -104,8 +142,8 @@ private final class LiveCloudKitEngineHost: CloudKitEngineHosting, @unchecked Se
         stateSerialization: CKSyncEngine.State.Serialization?,
         delegate: any CKSyncEngineDelegate,
         subscriptionID: CKSubscription.ID
-    ) -> CloudKitEngineHandle {
-        let resources = ensureResources()
+    ) throws -> CloudKitEngineHandle {
+        let resources = try ensureResources()
         var configuration = CKSyncEngine.Configuration(
             database: resources.database,
             stateSerialization: stateSerialization,
@@ -157,10 +195,13 @@ private final class LiveCloudKitEngineHost: CloudKitEngineHosting, @unchecked Se
         lock.withLock { engines[handle] = nil }
     }
 
-    private func ensureResources() -> Resources {
-        lock.withLock {
+    private func ensureResources() throws -> Resources {
+        try lock.withLock {
             if let resources { return resources }
-            let container = CKContainer(identifier: containerIdentifier)
+            let container = try containerProvider.defaultContainer()
+            guard container.containerIdentifier == containerIdentifier else {
+                throw CloudSyncBoundaryError.missingContainerEntitlement(containerIdentifier)
+            }
             let resources = Resources(
                 container: container,
                 database: container.privateCloudDatabase
@@ -250,10 +291,10 @@ public actor CKSyncEngineBoundary: CloudSyncEngineBoundary {
         self.cancelSyncEngine = cancelSyncEngine
     }
 
-    public func accountAvailability() async -> CloudSyncAccountAvailability {
-        engineHost.prepareResources()
+    public func accountAvailability() async throws -> CloudSyncAccountAvailability {
+        let availability = try await engineHost.accountAvailability()
         resourcesInitialized = true
-        return await engineHost.accountAvailability()
+        return availability
     }
 
     public func setAccountChangeHandler(_ handler: (@Sendable () async -> Void)?) async {
@@ -267,11 +308,11 @@ public actor CKSyncEngineBoundary: CloudSyncEngineBoundary {
 
     public func start() async throws {
         guard engineHandle == nil else { return }
-        engineHost.prepareResources()
+        try engineHost.prepareResources()
         resourcesInitialized = true
         let delegate = ensureDelegate()
         await delegate.setActive(true)
-        let engineHandle = engineHost.createEngine(
+        let engineHandle = try engineHost.createEngine(
             stateSerialization: delegate.restoredStateSerialization(),
             delegate: delegate,
             subscriptionID: subscriptionID
@@ -381,10 +422,6 @@ public actor CKSyncEngineBoundary: CloudSyncEngineBoundary {
             await accountChangeHandler?()
         }
     }
-}
-
-private enum CloudSyncBoundaryError: Error {
-    case inactive
 }
 
 actor PingScopeCKSyncEngineDelegateState {

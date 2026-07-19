@@ -302,17 +302,13 @@ private final class PingScopeIOSAppModel: ObservableObject {
     @Published private(set) var hasConfiguredWidget = false
     @Published private(set) var diagnosticsLogText = ""
     @Published private var diagnosticsSharePayload: HistorySharePayload?
-    @Published var isCloudSyncEnabled = PingScopeCloudSyncPreference.isEnabled() {
-        didSet {
-            UserDefaults.standard.set(isCloudSyncEnabled, forKey: PingScopeCloudSyncPreference.enabledKey)
-            configureCloudSync()
-        }
-    }
+    @Published var isCloudSyncEnabled = PingScopeCloudSyncPreference.isEnabled()
     @Published private(set) var cloudSyncStatusText = "Off"
 
     private let hostStore: PingScopeIOSHostStore
     private let historyStore: (any PingHistoryStore)?
     private let cloudSyncService: PingScopeCloudSyncService?
+    private let cloudSyncActivation: PingScopeCloudSyncActivationController?
     private let historyLoader = PingScopeIOSHistoryLoader()
     private let weeklyDigestLoader = HistoryWeeklyDigestLoader()
     private let widgetSnapshotStore = WidgetSnapshotStore()
@@ -346,6 +342,7 @@ private final class PingScopeIOSAppModel: ObservableObject {
     private var allHostLatestResult: PingResult?
     private let onboardingStore = PingScopeIOSOnboardingStore()
     private let intentCommandStore = PingScopeIOSIntentCommandStore()
+    private var cloudSyncConfigurationGeneration: UInt = 0
 
     init() {
         self.hostStore = PingScopeIOSHostStore()
@@ -382,6 +379,9 @@ private final class PingScopeIOSAppModel: ObservableObject {
         }
         self.historyStore = loadedHistoryStore
         self.cloudSyncService = cloudSyncService
+        self.cloudSyncActivation = cloudSyncService.map {
+            PingScopeCloudSyncActivationController(service: $0)
+        }
         self.multiHostCoordinator = PingScopeIOSMultiHostSessionCoordinator(
             historyStore: loadedHistoryStore,
             historySampleEnricher: historySampleEnricher,
@@ -480,7 +480,7 @@ private final class PingScopeIOSAppModel: ObservableObject {
         }
         applyBackgroundKeepAlive()
         startNetworkPathMonitoring()
-        configureCloudSync()
+        configureCloudSyncAtLaunch()
     }
 
     var presentedSession: MonitorSessionState? {
@@ -792,27 +792,33 @@ private final class PingScopeIOSAppModel: ObservableObject {
 
     func setCloudSyncEnabled(_ enabled: Bool) {
         isCloudSyncEnabled = enabled
+        configureCloudSync(enabled: enabled, isAutomaticLaunch: false)
     }
 
-    private func configureCloudSync() {
-        guard let cloudSyncService else {
+    private func configureCloudSyncAtLaunch() {
+        configureCloudSync(enabled: isCloudSyncEnabled, isAutomaticLaunch: true)
+    }
+
+    private func configureCloudSync(enabled: Bool, isAutomaticLaunch: Bool) {
+        guard let cloudSyncActivation else {
+            isCloudSyncEnabled = false
+            UserDefaults.standard.set(false, forKey: PingScopeCloudSyncPreference.enabledKey)
             cloudSyncStatusText = "Unavailable"
             return
         }
-        let enabled = isCloudSyncEnabled
         let hosts = hosts
-        Task { [weak self] in
-            await cloudSyncService.setEnabled(enabled, hosts: hosts)
-            let status = await cloudSyncService.status()
-            guard let self else { return }
-            cloudSyncStatusText = switch status {
-            case .off: "Off"
-            case .checkingAccount: "Checking iCloud account…"
-            case .idle: "Up to date"
-            case .syncing: "Syncing…"
-            case .accountUnavailable: "Private iCloud account unavailable"
-            case let .failed(message): "Sync error: \(message)"
+        cloudSyncConfigurationGeneration &+= 1
+        let generation = cloudSyncConfigurationGeneration
+        cloudSyncStatusText = enabled ? "Checking iCloud account…" : "Off"
+        Task { @MainActor [weak self] in
+            let state = if isAutomaticLaunch {
+                await cloudSyncActivation.activatePersisted(hosts: hosts)
+            } else {
+                await cloudSyncActivation.setEnabledByUser(enabled, hosts: hosts)
             }
+            guard let self, generation == cloudSyncConfigurationGeneration else { return }
+            isCloudSyncEnabled = state.isEnabled
+            cloudSyncStatusText = state.statusText
         }
     }
 
