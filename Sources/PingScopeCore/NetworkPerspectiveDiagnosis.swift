@@ -188,7 +188,16 @@ public struct NetworkPerspectiveDiagnoser: Sendable {
             return gatedDiagnosis
         }
 
-        let observed = enabledHosts.compactMap { host -> ObservedHost? in
+        let activeInterface = enabledHosts.compactMap { host -> PingResult? in
+            guard let result = healthByHost[host.id]?.latestResult,
+                  result.networkInterface != nil else { return nil }
+            return result
+        }.max { $0.timestamp < $1.timestamp }?.networkInterface
+        let diagnosticHosts = enabledHosts.filter { host in
+            !(activeInterface == "cellular" && classifier.tier(for: host) == .localGateway)
+        }
+
+        let observed = diagnosticHosts.compactMap { host -> ObservedHost? in
             guard let health = healthByHost[host.id], health.latestResult != nil else { return nil }
             return ObservedHost(host: host, health: health, tier: classifier.tier(for: host))
         }

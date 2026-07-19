@@ -315,4 +315,32 @@ final class IOSNetworkDiagnosisPresentationTests: XCTestCase {
         XCTAssertTrue(presentation.starlink.isEmpty)
         XCTAssertFalse(presentation.hasContent)
     }
+
+    func testGatewayDegradationIsSuppressedOnCellularButPresentedOnWiFi() {
+        let gateway = HostConfig.defaultGateway
+
+        func presentation(interface: String) -> PingScopeIOSMonitorInsightsPresentation {
+            let result = PingResult.success(
+                hostID: gateway.id,
+                latency: .milliseconds(gateway.thresholds.degradedMilliseconds + 1),
+                timestamp: Date(timeIntervalSince1970: 500),
+                networkInterface: interface
+            )
+            var health = HostHealth(hostID: gateway.id, thresholds: gateway.thresholds)
+            health.ingest(result)
+            var series = SampleSeries(hostID: gateway.id)
+            series.append(result)
+            return PingScopeIOSMonitorInsightsPresentation(snapshots: [
+                LiveMonitorSessionSnapshot(
+                    host: gateway,
+                    session: nil,
+                    health: health,
+                    series: series
+                ),
+            ])
+        }
+
+        XCTAssertNil(presentation(interface: "cellular").diagnosis)
+        XCTAssertEqual(presentation(interface: "wifi").diagnosis?.label, "Router / gateway degraded")
+    }
 }
