@@ -211,7 +211,7 @@ public struct HistoryMetrics: Equatable, Sendable {
     }
 }
 
-public struct HistorySession: Equatable, Sendable {
+public struct HistorySession: Equatable, Sendable, Identifiable {
     public let startDate: Date
     public let endDate: Date
     public let samples: [PingResult]
@@ -219,6 +219,7 @@ public struct HistorySession: Equatable, Sendable {
     public let metrics: HistoryMetrics
     public let status: HealthStatus
 
+    public var id: UUID { samples[0].id }
     public var hasOutage: Bool { metrics.outageCount > 0 }
 
     public static func nominalInterval(samples: [PingResult], fallback: TimeInterval = 60) -> TimeInterval {
@@ -470,7 +471,7 @@ public struct PingScopeIOSHistorySessionPresentation: Equatable, Sendable, Ident
     public let averageText: String
     public let graphData: PingScopeIOSLatencyGraphData
 
-    public var id: Date { session.startDate }
+    public var id: UUID { session.id }
     public var status: HealthStatus { session.status }
 
     public init(session: HistorySession) {

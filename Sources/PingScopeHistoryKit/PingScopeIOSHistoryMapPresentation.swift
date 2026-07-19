@@ -161,11 +161,7 @@ public struct HistoryMapPresentation: Equatable, Sendable {
         maximumRoutePointCount: Int = defaultMaximumRoutePointCount
     ) {
         let located = samples.compactMap { sample -> HistoryMapPoint? in
-            guard let location = sample.location,
-                  location.latitude.isFinite,
-                  location.longitude.isFinite,
-                  (-90...90).contains(location.latitude),
-                  (-180...180).contains(location.longitude) else { return nil }
+            guard let location = sample.location, Self.hasValidCoordinates(location) else { return nil }
             return HistoryMapPoint(sample: sample, location: location)
         }
         let chronological = Self.chronological(located)
@@ -176,13 +172,20 @@ public struct HistoryMapPresentation: Equatable, Sendable {
             guard point.isSuccess else { return nil }
             return point.latencyMilliseconds
         }
-        let networkLabels = Set(chronological.compactMap(Self.networkLabel))
         summary = HistoryMapSummary(
             bestLatencyMilliseconds: successfulLatencies.min(),
             worstLatencyMilliseconds: successfulLatencies.max(),
-            networkLabels: networkLabels.sorted(),
+            networkLabels: Self.networkLabels(samples: samples),
             worstRenderedPoint: points.max(by: Self.isLessSevere)
         )
+    }
+
+    /// Returns the labels shown by a full map summary without building map geometry.
+    public static func networkLabels(samples: [PingResult]) -> [String] {
+        Set(samples.compactMap { sample -> String? in
+            guard let location = sample.location, hasValidCoordinates(location) else { return nil }
+            return networkLabel(location)
+        }).sorted()
     }
 
     private struct GridCell: Hashable {
@@ -313,9 +316,16 @@ public struct HistoryMapPresentation: Equatable, Sendable {
         }
     }
 
-    private static func networkLabel(_ point: HistoryMapPoint) -> String? {
-        if let name = nonempty(point.networkName) { return name }
-        return nonempty(point.networkInterface)
+    private static func networkLabel(_ location: SampleLocation) -> String? {
+        if let name = nonempty(location.networkName) { return name }
+        return nonempty(location.networkInterface)
+    }
+
+    private static func hasValidCoordinates(_ location: SampleLocation) -> Bool {
+        location.latitude.isFinite
+            && location.longitude.isFinite
+            && (-90...90).contains(location.latitude)
+            && (-180...180).contains(location.longitude)
     }
 
     private static func nonempty(_ value: String?) -> String? {

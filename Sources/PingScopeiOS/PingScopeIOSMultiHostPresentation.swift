@@ -34,12 +34,19 @@ public struct PingScopeIOSHostRowSnapshot: Equatable, Sendable {
     public let samples: [PingResult]
     public let isStale: Bool
     public let isDefaultGateway: Bool
+    public let degradedThresholdMilliseconds: Double
 
     public var reducedSamples: [PingResult] { samples }
 
     public var latencyText: String {
-        guard let latestLatencyMilliseconds else { return "--ms" }
-        return "\(Int(latestLatencyMilliseconds.rounded()))ms"
+        Self.latencyText(for: latestLatencyMilliseconds)
+    }
+
+    fileprivate static func latencyText(for latency: Double?) -> String {
+        guard let latency, latency.isFinite else { return "--ms" }
+        let rounded = max(latency, 0).rounded()
+        guard rounded < Double(Int.max) else { return "--ms" }
+        return "\(Int(rounded))ms"
     }
 
     public var formattedLatency: String { latencyText }
@@ -52,7 +59,8 @@ public struct PingScopeIOSHostRowSnapshot: Equatable, Sendable {
         latestLatencyMilliseconds: Double?,
         samples: [PingResult],
         isStale: Bool,
-        isDefaultGateway: Bool = false
+        isDefaultGateway: Bool = false,
+        degradedThresholdMilliseconds: Double = LatencyThresholds.defaults.degradedMilliseconds
     ) {
         self.hostID = hostID
         self.displayName = displayName
@@ -62,6 +70,7 @@ public struct PingScopeIOSHostRowSnapshot: Equatable, Sendable {
         self.samples = samples
         self.isStale = isStale
         self.isDefaultGateway = isDefaultGateway
+        self.degradedThresholdMilliseconds = degradedThresholdMilliseconds
     }
 
     public init(
@@ -79,6 +88,7 @@ public struct PingScopeIOSHostRowSnapshot: Equatable, Sendable {
         self.samples = PingScopeIOSLatencySampleReducer.reduce(samples, limit: sampleLimit)
         self.isStale = isStale
         self.isDefaultGateway = host.isDefaultGateway
+        self.degradedThresholdMilliseconds = host.thresholds.degradedMilliseconds
     }
 
     fileprivate func cappedForActivity() -> Self {
@@ -90,8 +100,83 @@ public struct PingScopeIOSHostRowSnapshot: Equatable, Sendable {
             latestLatencyMilliseconds: latestLatencyMilliseconds,
             samples: PingScopeIOSLatencySampleReducer.reduce(samples, limit: PingScopeIOSLatencySampleReducer.defaultLimit),
             isStale: isStale,
-            isDefaultGateway: isDefaultGateway
+            isDefaultGateway: isDefaultGateway,
+            degradedThresholdMilliseconds: degradedThresholdMilliseconds
         )
+    }
+}
+
+public struct PingScopeIOSAllHostsRingCell: Identifiable, Equatable, Sendable {
+    public let hostID: UUID
+    public let displayName: String
+    public let latencyText: String
+    public let ringProgress: Double
+    public let status: HealthStatus
+
+    public var id: UUID { hostID }
+}
+
+public enum PingScopeIOSAllHostsRingGridPresentation {
+    public static func cells(from rows: [PingScopeIOSHostRowSnapshot]) -> [PingScopeIOSAllHostsRingCell] {
+        rows.map { row in
+            let presentation = PingScopeIOSAllHostsMonitorPresentation.rowPresentation(for: row)
+            let latency = row.isStale ? nil : row.latestLatencyMilliseconds
+            let threshold = max(row.degradedThresholdMilliseconds, 1)
+            return PingScopeIOSAllHostsRingCell(
+                hostID: row.hostID,
+                displayName: presentation.displayName,
+                latencyText: presentation.latencyText,
+                ringProgress: latency.map { min(max($0 / threshold, 0), 1) } ?? 0,
+                status: presentation.displayStatus
+            )
+        }
+    }
+
+    static func latencyText(for latency: Double?) -> String {
+        PingScopeIOSHostRowSnapshot.latencyText(for: latency)
+    }
+}
+
+struct PingScopeIOSAllHostsRingRowsFingerprint: Hashable {
+    struct Row: Hashable {
+        let hostID: UUID
+        let displayName: String
+        let status: String
+        let latencyBitPattern: UInt64?
+        let isStale: Bool
+        let degradedThresholdBitPattern: UInt64
+    }
+
+    let rows: [Row]
+
+    init(_ rows: [PingScopeIOSHostRowSnapshot]) {
+        self.rows = rows.map { row in
+            Row(
+                hostID: row.hostID,
+                displayName: row.displayName,
+                status: row.status.rawValue,
+                latencyBitPattern: row.latestLatencyMilliseconds?.bitPattern,
+                isStale: row.isStale,
+                degradedThresholdBitPattern: row.degradedThresholdMilliseconds.bitPattern
+            )
+        }
+    }
+}
+
+@MainActor
+final class PingScopeIOSAllHostsRingGridContentMemo {
+    private var cache = BoundedMemo<
+        PingScopeIOSAllHostsRingRowsFingerprint,
+        [PingScopeIOSAllHostsRingCell]
+    >(capacity: 1)
+
+    func resolve(
+        _ rows: [PingScopeIOSHostRowSnapshot],
+        build: ([PingScopeIOSHostRowSnapshot]) -> [PingScopeIOSAllHostsRingCell]
+    ) -> [PingScopeIOSAllHostsRingCell] {
+        cache.resolve(PingScopeIOSAllHostsRingRowsFingerprint(rows)) {
+            build(rows)
+        }
     }
 }
 
@@ -146,11 +231,5 @@ public enum PingScopeIOSHostScopePresentation {
             samplesByHost: samplesByHost,
             staleHostIDs: staleHostIDs
         ))
-    }
-}
-
-public extension PingScopeIOSDisplayMode {
-    func resolvedForHostScope(showsAllHosts: Bool) -> PingScopeIOSDisplayMode {
-        showsAllHosts ? .signal : self
     }
 }

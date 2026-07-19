@@ -9,6 +9,110 @@ public typealias PingScopeIOSMeasurementObserver = @Sendable (
     _ currentStatus: HealthStatus
 ) async -> Void
 
+public enum PingScopeIOSResourceEfficiency {
+    /// Preserves the former flattened `max` semantics without allocating a
+    /// combined sample array. Individual series are not assumed chronological.
+    public static func latestResult(in series: [PingScopeIOSHostGraphSeries]) -> PingResult? {
+        series.compactMap { $0.samples.max { $0.timestamp < $1.timestamp } }
+            .max { $0.timestamp < $1.timestamp }
+    }
+}
+
+public enum PingScopeIOSWidgetCheapPublishGate {
+    /// Conservatively skips sample construction only when no possible sample
+    /// change could make the existing publish policy save this snapshot.
+    public static func canSkipSampleConstruction(
+        candidateWithoutSamples: WidgetSnapshot,
+        previousSnapshot: WidgetSnapshot?,
+        lastTimelineReloadAt: Date?,
+        policy: WidgetSnapshotPublishPolicy
+    ) -> Bool {
+        guard let previousSnapshot,
+              candidateWithoutSamples.hasSameWidgetState(as: previousSnapshot) else { return false }
+        let heartbeatDue = candidateWithoutSamples.generatedAt.timeIntervalSince(previousSnapshot.generatedAt)
+            >= policy.heartbeatInterval
+        let sampleSaveCouldBeDue = candidateWithoutSamples.generatedAt.timeIntervalSince(
+            lastTimelineReloadAt ?? .distantPast
+        ) >= policy.timelineReloadInterval
+        return !heartbeatDue && !sampleSaveCouldBeDue
+    }
+}
+
+public enum PingScopeIOSRefreshCadence {
+    public static let maximumCountdownRefreshInterval: Duration = .seconds(2)
+    public static let inFlightProbePollInterval: Duration = .milliseconds(250)
+
+    public static func interval(
+        nextProbeDeadline: Date,
+        duration: MonitorSessionDuration,
+        now: Date
+    ) -> Duration {
+        let remainingSeconds = nextProbeDeadline.timeIntervalSince(now)
+        let probeAlignedInterval = remainingSeconds > 0
+            ? Duration.seconds(remainingSeconds)
+            : inFlightProbePollInterval
+        guard duration != .continuous else { return probeAlignedInterval }
+        return min(probeAlignedInterval, maximumCountdownRefreshInterval)
+    }
+}
+
+/// Owns the refresh task without allowing the suspended task to retain its
+/// owner. The iteration closure returns the absolute-deadline-derived sleep.
+@MainActor
+public final class PingScopeIOSRefreshLoopDriver {
+    public typealias Sleeper = @Sendable (Duration) async throws -> Void
+
+    private let sleeper: Sleeper
+    private var task: Task<Void, Never>?
+    private var generation = 0
+    public private(set) var isRunning = false
+
+    public init(sleeper: @escaping Sleeper = { duration in
+        try await Task.sleep(for: duration)
+    }) {
+        self.sleeper = sleeper
+    }
+
+    public func start(
+        iteration: @escaping @MainActor @Sendable () async -> Duration?
+    ) {
+        cancel()
+        generation += 1
+        let taskGeneration = generation
+        let sleeper = sleeper
+        isRunning = true
+        task = Task { @MainActor [weak self] in
+            defer { self?.finish(generation: taskGeneration) }
+            while !Task.isCancelled {
+                guard self != nil else { return }
+                guard let interval = await iteration() else { return }
+                do {
+                    try await sleeper(interval)
+                } catch {
+                    return
+                }
+            }
+        }
+    }
+
+    public func cancel() {
+        generation += 1
+        isRunning = false
+        task?.cancel()
+        task = nil
+    }
+
+    deinit {
+        task?.cancel()
+    }
+
+    private func finish(generation taskGeneration: Int) {
+        guard generation == taskGeneration else { return }
+        isRunning = false
+        task = nil
+    }
+}
+
 public struct LiveMonitorSessionSnapshot: Equatable, Sendable {
     public var host: HostConfig
     public var session: MonitorSessionState?
@@ -39,6 +143,8 @@ public actor LiveMonitorSessionController {
     private var series: SampleSeries
     private var loopTask: Task<Void, Never>?
     private var loopGeneration = 0
+    private var currentNextProbeInterval: Duration
+    private var currentNextProbeDeadline: Date
 
     /// `clock` paces the probe loop and `now` supplies its wall-clock reads, so
     /// tests can drive the loop deterministically instead of racing real sleeps.
@@ -65,6 +171,8 @@ public actor LiveMonitorSessionController {
         self.measurementObserver = measurementObserver
         self.health = HostHealth(hostID: self.host.id, thresholds: self.host.thresholds)
         self.series = SampleSeries(hostID: self.host.id)
+        self.currentNextProbeInterval = policy.probeInterval
+        self.currentNextProbeDeadline = now().addingTimeInterval(policy.probeInterval.seconds)
     }
 
     public func start(duration: MonitorSessionDuration) async {
@@ -83,6 +191,8 @@ public actor LiveMonitorSessionController {
         session = newSession
         health = HostHealth(hostID: host.id, thresholds: host.thresholds)
         series = SampleSeries(hostID: host.id)
+        currentNextProbeInterval = policy.probeInterval
+        currentNextProbeDeadline = date
         let generation = loopGeneration
         loopTask = Task {
             await runLoop(startedAt: date, generation: generation)
@@ -103,6 +213,21 @@ public actor LiveMonitorSessionController {
         LiveMonitorSessionSnapshot(host: host, session: session, health: health, series: series)
     }
 
+    public func nextProbeInterval() async -> Duration {
+        currentNextProbeInterval
+    }
+
+    public func nextProbeDeadline() async -> Date {
+        currentNextProbeDeadline
+    }
+
+    func historyWriterDiagnosticsForTesting() async -> (
+        pendingCount: Int,
+        consecutiveFailureCount: Int
+    )? {
+        await historyWriter?.diagnosticsForTesting()
+    }
+
     private func cancelLoop() {
         loopGeneration += 1
         guard let task = loopTask else { return }
@@ -111,6 +236,7 @@ public actor LiveMonitorSessionController {
     }
 
     private func runLoop(startedAt: Date, generation: Int) async {
+        var idleBackoff = ProbeIdleBackoffTracker()
         while !Task.isCancelled {
             guard generation == loopGeneration else { break }
             let now = now()
@@ -126,10 +252,18 @@ public actor LiveMonitorSessionController {
             let probe = await probeFactory.makeProbe(for: host.method)
             let result = await probe.measure(host)
             guard !Task.isCancelled, generation == loopGeneration else { break }
-            await ingest(result)
+            let statusTransition = await ingest(result)
+            let nextInterval = idleBackoff.interval(
+                after: result,
+                previousStatus: statusTransition.previous,
+                currentStatus: statusTransition.current,
+                baseInterval: policy.probeInterval
+            )
+            currentNextProbeInterval = nextInterval
+            currentNextProbeDeadline = self.now().addingTimeInterval(nextInterval.seconds)
 
             do {
-                try await clock.sleep(for: policy.probeInterval)
+                try await clock.sleep(for: nextInterval)
             } catch {
                 break
             }
@@ -147,7 +281,7 @@ public actor LiveMonitorSessionController {
         return date.timeIntervalSince(startedAt) >= backgroundRuntimeLimit.seconds
     }
 
-    private func ingest(_ result: PingResult) async {
+    private func ingest(_ result: PingResult) async -> (previous: HealthStatus, current: HealthStatus) {
         let previousStatus = health.status
         health.ingest(result)
         let currentStatus = health.status
@@ -155,6 +289,7 @@ public actor LiveMonitorSessionController {
         session = session?.updating(with: result)
         await measurementObserver(result, previousStatus, currentStatus)
         await historyWriter?.append(historySampleEnricher(result))
+        return (previousStatus, currentStatus)
     }
 
     private func finish(reason: MonitorSessionEndReason, at date: Date) {
@@ -199,6 +334,10 @@ private actor LiveHistoryWriteBuffer {
         if !completed, pendingBeforeFlush > 0 {
             NSLog("PingScope iOS history forced flush incomplete pending=\(pending.count)")
         }
+    }
+
+    func diagnosticsForTesting() -> (pendingCount: Int, consecutiveFailureCount: Int) {
+        (pending.count, consecutiveFailureCount)
     }
 
     private func scheduleDelayedFlush() {

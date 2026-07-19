@@ -6,9 +6,118 @@ public protocol PingScopeIOSMultiHostSessionControlling: Sendable {
     func start(duration: MonitorSessionDuration, at date: Date) async
     func stop(reason: MonitorSessionEndReason, at date: Date) async
     func snapshot() async -> LiveMonitorSessionSnapshot
+    func nextProbeInterval() async -> Duration
+    func nextProbeDeadline() async -> Date
+}
+
+public extension PingScopeIOSMultiHostSessionControlling {
+    func nextProbeInterval() async -> Duration {
+        MonitorSessionPolicy().probeInterval
+    }
+
+    func nextProbeDeadline() async -> Date {
+        Date().addingTimeInterval((await nextProbeInterval()).seconds)
+    }
 }
 
 extension LiveMonitorSessionController: PingScopeIOSMultiHostSessionControlling {}
+
+public struct PingScopeIOSAllHostPresentationCache {
+    public struct Resolution: Sendable {
+        public let rows: [PingScopeIOSHostRowSnapshot]
+        public let series: [PingScopeIOSHostGraphSeries]
+        public let recomputedHostIDs: [UUID]
+        public let reusedHostIDs: [UUID]
+        public let hasPresentationChanges: Bool
+        public let latestResult: PingResult?
+
+        public func valueIfPresentationChanged<Value>(
+            _ build: () -> Value
+        ) -> Value? {
+            guard hasPresentationChanges else { return nil }
+            return build()
+        }
+    }
+
+    private struct InputKey: Equatable {
+        let host: HostConfig
+        let health: HostHealth
+        let samples: AppendOnlySequenceFingerprint<UUID>
+        let isStale: Bool
+    }
+
+    private struct Entry {
+        let key: InputKey
+        let row: PingScopeIOSHostRowSnapshot
+        let series: PingScopeIOSHostGraphSeries
+        let latestResult: PingResult?
+    }
+
+    private var entriesByHostID: [UUID: Entry] = [:]
+    private var orderedHostIDs: [UUID] = []
+
+    public init() {}
+
+    public mutating func resolve(_ snapshots: [LiveMonitorSessionSnapshot]) -> Resolution {
+        var nextEntries: [UUID: Entry] = [:]
+        nextEntries.reserveCapacity(snapshots.count)
+        var rows: [PingScopeIOSHostRowSnapshot] = []
+        var series: [PingScopeIOSHostGraphSeries] = []
+        var recomputedHostIDs: [UUID] = []
+        var reusedHostIDs: [UUID] = []
+        rows.reserveCapacity(snapshots.count)
+        series.reserveCapacity(snapshots.count)
+
+        for snapshot in snapshots {
+            let isStale = snapshot.session.map { $0.phase() != .live } ?? false
+            let key = InputKey(
+                host: snapshot.host,
+                health: snapshot.health,
+                samples: AppendOnlySequenceFingerprint(samples: snapshot.series.samples),
+                isStale: isStale
+            )
+            let entry: Entry
+            if let cached = entriesByHostID[snapshot.host.id], cached.key == key {
+                entry = cached
+                reusedHostIDs.append(snapshot.host.id)
+            } else {
+                entry = Entry(
+                    key: key,
+                    row: PingScopeIOSHostRowSnapshot(
+                        host: snapshot.host,
+                        health: snapshot.health,
+                        samples: snapshot.series.samples,
+                        isStale: isStale
+                    ),
+                    series: PingScopeIOSHostGraphSeries(
+                        hostID: snapshot.host.id,
+                        samples: snapshot.series.samples
+                    ),
+                    latestResult: snapshot.series.samples.max { $0.timestamp < $1.timestamp }
+                )
+                recomputedHostIDs.append(snapshot.host.id)
+            }
+            nextEntries[snapshot.host.id] = entry
+            rows.append(entry.row)
+            series.append(entry.series)
+        }
+
+        let nextOrder = snapshots.map(\.host.id)
+        let hasPresentationChanges = nextOrder != orderedHostIDs
+            || !recomputedHostIDs.isEmpty
+            || nextEntries.count != entriesByHostID.count
+        entriesByHostID = nextEntries
+        orderedHostIDs = nextOrder
+        return Resolution(
+            rows: rows,
+            series: series,
+            recomputedHostIDs: recomputedHostIDs,
+            reusedHostIDs: reusedHostIDs,
+            hasPresentationChanges: hasPresentationChanges,
+            latestResult: PingScopeIOSResourceEfficiency.latestResult(in: series)
+        )
+    }
+}
 
 public protocol PingScopeIOSMultiHostSessionControllerFactory: Sendable {
     func makeController(
@@ -146,17 +255,25 @@ public actor PingScopeIOSMultiHostSessionCoordinator {
     private func startTransaction(duration: MonitorSessionDuration) async {
         let startedAt = now()
         aggregateSession = PingScopeIOSMultiHostSessionState(duration: duration, startedAt: startedAt)
-        for hostID in orderedHostIDs {
-            guard let entry = controllers[hostID] else { continue }
-            await entry.controller.start(duration: duration, at: startedAt)
+        let orderedEntries = orderedHostIDs.compactMap { controllers[$0] }
+        await withTaskGroup(of: Void.self) { group in
+            for entry in orderedEntries {
+                group.addTask {
+                    await entry.controller.start(duration: duration, at: startedAt)
+                }
+            }
         }
     }
 
     private func stopTransaction(reason: MonitorSessionEndReason) async {
         let stoppedAt = now()
-        for hostID in orderedHostIDs {
-            guard let entry = controllers[hostID] else { continue }
-            await entry.controller.stop(reason: reason, at: stoppedAt)
+        let orderedEntries = orderedHostIDs.compactMap { controllers[$0] }
+        await withTaskGroup(of: Void.self) { group in
+            for entry in orderedEntries {
+                group.addTask {
+                    await entry.controller.stop(reason: reason, at: stoppedAt)
+                }
+            }
         }
         aggregateSession = aggregateSession?.ending(at: stoppedAt, reason: reason)
     }
@@ -168,14 +285,20 @@ public actor PingScopeIOSMultiHostSessionCoordinator {
     /// Returns snapshots in the saved enabled-host order used for lifecycle fan-out.
     public func orderedSnapshots() async -> [LiveMonitorSessionSnapshot] {
         let orderedEntries = orderedHostIDs.compactMap { controllers[$0] }
-        var snapshots: [LiveMonitorSessionSnapshot] = []
-        snapshots.reserveCapacity(orderedEntries.count)
-        for entry in orderedEntries {
-            var snapshot = await entry.controller.snapshot()
-            snapshot.host = snapshot.host.applyingPresentationMetadata(from: entry.host)
-            snapshots.append(snapshot)
+        return await withTaskGroup(of: (Int, LiveMonitorSessionSnapshot).self, returning: [LiveMonitorSessionSnapshot].self) { group in
+            for (index, entry) in orderedEntries.enumerated() {
+                group.addTask {
+                    var snapshot = await entry.controller.snapshot()
+                    snapshot.host = snapshot.host.applyingPresentationMetadata(from: entry.host)
+                    return (index, snapshot)
+                }
+            }
+            var snapshots = Array<LiveMonitorSessionSnapshot?>(repeating: nil, count: orderedEntries.count)
+            for await (index, snapshot) in group {
+                snapshots[index] = snapshot
+            }
+            return snapshots.compactMap { $0 }
         }
-        return snapshots
     }
 
     /// Returns a keyed lookup for a host ID. Dictionary iteration order is unspecified.
@@ -193,9 +316,43 @@ public actor PingScopeIOSMultiHostSessionCoordinator {
         await snapshotsByHostID()
     }
 
+    public func nextProbeInterval() async -> Duration {
+        let orderedEntries = orderedHostIDs.compactMap { controllers[$0] }
+        guard !orderedEntries.isEmpty else { return MonitorSessionPolicy().probeInterval }
+        return await withTaskGroup(of: Duration.self, returning: Duration.self) { group in
+            for entry in orderedEntries {
+                group.addTask { await entry.controller.nextProbeInterval() }
+            }
+            var shortest = ProbeIdleBackoffPolicy.maximumInterval
+            for await interval in group {
+                shortest = min(shortest, interval)
+            }
+            return shortest
+        }
+    }
+
+    public func nextProbeDeadline() async -> Date {
+        let orderedEntries = orderedHostIDs.compactMap { controllers[$0] }
+        guard !orderedEntries.isEmpty else {
+            return Date().addingTimeInterval(MonitorSessionPolicy().probeInterval.seconds)
+        }
+        return await withTaskGroup(of: Date.self, returning: Date.self) { group in
+            for entry in orderedEntries {
+                group.addTask { await entry.controller.nextProbeDeadline() }
+            }
+            var earliest = Date.distantFuture
+            for await deadline in group {
+                earliest = min(earliest, deadline)
+            }
+            return earliest
+        }
+    }
+
     private func reconcileTransaction(hosts: [HostConfig]) async {
-        let enabledHosts = PingScopeIOSHostScopePresentation.enabledHosts(from: hosts)
-        let desiredHostIDs = Set(enabledHosts.map(\.id))
+        var desiredHostIDs = Set<UUID>()
+        let enabledHosts = PingScopeIOSHostScopePresentation.enabledHosts(from: hosts).filter {
+            desiredHostIDs.insert($0.id).inserted
+        }
         let reconciledAt = now()
 
         for hostID in orderedHostIDs where !desiredHostIDs.contains(hostID) {

@@ -70,4 +70,37 @@ public struct HistoryReportFileLifecycle {
             throw error
         }
     }
+
+    public func exportAsync(
+        hostName: String,
+        format: HistoryReportFormat,
+        write: @escaping @Sendable (URL) async throws -> Void
+    ) async throws -> HistorySharePayload {
+        try fileManager.createDirectory(
+            at: planner.temporaryDirectory,
+            withIntermediateDirectories: true
+        )
+        let destination = planner.destination(hostName: hostName, format: format)
+        do {
+            try await write(destination)
+            return HistorySharePayload(files: [destination])
+        } catch {
+            try? fileManager.removeItem(at: destination)
+            throw error
+        }
+    }
+}
+
+public enum HistoryFileWriteOperation {
+    public static func perform<Value: Sendable>(
+        _ operation: @escaping @Sendable () throws -> Value
+    ) async throws -> Value {
+        try await Task.detached(priority: .utility, operation: operation).value
+    }
+
+    public static func write(_ data: Data, to destination: URL) async throws {
+        try await perform {
+            try data.write(to: destination, options: .atomic)
+        }
+    }
 }

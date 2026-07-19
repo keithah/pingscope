@@ -37,22 +37,27 @@ public struct HistoryNetworkBreakdown: Equatable, Sendable {
     public let groups: [HistoryNetworkGroup]
 
     public init(samples: [PingResult]) {
-        let grouped = Dictionary(grouping: samples) { sample in
-            HistoryNetworkKey(interface: sample.networkInterface, name: sample.networkName)
+        self.init(accumulating: samples)
+    }
+
+    public init<S: Sequence>(accumulating samples: S) where S.Element == PingResult {
+        var accumulator = HistoryNetworkBreakdownAccumulator()
+        for sample in samples {
+            accumulator.append(sample)
         }
-        groups = grouped.map { key, samples in
+        groups = accumulator.groups.map { key, accumulated in
             HistoryNetworkGroup(
                 key: key,
                 displayLabel: key.name
                     ?? key.interface.map(NetworkInterfaceNormalizer.displayName(for:))
                     ?? "Unknown",
                 interface: key.interface,
-                sampleCount: samples.count,
-                firstSeen: samples.map(\.timestamp).min()!,
-                lastSeen: samples.map(\.timestamp).max()!,
-                metrics: HistoryMetrics(samples: samples),
-                samples: samples,
-                hasVPN: samples.contains(where: \.isVPN)
+                sampleCount: accumulated.samples.count,
+                firstSeen: accumulated.firstSeen,
+                lastSeen: accumulated.lastSeen,
+                metrics: HistoryMetrics(samples: accumulated.samples),
+                samples: accumulated.samples,
+                hasVPN: accumulated.hasVPN
             )
         }.sorted(by: Self.isOrderedBefore)
     }
@@ -73,6 +78,34 @@ public struct HistoryNetworkBreakdown: Equatable, Sendable {
             return lhs.displayLabel < rhs.displayLabel
         }
         return (lhs.interface ?? "") < (rhs.interface ?? "")
+    }
+}
+
+private struct HistoryNetworkBreakdownAccumulator {
+    struct Group {
+        var samples: [PingResult]
+        var firstSeen: Date
+        var lastSeen: Date
+        var hasVPN: Bool
+
+        mutating func append(_ sample: PingResult) {
+            samples.append(sample)
+            firstSeen = min(firstSeen, sample.timestamp)
+            lastSeen = max(lastSeen, sample.timestamp)
+            hasVPN = hasVPN || sample.isVPN
+        }
+    }
+
+    var groups: [HistoryNetworkKey: Group] = [:]
+
+    mutating func append(_ sample: PingResult) {
+        let key = HistoryNetworkKey(interface: sample.networkInterface, name: sample.networkName)
+        groups[key, default: Group(
+            samples: [],
+            firstSeen: sample.timestamp,
+            lastSeen: sample.timestamp,
+            hasVPN: false
+        )].append(sample)
     }
 }
 

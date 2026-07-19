@@ -314,19 +314,21 @@ private final class PingScopeIOSAppModel: ObservableObject {
     private let historyStore: (any PingHistoryStore)?
     private let cloudSyncService: PingScopeCloudSyncService?
     private let historyLoader = PingScopeIOSHistoryLoader()
+    private let weeklyDigestLoader = HistoryWeeklyDigestLoader()
     private let widgetSnapshotStore = WidgetSnapshotStore()
     private let gatewayDetector = PingScopeIOSGatewayDetector()
     private let presenter = DisplayStatePresenter()
     private let backgroundRuntime: LiveMonitorBackgroundRuntime
     private let multiHostCoordinator: PingScopeIOSMultiHostSessionCoordinator
     private let notificationEngine: PingScopeIOSNotificationEngine
+    private let failureLogSuppressor: PingScopeIOSFailureLogSuppressor
     private let historyLocationService: HistoryLocationService
     private var historyExportCoordinator: HistoryExportCoordinator?
     private var historyExportObservation: AnyCancellable?
     private let pathMonitor = NWPathMonitor()
     private let pathMonitorQueue = DispatchQueue(label: "PingScope.iOS.NetworkPath")
     private var controller: LiveMonitorSessionController
-    private var refreshTask: Task<Void, Never>?
+    private let refreshLoopDriver = PingScopeIOSRefreshLoopDriver()
     private let lifecycleHarness = PingScopeIOSLifecycleHarness(
         promptBackgroundProtectionClient: UIApplicationPromptBackgroundProtectionClient()
     )
@@ -340,6 +342,8 @@ private final class PingScopeIOSAppModel: ObservableObject {
     private var lastPublishedWidgetSnapshot: WidgetSnapshot?
     private var lastWidgetTimelineReloadAt: Date?
     private let widgetPublishPolicy = WidgetSnapshotPublishPolicy()
+    private var allHostPresentationCache = PingScopeIOSAllHostPresentationCache()
+    private var allHostLatestResult: PingResult?
     private let onboardingStore = PingScopeIOSOnboardingStore()
     private let intentCommandStore = PingScopeIOSIntentCommandStore()
 
@@ -350,6 +354,8 @@ private final class PingScopeIOSAppModel: ObservableObject {
             rules: PingScopeIOSNotificationRuleSource.persistedRules()
         )
         self.notificationEngine = notificationEngine
+        let failureLogSuppressor = PingScopeIOSFailureLogSuppressor()
+        self.failureLogSuppressor = failureLogSuppressor
         let locationService = HistoryLocationService()
         let historySampleEnricher = locationService.snapshotStore.makeHistorySampleEnricher()
         self.historyLocationService = locationService
@@ -380,7 +386,8 @@ private final class PingScopeIOSAppModel: ObservableObject {
             historyStore: loadedHistoryStore,
             historySampleEnricher: historySampleEnricher,
             measurementObserver: { result, previousStatus, currentStatus in
-                if !result.isSuccess {
+                if let reason = result.failureReason,
+                   await failureLogSuppressor.shouldLog(hostID: result.hostID, reason: reason) {
                     DebugLog.write("iOS probe failed host=\(result.hostID.uuidString) reason=\(String(describing: result.failureReason))")
                 }
                 await notificationEngine.ingest(
@@ -413,7 +420,8 @@ private final class PingScopeIOSAppModel: ObservableObject {
             historyStore: loadedHistoryStore,
             historySampleEnricher: historySampleEnricher,
             measurementObserver: { result, previousStatus, currentStatus in
-                if !result.isSuccess {
+                if let reason = result.failureReason,
+                   await failureLogSuppressor.shouldLog(hostID: result.hostID, reason: reason) {
                     DebugLog.write("iOS probe failed host=\(result.hostID.uuidString) reason=\(String(describing: result.failureReason))")
                 }
                 await notificationEngine.ingest(
@@ -705,7 +713,6 @@ private final class PingScopeIOSAppModel: ObservableObject {
     }
 
     deinit {
-        refreshTask?.cancel()
         pathMonitor.cancel()
     }
 
@@ -1004,8 +1011,7 @@ private final class PingScopeIOSAppModel: ObservableObject {
     }
 
     private func cancelRefreshLoop() {
-        refreshTask?.cancel()
-        refreshTask = nil
+        refreshLoopDriver.cancel()
     }
 
     private func startSession(duration: MonitorSessionDuration, context: LifecycleContext) async {
@@ -1026,22 +1032,30 @@ private final class PingScopeIOSAppModel: ObservableObject {
     }
 
     private func startRefreshLoop() {
-        refreshTask = Task {
-            while !Task.isCancelled {
-                await refreshSnapshot()
-                if presentedSession?.phase() == .ended,
-                   let sessionIdentity = lifecycleHarness.currentSessionIdentity {
-                    lifecycleHarness.enqueueFiniteCompletion(for: sessionIdentity) { @MainActor [weak self] in
-                        await self?.completeFiniteSession()
-                    }
-                    break
+        refreshLoopDriver.start { @MainActor [weak self] in
+            guard let self else { return nil }
+            await self.refreshSnapshot()
+            if self.presentedSession?.phase() == .ended,
+               let sessionIdentity = self.lifecycleHarness.currentSessionIdentity {
+                self.lifecycleHarness.enqueueFiniteCompletion(for: sessionIdentity) { @MainActor [weak self] in
+                    await self?.completeFiniteSession()
                 }
-                await updateLiveActivity()
-                // History backs the History tab in both scopes; the query keys
-                // on the remembered focused host, which stays valid in All Hosts.
-                await refreshHistoryIfStale()
-                try? await Task.sleep(for: .seconds(1))
+                return nil
             }
+            await self.updateLiveActivity()
+            // History backs the History tab in both scopes; the query keys
+            // on the remembered focused host, which stays valid in All Hosts.
+            await self.refreshHistoryIfStale()
+            let nextProbeDeadline = if self.hostScope == .allHosts {
+                await self.multiHostCoordinator.nextProbeDeadline()
+            } else {
+                await self.controller.nextProbeDeadline()
+            }
+            return PingScopeIOSRefreshCadence.interval(
+                nextProbeDeadline: nextProbeDeadline,
+                duration: self.presentedSession?.duration ?? .continuous,
+                now: Date()
+            )
         }
     }
 
@@ -1396,7 +1410,7 @@ private final class PingScopeIOSAppModel: ObservableObject {
         await ensureLiveActivityForPresentedSession()
         guard isCurrentLifecycle(context) else { return false }
         applyBackgroundKeepAlive()
-        if isMonitoringActive, refreshTask == nil {
+        if isMonitoringActive, !refreshLoopDriver.isRunning {
             startRefreshLoop()
         }
         return true
@@ -1451,8 +1465,10 @@ private final class PingScopeIOSAppModel: ObservableObject {
 
     private func notificationMeasurementObserver() -> PingScopeIOSMeasurementObserver {
         let notificationEngine = notificationEngine
+        let failureLogSuppressor = failureLogSuppressor
         return { result, previousStatus, currentStatus in
-            if !result.isSuccess {
+            if let reason = result.failureReason,
+               await failureLogSuppressor.shouldLog(hostID: result.hostID, reason: reason) {
                 DebugLog.write("iOS probe failed host=\(result.hostID.uuidString) reason=\(String(describing: result.failureReason))")
             }
             await notificationEngine.ingest(
@@ -1517,20 +1533,19 @@ private final class PingScopeIOSAppModel: ObservableObject {
         // A scope switch may have landed while we were suspended; stale
         // all-hosts data must not overwrite the focused presentation.
         guard hostScope == .allHosts else { return }
-        let presentationEndDate = Date()
-        allHostRows = snapshots.map { snapshot in
-            PingScopeIOSHostRowSnapshot(
-                host: snapshot.host,
-                health: snapshot.health,
-                samples: snapshot.series.samples,
-                isStale: snapshot.session.map { $0.phase() != .live } ?? false
+        let presentationUpdate = allHostPresentationCache.resolve(snapshots)
+        allHostLatestResult = presentationUpdate.latestResult
+        if let supplemental = presentationUpdate.valueIfPresentationChanged({
+            (
+                insights: PingScopeIOSMonitorInsightsPresentation(snapshots: snapshots),
+                endDate: Date()
             )
+        }) {
+            allHostRows = presentationUpdate.rows
+            allHostGraphSeries = presentationUpdate.series
+            monitorInsights = supplemental.insights
+            allHostsPresentationEndDate = supplemental.endDate
         }
-        allHostGraphSeries = snapshots.map { snapshot in
-            PingScopeIOSHostGraphSeries(hostID: snapshot.host.id, samples: snapshot.series.samples)
-        }
-        monitorInsights = PingScopeIOSMonitorInsightsPresentation(snapshots: snapshots)
-        allHostsPresentationEndDate = presentationEndDate
         // The widget must keep updating in All Hosts scope too; without this the
         // app-group snapshot freezes at the moment of the scope switch.
         await publishWidgetSnapshot(allHostsSnapshots: snapshots)
@@ -1607,25 +1622,15 @@ private final class PingScopeIOSAppModel: ObservableObject {
         let selectedHost = snapshot.host
         let thresholds = selectedHost.thresholds
         let allHosts = hosts
-        var weeklySamples: [UUID: [PingResult]] = [:]
+        let digest: HistoryWeeklyDigest?
         if let historyStore {
-            let weeklyCutoff = now.addingTimeInterval(-HistoryWeeklyDigest.windowDuration)
-            for host in allHosts {
-                weeklySamples[host.id] = await historyStore.latestSamples(
-                    hostID: host.id,
-                    since: weeklyCutoff,
-                    limit: Int.max
-                )
-            }
+            digest = await weeklyDigestLoader.load(store: historyStore, hosts: allHosts, endingAt: now)
+        } else {
+            digest = nil
         }
         guard snapshot.host.id == selection.hostID,
               historyRange == selection.range else { return }
         let presentation = await Task.detached(priority: .userInitiated) {
-            let digest = HistoryWeeklyDigest.make(
-                hosts: allHosts,
-                samplesByHost: weeklySamples,
-                endingAt: now
-            )
             return PingScopeIOSHistoryPresentation(
                 loadResult: result,
                 host: selectedHost,
@@ -1657,17 +1662,39 @@ private final class PingScopeIOSAppModel: ObservableObject {
     }
 
     private func publishWidgetSnapshot(allHostsSnapshots: [LiveMonitorSessionSnapshot]? = nil) async {
-        let widgetSnapshot: WidgetSnapshot
+        let generatedAt = Date()
+        var widgetSnapshot: WidgetSnapshot
+        let snapshots: [LiveMonitorSessionSnapshot]?
         if hostScope == .allHosts {
-            let snapshots: [LiveMonitorSessionSnapshot]
             if let allHostsSnapshots {
                 snapshots = allHostsSnapshots
             } else {
                 snapshots = await multiHostCoordinator.orderedSnapshots()
             }
-            widgetSnapshot = makeAllHostsWidgetSnapshot(snapshots: snapshots)
+            widgetSnapshot = makeAllHostsWidgetSnapshot(
+                snapshots: snapshots ?? [],
+                includeRecentSamples: false,
+                generatedAt: generatedAt
+            )
         } else {
-            widgetSnapshot = makeFocusedWidgetSnapshot()
+            snapshots = nil
+            widgetSnapshot = makeFocusedWidgetSnapshot(
+                includeRecentSamples: false,
+                generatedAt: generatedAt
+            )
+        }
+        if PingScopeIOSWidgetCheapPublishGate.canSkipSampleConstruction(
+            candidateWithoutSamples: widgetSnapshot,
+            previousSnapshot: lastPublishedWidgetSnapshot,
+            lastTimelineReloadAt: lastWidgetTimelineReloadAt,
+            policy: widgetPublishPolicy
+        ) {
+            return
+        }
+        if let snapshots {
+            widgetSnapshot.recentSamples = makeAllHostsWidgetSamples(snapshots: snapshots)
+        } else {
+            widgetSnapshot.recentSamples = makeFocusedWidgetSamples()
         }
         let publishDecision = widgetPublishPolicy.decision(
             for: widgetSnapshot,
@@ -1677,7 +1704,7 @@ private final class PingScopeIOSAppModel: ObservableObject {
         guard publishDecision.shouldSave else { return }
         lastPublishedWidgetSnapshot = widgetSnapshot
         guard await widgetSnapshotStore.save(widgetSnapshot) else { return }
-        if #available(iOS 18.0, *) {
+        if publishDecision.shouldReloadControls, #available(iOS 18.0, *) {
             ControlCenter.shared.reloadControls(ofKind: PingScopeIOSControlKind.monitoring)
             ControlCenter.shared.reloadControls(ofKind: PingScopeIOSControlKind.status)
         }
@@ -1687,14 +1714,12 @@ private final class PingScopeIOSAppModel: ObservableObject {
         }
     }
 
-    private func makeFocusedWidgetSnapshot() -> WidgetSnapshot {
+    private func makeFocusedWidgetSnapshot(
+        includeRecentSamples: Bool = true,
+        generatedAt: Date = Date()
+    ) -> WidgetSnapshot {
         let host = snapshot.host
-        let recentResults = presenter.mergedSamples(
-            history: historySamples,
-            live: snapshot.series.samples,
-            range: .tenMinutes
-        )
-        .suffix(60)
+        let recentSamples = includeRecentSamples ? makeFocusedWidgetSamples() : []
 
         return WidgetSnapshot(
             primaryHostID: host.id,
@@ -1718,14 +1743,28 @@ private final class PingScopeIOSAppModel: ObservableObject {
                     latestResultAt: snapshot.health.latestResult?.timestamp
                 )
             ],
-            recentSamples: recentResults.map(WidgetSample.init(result:)),
+            recentSamples: recentSamples,
             networkStatus: .connected,
-            generatedAt: Date(),
+            generatedAt: generatedAt,
             monitoring: WidgetMonitoringContext(isActive: isMonitoringActive, scope: .focused)
         )
     }
 
-    private func makeAllHostsWidgetSnapshot(snapshots: [LiveMonitorSessionSnapshot]) -> WidgetSnapshot {
+    private func makeFocusedWidgetSamples() -> [WidgetSample] {
+        presenter.mergedSamples(
+            history: historySamples,
+            live: snapshot.series.samples,
+            range: .tenMinutes
+        )
+        .suffix(60)
+        .map(WidgetSample.init(result:))
+    }
+
+    private func makeAllHostsWidgetSnapshot(
+        snapshots: [LiveMonitorSessionSnapshot],
+        includeRecentSamples: Bool = true,
+        generatedAt: Date = Date()
+    ) -> WidgetSnapshot {
         let hosts = snapshots.map { entry in
             WidgetHost(
                 id: entry.host.id,
@@ -1746,19 +1785,23 @@ private final class PingScopeIOSAppModel: ObservableObject {
                 latestResultAt: entry.health.latestResult?.timestamp
             )
         }
-        let recentResults = snapshots
-            .flatMap { $0.series.samples.suffix(60) }
-            .sorted { $0.timestamp < $1.timestamp }
-            .suffix(60)
         return WidgetSnapshot(
             primaryHostID: snapshot.host.id,
             hosts: hosts,
             health: health,
-            recentSamples: recentResults.map(WidgetSample.init(result:)),
+            recentSamples: includeRecentSamples ? makeAllHostsWidgetSamples(snapshots: snapshots) : [],
             networkStatus: .connected,
-            generatedAt: Date(),
+            generatedAt: generatedAt,
             monitoring: WidgetMonitoringContext(isActive: isMonitoringActive, scope: .allHosts)
         )
+    }
+
+    private func makeAllHostsWidgetSamples(snapshots: [LiveMonitorSessionSnapshot]) -> [WidgetSample] {
+        snapshots
+            .flatMap { $0.series.samples.suffix(60) }
+            .sorted { $0.timestamp < $1.timestamp }
+            .suffix(60)
+            .map(WidgetSample.init(result:))
     }
 
     private func beginBackgroundRuntimeIfNeeded(originatingAt sceneEpoch: PingScopeIOSLifecycleSceneEpoch) async {
@@ -1946,13 +1989,10 @@ private final class PingScopeIOSAppModel: ObservableObject {
 
         let activityRows = PingScopeIOSHostScopePresentation.activityRows(from: allHostRows)
             .map(PingScopeLiveActivityHostRow.init(snapshot:))
-        let latestResult = allHostGraphSeries
-            .flatMap(\.samples)
-            .max { lhs, rhs in lhs.timestamp < rhs.timestamp }
         return PingScopeLiveActivityAttributes.ContentState(
             latencyMilliseconds: nil,
             status: PingScopeIOSHostScopePresentation.aggregateStatus(from: allHostRows),
-            lastUpdatedAt: latestResult?.timestamp,
+            lastUpdatedAt: allHostLatestResult?.timestamp,
             remainingSeconds: session.duration == .continuous
                 ? 0
                 : Int(session.remainingDuration(at: date).seconds.rounded(.down)),

@@ -2,11 +2,78 @@ import PingScopeCore
 import PingScopeHistoryKit
 import SwiftUI
 
+enum PingScopeIOSAveragePathBuilder {
+    struct Segment<Line> {
+        let line: Line?
+        let first: CGPoint
+        let last: CGPoint
+    }
+
+    static func build<Line>(
+        segments: [[CGPoint]],
+        makeLine: ([CGPoint]) -> Line
+    ) -> [Segment<Line>] {
+        segments.compactMap { points in
+            guard let first = points.first, let last = points.last else { return nil }
+            return Segment(
+                line: points.count > 1 ? makeLine(points) : nil,
+                first: first,
+                last: last
+            )
+        }
+    }
+}
+
+struct PingScopeIOSHistoryContentMemo<Key: Hashable, Value> {
+    private var cache = BoundedMemo<Key, Value>(capacity: 4)
+
+    mutating func resolve(_ key: Key, build: () -> Value) -> Value {
+        cache.resolve(key, build: build)
+    }
+}
+
 #if os(iOS)
 public struct PingScopeIOSHistoryChartView: View {
+    private struct ContentCacheKey: Hashable {
+        let range: HistoryRange
+        let samples: AppendOnlySequenceFingerprint<UUID>
+        let startDate: Date
+        let endDate: Date
+        let selection: HistoryNetworkSelection
+    }
+
+    private struct ContentCache {
+        let key: ContentCacheKey
+        let networkPresentation: HistoryNetworkPresentation
+        let visiblePresentation: PingScopeIOSHistoryPresentation
+    }
+
+    @MainActor
+    private final class ContentMemo: ObservableObject {
+        private var cache = PingScopeIOSHistoryContentMemo<ContentCacheKey, ContentCache>()
+
+        init(presentation: PingScopeIOSHistoryPresentation?) {
+            if let presentation {
+                let initial = PingScopeIOSHistoryChartView.makeContentCache(presentation, selection: .all)
+                _ = cache.resolve(initial.key) { initial }
+            }
+        }
+
+        func resolve(
+            _ presentation: PingScopeIOSHistoryPresentation,
+            selection: HistoryNetworkSelection
+        ) -> ContentCache {
+            let key = PingScopeIOSHistoryChartView.contentCacheKey(for: presentation, selection: selection)
+            return cache.resolve(key) {
+                PingScopeIOSHistoryChartView.makeContentCache(presentation, selection: selection)
+            }
+        }
+    }
+
     public let selectedRange: HistoryRange
     public let resolvedPresentation: PingScopeIOSResolvedHistoryPresentation
     @State private var networkSelection: HistoryNetworkSelection = .all
+    @StateObject private var contentMemo: ContentMemo
 
     public init(
         selectedRange: HistoryRange,
@@ -14,6 +81,12 @@ public struct PingScopeIOSHistoryChartView: View {
     ) {
         self.selectedRange = selectedRange
         self.resolvedPresentation = resolvedPresentation
+        let presentation: PingScopeIOSHistoryPresentation? = if case let .content(content) = resolvedPresentation {
+            content
+        } else {
+            nil
+        }
+        _contentMemo = StateObject(wrappedValue: ContentMemo(presentation: presentation))
     }
 
     public var body: some View {
@@ -23,7 +96,10 @@ public struct PingScopeIOSHistoryChartView: View {
                 case .loading:
                     loadingCard
                 case let .content(presentation):
-                    historyContent(presentation)
+                    historyContent(
+                        presentation,
+                        cache: contentMemo.resolve(presentation, selection: networkSelection)
+                    )
                 }
             }
             .padding(.horizontal, 20)
@@ -33,12 +109,9 @@ public struct PingScopeIOSHistoryChartView: View {
     }
 
     @ViewBuilder
-    private func historyContent(_ presentation: PingScopeIOSHistoryPresentation) -> some View {
-        let networkPresentation = HistoryNetworkPresentation(
-            samples: presentation.sourceSamples,
-            selection: networkSelection
-        )
-        let visiblePresentation = presentation.applyingNetworkSelection(networkSelection)
+    private func historyContent(_ presentation: PingScopeIOSHistoryPresentation, cache: ContentCache) -> some View {
+        let networkPresentation = cache.networkPresentation
+        let visiblePresentation = cache.visiblePresentation
         VStack(alignment: .leading, spacing: 16) {
             if let collectingText = presentation.collectingText {
                 Label(collectingText, systemImage: "clock.badge.checkmark")
@@ -81,6 +154,30 @@ public struct PingScopeIOSHistoryChartView: View {
         }
     }
 
+    private static func makeContentCache(
+        _ presentation: PingScopeIOSHistoryPresentation,
+        selection: HistoryNetworkSelection
+    ) -> ContentCache {
+        ContentCache(
+            key: contentCacheKey(for: presentation, selection: selection),
+            networkPresentation: HistoryNetworkPresentation(samples: presentation.sourceSamples, selection: selection),
+            visiblePresentation: presentation.applyingNetworkSelection(selection)
+        )
+    }
+
+    private static func contentCacheKey(
+        for presentation: PingScopeIOSHistoryPresentation,
+        selection: HistoryNetworkSelection
+    ) -> ContentCacheKey {
+        ContentCacheKey(
+            range: presentation.range,
+            samples: AppendOnlySequenceFingerprint(samples: presentation.sourceSamples),
+            startDate: presentation.graphData.startDate,
+            endDate: presentation.graphData.endDate,
+            selection: selection
+        )
+    }
+
     private var loadingCard: some View {
         VStack(spacing: 12) {
             ProgressView()
@@ -114,7 +211,7 @@ public struct PingScopeIOSHistoryChartView: View {
     }
 
     private func sessionsSection(_ presentation: PingScopeIOSHistoryPresentation) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
+        LazyVStack(alignment: .leading, spacing: 10) {
             Text("Sessions")
                 .font(.headline)
 
@@ -385,8 +482,9 @@ private struct HistoryLatencyGraphCard: View {
                 Canvas { context, size in
                     drawGrid(context: &context, size: size)
                     drawExtremaBand(context: &context, size: size)
-                    drawAverageFill(context: &context, size: size)
-                    drawAverageLine(context: &context, size: size)
+                    let averagePaths = averageSegmentPaths(size: size)
+                    drawAverageFill(context: &context, size: size, paths: averagePaths)
+                    drawAverageLine(context: &context, paths: averagePaths)
                     drawFailureMarkers(context: &context, size: size)
                 }
                 .accessibilityLabel("Latency history graph")
@@ -429,6 +527,14 @@ private struct HistoryLatencyGraphCard: View {
         }
     }
 
+    private func averageSegmentPaths(size: CGSize) -> [PingScopeIOSAveragePathBuilder.Segment<Path>] {
+        PingScopeIOSAveragePathBuilder.build(
+            segments: graphPresentation.averageLineSegments.map { averagePoints($0, size: size) }
+        ) { points in
+            Path(LatencyCurve.smoothedPath(points: points, closed: false))
+        }
+    }
+
     private func xPosition(_ date: Date, size: CGSize) -> CGFloat {
         let duration = max(renderData.endDate.timeIntervalSince(renderData.startDate), 1)
         let elapsed = date.timeIntervalSince(renderData.startDate)
@@ -467,13 +573,15 @@ private struct HistoryLatencyGraphCard: View {
         }
     }
 
-    private func drawAverageFill(context: inout GraphicsContext, size: CGSize) {
-        for segment in graphPresentation.averageLineSegments {
-            let points = averagePoints(segment, size: size)
-            guard points.count > 1, let first = points.first, let last = points.last else { continue }
-            var path = Path(LatencyCurve.smoothedPath(points: points, closed: false))
-            path.addLine(to: CGPoint(x: last.x, y: size.height))
-            path.addLine(to: CGPoint(x: first.x, y: size.height))
+    private func drawAverageFill(
+        context: inout GraphicsContext,
+        size: CGSize,
+        paths: [PingScopeIOSAveragePathBuilder.Segment<Path>]
+    ) {
+        for averagePath in paths {
+            guard var path = averagePath.line else { continue }
+            path.addLine(to: CGPoint(x: averagePath.last.x, y: size.height))
+            path.addLine(to: CGPoint(x: averagePath.first.x, y: size.height))
             path.closeSubpath()
             context.fill(path, with: .linearGradient(
                 Gradient(colors: [graphColor.opacity(0.24), graphColor.opacity(0)]),
@@ -483,16 +591,19 @@ private struct HistoryLatencyGraphCard: View {
         }
     }
 
-    private func drawAverageLine(context: inout GraphicsContext, size: CGSize) {
-        for segment in graphPresentation.averageLineSegments {
-            let points = averagePoints(segment, size: size)
-            if points.count > 1 {
+    private func drawAverageLine(
+        context: inout GraphicsContext,
+        paths: [PingScopeIOSAveragePathBuilder.Segment<Path>]
+    ) {
+        for averagePath in paths {
+            if let path = averagePath.line {
                 context.stroke(
-                    Path(LatencyCurve.smoothedPath(points: points, closed: false)),
+                    path,
                     with: .color(graphColor),
                     style: StrokeStyle(lineWidth: 2.4, lineCap: .round, lineJoin: .round)
                 )
-            } else if let point = points.first {
+            } else {
+                let point = averagePath.first
                 context.fill(Path(ellipseIn: CGRect(x: point.x - 2, y: point.y - 2, width: 4, height: 4)), with: .color(graphColor))
             }
         }

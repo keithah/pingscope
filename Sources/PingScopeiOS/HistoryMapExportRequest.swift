@@ -75,6 +75,24 @@ public struct HistoryMapFileLifecycle {
         }
     }
 
+    public func exportAsync(
+        hostName: String,
+        write: @escaping @Sendable (URL) async throws -> Void
+    ) async throws -> HistorySharePayload {
+        try fileManager.createDirectory(at: temporaryDirectory, withIntermediateDirectories: true)
+        let destination = temporaryDirectory.appendingPathComponent(
+            "pingscope-\(slug(hostName))-map-\(UUID().uuidString).png",
+            isDirectory: false
+        )
+        do {
+            try await write(destination)
+            return HistorySharePayload(files: [destination])
+        } catch {
+            try? fileManager.removeItem(at: destination)
+            throw error
+        }
+    }
+
     private func slug(_ value: String) -> String {
         let slug = value.lowercased().map { $0.isLetter || $0.isNumber ? $0 : "-" }
             .reduce(into: "") { result, character in

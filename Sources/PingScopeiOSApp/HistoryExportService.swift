@@ -34,9 +34,9 @@ final class HistoryExportService: HistoryExportServicing {
         presentation: HistoryReportPresentation,
         format: HistoryReportFormat
     ) async throws -> HistorySharePayload {
-        try reportFileLifecycle.export(hostName: presentation.hostName, format: format) { destination in
-            let data = try renderReport(presentation, format: format)
-            try data.write(to: destination, options: .atomic)
+        let data = try renderReport(presentation, format: format)
+        return try await reportFileLifecycle.exportAsync(hostName: presentation.hostName, format: format) { destination in
+            try await HistoryFileWriteOperation.write(data, to: destination)
         }
     }
 
@@ -96,17 +96,16 @@ final class HistoryExportService: HistoryExportServicing {
             return HistoryMapExportPoint(x: point.x, y: point.y)
         }
 
-        return try mapFileLifecycle.export(hostName: request.host.displayName) { destination in
-            try Task.checkCancellation()
-            let renderer = UIGraphicsImageRenderer(size: options.size)
-            let image = renderer.image { context in
-                snapshot.image.draw(in: bounds)
-                draw(plan, region: request.visibleRegion, in: context.cgContext, size: options.size)
-            }
-            guard let data = image.pngData() else {
-                throw HistoryMapRenderingError.pngEncodingFailed
-            }
-            try data.write(to: destination, options: .atomic)
+        let renderer = UIGraphicsImageRenderer(size: options.size)
+        let image = renderer.image { context in
+            snapshot.image.draw(in: bounds)
+            draw(plan, region: request.visibleRegion, in: context.cgContext, size: options.size)
+        }
+        guard let data = image.pngData() else {
+            throw HistoryMapRenderingError.pngEncodingFailed
+        }
+        return try await mapFileLifecycle.exportAsync(hostName: request.host.displayName) { destination in
+            try await HistoryFileWriteOperation.write(data, to: destination)
             try Task.checkCancellation()
         }
     }
