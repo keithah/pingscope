@@ -9,6 +9,62 @@ private let displayPresentationPointsOfInterestLog = OSLog(
 )
 #endif
 
+struct PingScopeDisplayPreparation {
+    let visibleHistorySamples: [PingResult]
+    let visibleSamples: [PingResult]
+    let allHostGraphSeries: [HostLatencyGraphSeries]
+
+    init(
+        visibleHistorySamples: [PingResult],
+        visibleSamples: [PingResult],
+        allHostGraphSeries: [HostLatencyGraphSeries]
+    ) {
+        self.visibleHistorySamples = visibleHistorySamples
+        self.visibleSamples = visibleSamples
+        self.allHostGraphSeries = allHostGraphSeries
+    }
+
+    init(
+        snapshot: RuntimeSnapshot,
+        selectedRange: TimeRange,
+        visibleHistorySamples: [PingResult],
+        includesAllHosts: Bool,
+        presenter: DisplayStatePresenter,
+        now: Date
+    ) {
+        let liveSamples = presenter.visibleSamples(in: snapshot.primarySeries, range: selectedRange, now: now)
+        self.visibleHistorySamples = visibleHistorySamples
+        self.visibleSamples = presenter.mergedSamples(
+            history: visibleHistorySamples,
+            live: liveSamples,
+            range: selectedRange,
+            now: now
+        )
+        self.allHostGraphSeries = includesAllHosts
+            ? Self.makeAllHostGraphSeries(snapshot: snapshot, selectedRange: selectedRange, now: now)
+            : []
+    }
+
+    private static func makeAllHostGraphSeries(
+        snapshot: RuntimeSnapshot,
+        selectedRange: TimeRange,
+        now: Date
+    ) -> [HostLatencyGraphSeries] {
+        let cutoff = now.addingTimeInterval(-selectedRange.duration)
+        let primaryHostID = snapshot.primaryHost?.id
+        return snapshot.hosts.enumerated().compactMap { index, host in
+            guard host.isEnabled else { return nil }
+            let samples = snapshot.samplesByHost[host.id]?.samples(since: cutoff) ?? []
+            return HostLatencyGraphSeries(
+                host: host,
+                samples: samples,
+                color: HostLatencyGraphSeries.palette[index % HostLatencyGraphSeries.palette.count],
+                isPrimary: host.id == primaryHostID
+            )
+        }
+    }
+}
+
 struct PingScopeDisplayPresentation {
     let visibleHistorySamples: [PingResult]
     let visibleSamples: [PingResult]
@@ -40,6 +96,27 @@ struct PingScopeDisplayPresentation {
         presenter: DisplayStatePresenter,
         now: Date = Date()
     ) {
+        self.init(
+            snapshot: snapshot,
+            preparation: PingScopeDisplayPreparation(
+                snapshot: snapshot,
+                selectedRange: selectedRange,
+                visibleHistorySamples: visibleHistorySamples,
+                includesAllHosts: includesAllHosts,
+                presenter: presenter,
+                now: now
+            ),
+            includesAllHosts: includesAllHosts,
+            presenter: presenter
+        )
+    }
+
+    init(
+        snapshot: RuntimeSnapshot,
+        preparation: PingScopeDisplayPreparation,
+        includesAllHosts: Bool,
+        presenter: DisplayStatePresenter
+    ) {
         #if DEBUG
         let signpostID = OSSignpostID(log: displayPresentationPointsOfInterestLog)
         os_signpost(
@@ -57,30 +134,19 @@ struct PingScopeDisplayPresentation {
             )
         }
         #endif
-        let liveSamples = presenter.visibleSamples(in: snapshot.primarySeries, range: selectedRange, now: now)
-        let visibleSamples = presenter.mergedSamples(
-            history: visibleHistorySamples,
-            live: liveSamples,
-            range: selectedRange,
-            now: now
-        )
-        let allHostGraphSeries = includesAllHosts
-            ? Self.makeAllHostGraphSeries(snapshot: snapshot, selectedRange: selectedRange, now: now)
-            : []
-
-        self.visibleHistorySamples = visibleHistorySamples
-        self.visibleSamples = visibleSamples
-        self.allHostGraphSeries = allHostGraphSeries
+        self.visibleHistorySamples = preparation.visibleHistorySamples
+        self.visibleSamples = preparation.visibleSamples
+        self.allHostGraphSeries = preparation.allHostGraphSeries
         self.hostStatusSummaries = presenter.hostStatusSummaries(in: snapshot)
-        self.primaryGraphData = LatencyGraphData(samples: visibleSamples)
-        self.allHostsGraphData = MultiHostLatencyGraphData(series: allHostGraphSeries)
-        self.primaryStats = SampleStats(samples: visibleSamples)
+        self.primaryGraphData = LatencyGraphData(samples: preparation.visibleSamples)
+        self.allHostsGraphData = MultiHostLatencyGraphData(series: preparation.allHostGraphSeries)
+        self.primaryStats = SampleStats(samples: preparation.visibleSamples)
         self.latestStarlinkTelemetry = Self.latestStarlinkTelemetry(
-            in: visibleSamples,
+            in: preparation.visibleSamples,
             primaryHost: snapshot.primaryHost,
             includesAllHosts: includesAllHosts
         )
-        self.recentVisibleSamples = Array(visibleSamples.suffix(8).reversed())
+        self.recentVisibleSamples = Array(preparation.visibleSamples.suffix(8).reversed())
     }
 
     private static func latestStarlinkTelemetry(
@@ -95,22 +161,4 @@ struct PingScopeDisplayPresentation {
         return visibleSamples.reversed().lazy.compactMap(\.metadata.starlink).first
     }
 
-    private static func makeAllHostGraphSeries(
-        snapshot: RuntimeSnapshot,
-        selectedRange: TimeRange,
-        now: Date
-    ) -> [HostLatencyGraphSeries] {
-        let cutoff = now.addingTimeInterval(-selectedRange.duration)
-        let primaryHostID = snapshot.primaryHost?.id
-        return snapshot.hosts.enumerated().compactMap { index, host in
-            guard host.isEnabled else { return nil }
-            let samples = snapshot.samplesByHost[host.id]?.samples(since: cutoff) ?? []
-            return HostLatencyGraphSeries(
-                host: host,
-                samples: samples,
-                color: HostLatencyGraphSeries.palette[index % HostLatencyGraphSeries.palette.count],
-                isPrimary: host.id == primaryHostID
-            )
-        }
-    }
 }

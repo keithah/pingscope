@@ -16,14 +16,36 @@ private let snapshotPointsOfInterestLog = OSLog(
 )
 #endif
 
+typealias DisplayPresentationSampleFingerprint = PerHostSampleFingerprint
+
 struct DisplayPresentationInputKey: Equatable {
-    let visibleSamples: [PingResult]
+    let visibleSamples: DisplayPresentationSampleFingerprint
     let selectedRange: TimeRange
     let includesAllHosts: Bool
     let primaryHost: HostConfig?
     let hosts: [HostConfig]
     let healthByHost: [UUID: HostHealth]
-    let allHostVisibleSamples: [UUID: [PingResult]]?
+    let allHostVisibleSamples: [UUID: DisplayPresentationSampleFingerprint]?
+
+    init(
+        visibleSamples: [PingResult],
+        selectedRange: TimeRange,
+        includesAllHosts: Bool,
+        primaryHost: HostConfig?,
+        hosts: [HostConfig],
+        healthByHost: [UUID: HostHealth],
+        allHostVisibleSamples: [UUID: [PingResult]]?
+    ) {
+        self.visibleSamples = DisplayPresentationSampleFingerprint(samples: visibleSamples)
+        self.selectedRange = selectedRange
+        self.includesAllHosts = includesAllHosts
+        self.primaryHost = primaryHost
+        self.hosts = hosts
+        self.healthByHost = healthByHost
+        self.allHostVisibleSamples = allHostVisibleSamples?.mapValues { samples in
+            DisplayPresentationSampleFingerprint(samples: samples)
+        }
+    }
 }
 
 @MainActor
@@ -257,6 +279,7 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
     var endpointRefreshTask: Task<Void, Never>?
     private var historyTask: Task<Void, Never>?
     var historySurfaceTask: Task<Void, Never>?
+    var historySurfaceLoadToken: UInt64 = 0
     private var overlayFramePersistTask: Task<Void, Never>?
     var widgetSnapshotPublishTask: Task<Void, Never>?
     var notificationRulesTask: Task<Void, Never>?
@@ -275,8 +298,8 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
     private let cloudSyncService: PingScopeCloudSyncService?
     private var lastCloudSyncHostIDs: Set<UUID> = []
     private var lastCloudSyncHostsByID: [UUID: HostConfig] = [:]
-    let historySurfaceStore: (any PingHistoryStore)?
-    let historySurfaceLoader = MacHistorySurfaceLoader()
+    var historySurfaceStore: (any PingHistoryStore)?
+    var historySurfaceLoader: any MacHistorySurfaceLoading
     private var lastObservedGateway: String?
     private var lastNetworkPathSignature: String?
     var onMenuStateChanged: ((MenuBarState) -> Void)?
@@ -332,6 +355,7 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
             }
         )
         self.historySurfaceStore = historyStore
+        self.historySurfaceLoader = MacHistorySurfaceLoader()
         self.cloudSyncService = cloudSyncService
         self.hostConfigPersistence = hostConfigPersistence
         self.hostTester = HostTester(probeFactory: probeFactory)
@@ -359,6 +383,24 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
         self.overlayFrame = UserDefaults.standard.overlayFrame ?? NSRect(x: 80, y: 620, width: 240, height: 96)
         super.init()
         configureCloudSync()
+    }
+
+    convenience init(
+        historySurfaceStore: any PingHistoryStore,
+        historySurfaceLoader: any MacHistorySurfaceLoading,
+        configuredHosts: [HostConfig],
+        primaryHostID: UUID?
+    ) {
+        self.init()
+        self.historySurfaceStore = historySurfaceStore
+        self.historySurfaceLoader = historySurfaceLoader
+        self.configuredHosts = configuredHosts
+        self.configuredPrimaryHostID = primaryHostID
+    }
+
+    func replaceConfiguredHostsForTesting(_ hosts: [HostConfig], primaryHostID: UUID?) {
+        configuredHosts = hosts
+        configuredPrimaryHostID = primaryHostID
     }
 
     var primaryHost: HostConfig? {
@@ -559,7 +601,10 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
         networkTask?.cancel()
         endpointRefreshTask?.cancel()
         historyTask?.cancel()
+        historySurfaceLoadToken += 1
         historySurfaceTask?.cancel()
+        historySurfaceTask = nil
+        isLoadingHistorySurface = false
         displayPresentationRecomputeScheduler.cancel()
         overlayFramePersistTask?.cancel()
         notificationRulesTask?.cancel()
@@ -946,27 +991,23 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
         }
         let now = Date()
         let includesAllHosts = overlayShowsAllHosts || popoverShowsAllHosts
-        let liveSamples = presenter.visibleSamples(in: snapshot.primarySeries, range: selectedRange, now: now)
-        let mergedVisibleSamples = presenter.mergedSamples(
-            history: presentationVisibleHistorySamples,
-            live: liveSamples,
-            range: selectedRange,
+        let preparation = PingScopeDisplayPreparation(
+            snapshot: snapshot,
+            selectedRange: selectedRange,
+            visibleHistorySamples: presentationVisibleHistorySamples,
+            includesAllHosts: includesAllHosts,
+            presenter: presenter,
             now: now
         )
         let allHostVisibleSamples: [UUID: [PingResult]]? = if includesAllHosts {
-            Dictionary(uniqueKeysWithValues: snapshot.hosts.lazy.filter(\.isEnabled).map { host in
-                (
-                    host.id,
-                    self.snapshot.samplesByHost[host.id]?.samples(
-                        since: now.addingTimeInterval(-self.selectedRange.duration)
-                    ) ?? []
-                )
+            Dictionary(uniqueKeysWithValues: preparation.allHostGraphSeries.map { series in
+                (series.host.id, series.samples)
             })
         } else {
             nil
         }
         let inputKey = DisplayPresentationInputKey(
-            visibleSamples: mergedVisibleSamples,
+            visibleSamples: preparation.visibleSamples,
             selectedRange: selectedRange,
             includesAllHosts: includesAllHosts,
             primaryHost: snapshot.primaryHost,
@@ -980,11 +1021,9 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
         liveDisplay.updateDisplayPresentation(
             PingScopeDisplayPresentation(
                 snapshot: snapshot,
-                selectedRange: selectedRange,
-                visibleHistorySamples: presentationVisibleHistorySamples,
+                preparation: preparation,
                 includesAllHosts: includesAllHosts,
-                presenter: presenter,
-                now: now
+                presenter: presenter
             )
         )
         onPresentationChanged?()

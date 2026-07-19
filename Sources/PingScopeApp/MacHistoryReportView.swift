@@ -51,11 +51,15 @@ struct MacHistoryReportSheet: View {
         panel.allowedContentTypes = [.png]
         panel.canCreateDirectories = true
         guard panel.runModal() == .OK, let destination = panel.url else { return }
-        do {
-            try data.write(to: destination, options: .atomic)
-            message = "Saved \(destination.lastPathComponent)"
-        } catch {
-            message = "Save failed: \(error.localizedDescription)"
+        Task {
+            do {
+                try await Task.detached(priority: .utility) {
+                    try data.write(to: destination, options: .atomic)
+                }.value
+                message = "Saved \(destination.lastPathComponent)"
+            } catch {
+                message = "Save failed: \(error.localizedDescription)"
+            }
         }
     }
 
@@ -128,6 +132,7 @@ struct MacHistoryReportCard: View {
             metricStrip
             HStack(alignment: .top, spacing: 18) {
                 networkHighlights.frame(maxWidth: .infinity, alignment: .topLeading)
+                locationHighlights.frame(maxWidth: .infinity, alignment: .topLeading)
                 sessionHighlights.frame(maxWidth: .infinity, alignment: .topLeading)
             }
         }
@@ -230,6 +235,34 @@ struct MacHistoryReportCard: View {
                 .padding(.vertical, 3)
             }
         }
+        .padding(14)
+        .background(Color.black.opacity(0.045), in: RoundedRectangle(cornerRadius: 14))
+    }
+
+    private var locationHighlights: some View {
+        let locations = presentation.locationPresentation
+        return VStack(alignment: .leading, spacing: 8) {
+            Text("LOCATIONS").font(.caption.bold()).foregroundStyle(.secondary)
+            if locations.locatedSampleCount > 0 {
+                Label(
+                    "\(locations.locatedSampleCount) of \(locations.totalSampleCount) samples",
+                    systemImage: "location.fill"
+                )
+                if let coordinate = locations.latestCoordinateText {
+                    Text(coordinate).monospacedDigit()
+                }
+                if let accuracy = locations.latestAccuracyText {
+                    Text("Latest accuracy \(accuracy)")
+                }
+                if !locations.networkLabels.isEmpty {
+                    Text(locations.networkLabels.joined(separator: " · ")).lineLimit(1)
+                }
+            } else {
+                Text("No tagged locations")
+            }
+        }
+        .font(.caption.weight(.medium))
+        .foregroundStyle(.secondary)
         .padding(14)
         .background(Color.black.opacity(0.045), in: RoundedRectangle(cornerRadius: 14))
     }

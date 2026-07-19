@@ -3,6 +3,19 @@ import Darwin
 import PingScopeCore
 import SwiftUI
 
+enum PingScopePrimaryWindowConfiguration {
+    static let tabbingIdentifier = "com.hadm.PingScope.primary"
+
+    @MainActor
+    static func apply(to window: NSWindow) {
+        window.styleMask.insert(.resizable)
+        window.isReleasedWhenClosed = false
+        window.hidesOnDeactivate = false
+        window.tabbingIdentifier = tabbingIdentifier
+        window.tabbingMode = .preferred
+    }
+}
+
 @main
 struct PingScopeApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
@@ -123,7 +136,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
                 defer: false
             )
             window.title = "PingScope Settings"
-            window.isReleasedWhenClosed = false
+            PingScopePrimaryWindowConfiguration.apply(to: window)
             window.contentView = NSHostingView(rootView: view)
             window.center()
             settingsWindowController = NSWindowController(window: window)
@@ -144,12 +157,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             )
             window.title = "PingScope History"
             window.minSize = NSSize(width: 760, height: 580)
-            window.isReleasedWhenClosed = false
+            PingScopePrimaryWindowConfiguration.apply(to: window)
             window.contentView = NSHostingView(rootView: HistoryWindowView(model: model))
             window.center()
             historyWindowController = NSWindowController(window: window)
         }
-        model.prepareHistorySurface()
         historyWindowController?.showWindow(nil)
         NSApp.activate(ignoringOtherApps: true)
         historyWindowController?.window?.makeKeyAndOrderFront(nil)
@@ -508,9 +520,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         }
         window.minSize = MenuBarPresentationMode.statusContentMinimumSize
         window.isReleasedWhenClosed = false
-        DispatchQueue.main.async { [weak window] in
-            window?.setContentSize(MenuBarPresentationMode.statusContentSize)
-        }
         return window
     }
 

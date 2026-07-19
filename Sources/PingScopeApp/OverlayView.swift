@@ -9,7 +9,7 @@ struct OverlayView: View {
     var body: some View {
         let presentation = viewModel.presentation
         Group {
-            switch presentation.displayMode.resolvedForHostScope(showsAllHosts: presentation.showsAllHosts) {
+            switch presentation.displayMode {
             case .signal:
                 presentation.compactMode ? AnyView(signalCompact) : AnyView(signalExpanded)
             case .ring:

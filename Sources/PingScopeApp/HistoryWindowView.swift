@@ -1,3 +1,4 @@
+import MapKit
 import PingScopeCore
 import PingScopeHistoryKit
 import SwiftUI
@@ -5,6 +6,7 @@ import SwiftUI
 struct HistoryWindowView: View {
     @ObservedObject var model: PingScopeModel
     @State private var reportPresentation: MacHistoryReportPresentation?
+    @State private var loadLifecycle = MacHistoryWindowLoadLifecycle()
 
     var body: some View {
         VStack(spacing: 0) {
@@ -32,8 +34,11 @@ struct HistoryWindowView: View {
         }
         .frame(minWidth: 760, minHeight: 580)
         .background(Color(nsColor: .windowBackgroundColor))
-        .onAppear { model.prepareHistorySurface() }
-        .onChange(of: model.historySurfaceRefreshKey) { _, _ in model.refreshHistorySurface() }
+        .onAppear {
+            if loadLifecycle.consumeFirstAppearance() {
+                model.prepareHistorySurface()
+            }
+        }
         .sheet(item: $reportPresentation) { report in
             MacHistoryReportSheet(report: report.content)
         }
@@ -41,7 +46,13 @@ struct HistoryWindowView: View {
 
     private var toolbar: some View {
         HStack(spacing: 14) {
-            Picker("Host", selection: $model.historySurfaceHostID) {
+            Picker("Host", selection: Binding(
+                get: { model.historySurfaceHostID },
+                set: { hostID in
+                    model.historySurfaceHostID = hostID
+                    model.refreshHistorySurface()
+                }
+            )) {
                 ForEach(model.configuredHosts) { host in
                     Text(host.displayName).tag(host.id as UUID?)
                 }
@@ -49,7 +60,13 @@ struct HistoryWindowView: View {
             .frame(width: 210)
             .accessibilityIdentifier("history.hostPicker")
 
-            Picker("Range", selection: $model.historySurfaceRange) {
+            Picker("Range", selection: Binding(
+                get: { model.historySurfaceRange },
+                set: { range in
+                    model.historySurfaceRange = range
+                    model.refreshHistorySurface()
+                }
+            )) {
                 ForEach(HistoryRange.allCases, id: \.self) { range in
                     Text(range.rawValue).tag(range)
                 }
@@ -58,7 +75,10 @@ struct HistoryWindowView: View {
             .accessibilityIdentifier("history.rangePicker")
 
             Spacer()
-            if model.isLoadingHistorySurface {
+            if MacHistoryLoadingPresentation.showsToolbarSpinner(
+                isLoading: model.isLoadingHistorySurface,
+                surface: model.historySurfacePresentation
+            ) {
                 ProgressView().controlSize(.small)
             }
             Button {
@@ -102,6 +122,23 @@ struct HistoryWindowView: View {
 
             metricStrip(presentation.metrics)
 
+            historySection("Locations") {
+                if presentation.mapPresentation.points.isEmpty {
+                    Label(
+                        "No tagged locations in this range. Locations captured on iPhone appear here after iCloud sync.",
+                        systemImage: "location.slash"
+                    )
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(14)
+                    .background(.quaternary.opacity(0.22), in: RoundedRectangle(cornerRadius: 12))
+                    .accessibilityIdentifier("history.locationEmptyState")
+                } else {
+                    MacHistoryMap(presentation: presentation.mapPresentation)
+                }
+            }
+
             if let digest = presentation.weeklyDigest {
                 historySection("Weekly digest") {
                     HStack(spacing: 0) {
@@ -142,10 +179,10 @@ struct HistoryWindowView: View {
             }
 
             historySection("Sessions") {
-                VStack(spacing: 0) {
-                    ForEach(Array(presentation.sessions.enumerated()), id: \.offset) { _, session in
+                LazyVStack(spacing: 0) {
+                    ForEach(presentation.sessions) { session in
                         HistorySessionRow(session: session)
-                        if session != presentation.sessions.last { Divider() }
+                        if session.id != presentation.sessions.last?.id { Divider() }
                     }
                 }
                 .padding(.horizontal, 14)
@@ -202,6 +239,66 @@ struct HistoryWindowView: View {
         if seconds >= 3_600 { return "\(seconds / 3_600)h \((seconds % 3_600) / 60)m" }
         if seconds >= 60 { return "\(seconds / 60)m \(seconds % 60)s" }
         return "\(seconds)s"
+    }
+}
+
+private struct MacHistoryMap: View {
+    let presentation: HistoryMapPresentation
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Map(initialPosition: .automatic) {
+                if presentation.route.count > 1 {
+                    MapPolyline(coordinates: presentation.route.map {
+                        CLLocationCoordinate2D(latitude: $0.latitude, longitude: $0.longitude)
+                    })
+                    .stroke(.blue.opacity(0.7), lineWidth: 3)
+                }
+                ForEach(presentation.points) { point in
+                    Annotation(
+                        HistoryMapPointDetailPresentation(point: point).accessibilitySummary,
+                        coordinate: CLLocationCoordinate2D(
+                            latitude: point.latitude,
+                            longitude: point.longitude
+                        )
+                    ) {
+                        Circle()
+                            .fill(color(for: point.quality))
+                            .stroke(.white, lineWidth: 2)
+                            .frame(width: 13, height: 13)
+                            .shadow(radius: 2)
+                    }
+                }
+            }
+            .mapStyle(.standard(elevation: .flat))
+            .frame(height: 300)
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .accessibilityIdentifier("history.locationMap")
+
+            HStack {
+                Text("\(presentation.points.count) located samples")
+                if !presentation.summary.networkLabels.isEmpty {
+                    Text(presentation.summary.networkLabels.joined(separator: " · "))
+                }
+                Spacer()
+                if let best = presentation.summary.bestLatencyMilliseconds,
+                   let worst = presentation.summary.worstLatencyMilliseconds {
+                    Text("Best \(Int(best.rounded())) ms · Worst \(Int(worst.rounded())) ms")
+                        .monospacedDigit()
+                }
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
+    }
+
+    private func color(for quality: HistoryMapQuality) -> Color {
+        switch quality {
+        case .fast: .green
+        case .moderate: .yellow
+        case .slow: .orange
+        case .failure: .red
+        }
     }
 }
 

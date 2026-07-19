@@ -17,7 +17,7 @@ struct StatusPopoverView: View {
             VStack(alignment: .leading, spacing: 13) {
                 header
 
-                switch presentation.displayMode.resolvedForHostScope(showsAllHosts: presentation.popoverShowsAllHosts) {
+                switch presentation.displayMode {
                 case .signal:
                     signalDisplay
                 case .ring:
@@ -446,15 +446,6 @@ struct StatusPopoverView: View {
         Color(statusColor: viewModel.presentation.selectedRangeState.color)
     }
 
-    private var statusForSelectedRange: HealthStatus {
-        switch viewModel.presentation.selectedRangeState.color {
-        case .green: .healthy
-        case .yellow: .degraded
-        case .red: .down
-        case .gray: .noData
-        }
-    }
-
     private var endpointCaption: String {
         hostSubtitle.replacingOccurrences(of: " ", with: " · ", options: [], range: hostSubtitle.range(of: " "))
     }
@@ -549,153 +540,6 @@ struct StatusPopoverView: View {
             RoundedRectangle(cornerRadius: 12)
                 .stroke(Color.white.opacity(0.05), lineWidth: 1)
         )
-    }
-
-    private var degradationReason: NetworkPerspectiveDiagnosis? {
-        let diagnosis = viewModel.presentation.networkDiagnosis
-        return NetworkDiagnosisPresentation(diagnosis: diagnosis).showsCompactRow ? diagnosis : nil
-    }
-}
-
-private struct AllHostStatusRow: View {
-    let summary: HostStatusSummary
-    let graphSeries: HostLatencyGraphSeries?
-
-    var body: some View {
-        HStack(spacing: 10) {
-            Circle()
-                .fill(Color(statusColor: summary.color))
-                .frame(width: 8, height: 8)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(summary.name)
-                    .font(.caption.weight(.semibold))
-                    .lineLimit(1)
-                Text(summary.endpoint)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            }
-            Spacer(minLength: 8)
-            LatencySparkline(graphData: sparklineGraphData, color: sparklineColor)
-                .frame(width: 58, height: 20)
-                .opacity(sparklineGraphData.hasLatencyData ? 1 : 0.18)
-            VStack(alignment: .trailing, spacing: 1) {
-                Text(summary.latencyText)
-                    .font(.system(size: 15, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(Color(statusColor: summary.color))
-                    .lineLimit(1)
-            }
-            .frame(width: 50, alignment: .trailing)
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 9)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(summary.accessibilityLabel)
-        .help(summary.accessibilityLabel)
-    }
-
-    private var sparklineGraphData: LatencyGraphData {
-        LatencyGraphData(samples: graphSeries?.samples ?? [])
-    }
-
-    private var sparklineColor: Color {
-        graphSeries?.color ?? Color(statusColor: summary.color)
-    }
-}
-
-private struct CompactDiagnosisReasonRow: View {
-    let diagnosis: NetworkPerspectiveDiagnosis
-
-    private var presentation: NetworkDiagnosisPresentation {
-        NetworkDiagnosisPresentation(diagnosis: diagnosis)
-    }
-
-    var body: some View {
-        HStack(spacing: 9) {
-            Image(systemName: presentation.systemImage)
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(tint)
-                .frame(width: 15)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(presentation.label)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(tint)
-                    .lineLimit(1)
-                Text(presentation.detail)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            }
-            Spacer(minLength: 0)
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 7)
-        .background(tint.opacity(0.10), in: RoundedRectangle(cornerRadius: 7))
-        .overlay(
-            RoundedRectangle(cornerRadius: 7)
-                .stroke(tint.opacity(0.24), lineWidth: 1)
-        )
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(presentation.accessibilityLabel)
-        .help(presentation.accessibilityLabel)
-    }
-
-    private var tint: Color {
-        switch presentation.tone {
-        case .red:
-            .red
-        case .orange:
-            .orange
-        case .yellow:
-            .yellow
-        case .gray:
-            .secondary
-        case .green:
-            .green
-        }
-    }
-}
-
-private struct StarlinkTelemetrySummary: View {
-    let presentation: StarlinkTelemetryPresentation
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Starlink")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
-            LazyVGrid(columns: [
-                GridItem(.flexible(), alignment: .leading),
-                GridItem(.flexible(), alignment: .leading),
-                GridItem(.flexible(), alignment: .leading)
-            ], alignment: .leading, spacing: 8) {
-                item("State", presentation.state)
-                item("Drop", presentation.dropRate)
-                item("Obstructed", presentation.obstruction)
-                item("Down", presentation.downlinkThroughput)
-                item("Up", presentation.uplinkThroughput)
-                item("Uptime", presentation.uptime)
-            }
-            if let alerts = presentation.alerts {
-                Text(alerts)
-                    .font(.caption)
-                    .foregroundStyle(.orange)
-                    .lineLimit(1)
-            }
-        }
-        .padding(10)
-        .background(Color.secondary.opacity(0.10), in: RoundedRectangle(cornerRadius: 8))
-    }
-
-    private func item(_ label: String, _ value: String) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(label)
-                .font(.caption2.weight(.semibold))
-                .foregroundStyle(.secondary)
-            Text(value)
-                .font(.caption.monospacedDigit())
-                .lineLimit(1)
-        }
     }
 
 }

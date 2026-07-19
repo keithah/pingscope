@@ -19,6 +19,7 @@ struct MacHistorySurfacePresentation: Equatable, Sendable {
     let chartReduction: HistoryChartReduction
     let metrics: HistoryMetrics
     let sessions: [HistorySession]
+    let mapPresentation: HistoryMapPresentation
     let networkTable: MacHistoryNetworkTablePresentation
     let incidentLog: HistoryIncidentLog
     let weeklyDigest: HistoryWeeklyDigest?
@@ -37,6 +38,7 @@ struct MacHistorySurfacePresentation: Equatable, Sendable {
         chartReduction = loadResult.chartReduction
         metrics = HistoryMetrics(samples: loadResult.samples)
         sessions = HistorySession.sessionize(loadResult.samples)
+        mapPresentation = HistoryMapPresentation(samples: loadResult.samples)
         networkTable = MacHistoryNetworkTablePresentation(samples: loadResult.samples)
         incidentLog = HistoryIncidentLog(samples: loadResult.samples, endingAt: loadResult.endingAt)
         self.weeklyDigest = weeklyDigest ?? host.flatMap {
@@ -67,7 +69,8 @@ struct MacHistoryReportPresentation: Equatable, Sendable, Identifiable {
         return MacHistoryReportPresentation(content: HistoryReportPresentation(
             host: host,
             range: surface.range,
-            samples: surface.samples
+            samples: surface.samples,
+            mapSummary: surface.mapPresentation.summary
         ))
     }
 
@@ -79,8 +82,29 @@ struct MacHistoryReportPresentation: Equatable, Sendable, Identifiable {
     }
 }
 
-actor MacHistorySurfaceLoader {
+struct MacHistoryLoadingPresentation {
+    nonisolated static func showsToolbarSpinner(
+        isLoading: Bool,
+        surface: MacHistorySurfacePresentation?
+    ) -> Bool {
+        isLoading && surface == nil
+    }
+}
+
+protocol MacHistorySurfaceLoading: Sendable {
+    func load(
+        store: any PingHistoryStore,
+        hostID: UUID,
+        range: HistoryRange,
+        host: HostConfig?,
+        allHosts: [HostConfig],
+        now: Date
+    ) async -> MacHistorySurfacePresentation?
+}
+
+actor MacHistorySurfaceLoader: MacHistorySurfaceLoading {
     private let loader = PingScopeIOSHistoryLoader()
+    private let weeklyDigestLoader = HistoryWeeklyDigestLoader()
 
     func load(
         store: any PingHistoryStore,
@@ -93,21 +117,22 @@ actor MacHistorySurfaceLoader {
         guard let result = await loader.load(store: store, hostID: hostID, range: range, now: now) else {
             return nil
         }
-        var weeklySamples: [UUID: [PingResult]] = [:]
-        let weeklyCutoff = now.addingTimeInterval(-HistoryWeeklyDigest.windowDuration)
-        for monitoredHost in allHosts {
-            weeklySamples[monitoredHost.id] = await store.latestSamples(
-                hostID: monitoredHost.id,
-                since: weeklyCutoff,
-                limit: Int.max
-            )
-        }
-        let digest = HistoryWeeklyDigest.make(
+        let digest = await weeklyDigestLoader.load(
+            store: store,
             hosts: allHosts,
-            samplesByHost: weeklySamples,
             endingAt: now
         )
         return MacHistorySurfacePresentation(loadResult: result, host: host, weeklyDigest: digest)
+    }
+}
+
+struct MacHistoryWindowLoadLifecycle {
+    private var hasAppeared = false
+
+    mutating func consumeFirstAppearance() -> Bool {
+        guard !hasAppeared else { return false }
+        hasAppeared = true
+        return true
     }
 }
 
@@ -130,6 +155,8 @@ extension PingScopeModel {
 
     func refreshHistorySurface() {
         historySurfaceTask?.cancel()
+        historySurfaceLoadToken += 1
+        let loadToken = historySurfaceLoadToken
         guard let store = historySurfaceStore, let hostID = historySurfaceHost?.id else {
             historySurfacePresentation = nil
             isLoadingHistorySurface = false
@@ -148,10 +175,11 @@ extension PingScopeModel {
                 allHosts: allHosts,
                 now: Date()
             )
-            guard let self, !Task.isCancelled,
-                  historySurfaceHost?.id == hostID,
-                  historySurfaceRange == range else { return }
-            if let loaded {
+            guard let self, historySurfaceLoadToken == loadToken else { return }
+            if !Task.isCancelled,
+               historySurfaceHost?.id == hostID,
+               historySurfaceRange == range,
+               let loaded {
                 historySurfacePresentation = loaded
             }
             isLoadingHistorySurface = false
