@@ -243,7 +243,7 @@ final class CloudSyncRecordMapperTests: XCTestCase {
         XCTAssertNil(MonitoredHostRecordMapper.monitoredHost(from: record))
     }
 
-    func testMonitoredHostMapperIsNaNSafe() throws {
+    func testMonitoredHostMapperSanitizesNaNThresholdSafely() throws {
         let host = HostConfig(
             displayName: "Legacy thresholds",
             address: "example.com",
@@ -252,7 +252,34 @@ final class CloudSyncRecordMapperTests: XCTestCase {
 
         let record = try MonitoredHostRecordMapper.record(from: host, modifiedAt: .now)
         let decoded = try XCTUnwrap(MonitoredHostRecordMapper.monitoredHost(from: record))
-        XCTAssertTrue(decoded.config.thresholds.degradedMilliseconds.isNaN)
+        XCTAssertEqual(decoded.config.thresholds.degradedMilliseconds, 1)
         XCTAssertEqual(decoded.config.thresholds.downAfterFailures, 3)
+    }
+
+    func testMonitoredHostDecodeSanitizesRemoteConfigBeforeApplication() throws {
+        let host = HostConfig(
+            displayName: "  Remote host  ",
+            address: "  example.com  ",
+            interval: .milliseconds(1),
+            timeout: .seconds(120),
+            thresholds: LatencyThresholds(degradedMilliseconds: -5, downAfterFailures: 0)
+        )
+
+        let record = try MonitoredHostRecordMapper.record(from: host, modifiedAt: .now)
+        let decoded = try XCTUnwrap(MonitoredHostRecordMapper.monitoredHost(from: record))
+
+        XCTAssertEqual(decoded.config.displayName, "Remote host")
+        XCTAssertEqual(decoded.config.address, "example.com")
+        XCTAssertEqual(decoded.config.interval, .milliseconds(250))
+        XCTAssertEqual(decoded.config.timeout, .seconds(60))
+        XCTAssertEqual(decoded.config.thresholds.degradedMilliseconds, 1)
+        XCTAssertEqual(decoded.config.thresholds.downAfterFailures, 1)
+    }
+
+    func testMonitoredHostDecodeRejectsRemoteConfigThatCannotBeSanitized() throws {
+        let host = HostConfig(displayName: "   ", address: "example.com")
+        let record = try MonitoredHostRecordMapper.record(from: host, modifiedAt: .now)
+
+        XCTAssertNil(MonitoredHostRecordMapper.monitoredHost(from: record))
     }
 }

@@ -4,6 +4,67 @@ import XCTest
 @testable import PingScopeiOS
 
 final class PingScopeLiveActivityTests: XCTestCase {
+    func testSupportOwnedWireEnumsPreserveCoreRawValuesAndCodableFieldNames() throws {
+        let coreHealthStatuses: [HealthStatus] = [.noData, .healthy, .degraded, .down]
+        XCTAssertEqual(PingScopeLiveActivityHealthStatus.allCases.map(\.rawValue), coreHealthStatuses.map(\.rawValue))
+        XCTAssertEqual(PingScopeLiveActivityMethod.allCases.map(\.rawValue), PingMethod.allCases.map(\.rawValue))
+        XCTAssertEqual(PingScopeLiveActivityDuration.allCases.map(\.rawValue), MonitorSessionDuration.allCases.map(\.rawValue))
+
+        let attributes = PingScopeLiveActivityAttributes(
+            hostID: UUID(uuidString: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE")!,
+            hostName: "Example",
+            address: "example.com",
+            method: .https,
+            duration: .oneMinute
+        )
+        let state = PingScopeLiveActivityAttributes.ContentState(
+            latencyMilliseconds: 42,
+            status: .degraded,
+            lastUpdatedAt: nil,
+            remainingSeconds: 30,
+            isStale: false
+        )
+        let attributesJSON = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(attributes)) as? [String: Any])
+        let stateJSON = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(state)) as? [String: Any])
+
+        XCTAssertEqual(attributesJSON["method"] as? String, "https")
+        XCTAssertEqual(attributesJSON["duration"] as? String, "oneMinute")
+        XCTAssertEqual(stateJSON["status"] as? String, "degraded")
+        XCTAssertEqual(Set(attributesJSON.keys), ["hostID", "hostName", "address", "method", "duration"])
+        XCTAssertEqual(
+            Set(stateJSON.keys),
+            ["latencyMilliseconds", "status", "remainingSeconds", "isStale", "mode", "hostRows"]
+        )
+    }
+
+    func testCoreAdaptersMapEveryLiveActivityWireEnumCase() {
+        for value in [HealthStatus.noData, .healthy, .degraded, .down] {
+            XCTAssertEqual(PingScopeLiveActivityHealthStatus(value).coreValue, value)
+        }
+        for value in PingMethod.allCases {
+            XCTAssertEqual(PingScopeLiveActivityMethod(value).coreValue, value)
+        }
+        for value in MonitorSessionDuration.allCases {
+            XCTAssertEqual(PingScopeLiveActivityDuration(value).coreValue, value)
+        }
+
+        let host = HostConfig(displayName: "Adapter", address: "adapter.example", method: .starlink)
+        let attributes = PingScopeLiveActivityAttributes(host: host, duration: .thirtySeconds)
+        XCTAssertEqual(attributes.method, .starlink)
+        XCTAssertEqual(attributes.duration, .thirtySeconds)
+
+        let row = PingScopeLiveActivityHostRow(
+            hostID: host.id,
+            displayName: host.displayName,
+            endpointCaption: "Starlink adapter.example",
+            status: HealthStatus.down,
+            latestLatencyMilliseconds: nil,
+            samples: [],
+            isStale: false
+        )
+        XCTAssertEqual(row.status, .down)
+    }
+
     func testFocusedContentStateRoundTripsWithDefaultedPayloadFields() throws {
         let state = makeContentState()
 
@@ -673,7 +734,7 @@ private struct UnboundedHostRow: Codable {
         hostID = row.hostID
         displayName = String(repeating: "👩🏽‍💻", count: 200)
         endpointCaption = String(repeating: "连接-", count: 200)
-        status = row.status
+        status = row.status.coreValue
         latestLatencyMilliseconds = row.latestLatencyMilliseconds
         samples = Array(repeating: Int.max, count: 20)
         isStale = row.isStale

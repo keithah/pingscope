@@ -110,6 +110,25 @@ final class PingScopeIOSHistoryPresentationTests: XCTestCase {
         XCTAssertEqual(session.status, .down)
     }
 
+    func testHistorySessionIdentityComesFromFirstChronologicalSample() throws {
+        let firstID = UUID(uuidString: "10000000-0000-0000-0000-000000000001")!
+        let first = PingResult(
+            id: firstID,
+            hostID: Self.hostID,
+            timestamp: date(10),
+            latency: .milliseconds(10),
+            failureReason: nil
+        )
+        let later = success(at: 20, latency: 20)
+
+        let session = try XCTUnwrap(HistorySession.sessionize([later, first]).first)
+        let presentation = PingScopeIOSHistorySessionPresentation(session: session)
+
+        XCTAssertEqual(session.id, firstID)
+        XCTAssertEqual(presentation.id, firstID)
+        XCTAssertEqual(HistorySession.sessionize([later, first]).first?.id, firstID)
+    }
+
     func testHistoryChartReductionCreatesBoundedOrderedBucketsAndRetainsStatistics() {
         let samples = (0..<2_000).map { success(at: Double($0), latency: Double(($0 % 4) + 10)) }
 
@@ -158,6 +177,27 @@ final class PingScopeIOSHistoryPresentationTests: XCTestCase {
         XCTAssertEqual(data.startDate, start)
         XCTAssertEqual(data.endDate, end)
         XCTAssertEqual(data.points.map(\.latencyMilliseconds), [2, 3])
+    }
+
+    func testLiveGraphDataDownsamplesToPixelColumnsWhilePreservingEndpointsAndExtremes() {
+        var samples: [PingResult] = []
+        samples.reserveCapacity(5_000)
+        for index in 0..<5_000 {
+            let latency = index == 2_500 ? 900.0 : Double(10 + index % 20)
+            samples.append(success(at: Double(index), latency: latency))
+        }
+
+        let data = PingScopeIOSLatencyGraphData(
+            samples: samples,
+            startDate: date(0),
+            endDate: date(4_999)
+        )
+
+        XCTAssertLessThanOrEqual(data.points.count, 1_024)
+        XCTAssertEqual(data.points.first?.timestamp, date(0))
+        XCTAssertEqual(data.points.last?.timestamp, date(4_999))
+        XCTAssertEqual(data.points.map { $0.latencyMilliseconds }.max(), 900)
+        XCTAssertEqual(data.scale.axisMaximumMilliseconds, LatencyGraphScale(maximumMilliseconds: 900).axisMaximumMilliseconds)
     }
 
     func testHistoryPresentationShowsMonitoringFirstEmptyStateWithoutFabricatedMetrics() {

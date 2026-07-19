@@ -113,6 +113,72 @@ final class ProbeBehaviorTests: XCTestCase {
         XCTAssertEqual(result.failureReason, .cancelled)
     }
 
+    func testTimeoutProbeDoesNotReturnUntilCancelledMeasurementCompletes() async {
+        let host = HostConfig(displayName: "Slow", address: "example.com", timeout: .milliseconds(10))
+        let cleanupGate = ProbeTestGate()
+        let slowProbe = GatedCancellationCleanupProbe(cleanupGate: cleanupGate)
+        let probe = TimeoutProbe(wrapping: slowProbe)
+        let completion = ProbeCompletionState()
+        let task = Task {
+            let result = await probe.measure(host)
+            await completion.record(result)
+            return result
+        }
+
+        await slowProbe.waitUntilCleanupStarts()
+        try? await Task.sleep(for: .milliseconds(150))
+
+        let returnedBeforeCleanupFinished = await completion.didReturn
+        XCTAssertFalse(returnedBeforeCleanupFinished, "TimeoutProbe must retain ownership beyond the old 100 ms cutoff")
+
+        await cleanupGate.open()
+        let result = await task.value
+        XCTAssertEqual(result.failureReason, .timeout)
+        let cleanupFinished = await slowProbe.cleanupFinished
+        XCTAssertTrue(cleanupFinished, "the timeout loser must finish cooperative cancellation cleanup before measure returns")
+    }
+
+    func testTimeoutProbeCancellationWinsOverWrappedSuccessFromCancellationHandler() async {
+        let host = HostConfig(displayName: "Cancellation race", address: "example.com", timeout: .seconds(60))
+        let wrapped = SuccessOnCancellationProbe()
+        let probe = TimeoutProbe(wrapping: wrapped)
+        let task = Task { await probe.measure(host) }
+        await wrapped.waitUntilStarted()
+
+        task.cancel()
+        let result = await task.value
+
+        XCTAssertEqual(result.failureReason, .cancelled)
+    }
+
+    func testTimeoutProbeOuterCancellationWaitsForGatedMeasurementCleanup() async {
+        let host = HostConfig(displayName: "Cancelled owner", address: "example.com", timeout: .seconds(60))
+        let cleanupGate = ProbeTestGate()
+        let wrapped = GatedCancellationCleanupProbe(cleanupGate: cleanupGate)
+        let completion = ProbeCompletionState()
+        let task = Task {
+            let result = await TimeoutProbe(wrapping: wrapped).measure(host)
+            await completion.record(result)
+            return result
+        }
+
+        task.cancel()
+        await wrapped.waitUntilCleanupStarts()
+        try? await Task.sleep(for: .milliseconds(30))
+
+        let returnedWhileCleanupWasGated = await completion.didReturn
+        XCTAssertFalse(
+            returnedWhileCleanupWasGated,
+            "cancelling the owner must not make its completion join return while child cleanup is gated"
+        )
+
+        await cleanupGate.open()
+        let result = await task.value
+        XCTAssertEqual(result.failureReason, .cancelled)
+        let cleanupFinished = await wrapped.cleanupFinished
+        XCTAssertTrue(cleanupFinished)
+    }
+
     func testProcessICMPProbeParsesRoundTripFromPingOutput() {
         let output = """
         PING 1.1.1.1 (1.1.1.1): 56 data bytes
@@ -255,6 +321,111 @@ private actor CancellableSlowProbe: PingProbe {
             try? await Task.sleep(for: .milliseconds(25))
         }
         return wasCancelled
+    }
+}
+
+private actor GatedCancellationCleanupProbe: PingProbe {
+    private let cleanupGate: ProbeTestGate
+    private var cleanupStarted = false
+    private var cleanupStartWaiters: [CheckedContinuation<Void, Never>] = []
+    private(set) var cleanupFinished = false
+
+    init(cleanupGate: ProbeTestGate) {
+        self.cleanupGate = cleanupGate
+    }
+
+    func measure(_ host: HostConfig) async -> PingResult {
+        do {
+            try await Task.sleep(for: .seconds(60))
+        } catch {
+            cleanupStarted = true
+            cleanupStartWaiters.forEach { $0.resume() }
+            cleanupStartWaiters.removeAll()
+            await cleanupGate.wait()
+            cleanupFinished = true
+        }
+        return .failure(hostID: host.id, reason: .cancelled).withHostMetadata(from: host)
+    }
+
+    func waitUntilCleanupStarts() async {
+        guard !cleanupStarted else { return }
+        await withCheckedContinuation { continuation in
+            cleanupStartWaiters.append(continuation)
+        }
+    }
+}
+
+private actor ProbeTestGate {
+    private var isOpen = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    func wait() async {
+        guard !isOpen else { return }
+        await withCheckedContinuation { continuation in
+            waiters.append(continuation)
+        }
+    }
+
+    func open() {
+        isOpen = true
+        waiters.forEach { $0.resume() }
+        waiters.removeAll()
+    }
+}
+
+private actor ProbeCompletionState {
+    private(set) var didReturn = false
+    private(set) var result: PingResult?
+
+    func record(_ result: PingResult) {
+        didReturn = true
+        self.result = result
+    }
+}
+
+private final class SuccessOnCancellationProbe: PingProbe, @unchecked Sendable {
+    private let lock = NSLock()
+    private var resultContinuation: CheckedContinuation<PingResult, Never>?
+    private var startWaiters: [CheckedContinuation<Void, Never>] = []
+    private var started = false
+
+    func measure(_ host: HostConfig) async -> PingResult {
+        await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                lock.lock()
+                resultContinuation = continuation
+                started = true
+                let waiters = startWaiters
+                startWaiters.removeAll()
+                lock.unlock()
+                waiters.forEach { $0.resume() }
+            }
+        } onCancel: {
+            lock.lock()
+            let continuation = resultContinuation
+            resultContinuation = nil
+            lock.unlock()
+            continuation?.resume(returning: .success(hostID: host.id, latency: .milliseconds(1)).withHostMetadata(from: host))
+        }
+    }
+
+    func waitUntilStarted() async {
+        if lock.withLock({ started }) {
+            return
+        }
+
+        await withCheckedContinuation { continuation in
+            let resumeImmediately = lock.withLock { () -> Bool in
+                if started {
+                    return true
+                }
+                startWaiters.append(continuation)
+                return false
+            }
+            if resumeImmediately {
+                continuation.resume()
+            }
+        }
     }
 }
 

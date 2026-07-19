@@ -5,6 +5,34 @@ import PingScopeiOS
 import XCTest
 
 final class IOSDiagnosticsAndOnboardingTests: XCTestCase {
+    func testFailureLogSuppressorSuppressesRepeatsForSixtySecondsAndLogsTransitionsImmediately() async {
+        let suppressor = PingScopeIOSFailureLogSuppressor()
+        let hostID = UUID()
+        let start = Date(timeIntervalSince1970: 1_000)
+
+        let initial = await suppressor.shouldLog(hostID: hostID, reason: .timeout, at: start)
+        let repeated = await suppressor.shouldLog(hostID: hostID, reason: .timeout, at: start.addingTimeInterval(59))
+        let transition = await suppressor.shouldLog(hostID: hostID, reason: .dnsFailure, at: start.addingTimeInterval(59))
+        let elapsed = await suppressor.shouldLog(hostID: hostID, reason: .timeout, at: start.addingTimeInterval(60))
+        XCTAssertTrue(initial)
+        XCTAssertFalse(repeated)
+        XCTAssertTrue(transition)
+        XCTAssertTrue(elapsed)
+    }
+
+    func testFailureLogSuppressorLogsReturnTransitionAndThenRateLimitsThatReason() async {
+        let suppressor = PingScopeIOSFailureLogSuppressor()
+        let hostID = UUID()
+        let start = Date(timeIntervalSince1970: 2_000)
+
+        let first = await suppressor.shouldLog(hostID: hostID, reason: .timeout, at: start)
+        let changed = await suppressor.shouldLog(hostID: hostID, reason: .dnsFailure, at: start.addingTimeInterval(10))
+        let returned = await suppressor.shouldLog(hostID: hostID, reason: .timeout, at: start.addingTimeInterval(20))
+        let repeated = await suppressor.shouldLog(hostID: hostID, reason: .timeout, at: start.addingTimeInterval(79))
+        let elapsed = await suppressor.shouldLog(hostID: hostID, reason: .timeout, at: start.addingTimeInterval(80))
+        XCTAssertTrue(first); XCTAssertTrue(changed); XCTAssertTrue(returned); XCTAssertFalse(repeated); XCTAssertTrue(elapsed)
+    }
+
     func testDiagnosticsBundleContainsAppMetadataConfigurationAndLog() {
         let bundle = PingScopeIOSDiagnosticsBundle.text(
             metadata: .init(appName: "PingScope", version: "2.0", build: "200", buildFlavor: "App Store"),

@@ -2,6 +2,69 @@ import XCTest
 @testable import PingScopeCore
 
 final class RuntimeBehaviorTests: XCTestCase {
+    func testConfirmedDownProbeBackoffUsesBaseForDetectionThenDoublesToCap() {
+        let base = Duration.seconds(2)
+
+        XCTAssertEqual(ProbeIdleBackoffPolicy.interval(confirmedDownFailureCount: 0, baseInterval: base), base)
+        XCTAssertEqual(ProbeIdleBackoffPolicy.interval(confirmedDownFailureCount: 1, baseInterval: base), base)
+        XCTAssertEqual(ProbeIdleBackoffPolicy.interval(confirmedDownFailureCount: 2, baseInterval: base), .seconds(4))
+        XCTAssertEqual(ProbeIdleBackoffPolicy.interval(confirmedDownFailureCount: 3, baseInterval: base), .seconds(8))
+        XCTAssertEqual(ProbeIdleBackoffPolicy.interval(confirmedDownFailureCount: 8, baseInterval: base), .seconds(30))
+        XCTAssertEqual(ProbeIdleBackoffPolicy.interval(confirmedDownFailureCount: 20, baseInterval: base), .seconds(30))
+    }
+
+    func testBackoffCadenceUsesAuthoritativeStatusTransition() {
+        var tracker = ProbeIdleBackoffTracker()
+        let hostID = UUID()
+        let failure = PingResult.failure(hostID: hostID, reason: .timeout)
+
+        XCTAssertEqual(
+            tracker.interval(
+                after: failure,
+                previousStatus: .degraded,
+                currentStatus: .down,
+                baseInterval: .seconds(2)
+            ),
+            .seconds(2)
+        )
+        XCTAssertEqual(
+            tracker.interval(
+                after: failure,
+                previousStatus: .down,
+                currentStatus: .down,
+                baseInterval: .seconds(2)
+            ),
+            .seconds(4)
+        )
+    }
+
+    func testConfirmedDownProbeBackoffResetsOnAnySuccessfulResponse() {
+        let hostID = UUID()
+        var health = HostHealth(
+            hostID: hostID,
+            thresholds: LatencyThresholds(degradedMilliseconds: 100, downAfterFailures: 3)
+        )
+        var tracker = ProbeIdleBackoffTracker()
+
+        func interval(after result: PingResult) -> Duration {
+            let previousStatus = health.status
+            health.ingest(result)
+            return tracker.interval(
+                after: result,
+                previousStatus: previousStatus,
+                currentStatus: health.status,
+                baseInterval: .seconds(2)
+            )
+        }
+
+        XCTAssertEqual(interval(after: .failure(hostID: hostID, reason: .timeout)), .seconds(2))
+        XCTAssertEqual(interval(after: .failure(hostID: hostID, reason: .timeout)), .seconds(2))
+        XCTAssertEqual(interval(after: .failure(hostID: hostID, reason: .timeout)), .seconds(2))
+        XCTAssertEqual(interval(after: .failure(hostID: hostID, reason: .timeout)), .seconds(4))
+        XCTAssertEqual(interval(after: .success(hostID: hostID, latency: .milliseconds(150))), .seconds(2))
+        XCTAssertEqual(interval(after: .failure(hostID: hostID, reason: .timeout)), .seconds(2))
+    }
+
     func testHostStoreDefaultsAndPrimarySelection() async {
         let store = HostStore(defaultHosts: [.defaultInternet])
 
@@ -149,7 +212,7 @@ final class RuntimeBehaviorTests: XCTestCase {
         await scheduler.stop()
     }
 
-    func testMeasurementSchedulerRestartDoesNotWaitForHungPreviousProbe() async throws {
+    func testMeasurementSchedulerRestartJoinsCancellationResponsivePreviousProbe() async throws {
         let oldHost = HostConfig(displayName: "Old", address: "old.example", interval: .milliseconds(20))
         let newHost = HostConfig(displayName: "New", address: "new.example", interval: .milliseconds(20))
         let scheduler = MeasurementScheduler(probeFactory: HostSensitiveProbeFactory(hangingAddress: oldHost.address))
@@ -172,6 +235,80 @@ final class RuntimeBehaviorTests: XCTestCase {
         XCTAssertEqual(replacementResult?.hostID, newHost.id)
         withExtendedLifetime(oldStream) {}
         await scheduler.stop()
+    }
+
+    func testMeasurementSchedulerRestartJoinsCooperativePreviousGeneration() async throws {
+        let oldHost = HostConfig(displayName: "Old", address: "old.example", interval: .seconds(60))
+        let newHost = HostConfig(displayName: "New", address: "new.example", interval: .seconds(60))
+        let tracker = RestartCleanupTracker(oldHostID: oldHost.id)
+        let scheduler = MeasurementScheduler(
+            probeFactory: RestartCleanupProbeFactory(tracker: tracker, cleanupDelay: .milliseconds(40))
+        )
+        _ = await scheduler.start(hosts: [oldHost])
+        await tracker.waitUntilOldProbeStarts()
+
+        let newStream = await scheduler.start(hosts: [newHost])
+        let firstResult = try await firstResult(from: newStream, timeout: .milliseconds(500))
+
+        XCTAssertEqual(firstResult?.hostID, newHost.id)
+        let newStartedAfterCleanup = await tracker.newStartedAfterOldCleanup
+        XCTAssertTrue(newStartedAfterCleanup, "a replacement generation must not launch before cooperative cleanup joins")
+        await scheduler.stop()
+    }
+
+    func testMeasurementSchedulerRestartWaitsForExplicitPriorGenerationCleanupGate() async throws {
+        let oldHost = HostConfig(displayName: "Old", address: "old.example", interval: .seconds(60))
+        let newHost = HostConfig(displayName: "New", address: "new.example", interval: .seconds(60))
+        let tracker = StrictSchedulerJoinTracker(oldHostID: oldHost.id)
+        let callState = SchedulerCallState()
+        let scheduler = MeasurementScheduler(probeFactory: StrictSchedulerJoinProbeFactory(tracker: tracker))
+        _ = await scheduler.start(hosts: [oldHost])
+        await tracker.waitUntilOldProbeStarts()
+
+        let restartTask = Task {
+            let stream = await scheduler.start(hosts: [newHost])
+            await callState.recordReturn()
+            return stream
+        }
+        await tracker.waitUntilOldCancellationStarts()
+        try await Task.sleep(for: .milliseconds(150))
+
+        let restartReturnedWhileCleanupWasGated = await callState.didReturn
+        let replacementStartedWhileCleanupWasGated = await tracker.didNewProbeStart
+        XCTAssertFalse(restartReturnedWhileCleanupWasGated)
+        XCTAssertFalse(replacementStartedWhileCleanupWasGated)
+
+        await tracker.releaseOldCleanup()
+        let newStream = await restartTask.value
+        let firstResult = try await firstResult(from: newStream, timeout: .milliseconds(300))
+        XCTAssertEqual(firstResult?.hostID, newHost.id)
+        let cleanupFinishedBeforeReplacement = await tracker.newStartedAfterOldCleanup
+        XCTAssertTrue(cleanupFinishedBeforeReplacement)
+        await scheduler.stop()
+    }
+
+    func testMeasurementSchedulerStopWaitsForExplicitPriorGenerationCleanupGate() async throws {
+        let oldHost = HostConfig(displayName: "Old", address: "old.example", interval: .seconds(60))
+        let tracker = StrictSchedulerJoinTracker(oldHostID: oldHost.id)
+        let callState = SchedulerCallState()
+        let scheduler = MeasurementScheduler(probeFactory: StrictSchedulerJoinProbeFactory(tracker: tracker))
+        _ = await scheduler.start(hosts: [oldHost])
+        await tracker.waitUntilOldProbeStarts()
+
+        let stopTask = Task {
+            await scheduler.stop()
+            await callState.recordReturn()
+        }
+        await tracker.waitUntilOldCancellationStarts()
+        try await Task.sleep(for: .milliseconds(150))
+
+        let stopReturnedWhileCleanupWasGated = await callState.didReturn
+        XCTAssertFalse(stopReturnedWhileCleanupWasGated)
+
+        await tracker.releaseOldCleanup()
+        await stopTask.value
+        let stopReturnedAfterCleanup = await callState.didReturn
+        XCTAssertTrue(stopReturnedAfterCleanup)
     }
 
     func testSchedulerBuffersRealisticBurstWithoutDroppingResults() async throws {
@@ -247,6 +384,67 @@ final class RuntimeBehaviorTests: XCTestCase {
 
         let decisions = await collectDecisions(from: alertStream)
         XCTAssertEqual(decisions, [.remoteServiceDown(hostIDs: [host.id])])
+    }
+
+    func testRuntimeAlertBufferCoalescesUnobservedTransitionPairsToBoundBurst() async {
+        let host = HostConfig(
+            displayName: "Flapping",
+            address: "flapping.example",
+            thresholds: LatencyThresholds(degradedMilliseconds: 100, downAfterFailures: 1)
+        )
+        let runtime = PingRuntime(
+            hostStore: HostStore(defaultHosts: [host]),
+            scheduler: MeasurementScheduler(probeFactory: HangingProbeFactory()),
+            notificationRules: NotificationRuleSet(
+                cooldown: .seconds(0),
+                alertTypes: [.hostDown, .recovered]
+            )
+        )
+        // Attach a subscriber but deliberately do not request its first element;
+        // the delivery queue, rather than only the pre-subscription queue, must
+        // remain finite while the host flaps.
+        let alertStream = await runtime.alerts()
+        let base = Date(timeIntervalSince1970: 15_000)
+        for index in 0..<400 {
+            await runtime.ingest(.failure(
+                hostID: host.id,
+                reason: .timeout,
+                timestamp: base.addingTimeInterval(Double(index * 2))
+            ))
+            await runtime.ingest(.success(
+                hostID: host.id,
+                latency: .milliseconds(8),
+                timestamp: base.addingTimeInterval(Double(index * 2 + 1))
+            ))
+        }
+        await runtime.ingest(.failure(
+            hostID: host.id,
+            reason: .timeout,
+            timestamp: base.addingTimeInterval(1_000)
+        ))
+        await runtime.stop()
+
+        let decisions = await collectDecisions(from: alertStream)
+        XCTAssertEqual(decisions, [.hostDown(hostID: host.id)])
+    }
+
+    func testAlertBufferRetainsRecoveryForTransitionDiscardedAtCapacity() {
+        let hostIDs = (0..<129).map { _ in UUID() }
+        var buffer = RuntimeAlertEventBuffer(capacity: 128)
+        for hostID in hostIDs {
+            buffer.append(RuntimeAlertEvent(decisions: [.hostDown(hostID: hostID)], hosts: []))
+        }
+
+        buffer.append(RuntimeAlertEvent(decisions: [.recovered(hostID: hostIDs[0])], hosts: []))
+
+        var decisions: [AlertDecision] = []
+        while let event = buffer.popFirst() {
+            decisions.append(contentsOf: event.decisions)
+        }
+        XCTAssertTrue(
+            decisions.contains(.recovered(hostID: hostIDs[0])),
+            "discarding an undelivered down edge must advance its tracked state so recovery is not lost"
+        )
     }
 
     func testRuntimeSuppressesAlertEventsForMutedHosts() async throws {
@@ -825,6 +1023,186 @@ private struct HostSensitiveProbe: PingProbe {
             return .failure(hostID: host.id, reason: .cancelled).withHostMetadata(from: host)
         }
         return .success(hostID: host.id, latency: .milliseconds(12)).withHostMetadata(from: host)
+    }
+}
+
+private struct RestartCleanupProbeFactory: ProbeFactory {
+    let tracker: RestartCleanupTracker
+    let cleanupDelay: Duration
+
+    func makeProbe(for method: PingMethod) async -> any PingProbe {
+        RestartCleanupProbe(tracker: tracker, cleanupDelay: cleanupDelay)
+    }
+}
+
+private struct RestartCleanupProbe: PingProbe {
+    let tracker: RestartCleanupTracker
+    let cleanupDelay: Duration
+
+    func measure(_ host: HostConfig) async -> PingResult {
+        if await tracker.isOldHost(host.id) {
+            await tracker.oldProbeStarted()
+            do {
+                try await Task.sleep(for: .seconds(60))
+            } catch {
+                await runtimeTestUncancellableSleep(for: cleanupDelay)
+                await tracker.oldProbeCleanupFinished()
+            }
+            return .failure(hostID: host.id, reason: .cancelled).withHostMetadata(from: host)
+        }
+        await tracker.newProbeStarted()
+        return .success(hostID: host.id, latency: .milliseconds(12)).withHostMetadata(from: host)
+    }
+}
+
+private actor RestartCleanupTracker {
+    private let oldHostID: UUID
+    private var oldStarted = false
+    private var oldCleanupFinished = false
+    private var startWaiters: [CheckedContinuation<Void, Never>] = []
+    private(set) var newStartedAfterOldCleanup = false
+
+    init(oldHostID: UUID) {
+        self.oldHostID = oldHostID
+    }
+
+    func isOldHost(_ hostID: UUID) -> Bool {
+        hostID == oldHostID
+    }
+
+    func oldProbeStarted() {
+        oldStarted = true
+        startWaiters.forEach { $0.resume() }
+        startWaiters.removeAll()
+    }
+
+    func waitUntilOldProbeStarts() async {
+        guard !oldStarted else { return }
+        await withCheckedContinuation { continuation in
+            startWaiters.append(continuation)
+        }
+    }
+
+    func oldProbeCleanupFinished() {
+        oldCleanupFinished = true
+    }
+
+    func newProbeStarted() {
+        newStartedAfterOldCleanup = oldCleanupFinished
+    }
+}
+
+private struct StrictSchedulerJoinProbeFactory: ProbeFactory {
+    let tracker: StrictSchedulerJoinTracker
+
+    func makeProbe(for method: PingMethod) async -> any PingProbe {
+        StrictSchedulerJoinProbe(tracker: tracker)
+    }
+}
+
+private struct StrictSchedulerJoinProbe: PingProbe {
+    let tracker: StrictSchedulerJoinTracker
+
+    func measure(_ host: HostConfig) async -> PingResult {
+        guard await tracker.isOldHost(host.id) else {
+            await tracker.newProbeStarted()
+            return .success(hostID: host.id, latency: .milliseconds(12)).withHostMetadata(from: host)
+        }
+
+        await tracker.oldProbeStarted()
+        await withTaskCancellationHandler {
+            await tracker.waitForOldCleanupRelease()
+        } onCancel: {
+            Task { await tracker.oldCancellationStarted() }
+        }
+        await tracker.oldCleanupFinished()
+        return .failure(hostID: host.id, reason: .cancelled).withHostMetadata(from: host)
+    }
+}
+
+private actor StrictSchedulerJoinTracker {
+    private let oldHostID: UUID
+    private(set) var didNewProbeStart = false
+    private(set) var newStartedAfterOldCleanup = false
+    private var oldStarted = false
+    private var oldCancellationDidStart = false
+    private var oldCleanupDidFinish = false
+    private var oldStartWaiters: [CheckedContinuation<Void, Never>] = []
+    private var oldCancellationWaiters: [CheckedContinuation<Void, Never>] = []
+    private var oldCleanupReleaseWaiters: [CheckedContinuation<Void, Never>] = []
+    private var oldCleanupReleased = false
+
+    init(oldHostID: UUID) {
+        self.oldHostID = oldHostID
+    }
+
+    func isOldHost(_ hostID: UUID) -> Bool {
+        hostID == oldHostID
+    }
+
+    func oldProbeStarted() {
+        oldStarted = true
+        oldStartWaiters.forEach { $0.resume() }
+        oldStartWaiters.removeAll()
+    }
+
+    func oldCancellationStarted() {
+        oldCancellationDidStart = true
+        oldCancellationWaiters.forEach { $0.resume() }
+        oldCancellationWaiters.removeAll()
+    }
+
+    func oldCleanupFinished() {
+        oldCleanupDidFinish = true
+    }
+
+    func newProbeStarted() {
+        didNewProbeStart = true
+        newStartedAfterOldCleanup = oldCleanupDidFinish
+    }
+
+    func waitUntilOldProbeStarts() async {
+        guard !oldStarted else { return }
+        await withCheckedContinuation { continuation in
+            oldStartWaiters.append(continuation)
+        }
+    }
+
+    func waitUntilOldCancellationStarts() async {
+        guard !oldCancellationDidStart else { return }
+        await withCheckedContinuation { continuation in
+            oldCancellationWaiters.append(continuation)
+        }
+    }
+
+    func waitForOldCleanupRelease() async {
+        guard !oldCleanupReleased else { return }
+        await withCheckedContinuation { continuation in
+            oldCleanupReleaseWaiters.append(continuation)
+        }
+    }
+
+    func releaseOldCleanup() {
+        oldCleanupReleased = true
+        oldCleanupReleaseWaiters.forEach { $0.resume() }
+        oldCleanupReleaseWaiters.removeAll()
+    }
+}
+
+private actor SchedulerCallState {
+    private(set) var didReturn = false
+
+    func recordReturn() {
+        didReturn = true
+    }
+}
+
+private func runtimeTestUncancellableSleep(for duration: Duration) async {
+    let nanoseconds = max(0, UInt64(duration.seconds * 1_000_000_000))
+    await withCheckedContinuation { continuation in
+        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + .nanoseconds(Int(nanoseconds))) {
+            continuation.resume()
+        }
     }
 }
 

@@ -2,6 +2,38 @@ import XCTest
 @testable import PingScopeCore
 
 final class DomainBehaviorTests: XCTestCase {
+    func testAppendOnlySequenceFingerprintRetainsCountAndBoundaryIDs() throws {
+        let hostID = UUID()
+        let first = PingResult.success(hostID: hostID, latency: .milliseconds(10))
+        let middle = PingResult.success(hostID: hostID, latency: .milliseconds(20))
+        let last = PingResult.success(hostID: hostID, latency: .milliseconds(30))
+
+        let fingerprint = AppendOnlySequenceFingerprint(samples: [first, middle, last])
+
+        XCTAssertEqual(fingerprint.count, 3)
+        XCTAssertEqual(fingerprint.first, first.id)
+        XCTAssertEqual(fingerprint.last, last.id)
+    }
+
+    func testBoundedMemoReturnsHitsWithoutRebuildingAndEvictsLeastRecentlyUsedEntry() {
+        var memo = BoundedMemo<String, Int>(capacity: 2)
+        var buildCount = 0
+        func build(_ value: Int) -> Int {
+            buildCount += 1
+            return value
+        }
+
+        XCTAssertEqual(memo.resolve("a") { build(1) }, 1)
+        XCTAssertEqual(memo.resolve("b") { build(2) }, 2)
+        XCTAssertEqual(memo.resolve("a") { build(10) }, 1)
+        XCTAssertEqual(buildCount, 2, "a cache hit must not rebuild its value")
+
+        XCTAssertEqual(memo.resolve("c") { build(3) }, 3)
+        XCTAssertEqual(memo.resolve("b") { build(20) }, 20)
+        XCTAssertEqual(buildCount, 4, "b must be evicted after a is promoted and c is inserted")
+        XCTAssertEqual(memo.count, 2)
+    }
+
     func testPingResultNetworkFieldsDefaultAndDecodeLegacyJSON() throws {
         let original = PingResult.success(hostID: UUID(), latency: .milliseconds(12))
 

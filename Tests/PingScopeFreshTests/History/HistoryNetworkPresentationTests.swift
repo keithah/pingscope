@@ -3,6 +3,53 @@ import XCTest
 @testable import PingScopeHistoryKit
 
 final class HistoryNetworkPresentationTests: XCTestCase {
+    func testHistoryMapNetworkLabelsMatchesFullPresentationSummary() {
+        let hostID = Self.hostID
+        let cafeLocation = SampleLocation(
+            latitude: 37.3317,
+            longitude: -122.0301,
+            networkName: "Cafe",
+            networkInterface: "wifi"
+        )!
+        let wiredLocation = SampleLocation(
+            latitude: 37.332,
+            longitude: -122.031,
+            networkName: "   ",
+            networkInterface: "wired"
+        )!
+        var invalidLocation = SampleLocation(
+            latitude: 37.333,
+            longitude: -122.032,
+            networkName: "Ignore invalid location",
+            networkInterface: "cellular"
+        )!
+        invalidLocation.latitude = .nan
+
+        let samples = [
+            PingResult.success(
+                hostID: hostID,
+                latency: .milliseconds(10),
+                timestamp: date(1),
+                location: cafeLocation,
+                networkName: "Top-level metadata is not a map label"
+            ),
+            PingResult.success(hostID: hostID, latency: .milliseconds(20), timestamp: date(2), location: cafeLocation),
+            PingResult.failure(hostID: hostID, reason: .timeout, timestamp: date(3), location: wiredLocation),
+            PingResult.success(hostID: hostID, latency: .milliseconds(30), timestamp: date(4), location: invalidLocation),
+            PingResult.success(
+                hostID: hostID,
+                latency: .milliseconds(40),
+                timestamp: date(5),
+                networkName: "Unlocated top-level metadata"
+            ),
+        ]
+
+        let labels = HistoryMapPresentation.networkLabels(samples: samples)
+
+        XCTAssertEqual(labels, ["Cafe", "wired"])
+        XCTAssertEqual(labels, HistoryMapPresentation(samples: samples).summary.networkLabels)
+    }
+
     func testCardsExposeMetricsGlyphVPNStatusAndStableText() throws {
         let samples = [
             sample(at: 1, latency: 10, interface: "wifi", name: "Home", isVPN: true),

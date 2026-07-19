@@ -464,6 +464,7 @@ final class PingScopeIOSHistoryMapPresentationTests: XCTestCase {
             .deletingLastPathComponent()
             .deletingLastPathComponent()
             .deletingLastPathComponent()
+            .deletingLastPathComponent()
         let sourceRoots = [
             repositoryRoot.appendingPathComponent("Sources/PingScopeiOS"),
             repositoryRoot.appendingPathComponent("Sources/PingScopeiOSApp"),
@@ -542,6 +543,45 @@ final class PingScopeIOSHistoryMapPresentationTests: XCTestCase {
 
         XCTAssertEqual(presentation.mapPresentation.points.map(\.id), [rangedSample.id])
         XCTAssertEqual(presentation.mapPresentation.route.map(\.id), [rangedSample.id])
+    }
+
+    func testLiveGraphReducerIsNotPointEquivalentToHistoryChartReduction() {
+        let samples = (0..<2_000).map { index in
+            PingResult.success(
+                hostID: Self.hostID,
+                latency: .milliseconds(Double((index % 7) * 10)),
+                timestamp: date(TimeInterval(index))
+            )
+        }
+        let liveData = PingScopeIOSLatencyGraphData(
+            samples: samples,
+            startDate: date(0),
+            endDate: date(1_999)
+        )
+        let historyPoints = HistoryChartReduction(
+            samples: samples,
+            maximumBucketCount: PingScopeIOSLatencyGraphData.maximumPointCount / 2
+        ).buckets.flatMap { bucket -> [PingScopeIOSLatencyGraphPoint] in
+            guard let minimum = bucket.minimum else { return [] }
+            let minimumPoint = PingScopeIOSLatencyGraphPoint(
+                timestamp: minimum.timestamp,
+                latencyMilliseconds: minimum.latencyMilliseconds
+            )
+            guard let maximum = bucket.maximum else { return [] }
+            let maximumPoint = PingScopeIOSLatencyGraphPoint(
+                timestamp: maximum.timestamp,
+                latencyMilliseconds: maximum.latencyMilliseconds
+            )
+            if minimumPoint.timestamp <= maximumPoint.timestamp {
+                return minimumPoint == maximumPoint ? [minimumPoint] : [minimumPoint, maximumPoint]
+            }
+            return minimumPoint == maximumPoint ? [minimumPoint] : [maximumPoint, minimumPoint]
+        }
+
+        XCTAssertNotEqual(liveData.points, historyPoints)
+        XCTAssertEqual(liveData.points.first?.timestamp, date(0))
+        XCTAssertEqual(liveData.points.last?.timestamp, date(1_999))
+        XCTAssertLessThanOrEqual(liveData.points.count, PingScopeIOSLatencyGraphData.maximumPointCount)
     }
 
     private func assertAuthorization(

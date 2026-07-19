@@ -1,6 +1,6 @@
 import XCTest
 import PingScopeCore
-import PingScopeiOS
+@testable import PingScopeiOS
 
 final class LiveMonitorSessionControllerTests: XCTestCase {
     func testIOSHostEditorDraftAcceptsAndRoundTripsHTTPSWithDefaultPort() {
@@ -607,6 +607,57 @@ final class LiveMonitorSessionControllerTests: XCTestCase {
         XCTAssertNil(samples[0].location)
     }
 
+    func testLiveHistoryWriteBufferSkipsDuplicateAndContinuesWithFreshRow() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("pingscope-live-buffer-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = SQLiteHistoryStore(url: directory.appendingPathComponent("History.sqlite"))
+        let host = HostConfig(id: UUID(), displayName: "Cloudflare", address: "1.1.1.1")
+        let base = Date(timeIntervalSince1970: 75_000)
+        let original = PingResult.success(
+            hostID: host.id,
+            latency: .milliseconds(10),
+            timestamp: base
+        ).withHostMetadata(from: host)
+        let duplicate = PingResult(
+            id: original.id,
+            hostID: host.id,
+            timestamp: base.addingTimeInterval(1),
+            latency: .milliseconds(20),
+            failureReason: nil
+        )
+        let fresh = PingResult.success(
+            hostID: host.id,
+            latency: .milliseconds(30),
+            timestamp: base.addingTimeInterval(2)
+        )
+        try await store.appendAndWait([original])
+        let probe = RecordingProbe(results: [duplicate, fresh])
+        let clock = ManualClock(baseDate: base)
+        let controller = LiveMonitorSessionController(
+            host: host,
+            probeFactory: StaticProbeFactory(probe: probe),
+            policy: MonitorSessionPolicy(probeInterval: .milliseconds(50)),
+            historyStore: store,
+            clock: clock,
+            now: { clock.currentDate }
+        )
+
+        await controller.start(duration: .continuous, at: base)
+        try await clock.waitForSleepers(atLeast: 1)
+        clock.advance(by: .milliseconds(50))
+        try await probe.waitForMeasurements(atLeast: 2)
+        await controller.stop()
+        await controller.stop()
+
+        let stored = await store.samples(hostID: host.id, since: base.addingTimeInterval(-1), limit: 10)
+        let diagnostics = await controller.historyWriterDiagnosticsForTesting()
+        XCTAssertEqual(Set(stored.map(\.id)), Set([original.id, fresh.id]))
+        XCTAssertEqual(stored.first(where: { $0.id == original.id })?.latency?.milliseconds, 10)
+        XCTAssertEqual(diagnostics?.pendingCount, 0)
+        XCTAssertEqual(diagnostics?.consecutiveFailureCount, 0)
+    }
+
     func testControllerEnrichesOnlyPersistedSample() async throws {
         let host = HostConfig(id: UUID(), displayName: "Cloudflare", address: "1.1.1.1")
         let probe = RecordingProbe(results: [
@@ -1115,6 +1166,55 @@ final class LiveMonitorSessionControllerTests: XCTestCase {
         XCTAssertEqual(secondSnapshot.session?.duration, .oneMinute)
         XCTAssertEqual(secondSnapshot.series.samples.count, 1)
         XCTAssertEqual(secondSnapshot.series.samples.first?.latency?.milliseconds.rounded(), 19)
+    }
+
+    func testControllerRestartWhileDownResetsHealthAndNextSleepDuration() async throws {
+        let host = HostConfig(
+            id: UUID(),
+            displayName: "Cloudflare",
+            address: "1.1.1.1",
+            thresholds: LatencyThresholds(degradedMilliseconds: 100, downAfterFailures: 1)
+        )
+        let failure = PingResult.failure(hostID: host.id, reason: .timeout)
+        let probe = RecordingProbe(results: [failure])
+        let clock = ManualClock()
+        let controller = LiveMonitorSessionController(
+            host: host,
+            probeFactory: StaticProbeFactory(probe: probe),
+            policy: MonitorSessionPolicy(probeInterval: .milliseconds(100)),
+            clock: clock,
+            now: { clock.currentDate }
+        )
+
+        await controller.start(duration: .continuous, at: clock.baseDate)
+        try await clock.waitForSleepers(atLeast: 1)
+        clock.advance(by: .milliseconds(100))
+        try await clock.waitForSleepers(atLeast: 1)
+
+        let downSnapshot = await controller.snapshot()
+        let downMeasurementCount = await probe.measurementCount
+        XCTAssertEqual(downSnapshot.health.status, .down)
+        XCTAssertEqual(downMeasurementCount, 2)
+
+        await controller.start(duration: .continuous, at: clock.currentDate)
+        try await clock.waitForSleepers(atLeast: 1)
+
+        let restartedSnapshot = await controller.snapshot()
+        let restartedMeasurementCount = await probe.measurementCount
+        XCTAssertEqual(restartedSnapshot.health.status, .down)
+        XCTAssertEqual(restartedMeasurementCount, 3)
+        XCTAssertEqual(clock.durationUntilNextSleepDeadline, .milliseconds(100))
+
+        clock.advance(by: .milliseconds(99))
+        XCTAssertEqual(clock.durationUntilNextSleepDeadline, .milliseconds(1))
+        let measurementCountBeforeBaseInterval = await probe.measurementCount
+        XCTAssertEqual(measurementCountBeforeBaseInterval, 3)
+
+        clock.advance(by: .milliseconds(1))
+        try await clock.waitForSleepers(atLeast: 1)
+        let measurementCountAtBaseInterval = await probe.measurementCount
+        XCTAssertEqual(measurementCountAtBaseInterval, 4)
+        await controller.stop()
     }
 
     func testControllerStopsWithUserStoppedReasonAndCancelsFurtherMeasurements() async throws {
@@ -1705,19 +1805,45 @@ final class LiveMonitorSessionControllerTests: XCTestCase {
         XCTAssertEqual(session?.remainingDuration(at: startedAt), .seconds(60))
     }
 
-    func testIOSAllHostsCoordinatorDuplicateHostIDsDoNotTrapSnapshotLookup() async {
+    func testIOSAllHostsCoordinatorStartsIndependentControllersConcurrentlyAndKeepsSnapshotOrder() async throws {
+        let hostA = HostConfig(id: UUID(), displayName: "Cloudflare", address: "1.1.1.1")
+        let hostB = HostConfig(id: UUID(), displayName: "Google", address: "8.8.8.8")
+        let startGate = IOSAllHostsStartGate()
+        let factory = RecordingIOSAllHostsControllerFactory(startGate: startGate)
+        let coordinator = PingScopeIOSMultiHostSessionCoordinator(controllerFactory: factory)
+
+        await coordinator.reconcile(hosts: [hostB, hostA])
+        let start = Task { await coordinator.start(duration: .continuous) }
+        await startGate.waitForStart()
+        try await Task.sleep(for: .milliseconds(50))
+
+        let startCount = await factory.startCount
+        XCTAssertEqual(startCount, 2)
+        await startGate.release()
+        await start.value
+        let snapshots = await coordinator.orderedSnapshots()
+        XCTAssertEqual(snapshots.map(\.host.id), [hostB.id, hostA.id])
+    }
+
+    func testIOSAllHostsCoordinatorCoalescesDuplicateHostIDsBeforeLifecycleFanOut() async {
         let duplicateID = UUID()
         let first = HostConfig(id: duplicateID, displayName: "First", address: "1.1.1.1")
         let second = HostConfig(id: duplicateID, displayName: "Second", address: "8.8.8.8")
+        let factory = RecordingIOSAllHostsControllerFactory()
         let coordinator = PingScopeIOSMultiHostSessionCoordinator(
-            controllerFactory: RecordingIOSAllHostsControllerFactory()
+            controllerFactory: factory
         )
 
         await coordinator.reconcile(hosts: [first, second])
+        await coordinator.start(duration: .continuous)
         let snapshots = await coordinator.snapshotsByHostID()
+        let createdHostIDs = await factory.createdHostIDs
+        let startedHostIDs = await factory.startedHostIDs
 
         XCTAssertEqual(snapshots.count, 1)
-        XCTAssertEqual(snapshots[duplicateID]?.host.id, duplicateID)
+        XCTAssertEqual(snapshots[duplicateID]?.host, first)
+        XCTAssertEqual(createdHostIDs, [duplicateID])
+        XCTAssertEqual(startedHostIDs, [duplicateID])
     }
 
     func testIOSAllHostsCoordinatorStopsAndFlushesRemovedOrDisabledControllersBeforeDroppingThem() async {
@@ -1876,12 +2002,22 @@ final class LiveMonitorSessionControllerTests: XCTestCase {
         let hostA = HostConfig(id: UUID(), displayName: "Cloudflare", address: "1.1.1.1")
         let disabledB = HostConfig(id: UUID(), displayName: "Disabled", address: "8.8.8.8", isEnabled: false)
         let hostC = HostConfig(id: UUID(), displayName: "Gateway", address: "192.168.1.1")
-        let factory = RecordingIOSAllHostsControllerFactory()
+        let snapshotOrderGate = IOSAllHostsSnapshotOrderGate(blockedHostID: hostC.id)
+        let factory = RecordingIOSAllHostsControllerFactory(snapshotOrderGate: snapshotOrderGate)
         let coordinator = PingScopeIOSMultiHostSessionCoordinator(controllerFactory: factory)
 
         await coordinator.reconcile(hosts: [hostC, disabledB, hostA])
 
-        let orderedSnapshots = await coordinator.orderedSnapshots()
+        let snapshotCollection = Task {
+            await coordinator.orderedSnapshots()
+        }
+        await snapshotOrderGate.waitForBlockedSnapshot()
+        await snapshotOrderGate.waitForCompletion(of: hostA.id)
+        let completedBeforeRelease = await snapshotOrderGate.completedHostIDs
+        XCTAssertEqual(completedBeforeRelease, [hostA.id])
+        await snapshotOrderGate.releaseBlockedSnapshot()
+
+        let orderedSnapshots = await snapshotCollection.value
         let snapshotsByHostID = await coordinator.snapshotsByHostID()
         XCTAssertEqual(orderedSnapshots.map(\.host.id), [hostC.id, hostA.id])
         XCTAssertEqual(Set(snapshotsByHostID.keys), Set([hostC.id, hostA.id]))
@@ -2024,10 +2160,10 @@ final class LiveMonitorSessionControllerTests: XCTestCase {
 
         let startRecords = await factory.startRecords
         let stopRecords = await factory.stopRecords
-        XCTAssertEqual(startRecords.map(\.hostID), [hostA.id, hostB.id])
-        XCTAssertEqual(startRecords.map(\.duration), [.oneMinute, .oneMinute])
+        XCTAssertEqual(Set(startRecords.map(\.hostID)), Set([hostA.id, hostB.id]))
+        XCTAssertTrue(startRecords.allSatisfy { $0.duration == .oneMinute })
         XCTAssertEqual(startRecords.map(\.date), [clock.baseDate, clock.baseDate])
-        XCTAssertEqual(stopRecords.map(\.hostID), [hostA.id, hostB.id])
+        XCTAssertEqual(Set(stopRecords.map(\.hostID)), Set([hostA.id, hostB.id]))
         XCTAssertEqual(stopRecords.map(\.date), [clock.baseDate.addingTimeInterval(12), clock.baseDate.addingTimeInterval(12)])
     }
 
@@ -2156,6 +2292,17 @@ private actor RecordingProbe: PingProbe {
         measurementCount += 1
         let index = min(measurementCount - 1, results.count - 1)
         return results[index].withHostMetadata(from: host)
+    }
+
+    func waitForMeasurements(atLeast expectedCount: Int) async throws {
+        let deadline = Date().addingTimeInterval(2)
+        while measurementCount < expectedCount {
+            if Date() > deadline {
+                XCTFail("timed out waiting for \(expectedCount) measurements")
+                return
+            }
+            try await Task.sleep(for: .milliseconds(5))
+        }
     }
 }
 
@@ -2330,6 +2477,7 @@ private actor RecordingIOSAllHostsControllerFactory: PingScopeIOSMultiHostSessio
     private let stopGate: IOSAllHostsStopGate?
     private let firstStopGate: IOSAllHostsFirstStopGate?
     private let snapshotGate: IOSAllHostsFirstSnapshotGate?
+    private let snapshotOrderGate: IOSAllHostsSnapshotOrderGate?
     private var nextControllerToken = 0
     private var runningByControllerToken: [Int: Bool] = [:]
     private(set) var createdHostIDs: [UUID] = []
@@ -2350,7 +2498,8 @@ private actor RecordingIOSAllHostsControllerFactory: PingScopeIOSMultiHostSessio
         startGate: IOSAllHostsStartGate? = nil,
         stopGate: IOSAllHostsStopGate? = nil,
         firstStopGate: IOSAllHostsFirstStopGate? = nil,
-        snapshotGate: IOSAllHostsFirstSnapshotGate? = nil
+        snapshotGate: IOSAllHostsFirstSnapshotGate? = nil,
+        snapshotOrderGate: IOSAllHostsSnapshotOrderGate? = nil
     ) {
         self.statuses = statuses
         self.snapshotHosts = snapshotHosts
@@ -2358,6 +2507,7 @@ private actor RecordingIOSAllHostsControllerFactory: PingScopeIOSMultiHostSessio
         self.stopGate = stopGate
         self.firstStopGate = firstStopGate
         self.snapshotGate = snapshotGate
+        self.snapshotOrderGate = snapshotOrderGate
     }
 
     func makeController(
@@ -2376,6 +2526,10 @@ private actor RecordingIOSAllHostsControllerFactory: PingScopeIOSMultiHostSessio
 
     var stopCount: Int {
         stoppedAndFlushedHostIDs.count
+    }
+
+    var startCount: Int {
+        startedHostIDs.count
     }
 
     func recordStart(hostID: UUID, controllerToken: Int, duration: MonitorSessionDuration, at date: Date) async {
@@ -2412,10 +2566,12 @@ private actor RecordingIOSAllHostsControllerFactory: PingScopeIOSMultiHostSessio
         if await snapshotGate?.recordSnapshot() == true {
             await snapshotGate?.waitForRelease()
         }
+        await snapshotOrderGate?.waitIfBlocked(hostID: host.id)
 
         let snapshotHost = snapshotHosts[host.id] ?? host
         var health = HostHealth(hostID: snapshotHost.id, thresholds: snapshotHost.thresholds)
         health.status = statuses[host.id] ?? .noData
+        await snapshotOrderGate?.recordCompletion(hostID: host.id)
         return LiveMonitorSessionSnapshot(host: snapshotHost, session: nil, health: health)
     }
 }
@@ -2603,6 +2759,63 @@ private actor IOSAllHostsFirstSnapshotGate {
     }
 
     func release() {
+        released = true
+        releaseWaiters.forEach { $0.resume() }
+        releaseWaiters.removeAll()
+    }
+}
+
+private actor IOSAllHostsSnapshotOrderGate {
+    private let blockedHostID: UUID
+    private var blockedSnapshotStarted = false
+    private var released = false
+    private var completed: [UUID] = []
+    private var blockedSnapshotWaiters: [CheckedContinuation<Void, Never>] = []
+    private var releaseWaiters: [CheckedContinuation<Void, Never>] = []
+    private var completionWaiters: [UUID: [CheckedContinuation<Void, Never>]] = [:]
+
+    init(blockedHostID: UUID) {
+        self.blockedHostID = blockedHostID
+    }
+
+    var completedHostIDs: [UUID] {
+        completed
+    }
+
+    func waitIfBlocked(hostID: UUID) async {
+        guard hostID == blockedHostID else { return }
+        blockedSnapshotStarted = true
+        blockedSnapshotWaiters.forEach { $0.resume() }
+        blockedSnapshotWaiters.removeAll()
+        while !released {
+            await withCheckedContinuation { continuation in
+                releaseWaiters.append(continuation)
+            }
+        }
+    }
+
+    func waitForBlockedSnapshot() async {
+        while !blockedSnapshotStarted {
+            await withCheckedContinuation { continuation in
+                blockedSnapshotWaiters.append(continuation)
+            }
+        }
+    }
+
+    func recordCompletion(hostID: UUID) {
+        completed.append(hostID)
+        completionWaiters.removeValue(forKey: hostID)?.forEach { $0.resume() }
+    }
+
+    func waitForCompletion(of hostID: UUID) async {
+        while !completed.contains(hostID) {
+            await withCheckedContinuation { continuation in
+                completionWaiters[hostID, default: []].append(continuation)
+            }
+        }
+    }
+
+    func releaseBlockedSnapshot() {
         released = true
         releaseWaiters.forEach { $0.resume() }
         releaseWaiters.removeAll()

@@ -3,6 +3,24 @@ import AppKit
 import XCTest
 
 final class MenuBarPresentationModeTests: XCTestCase {
+    @MainActor
+    func testSettingsAndHistoryWindowsStayOpenAndShareTabbingGroup() {
+        let settings = NSWindow()
+        let history = NSWindow()
+
+        PingScopePrimaryWindowConfiguration.apply(to: settings)
+        PingScopePrimaryWindowConfiguration.apply(to: history)
+
+        for window in [settings, history] {
+            XCTAssertFalse(window.isReleasedWhenClosed)
+            XCTAssertFalse(window.hidesOnDeactivate)
+            XCTAssertEqual(window.tabbingMode, .preferred)
+            XCTAssertTrue(window.styleMask.contains(.resizable))
+        }
+        XCTAssertEqual(settings.tabbingIdentifier, history.tabbingIdentifier)
+        XCTAssertFalse(settings.tabbingIdentifier.isEmpty)
+    }
+
     func testMenuPopoverAllowsUserInitiatedDetach() {
         XCTAssertTrue(MenuBarPresentationMode.shouldAllowUserDetachForMenuPopover())
     }
@@ -27,6 +45,21 @@ final class MenuBarPresentationModeTests: XCTestCase {
         XCTAssertTrue(window.titlebarAppearsTransparent)
         XCTAssertGreaterThanOrEqual(window.minSize.width, 150)
         XCTAssertGreaterThanOrEqual(window.minSize.height, 54)
+    }
+
+    @MainActor
+    func testCompactOverlayWindowAllowsIndependentHorizontalAndVerticalResize() {
+        let window = OverlayWindow(contentRect: NSRect(x: 0, y: 0, width: 180, height: 80))
+        window.aspectRatio = NSSize(width: 2, height: 1)
+        window.contentAspectRatio = NSSize(width: 2, height: 1)
+
+        window.enableFreeformResize()
+
+        XCTAssertTrue(window.styleMask.contains(.resizable))
+        XCTAssertEqual(window.aspectRatio, .zero)
+        XCTAssertEqual(window.contentAspectRatio, .zero)
+        XCTAssertEqual(window.resizeIncrements.width, 1)
+        XCTAssertEqual(window.resizeIncrements.height, 1)
     }
 
     func testDetachedPopoverContentHasSmallerMinimumThanInitialSize() {

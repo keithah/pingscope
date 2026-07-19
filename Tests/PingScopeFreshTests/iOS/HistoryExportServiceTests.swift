@@ -6,6 +6,14 @@ import XCTest
 
 @MainActor
 final class HistoryExportServiceTests: XCTestCase {
+    func testImmutableFileWriteOperationLeavesMainActor() async throws {
+        let ranOffMainActor = try await HistoryFileWriteOperation.perform {
+            !Thread.isMainThread
+        }
+
+        XCTAssertTrue(ranOffMainActor)
+    }
+
     func testReportPresentationAuditsEveryPopulatedField() throws {
         let host = HostConfig(id: UUID(), displayName: "Office Gateway", address: "192.0.2.1")
         let start = Date(timeIntervalSince1970: 1_000)

@@ -80,6 +80,174 @@ final class PingScopePresentationViewModelTests: XCTestCase {
         )
     }
 
+    func testDisplayPresentationSampleFingerprintTracksCountAndNewestSamplePerHost() {
+        let firstHostID = UUID()
+        let secondHostID = UUID()
+        let first = PingResult.success(hostID: firstHostID, latency: .milliseconds(10), timestamp: Date(timeIntervalSince1970: 100))
+        let newest = PingResult.success(hostID: firstHostID, latency: .milliseconds(20), timestamp: Date(timeIntervalSince1970: 200))
+        let otherHost = PingResult.success(hostID: secondHostID, latency: .milliseconds(30), timestamp: Date(timeIntervalSince1970: 150))
+
+        XCTAssertEqual(
+            DisplayPresentationSampleFingerprint(samples: [first, newest, otherHost]),
+            DisplayPresentationSampleFingerprint(samples: [otherHost, first, newest])
+        )
+        XCTAssertNotEqual(
+            DisplayPresentationSampleFingerprint(samples: [first, newest]),
+            DisplayPresentationSampleFingerprint(samples: [first])
+        )
+        XCTAssertNotEqual(
+            DisplayPresentationSampleFingerprint(samples: [first]),
+            DisplayPresentationSampleFingerprint(samples: [newest])
+        )
+    }
+
+    func testDisplayPresentationSampleFingerprintUsesGreatestIDToBreakNewestTimestampTie() throws {
+        let hostID = UUID()
+        let timestamp = Date(timeIntervalSince1970: 100)
+        let lowerID = UUID(uuidString: "00000000-0000-0000-0000-000000000001")!
+        let greaterID = UUID(uuidString: "FFFFFFFF-FFFF-FFFF-FFFF-FFFFFFFFFFFF")!
+        let lower = PingResult(id: lowerID, hostID: hostID, timestamp: timestamp, latency: .milliseconds(10), failureReason: nil)
+        let greater = PingResult(id: greaterID, hostID: hostID, timestamp: timestamp, latency: .milliseconds(20), failureReason: nil)
+
+        let fingerprint = DisplayPresentationSampleFingerprint(samples: [greater, lower])
+
+        XCTAssertEqual(try XCTUnwrap(fingerprint.hosts.first).count, 2)
+        XCTAssertEqual(try XCTUnwrap(fingerprint.hosts.first).newestSampleID, greaterID)
+        XCTAssertEqual(try XCTUnwrap(fingerprint.hosts.first).newestTimestamp, timestamp)
+    }
+
+    func testDisplayPresentationSampleFingerprintMatchesUnorderedEquivalenceOracle() {
+        struct OracleHost: Equatable {
+            let hostID: UUID
+            let count: Int
+            let newestSampleID: UUID
+            let newestTimestamp: Date
+        }
+
+        func oracle(_ samples: [PingResult]) -> [OracleHost] {
+            Dictionary(grouping: samples, by: \PingResult.hostID)
+                .map { hostID, hostSamples in
+                    let newest = hostSamples.max { lhs, rhs in
+                        if lhs.timestamp != rhs.timestamp {
+                            return lhs.timestamp < rhs.timestamp
+                        }
+                        return lhs.id.uuidString < rhs.id.uuidString
+                    }!
+                    return OracleHost(
+                        hostID: hostID,
+                        count: hostSamples.count,
+                        newestSampleID: newest.id,
+                        newestTimestamp: newest.timestamp
+                    )
+                }
+                .sorted { $0.hostID.uuidString < $1.hostID.uuidString }
+        }
+
+        let firstHostID = UUID(uuidString: "10000000-0000-0000-0000-000000000000")!
+        let secondHostID = UUID(uuidString: "20000000-0000-0000-0000-000000000000")!
+        let lowerSampleID = UUID(uuidString: "00000000-0000-0000-0000-000000000001")!
+        let greaterSampleID = UUID(uuidString: "00000000-0000-0000-0000-0000000000FF")!
+        let old = PingResult(
+            id: UUID(),
+            hostID: firstHostID,
+            timestamp: Date(timeIntervalSince1970: 100),
+            latency: .milliseconds(10),
+            failureReason: nil
+        )
+        let tiedLower = PingResult(
+            id: lowerSampleID,
+            hostID: firstHostID,
+            timestamp: Date(timeIntervalSince1970: 200),
+            latency: .milliseconds(20),
+            failureReason: nil
+        )
+        let tiedGreater = PingResult(
+            id: greaterSampleID,
+            hostID: firstHostID,
+            timestamp: Date(timeIntervalSince1970: 200),
+            latency: .milliseconds(30),
+            failureReason: nil
+        )
+        let otherHost = PingResult(
+            id: UUID(),
+            hostID: secondHostID,
+            timestamp: Date(timeIntervalSince1970: 150),
+            latency: .milliseconds(40),
+            failureReason: nil
+        )
+        let samples = [old, tiedLower, tiedGreater, otherHost]
+        let reordered = [otherHost, tiedGreater, old, tiedLower]
+
+        for input in [samples, reordered] {
+            let actual = DisplayPresentationSampleFingerprint(samples: input).hosts.map {
+                OracleHost(
+                    hostID: $0.hostID,
+                    count: $0.count,
+                    newestSampleID: $0.newestSampleID!,
+                    newestTimestamp: $0.newestTimestamp!
+                )
+            }
+            XCTAssertEqual(actual, oracle(input))
+        }
+        XCTAssertEqual(
+            DisplayPresentationSampleFingerprint(samples: samples),
+            DisplayPresentationSampleFingerprint(samples: reordered)
+        )
+        let additionalOld = PingResult(
+            id: UUID(),
+            hostID: firstHostID,
+            timestamp: Date(timeIntervalSince1970: 50),
+            latency: .milliseconds(5),
+            failureReason: nil
+        )
+        XCTAssertNotEqual(
+            DisplayPresentationSampleFingerprint(samples: samples),
+            DisplayPresentationSampleFingerprint(samples: samples + [additionalOld])
+        )
+        let newest = PingResult(
+            id: UUID(),
+            hostID: firstHostID,
+            timestamp: Date(timeIntervalSince1970: 300),
+            latency: .milliseconds(50),
+            failureReason: nil
+        )
+        XCTAssertNotEqual(
+            DisplayPresentationSampleFingerprint(samples: samples),
+            DisplayPresentationSampleFingerprint(samples: [old, tiedLower, newest, otherHost])
+        )
+    }
+
+    func testDisplayPresentationConsumesPreparedSamplesWithoutMaterializingThemAgain() {
+        let host = HostConfig(displayName: "Primary", address: "1.1.1.1")
+        let preparedSample = PingResult.success(
+            hostID: host.id,
+            latency: .milliseconds(42),
+            timestamp: Date(timeIntervalSince1970: 100)
+        )
+        let snapshot = RuntimeSnapshot(
+            hosts: [host],
+            primaryHostID: host.id,
+            healthByHost: [:],
+            samplesByHost: [:]
+        )
+        let preparation = PingScopeDisplayPreparation(
+            visibleHistorySamples: [preparedSample],
+            visibleSamples: [preparedSample],
+            allHostGraphSeries: []
+        )
+
+        let presentation = PingScopeDisplayPresentation(
+            snapshot: snapshot,
+            preparation: preparation,
+            includesAllHosts: false,
+            presenter: DisplayStatePresenter()
+        )
+
+        XCTAssertEqual(presentation.visibleHistorySamples, [preparedSample])
+        XCTAssertEqual(presentation.visibleSamples, [preparedSample])
+        XCTAssertEqual(presentation.primaryStats.transmitted, 1)
+    }
+
     func testOverlayPresentationViewModelRefreshesOverlayPreferences() {
         let oldShowsAllHosts = UserDefaults.standard.overlayShowsAllHosts
         let oldShowsLegend = UserDefaults.standard.overlayShowsLegend
@@ -184,11 +352,23 @@ final class PingScopePresentationViewModelTests: XCTestCase {
         XCTAssertEqual(overlayViewModel.presentation.displayMode, .signal)
     }
 
-    func testDisplayModeResolvesAllHostsToSignal() {
-        XCTAssertEqual(PingScopeDisplayMode.signal.resolvedForHostScope(showsAllHosts: false), .signal)
-        XCTAssertEqual(PingScopeDisplayMode.ring.resolvedForHostScope(showsAllHosts: false), .ring)
-        XCTAssertEqual(PingScopeDisplayMode.signal.resolvedForHostScope(showsAllHosts: true), .signal)
-        XCTAssertEqual(PingScopeDisplayMode.ring.resolvedForHostScope(showsAllHosts: true), .signal)
+    func testDisplayModeKeepsRingForAllHosts() {
+        let oldDisplayMode = UserDefaults.standard.pingScopeDisplayMode
+        let oldPopoverShowsAllHosts = UserDefaults.standard.popoverShowsAllHosts
+        let oldOverlayShowsAllHosts = UserDefaults.standard.overlayShowsAllHosts
+        defer {
+            UserDefaults.standard.pingScopeDisplayMode = oldDisplayMode
+            UserDefaults.standard.popoverShowsAllHosts = oldPopoverShowsAllHosts
+            UserDefaults.standard.overlayShowsAllHosts = oldOverlayShowsAllHosts
+        }
+
+        let model = PingScopeModel()
+        model.displayMode = .ring
+        model.popoverShowsAllHosts = true
+        model.overlayShowsAllHosts = true
+
+        XCTAssertEqual(StatusPopoverPresentation(model: model).displayMode, .ring)
+        XCTAssertEqual(OverlayPresentation(model: model).displayMode, .ring)
     }
 
     func testOverlayCompactModeDefaultsToExpandedAndPersistsExplicitCompact() {

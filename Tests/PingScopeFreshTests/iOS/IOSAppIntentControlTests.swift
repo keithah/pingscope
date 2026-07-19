@@ -227,6 +227,31 @@ final class IOSAppIntentControlTests: XCTestCase {
         XCTAssertEqual(PingScopeIOSControlKind.status, "com.hadm.pingscope.status-control")
     }
 
+    func testControlWidgetSourcesAreCompileTimeGatedToIOS() throws {
+        let repositoryRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let controls = try String(
+            contentsOf: repositoryRoot.appendingPathComponent("PingScopeWidget/PingScopeControls.swift"),
+            encoding: .utf8
+        )
+        let bundle = try String(
+            contentsOf: repositoryRoot.appendingPathComponent("PingScopeWidget/PingScopeWidget.swift"),
+            encoding: .utf8
+        )
+
+        XCTAssertTrue(
+            controls.contains("#if os(iOS)\n@available(iOS 18.0, *)\nstruct PingScopeMonitoringControl"),
+            "ControlWidget declarations must not be type-checked by the macOS 15 widget target"
+        )
+        XCTAssertTrue(
+            bundle.contains("#if os(iOS)\n        if #available(iOS 18.0, *)"),
+            "The shared WidgetBundle must only reference ControlWidget types on iOS"
+        )
+    }
+
     func testWidgetSnapshotMonitoringContextDecodesLegacyDataAsNil() throws {
         let json = """
         {

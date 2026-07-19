@@ -59,6 +59,13 @@ final class ManualClock: Clock, @unchecked Sendable {
 
     var minimumResolution: Duration { .zero }
 
+    var durationUntilNextSleepDeadline: Duration? {
+        lock.lock()
+        defer { lock.unlock() }
+        guard let deadline = waiters.map(\.deadline).min() else { return nil }
+        return currentInstant.duration(to: deadline)
+    }
+
     /// The wall-clock equivalent of `now`, for injecting as a date provider.
     var currentDate: Date {
         lock.lock()

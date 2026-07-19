@@ -7,6 +7,7 @@ final class CorePlatformImportGuardTests: XCTestCase {
             .deletingLastPathComponent()
             .deletingLastPathComponent()
             .deletingLastPathComponent()
+            .deletingLastPathComponent()
         let guardedSourceDirectories = [
             repositoryRoot.appendingPathComponent("Sources/PingScopeCore"),
             repositoryRoot.appendingPathComponent("Sources/PingScopeHistoryKit"),
@@ -49,6 +50,7 @@ final class CorePlatformImportGuardTests: XCTestCase {
             .deletingLastPathComponent()
             .deletingLastPathComponent()
             .deletingLastPathComponent()
+            .deletingLastPathComponent()
         let iOSApp = try String(
             contentsOf: repositoryRoot.appendingPathComponent("Sources/PingScopeiOSApp/PingScopeIOSApp.swift"),
             encoding: .utf8
@@ -65,6 +67,7 @@ final class CorePlatformImportGuardTests: XCTestCase {
 
     func testApplicationTargetsDeclareWiFiInfoCapability() throws {
         let repositoryRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
             .deletingLastPathComponent()
             .deletingLastPathComponent()
             .deletingLastPathComponent()
@@ -92,6 +95,7 @@ final class CorePlatformImportGuardTests: XCTestCase {
             .deletingLastPathComponent()
             .deletingLastPathComponent()
             .deletingLastPathComponent()
+            .deletingLastPathComponent()
         let iOSApp = try String(
             contentsOf: repositoryRoot.appendingPathComponent("Sources/PingScopeiOSApp/PingScopeIOSApp.swift"),
             encoding: .utf8
@@ -108,10 +112,16 @@ final class CorePlatformImportGuardTests: XCTestCase {
             .deletingLastPathComponent()
             .deletingLastPathComponent()
             .deletingLastPathComponent()
-        let macView = try String(
+            .deletingLastPathComponent()
+        let popoverViews = try String(
             contentsOf: repositoryRoot.appendingPathComponent("Sources/PingScopeApp/PopoverViews.swift"),
             encoding: .utf8
         )
+        let popoverSupportViews = try String(
+            contentsOf: repositoryRoot.appendingPathComponent("Sources/PingScopeApp/PopoverSupportViews.swift"),
+            encoding: .utf8
+        )
+        let macView = popoverViews + popoverSupportViews
         let iosPresentation = try String(
             contentsOf: repositoryRoot.appendingPathComponent(
                 "Sources/PingScopeiOS/PingScopeIOSNetworkDiagnosisPresentation.swift"
@@ -119,10 +129,9 @@ final class CorePlatformImportGuardTests: XCTestCase {
             encoding: .utf8
         )
 
-        for source in [macView, iosPresentation] {
-            XCTAssertTrue(source.contains("NetworkDiagnosisPresentation"))
-            XCTAssertTrue(source.contains("StarlinkTelemetryPresentation"))
-        }
+        XCTAssertTrue(iosPresentation.contains("NetworkDiagnosisPresentation"))
+        XCTAssertTrue(iosPresentation.contains("StarlinkTelemetryPresentation"))
+        XCTAssertTrue(macView.contains("StarlinkTelemetryPresentation"))
         for duplicatedLiteral in [
             "\"network.slash\"",
             "\"wifi.exclamationmark\"",

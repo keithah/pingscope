@@ -234,6 +234,44 @@ final class HistoryStoreTests: XCTestCase {
         XCTAssertEqual(samples.map { Int($0.latency?.milliseconds ?? 0) }, [20])
     }
 
+    func testLocalBatchRetentionPrunePreservesBackfilledRowsInsertedInSameBatch() async throws {
+        let url = temporaryHistoryURL()
+        let host = HostConfig(displayName: "Backfill", address: "backfill.example.com")
+        let now = Date()
+        let backfilled = PingResult.success(
+            hostID: host.id,
+            latency: .milliseconds(40),
+            timestamp: now.addingTimeInterval(-8 * 86_400)
+        ).withHostMetadata(from: host)
+        let preexistingExpired = PingResult.success(
+            hostID: host.id,
+            latency: .milliseconds(60),
+            timestamp: now.addingTimeInterval(-9 * 86_400)
+        ).withHostMetadata(from: host)
+        let current = PingResult.success(
+            hostID: host.id,
+            latency: .milliseconds(10),
+            timestamp: now
+        ).withHostMetadata(from: host)
+        do {
+            let seedingStore = SQLiteHistoryStore(url: url, retention: .days(30))
+            try await seedingStore.appendAndWait([preexistingExpired])
+        }
+        let store = SQLiteHistoryStore(url: url, retention: .days(7))
+
+        try await store.appendAndWait([backfilled, current])
+
+        let persisted = await store.samples(
+            hostID: host.id,
+            since: backfilled.timestamp.addingTimeInterval(-1),
+            limit: 10
+        )
+        let revision = await store.historyRevision()
+        XCTAssertEqual(Set(persisted.map(\.id)), Set([backfilled.id, current.id]))
+        XCTAssertFalse(persisted.contains { $0.id == preexistingExpired.id })
+        XCTAssertEqual(revision, 1)
+    }
+
     func testSQLiteHistoryStoreFutureTimestampDoesNotPruneOtherHostsRecentHistory() async throws {
         let url = temporaryHistoryURL()
         let recentHost = HostConfig(displayName: "Recent", address: "recent.example.com")
@@ -288,6 +326,109 @@ final class HistoryStoreTests: XCTestCase {
         XCTAssertEqual(latest.map(\.hostID), Array(repeating: host.id, count: 3))
     }
 
+    func testSQLiteHistoryStoreLoadsOrderedWeeklyInputsForMultipleHostsInOneRequest() async throws {
+        let url = temporaryHistoryURL()
+        let first = HostConfig(displayName: "First", address: "first.example.com")
+        let second = HostConfig(displayName: "Second", address: "second.example.com")
+        let ignored = HostConfig(displayName: "Ignored", address: "ignored.example.com")
+        let endingAt = Date(timeIntervalSince1970: 50_000)
+        let store = SQLiteHistoryStore(url: url, retention: .days(30))
+        var firstSuccess = PingResult.success(
+            hostID: first.id,
+            latency: .milliseconds(10),
+            timestamp: endingAt.addingTimeInterval(-20),
+            networkInterface: "wifi",
+            networkName: "Office"
+        ).withHostMetadata(from: first)
+        firstSuccess.metadata = ProbeMetadata(
+            starlink: StarlinkTelemetry(state: "CONNECTED", popPingDropRate: 0.25)
+        )
+        let rows = [
+            PingResult.failure(
+                hostID: second.id,
+                reason: .timeout,
+                timestamp: endingAt.addingTimeInterval(-10),
+                networkInterface: "cellular"
+            ).withHostMetadata(from: second),
+            firstSuccess,
+            PingResult.success(
+                hostID: ignored.id,
+                latency: .milliseconds(99),
+                timestamp: endingAt.addingTimeInterval(-5)
+            ).withHostMetadata(from: ignored),
+            PingResult.success(
+                hostID: first.id,
+                latency: .milliseconds(20),
+                timestamp: endingAt.addingTimeInterval(-30)
+            ).withHostMetadata(from: first)
+        ]
+        try await store.appendAndWait(rows)
+
+        let revision = await store.historyRevision()
+        let inputs = await store.weeklyDigestSamples(
+            hostIDs: [second.id, first.id],
+            since: endingAt.addingTimeInterval(-100),
+            through: endingAt
+        )
+
+        let expected = [rows[0], firstSuccess, rows[3]].sorted { lhs, rhs in
+            if lhs.hostID != rhs.hostID { return lhs.hostID.uuidString < rhs.hostID.uuidString }
+            if lhs.timestamp != rhs.timestamp { return lhs.timestamp < rhs.timestamp }
+            return lhs.id.uuidString < rhs.id.uuidString
+        }
+        XCTAssertGreaterThan(revision, 0)
+        XCTAssertEqual(inputs.map(\.id), expected.map(\.id))
+        XCTAssertEqual(inputs.map(\.hostID), expected.map(\.hostID))
+        let starlinkInput = try XCTUnwrap(inputs.first { $0.id == firstSuccess.id })
+        XCTAssertEqual(starlinkInput.lossFractionOverride, 0.25)
+        XCTAssertEqual(starlinkInput.networkInterface, "wifi")
+        XCTAssertEqual(starlinkInput.networkName, "Office")
+        XCTAssertFalse(try XCTUnwrap(inputs.first { $0.id == rows[0].id }).isSuccess)
+    }
+
+    func testSQLiteHistoryStoreChunksWeeklyHostBindsAtConnectionVariableLimit() async throws {
+        let url = temporaryHistoryURL()
+        let base = Date(timeIntervalSince1970: 55_000)
+        let hosts = (0..<7).map { index in
+            HostConfig(displayName: "Host \(index)", address: "host-\(index).example.com")
+        }
+        let rows = hosts.enumerated().flatMap { index, host in
+            [
+                PingResult.success(
+                    hostID: host.id,
+                    latency: .milliseconds(Double(index + 1)),
+                    timestamp: base.addingTimeInterval(Double(index % 3)),
+                    networkInterface: index.isMultiple(of: 2) ? "wifi" : "cellular"
+                ).withHostMetadata(from: host),
+                PingResult.failure(
+                    hostID: host.id,
+                    reason: .timeout,
+                    timestamp: base.addingTimeInterval(Double(index % 3))
+                ).withHostMetadata(from: host)
+            ]
+        }
+        let store = SQLiteHistoryStore(
+            url: url,
+            retention: .days(30),
+            sqliteVariableNumberLimitForTesting: 5
+        )
+        try await store.appendAndWait(rows.reversed())
+
+        let inputs = await store.weeklyDigestSamples(
+            hostIDs: hosts.map(\.id) + [hosts[0].id, hosts[6].id],
+            since: base.addingTimeInterval(-1),
+            through: base.addingTimeInterval(10)
+        )
+        let expected = rows.sorted { lhs, rhs in
+            if lhs.hostID != rhs.hostID { return lhs.hostID.uuidString < rhs.hostID.uuidString }
+            if lhs.timestamp != rhs.timestamp { return lhs.timestamp < rhs.timestamp }
+            return lhs.id.uuidString < rhs.id.uuidString
+        }
+
+        XCTAssertEqual(inputs.map(\.id), expected.map(\.id))
+        XCTAssertEqual(inputs.count, rows.count)
+    }
+
     func testSQLiteHistoryStoreCreatesTimestampPruneIndex() async throws {
         let url = temporaryHistoryURL()
         let host = HostConfig(displayName: "Example", address: "example.com")
@@ -311,6 +452,295 @@ final class HistoryStoreTests: XCTestCase {
         }
 
         XCTAssertTrue(indexes.contains("ping_samples_timestamp"))
+    }
+
+    func testSQLiteHistoryStoreUsesUnsyncedTimestampIndexForSyncQueue() async throws {
+        let url = temporaryHistoryURL()
+        let host = HostConfig(displayName: "Example", address: "example.com")
+        let store = SQLiteHistoryStore(url: url)
+
+        await store.append(.success(hostID: host.id, latency: .milliseconds(10)).withHostMetadata(from: host))
+
+        var db: OpaquePointer?
+        XCTAssertEqual(sqlite3_open_v2(url.path, &db, SQLITE_OPEN_READONLY, nil), SQLITE_OK)
+        defer { sqlite3_close(db) }
+
+        let plan = try queryPlanDetails(
+            db: db,
+            sql: """
+            EXPLAIN QUERY PLAN
+            SELECT id FROM ping_samples
+            WHERE synced = 0
+            ORDER BY timestamp DESC
+            LIMIT 300;
+            """
+        )
+
+        XCTAssertTrue(plan.contains { $0.contains("ping_samples_unsynced_time") }, plan.joined(separator: "\n"))
+        XCTAssertFalse(plan.contains { $0.contains("USE TEMP B-TREE") }, plan.joined(separator: "\n"))
+    }
+
+    func testSQLiteHistoryStoreMarksSyncBatchAtomicallyWhenAnUpdateFails() async throws {
+        let url = temporaryHistoryURL()
+        let host = HostConfig(displayName: "Example", address: "example.com")
+        let base = Date(timeIntervalSince1970: 20_000)
+        let samples = (0..<3).map { offset in
+            PingResult.success(
+                hostID: host.id,
+                latency: .milliseconds(Double(offset + 1)),
+                timestamp: base.addingTimeInterval(Double(offset))
+            ).withHostMetadata(from: host)
+        }
+        let store = SQLiteHistoryStore(url: url)
+        try await store.appendAndWait(samples)
+        try installFailingSyncMarkTrigger(url: url, sampleID: samples[1].id)
+
+        do {
+            try await store.markSamplesSynced(ids: samples.map(\.id))
+            XCTFail("Expected the forced middle update to fail")
+        } catch {}
+
+        let unsynced = try await store.unsyncedSamples(limit: 10)
+        XCTAssertEqual(Set(unsynced.map(\.id)), Set(samples.map(\.id)))
+    }
+
+    func testSQLiteHistoryStoreIgnoresDuplicateLocalIDButRemoteUpsertReplacesIt() async throws {
+        let url = temporaryHistoryURL()
+        let host = HostConfig(displayName: "Example", address: "example.com")
+        let sampleID = UUID()
+        let base = Date(timeIntervalSince1970: 25_000)
+        let original = PingResult(
+            id: sampleID,
+            hostID: host.id,
+            timestamp: base,
+            latency: .milliseconds(10),
+            failureReason: nil
+        ).withHostMetadata(from: host)
+        let localDuplicate = PingResult(
+            id: sampleID,
+            hostID: host.id,
+            timestamp: base.addingTimeInterval(1),
+            latency: .milliseconds(20),
+            failureReason: nil
+        ).withHostMetadata(from: host)
+        let remoteReplacement = PingResult(
+            id: sampleID,
+            hostID: host.id,
+            timestamp: base.addingTimeInterval(2),
+            latency: .milliseconds(30),
+            failureReason: nil
+        ).withHostMetadata(from: host)
+        let store = SQLiteHistoryStore(url: url)
+
+        try await store.appendAndWait([original])
+        try await store.appendAndWait([localDuplicate])
+
+        var stored = await store.samples(hostID: host.id, since: base.addingTimeInterval(-1), limit: 10)
+        XCTAssertEqual(stored.map(\.id), [sampleID])
+        XCTAssertEqual(try XCTUnwrap(stored.first?.latency).milliseconds, 10, accuracy: 0.01)
+
+        try await store.upsertRemoteSamples([remoteReplacement])
+
+        stored = await store.samples(hostID: host.id, since: base.addingTimeInterval(-1), limit: 10)
+        XCTAssertEqual(stored.map(\.id), [sampleID])
+        XCTAssertEqual(try XCTUnwrap(stored.first?.latency).milliseconds, 30, accuracy: 0.01)
+        let unsynced = try await store.unsyncedSamples(limit: 10)
+        XCTAssertTrue(unsynced.isEmpty)
+    }
+
+    func testRemoteUpsertChunksLargeBackfillAndAdvancesRevisionPerCommittedChunk() async throws {
+        let url = temporaryHistoryURL()
+        let host = HostConfig(displayName: "Remote", address: "remote.example.com")
+        let base = Date(timeIntervalSince1970: 30_000)
+        let samples = (0..<1_205).map { offset in
+            PingResult.success(
+                hostID: host.id,
+                latency: .milliseconds(Double(offset % 100)),
+                timestamp: base.addingTimeInterval(Double(offset))
+            ).withHostMetadata(from: host)
+        }
+        let transactions = SQLiteTransactionObservation()
+        let store = SQLiteHistoryStore(
+            url: url,
+            remoteUpsertChunkSizeForTesting: 500,
+            transactionObserverForTesting: transactions.record
+        )
+
+        try await store.upsertRemoteSamples(samples)
+
+        let stored = await store.samples(hostID: host.id, since: base.addingTimeInterval(-1), limit: 2_000)
+        XCTAssertEqual(Set(stored.map(\.id)), Set(samples.map(\.id)))
+        XCTAssertEqual(
+            transactions.events,
+            [.beginImmediate, .commit, .beginImmediate, .commit, .beginImmediate, .commit]
+        )
+        let revision = await store.historyRevision()
+        XCTAssertEqual(revision, 3)
+    }
+
+    func testRemoteUpsertFailureKeepsPriorChunksAndRetryConverges() async throws {
+        let url = temporaryHistoryURL()
+        let host = HostConfig(displayName: "Remote", address: "remote.example.com")
+        let base = Date(timeIntervalSince1970: 40_000)
+        let samples = (0..<1_205).map { offset in
+            PingResult.success(
+                hostID: host.id,
+                latency: .milliseconds(Double(offset % 100)),
+                timestamp: base.addingTimeInterval(Double(offset))
+            ).withHostMetadata(from: host)
+        }
+        let failedTransactions = SQLiteTransactionObservation()
+        let failingStore = SQLiteHistoryStore(
+            url: url,
+            remoteUpsertChunkSizeForTesting: 500,
+            failingRemoteUpsertChunkForTesting: 1,
+            transactionObserverForTesting: failedTransactions.record
+        )
+
+        do {
+            try await failingStore.upsertRemoteSamples(samples)
+            XCTFail("Expected the second remote-upsert chunk to fail")
+        } catch {}
+
+        var stored = await failingStore.samples(hostID: host.id, since: base.addingTimeInterval(-1), limit: 2_000)
+        XCTAssertEqual(Set(stored.map(\.id)), Set(samples.prefix(500).map(\.id)))
+        XCTAssertEqual(failedTransactions.events, [.beginImmediate, .commit])
+        let failedRevision = await failingStore.historyRevision()
+        XCTAssertEqual(failedRevision, 1)
+
+        let retryTransactions = SQLiteTransactionObservation()
+        let retryStore = SQLiteHistoryStore(
+            url: url,
+            remoteUpsertChunkSizeForTesting: 500,
+            transactionObserverForTesting: retryTransactions.record
+        )
+        try await retryStore.upsertRemoteSamples(samples)
+
+        stored = await retryStore.samples(hostID: host.id, since: base.addingTimeInterval(-1), limit: 2_000)
+        XCTAssertEqual(Set(stored.map(\.id)), Set(samples.map(\.id)))
+        XCTAssertEqual(retryTransactions.events.count, 6)
+        let retryRevision = await retryStore.historyRevision()
+        XCTAssertEqual(retryRevision, 3)
+    }
+
+    func testSQLiteHistoryStoreSkipsDuplicateWithoutRollingBackFreshRows() async throws {
+        let url = temporaryHistoryURL()
+        let host = HostConfig(displayName: "Example", address: "example.com")
+        let base = Date(timeIntervalSince1970: 26_000)
+        let original = PingResult.success(
+            hostID: host.id,
+            latency: .milliseconds(10),
+            timestamp: base
+        ).withHostMetadata(from: host)
+        let fresh = PingResult.success(
+            hostID: host.id,
+            latency: .milliseconds(20),
+            timestamp: base.addingTimeInterval(1)
+        ).withHostMetadata(from: host)
+        let duplicate = PingResult(
+            id: original.id,
+            hostID: host.id,
+            timestamp: base.addingTimeInterval(2),
+            latency: .milliseconds(30),
+            failureReason: nil
+        ).withHostMetadata(from: host)
+        let store = SQLiteHistoryStore(url: url)
+        try await store.appendAndWait([original])
+
+        try await store.appendAndWait([duplicate, fresh])
+
+        let stored = await store.samples(hostID: host.id, since: base.addingTimeInterval(-1), limit: 10)
+        XCTAssertEqual(Set(stored.map(\.id)), Set([original.id, fresh.id]))
+        XCTAssertEqual(stored.first(where: { $0.id == original.id })?.latency?.milliseconds, 10)
+    }
+
+    func testIgnoredFutureDuplicateDoesNotAdvanceRetentionPruneAnchor() async throws {
+        let url = temporaryHistoryURL()
+        let host = HostConfig(displayName: "Example", address: "example.com")
+        let now = Date()
+        let original = PingResult.success(
+            hostID: host.id,
+            latency: .milliseconds(10),
+            timestamp: now.addingTimeInterval(-90)
+        ).withHostMetadata(from: host)
+        let futureDuplicate = PingResult(
+            id: original.id,
+            hostID: host.id,
+            timestamp: now.addingTimeInterval(86_400),
+            latency: .milliseconds(20),
+            failureReason: nil
+        ).withHostMetadata(from: host)
+        let store = SQLiteHistoryStore(url: url, retention: .seconds(60))
+        try await store.appendAndWait([original])
+
+        try await store.appendAndWait([futureDuplicate])
+
+        let stored = await store.samples(hostID: host.id, since: .distantPast, limit: 10)
+        XCTAssertEqual(stored.map(\.id), [original.id])
+    }
+
+    func testLocalAppendRetentionFailureRollsBackAndCanBeRetried() async throws {
+        let url = temporaryHistoryURL()
+        let host = HostConfig(displayName: "Example", address: "example.com")
+        let base = Date()
+        let expired = PingResult.success(
+            hostID: host.id,
+            latency: .milliseconds(5),
+            timestamp: base.addingTimeInterval(-120)
+        ).withHostMetadata(from: host)
+        let candidate = PingResult.success(
+            hostID: host.id,
+            latency: .milliseconds(10),
+            timestamp: base
+        ).withHostMetadata(from: host)
+        let later = PingResult.success(
+            hostID: host.id,
+            latency: .milliseconds(15),
+            timestamp: base.addingTimeInterval(1)
+        ).withHostMetadata(from: host)
+        let transactions = SQLiteTransactionObservation()
+        let store = SQLiteHistoryStore(
+            url: url,
+            retention: .seconds(60),
+            transactionObserverForTesting: transactions.record
+        )
+        _ = await store.samples(hostID: host.id, since: .distantPast, limit: 10)
+        try insertRawHistorySample(expired, url: url)
+        try installFailingHistoryPruneTrigger(url: url)
+
+        var appendFailed = false
+        do {
+            try await store.appendAndWait([candidate])
+        } catch {
+            appendFailed = true
+        }
+
+        XCTAssertTrue(appendFailed)
+        XCTAssertEqual(transactions.events, [.beginImmediate, .rollback])
+        var revision = await store.historyRevision()
+        XCTAssertEqual(revision, 0)
+        var stored = await store.samples(hostID: host.id, since: .distantPast, limit: 10)
+        XCTAssertEqual(stored.map(\.id), [expired.id])
+
+        try removeFailingHistoryPruneTrigger(url: url)
+        try await store.appendAndWait([candidate])
+
+        XCTAssertEqual(transactions.events, [.beginImmediate, .rollback, .beginImmediate, .commit])
+        revision = await store.historyRevision()
+        XCTAssertEqual(revision, 1)
+        stored = await store.samples(hostID: host.id, since: .distantPast, limit: 10)
+        XCTAssertEqual(stored.map(\.id), [candidate.id])
+
+        try await store.appendAndWait([later])
+
+        XCTAssertEqual(
+            transactions.events,
+            [.beginImmediate, .rollback, .beginImmediate, .commit, .beginImmediate, .commit]
+        )
+        revision = await store.historyRevision()
+        XCTAssertEqual(revision, 2)
+        stored = await store.samples(hostID: host.id, since: .distantPast, limit: 10)
+        XCTAssertEqual(Set(stored.map(\.id)), Set([candidate.id, later.id]))
     }
 
     func testRuntimeWritesIngestedResultsToHistoryStore() async throws {
@@ -349,6 +779,110 @@ final class HistoryStoreTests: XCTestCase {
         let appendAttemptCount = await history.appendAttemptCount
         XCTAssertEqual(appendAttemptCount, 1)
         await buffer.discardPending()
+    }
+
+    func testHistoryWriteBufferFlushesPendingSamplesInOneStoreBatch() async {
+        let host = HostConfig(displayName: "Example", address: "example.com")
+        let history = BatchRecordingHistoryStore()
+        let buffer = HistoryWriteBuffer(
+            store: history,
+            maxBatchSize: 10,
+            flushDelay: .seconds(60)
+        )
+        let samples = (0..<6).map { offset in
+            PingResult.success(
+                hostID: host.id,
+                latency: .milliseconds(Double(offset + 1))
+            ).withHostMetadata(from: host)
+        }
+        for sample in samples {
+            await buffer.append(sample)
+        }
+
+        await buffer.flushNow()
+
+        let batches = await history.recordedBatches()
+        XCTAssertEqual(batches.map { $0.map(\.id) }, [samples.map(\.id)])
+    }
+
+    func testHistoryWriteBufferSkipsDuplicateAndContinuesWithFreshRow() async throws {
+        let url = temporaryHistoryURL()
+        let host = HostConfig(displayName: "Example", address: "example.com")
+        let base = Date(timeIntervalSince1970: 26_500)
+        let original = PingResult.success(
+            hostID: host.id,
+            latency: .milliseconds(10),
+            timestamp: base
+        ).withHostMetadata(from: host)
+        let duplicate = PingResult(
+            id: original.id,
+            hostID: host.id,
+            timestamp: base.addingTimeInterval(1),
+            latency: .milliseconds(20),
+            failureReason: nil
+        ).withHostMetadata(from: host)
+        let fresh = PingResult.success(
+            hostID: host.id,
+            latency: .milliseconds(30),
+            timestamp: base.addingTimeInterval(2)
+        ).withHostMetadata(from: host)
+        let store = SQLiteHistoryStore(url: url)
+        try await store.appendAndWait([original])
+        let buffer = HistoryWriteBuffer(store: store, maxBatchSize: 10, flushDelay: .seconds(60))
+        await buffer.append(duplicate)
+        await buffer.append(fresh)
+
+        await buffer.flushNow()
+        await buffer.flushNow()
+
+        let stored = await store.samples(hostID: host.id, since: base.addingTimeInterval(-1), limit: 10)
+        let diagnostics = await buffer.diagnosticsForTesting()
+        XCTAssertEqual(Set(stored.map(\.id)), Set([original.id, fresh.id]))
+        XCTAssertEqual(stored.first(where: { $0.id == original.id })?.latency?.milliseconds, 10)
+        XCTAssertEqual(diagnostics.pendingCount, 0)
+        XCTAssertEqual(diagnostics.consecutiveFailureCount, 0)
+    }
+
+    func testHistoryWriteBufferFlushUsesOneSQLiteTransactionForOneBatch() async throws {
+        let url = temporaryHistoryURL()
+        let host = HostConfig(displayName: "Example", address: "example.com")
+        let base = Date()
+        let transactions = SQLiteTransactionObservation()
+        let store = SQLiteHistoryStore(
+            url: url,
+            retention: .seconds(60),
+            transactionObserverForTesting: transactions.record
+        )
+        let buffer = HistoryWriteBuffer(
+            store: store,
+            maxBatchSize: 10,
+            flushDelay: .seconds(60)
+        )
+        let expired = PingResult.success(
+            hostID: host.id,
+            latency: .milliseconds(1),
+            timestamp: base.addingTimeInterval(-120)
+        ).withHostMetadata(from: host)
+        let retained = (0..<5).map { offset in
+            PingResult.success(
+                hostID: host.id,
+                latency: .milliseconds(Double(offset + 2)),
+                timestamp: base.addingTimeInterval(Double(offset))
+            ).withHostMetadata(from: host)
+        }
+        let samples = [expired] + retained
+        for sample in samples {
+            await buffer.append(sample)
+        }
+
+        await buffer.flushNow()
+
+        XCTAssertEqual(transactions.events, [.beginImmediate, .commit])
+        let persisted = await store.samples(hostID: host.id, since: .distantPast, limit: 10)
+        XCTAssertEqual(
+            persisted.map(\.id).sorted { $0.uuidString < $1.uuidString },
+            samples.map(\.id).sorted { $0.uuidString < $1.uuidString }
+        )
     }
 
     func testBoundedBufferDropsOldestAndCountsOverflow() {
@@ -701,6 +1235,34 @@ final class HistoryStoreTests: XCTestCase {
 
         XCTAssertTrue(decision.shouldSave)
         XCTAssertTrue(decision.shouldReloadTimeline)
+        XCTAssertTrue(decision.shouldReloadControls)
+    }
+
+    func testWidgetSnapshotPublishPolicyReloadsControlsOnlyForControlRelevantState() {
+        let policy = WidgetSnapshotPublishPolicy(heartbeatInterval: 300, timelineReloadInterval: 300)
+        let hostID = UUID()
+        let generatedAt = Date(timeIntervalSince1970: 1_000)
+        let previous = WidgetSnapshot(
+            primaryHostID: hostID,
+            hosts: [WidgetHost(id: hostID, displayName: "Edge", address: "1.1.1.1", method: .tcp, port: 443, isPrimary: true)],
+            health: [WidgetHostHealth(hostID: hostID, status: .healthy, latencyMilliseconds: 12, consecutiveFailureCount: 0, failureReason: nil, latestResultAt: generatedAt)],
+            recentSamples: [],
+            networkStatus: .connected,
+            generatedAt: generatedAt,
+            monitoring: WidgetMonitoringContext(isActive: true, scope: .focused)
+        )
+        var latencyOnly = previous
+        latencyOnly.generatedAt = generatedAt.addingTimeInterval(301)
+        latencyOnly.health[0].latencyMilliseconds = 34
+        latencyOnly.health[0].latestResultAt = latencyOnly.generatedAt
+        var statusChanged = latencyOnly
+        statusChanged.health[0].status = .down
+        var scopeChanged = latencyOnly
+        scopeChanged.monitoring = WidgetMonitoringContext(isActive: true, scope: .allHosts)
+
+        XCTAssertFalse(policy.decision(for: latencyOnly, previousSnapshot: previous, lastTimelineReloadAt: generatedAt).shouldReloadControls)
+        XCTAssertTrue(policy.decision(for: statusChanged, previousSnapshot: previous, lastTimelineReloadAt: generatedAt).shouldReloadControls)
+        XCTAssertTrue(policy.decision(for: scopeChanged, previousSnapshot: previous, lastTimelineReloadAt: generatedAt).shouldReloadControls)
     }
 
     func testWidgetSnapshotPublishPolicySkipsUnchangedFreshSnapshot() {
@@ -983,6 +1545,84 @@ final class HistoryStoreTests: XCTestCase {
         return names
     }
 
+    private func queryPlanDetails(db: OpaquePointer?, sql: String) throws -> [String] {
+        var statement: OpaquePointer?
+        XCTAssertEqual(sqlite3_prepare_v2(db, sql, -1, &statement, nil), SQLITE_OK)
+        defer { sqlite3_finalize(statement) }
+        var details: [String] = []
+        while sqlite3_step(statement) == SQLITE_ROW {
+            if let text = sqlite3_column_text(statement, 3) {
+                details.append(String(cString: text))
+            }
+        }
+        return details
+    }
+
+    private func installFailingSyncMarkTrigger(url: URL, sampleID: UUID) throws {
+        var db: OpaquePointer?
+        XCTAssertEqual(sqlite3_open_v2(url.path, &db, SQLITE_OPEN_READWRITE, nil), SQLITE_OK)
+        defer { sqlite3_close(db) }
+        let sql = """
+        CREATE TRIGGER fail_sync_mark
+        BEFORE UPDATE OF synced ON ping_samples
+        WHEN NEW.id = '\(sampleID.uuidString)'
+        BEGIN
+            SELECT RAISE(ABORT, 'forced sync mark failure');
+        END;
+        """
+        XCTAssertEqual(sqlite3_exec(db, sql, nil, nil, nil), SQLITE_OK)
+    }
+
+    private func insertRawHistorySample(_ sample: PingResult, url: URL) throws {
+        var db: OpaquePointer?
+        XCTAssertEqual(sqlite3_open_v2(url.path, &db, SQLITE_OPEN_READWRITE, nil), SQLITE_OK)
+        defer { sqlite3_close(db) }
+        let sql = """
+        INSERT INTO ping_samples
+        (id, host_id, address, method, port, timestamp, latency_ms)
+        VALUES (?, ?, ?, ?, ?, ?, ?);
+        """
+        var statement: OpaquePointer?
+        XCTAssertEqual(sqlite3_prepare_v2(db, sql, -1, &statement, nil), SQLITE_OK)
+        defer { sqlite3_finalize(statement) }
+        sqlite3_bind_text(statement, 1, sample.id.uuidString, -1, sqliteTransientForTests)
+        sqlite3_bind_text(statement, 2, sample.hostID.uuidString, -1, sqliteTransientForTests)
+        sqlite3_bind_text(statement, 3, sample.address, -1, sqliteTransientForTests)
+        sqlite3_bind_text(statement, 4, sample.method.rawValue, -1, sqliteTransientForTests)
+        if let port = sample.port {
+            sqlite3_bind_int64(statement, 5, Int64(port))
+        } else {
+            sqlite3_bind_null(statement, 5)
+        }
+        sqlite3_bind_double(statement, 6, sample.timestamp.timeIntervalSince1970)
+        sqlite3_bind_double(statement, 7, try XCTUnwrap(sample.latency).milliseconds)
+        XCTAssertEqual(sqlite3_step(statement), SQLITE_DONE)
+    }
+
+    private func installFailingHistoryPruneTrigger(url: URL) throws {
+        try executeHistorySQL(
+            """
+            CREATE TRIGGER fail_history_prune
+            BEFORE DELETE ON ping_samples
+            BEGIN
+                SELECT RAISE(ABORT, 'forced history prune failure');
+            END;
+            """,
+            url: url
+        )
+    }
+
+    private func removeFailingHistoryPruneTrigger(url: URL) throws {
+        try executeHistorySQL("DROP TRIGGER fail_history_prune;", url: url)
+    }
+
+    private func executeHistorySQL(_ sql: String, url: URL) throws {
+        var db: OpaquePointer?
+        XCTAssertEqual(sqlite3_open_v2(url.path, &db, SQLITE_OPEN_READWRITE, nil), SQLITE_OK)
+        defer { sqlite3_close(db) }
+        XCTAssertEqual(sqlite3_exec(db, sql, nil, nil, nil), SQLITE_OK)
+    }
+
     private func insertRawLocations(host: HostConfig, startingAt timestamp: Date, url: URL) throws {
         var db: OpaquePointer?
         XCTAssertEqual(sqlite3_open_v2(url.path, &db, SQLITE_OPEN_READWRITE, nil), SQLITE_OK)
@@ -1129,6 +1769,42 @@ private actor FailingHistoryStore: PingHistoryStore {
     func prune(olderThan cutoff: Date) async {}
 
     func deleteAll() async {}
+}
+
+private actor BatchRecordingHistoryStore: PingHistoryStore {
+    private var batches: [[PingResult]] = []
+
+    func append(_ result: PingResult) async {
+        batches.append([result])
+    }
+
+    func appendAndWait(_ results: [PingResult]) async throws {
+        batches.append(results)
+    }
+
+    func samples(hostID: UUID, since: Date, limit: Int) async -> [PingResult] { [] }
+    func latestSamples(hostID: UUID, since: Date, limit: Int) async -> [PingResult] { [] }
+    func prune(olderThan cutoff: Date) async {}
+    func deleteAll() async {}
+
+    func recordedBatches() -> [[PingResult]] { batches }
+}
+
+private final class SQLiteTransactionObservation: @unchecked Sendable {
+    private let lock = NSLock()
+    private var recordedEvents: [SQLiteHistoryTransactionEvent] = []
+
+    func record(_ event: SQLiteHistoryTransactionEvent) {
+        lock.lock()
+        recordedEvents.append(event)
+        lock.unlock()
+    }
+
+    var events: [SQLiteHistoryTransactionEvent] {
+        lock.lock()
+        defer { lock.unlock() }
+        return recordedEvents
+    }
 }
 
 private struct HistoryExportDocumentProbe: Decodable {
