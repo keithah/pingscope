@@ -256,12 +256,23 @@ struct PingScopeIOSHistoryMapView: View {
     }
 
     private var noLocatedSamplesNote: some View {
-        Label("No location-tagged samples in this range", systemImage: "location.slash")
-            .font(.subheadline.weight(.semibold))
+        let prerequisite = HistoryMapPrerequisitePresentation(
+            authorization: .whenInUse,
+            taggingOptIn: true,
+            locatedSampleCount: 0
+        )
+        return VStack(alignment: .leading, spacing: 3) {
+            Label(prerequisite?.title ?? "No location-tagged samples yet", systemImage: "location.slash")
+                .font(.subheadline.weight(.semibold))
+            Text(prerequisite?.detail ?? "Keep monitoring with Location Tagging enabled to add future samples.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
-            .background(.regularMaterial, in: Capsule())
-            .accessibilityLabel("No location-tagged samples in this range")
+            .frame(maxWidth: 290, alignment: .leading)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
+            .accessibilityElement(children: .combine)
     }
 
     private func selectedPoint(in presentation: HistoryMapPresentation) -> HistoryMapPoint? {

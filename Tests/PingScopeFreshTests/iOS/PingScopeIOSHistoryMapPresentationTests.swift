@@ -67,14 +67,14 @@ final class PingScopeIOSHistoryMapPresentationTests: XCTestCase {
             .denied,
             taggingOptIn: false,
             mapAvailable: false,
-            showsPrompt: false,
-            request: .none
+            showsPrompt: true,
+            request: .openSettings
         )
         assertAuthorization(
             .restricted,
             taggingOptIn: false,
             mapAvailable: false,
-            showsPrompt: false,
+            showsPrompt: true,
             request: .none
         )
         assertAuthorization(
@@ -91,6 +91,33 @@ final class PingScopeIOSHistoryMapPresentationTests: XCTestCase {
             showsPrompt: false,
             request: .none
         )
+    }
+
+    func testHistoryMapPrerequisiteGuidanceExplainsPermissionLocatedSamplesAndOptionalSync() {
+        let denied = try! XCTUnwrap(HistoryMapPrerequisitePresentation(
+            authorization: .denied,
+            taggingOptIn: false,
+            locatedSampleCount: 0
+        ))
+        XCTAssertEqual(denied.title, "Location access is off")
+        XCTAssertTrue(denied.detail.contains("Settings"))
+        XCTAssertEqual(denied.actionTitle, "Open Settings")
+
+        let empty = try! XCTUnwrap(HistoryMapPrerequisitePresentation(
+            authorization: .whenInUse,
+            taggingOptIn: true,
+            locatedSampleCount: 0
+        ))
+        XCTAssertEqual(empty.title, "No location-tagged samples yet")
+        XCTAssertTrue(empty.detail.contains("future samples"))
+        XCTAssertTrue(empty.detail.contains("iCloud sync"))
+        XCTAssertNil(empty.actionTitle)
+
+        XCTAssertNil(HistoryMapPrerequisitePresentation(
+            authorization: .always,
+            taggingOptIn: true,
+            locatedSampleCount: 1
+        ))
     }
 
     func testHistoryMapAuthorizationFallsBackToChartUntilGranted() {
@@ -131,20 +158,28 @@ final class PingScopeIOSHistoryMapPresentationTests: XCTestCase {
         XCTAssertEqual(decision.permissionRequest, .requestWhenInUse)
     }
 
-    func testHistoryContainerDoesNotRepeatPermissionRequestAfterDenialOrRestriction() {
-        for authorization: PingScopeIOSHistoryLocationAuthorization in [.denied, .restricted] {
-            let decision = PingScopeIOSHistoryContainerDecision(
-                requestedLens: .map,
-                authorization: authorization,
-                taggingOptIn: false,
-                selection: selection(),
-                presentationState: .loading(selection: selection())
-            )
+    func testHistoryContainerExplainsDeniedPermissionWithoutRepeatingRestrictedRequest() {
+        let denied = PingScopeIOSHistoryContainerDecision(
+            requestedLens: .map,
+            authorization: .denied,
+            taggingOptIn: false,
+            selection: selection(),
+            presentationState: .loading(selection: selection())
+        )
+        XCTAssertEqual(denied.effectiveLens, .chart)
+        XCTAssertTrue(denied.showsContextualPermissionPrompt)
+        XCTAssertEqual(denied.permissionRequest, .openSettings)
 
-            XCTAssertEqual(decision.effectiveLens, .chart)
-            XCTAssertFalse(decision.showsContextualPermissionPrompt)
-            XCTAssertEqual(decision.permissionRequest, .none)
-        }
+        let restricted = PingScopeIOSHistoryContainerDecision(
+            requestedLens: .map,
+            authorization: .restricted,
+            taggingOptIn: false,
+            selection: selection(),
+            presentationState: .loading(selection: selection())
+        )
+        XCTAssertEqual(restricted.effectiveLens, .chart)
+        XCTAssertTrue(restricted.showsContextualPermissionPrompt)
+        XCTAssertEqual(restricted.permissionRequest, .none)
     }
 
     func testHistoryContainerMakesMapAvailableAfterGrantAndFallsBackAfterRevocation() {

@@ -559,6 +559,11 @@ private final class PingScopeIOSAppModel: ObservableObject {
             taggingOptIn: historyLocationTaggingEnabled
         )
         guard authorization.requestDecision != .none else { return }
+        if authorization.requestDecision == .openSettings {
+            guard let settingsURL = URL(string: UIApplication.openSettingsURLString) else { return }
+            UIApplication.shared.open(settingsURL)
+            return
+        }
         historyLocationTaggingEnabled = true
         UserDefaults.standard.set(true, forKey: Self.historyLocationTaggingEnabledKey)
         applyBackgroundKeepAlive()

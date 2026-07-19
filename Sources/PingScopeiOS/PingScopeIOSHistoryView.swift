@@ -121,24 +121,27 @@ public struct PingScopeIOSHistoryView: View {
     }
 
     private var permissionPrompt: some View {
-        HStack(spacing: 12) {
+        let prerequisite = decision.prerequisitePresentation
+        return HStack(spacing: 12) {
             Image(systemName: "map")
                 .font(.title3.weight(.semibold))
                 .foregroundStyle(.blue)
             VStack(alignment: .leading, spacing: 3) {
-                Text("Map your connection history")
+                Text(prerequisite?.title ?? "Map your connection history")
                     .font(.subheadline.weight(.semibold))
-                Text("Tag future samples with an approximate location while monitoring.")
+                Text(prerequisite?.detail ?? "Tag future samples with an approximate location while monitoring.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
             Spacer(minLength: 4)
-            Button("Enable") {
-                onRequestMapPermission()
+            if let actionTitle = prerequisite?.actionTitle {
+                Button(actionTitle) {
+                    onRequestMapPermission()
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+                .accessibilityLabel(actionTitle == "Open Settings" ? "Open location settings" : "Enable History map location")
             }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.small)
-            .accessibilityLabel("Enable History map location")
         }
         .padding(14)
         .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16))
