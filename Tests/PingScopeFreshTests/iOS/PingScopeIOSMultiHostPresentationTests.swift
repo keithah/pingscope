@@ -448,16 +448,25 @@ final class PingScopeIOSMultiHostPresentationTests: XCTestCase {
         }
     }
 
-    func testFocusedMonitorPresentationHidesAllHostContentAndKeepsSelectedDisplayMode() {
+    func testFocusedMonitorPresentationKeepsOtherHostLatencyAndGraphSnapshotsAvailable() {
         let host = HostConfig(displayName: "Router", address: "192.168.1.1")
-        let rows = [PingScopeIOSHostRowSnapshot(host: host, health: nil)]
-        let series = [PingScopeIOSHostGraphSeries(hostID: host.id, samples: [])]
+        let samples = makeSuccessfulResults(count: 3, hostID: host.id)
+        var health = HostHealth(hostID: host.id, thresholds: host.thresholds)
+        health.ingest(.success(hostID: host.id, latency: .milliseconds(18)))
+        let rows = [PingScopeIOSHostRowSnapshot(host: host, health: health, samples: samples)]
+        let series = [PingScopeIOSHostGraphSeries(hostID: host.id, samples: samples)]
 
-        XCTAssertTrue(
-            PingScopeIOSAllHostsMonitorPresentation.rows(hostScope: .focused, allHostRows: rows).isEmpty
+        XCTAssertEqual(
+            PingScopeIOSAllHostsMonitorPresentation.rows(hostScope: .focused, allHostRows: rows),
+            rows
         )
-        XCTAssertTrue(
-            PingScopeIOSAllHostsMonitorPresentation.graphSeries(hostScope: .focused, allHostGraphSeries: series).isEmpty
+        XCTAssertEqual(
+            PingScopeIOSAllHostsMonitorPresentation.graphSeries(hostScope: .focused, allHostGraphSeries: series),
+            series
+        )
+        XCTAssertEqual(
+            PingScopeIOSAllHostsMonitorPresentation.rowPresentation(for: rows[0]).latencyText,
+            "18ms"
         )
     }
 

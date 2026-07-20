@@ -22,7 +22,7 @@ final class PingScopeIOSPathProjectionMemo<Key: Hashable, Value> {
 struct SignalHeroGraphCard: View {
     let renderData: PingScopeIOSLatencyGraphData
     let range: TimeRange
-    let status: HealthStatus
+    let color: Color
     @Binding var scrubbedLatencyMilliseconds: Double?
     let onStepRange: (Int) -> Void
     let onSwipeHost: (Int) -> Void
@@ -76,7 +76,7 @@ struct SignalHeroGraphCard: View {
     }
 
     private var graphColor: Color {
-        status == .healthy ? .blue : Color(iosStatusColor: status.iosStatusColor)
+        color
     }
 
     private var magnifyGesture: some Gesture {

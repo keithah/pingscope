@@ -214,14 +214,14 @@ public enum PingScopeIOSAllHostsMonitorPresentation {
         hostScope: PingScopeIOSHostScope,
         allHostRows: [PingScopeIOSHostRowSnapshot]
     ) -> [PingScopeIOSHostRowSnapshot] {
-        hostScope == .allHosts ? allHostRows : []
+        allHostRows
     }
 
     public static func graphSeries(
         hostScope: PingScopeIOSHostScope,
         allHostGraphSeries: [PingScopeIOSHostGraphSeries]
     ) -> [PingScopeIOSHostGraphSeries] {
-        hostScope == .allHosts ? allHostGraphSeries : []
+        allHostGraphSeries
     }
 
     public static func graphSamples(
@@ -841,7 +841,9 @@ public struct PingScopeIOSRootView: View {
                 SignalHeroGraphCard(
                     renderData: graphPresentation.renderData,
                     range: selectedGraphRange,
-                    status: health.status,
+                    color: PingScopeIOSAllHostsMonitorPresentation
+                        .graphIdentityColor(for: host.id)
+                        .swiftUIColor,
                     scrubbedLatencyMilliseconds: scrubbedLatencyMilliseconds,
                     onStepRange: stepRange,
                     onSwipeHost: swipeHost
@@ -942,8 +944,13 @@ public struct PingScopeIOSRootView: View {
         .accessibilityLabel("Run duration")
     }
 
-    private var otherHostsCard: some View {
+    private func otherHostsCard(
+        allHostsGraphPresentation: PingScopeIOSAllHostsGraphPresentation
+    ) -> some View {
         let others = hosts.filter { $0.id != host.id }.prefix(3)
+        let cachedRows = allHostsMonitorRows.reduce(into: [UUID: PingScopeIOSHostRowSnapshot]()) {
+            $0[$1.hostID] = $1
+        }
         return VStack(alignment: .leading, spacing: 12) {
             sectionHeader("Other hosts")
             if others.isEmpty {
@@ -955,7 +962,15 @@ public struct PingScopeIOSRootView: View {
                     Button {
                         onSelectHost(host.id)
                     } label: {
-                        hostRow(host, isActive: false, showsSparkline: true)
+                        if let row = cachedRows[host.id] {
+                            allHostsRow(
+                                row,
+                                presentation: PingScopeIOSAllHostsMonitorPresentation.rowPresentation(for: row),
+                                allHostsGraphPresentation: allHostsGraphPresentation
+                            )
+                        } else {
+                            hostRow(host, isActive: false, showsSparkline: true)
+                        }
                     }
                     .buttonStyle(.plain)
                     if host.id != others.last?.id {
@@ -975,7 +990,7 @@ public struct PingScopeIOSRootView: View {
         if hostScope == .allHosts {
             allHostsCard(allHostsGraphPresentation: allHostsGraphPresentation)
         } else {
-            otherHostsCard
+            otherHostsCard(allHostsGraphPresentation: allHostsGraphPresentation)
         }
     }
 
@@ -1317,7 +1332,9 @@ public struct PingScopeIOSRootView: View {
         presentation: PingScopeIOSAllHostsRowPresentation,
         allHostsGraphPresentation: PingScopeIOSAllHostsGraphPresentation
     ) -> some View {
-        let color = Color(iosStatusColor: presentation.displayStatus.iosStatusColor)
+        let color = PingScopeIOSAllHostsMonitorPresentation
+            .graphIdentityColor(for: row.hostID)
+            .swiftUIColor
         let graphData = allHostsGraphPresentation.graphData(for: row.hostID) ?? PingScopeIOSLatencyGraphData(
             samples: row.samples,
             range: selectedGraphRange,
