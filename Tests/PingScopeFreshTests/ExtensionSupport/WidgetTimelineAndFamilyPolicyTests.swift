@@ -18,6 +18,40 @@ final class WidgetTimelineAndFamilyPolicyTests: XCTestCase {
         XCTAssertTrue(dates.allSatisfy { $0 >= now })
     }
 
+    func testWidgetEntryMapperOwnsExactBoundaryClockSkewHorizonAndMissingContent() {
+        let now = Date(timeIntervalSince1970: 10_000)
+        let exactBoundaryGeneratedAt = now.addingTimeInterval(-WidgetTimelineSchedule.staleInterval)
+        let boundary = WidgetTimelineEntryMapper.entries(
+            now: now,
+            contentGeneratedAt: exactBoundaryGeneratedAt
+        )
+        XCTAssertTrue(boundary[0].isStale)
+
+        let futureGeneratedAt = now.addingTimeInterval(60)
+        let clockSkew = WidgetTimelineEntryMapper.entries(
+            now: now,
+            contentGeneratedAt: futureGeneratedAt
+        )
+        XCTAssertFalse(clockSkew[0].isStale)
+        XCTAssertTrue(clockSkew.contains { $0.date == futureGeneratedAt.addingTimeInterval(WidgetTimelineSchedule.staleInterval) })
+
+        let beyondHorizon = WidgetTimelineEntryMapper.entries(
+            now: now,
+            contentGeneratedAt: now.addingTimeInterval(WidgetTimelineSchedule.horizon + 60)
+        )
+        XCTAssertEqual(beyondHorizon.map(\.date), [
+            now,
+            now.addingTimeInterval(WidgetTimelineSchedule.refreshInterval),
+            now.addingTimeInterval(2 * WidgetTimelineSchedule.refreshInterval),
+            now.addingTimeInterval(3 * WidgetTimelineSchedule.refreshInterval),
+        ])
+        XCTAssertTrue(beyondHorizon.allSatisfy { !$0.isStale })
+
+        let missing = WidgetTimelineEntryMapper.entries(now: now, contentGeneratedAt: nil)
+        XCTAssertEqual(missing.map(\.date), beyondHorizon.map(\.date))
+        XCTAssertTrue(missing.allSatisfy { !$0.isStale })
+    }
+
     func testWidgetFamilyGraphPolicyIsConsistentForEveryFamilyWithRoom() {
         XCTAssertFalse(WidgetFamilyRenderPolicy.forFamily(.small).showsSparkline)
         XCTAssertTrue(WidgetFamilyRenderPolicy.forFamily(.medium).showsSparkline)

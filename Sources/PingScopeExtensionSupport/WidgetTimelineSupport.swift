@@ -35,6 +35,45 @@ public enum WidgetTimelineSchedule {
     }
 }
 
+public enum WidgetContentFreshness {
+    public static let staleInterval = WidgetTimelineSchedule.staleInterval
+
+    public static func isStale(contentGeneratedAt: Date?, at date: Date) -> Bool {
+        guard let contentGeneratedAt else { return false }
+        return date.timeIntervalSince(contentGeneratedAt) >= staleInterval
+    }
+}
+
+public struct WidgetTimelineEntryMapping: Equatable, Sendable {
+    public let date: Date
+    public let isStale: Bool
+
+    public init(date: Date, isStale: Bool) {
+        self.date = date
+        self.isStale = isStale
+    }
+}
+
+public enum WidgetTimelineEntryMapper {
+    public static func entries(
+        now: Date,
+        contentGeneratedAt: Date?
+    ) -> [WidgetTimelineEntryMapping] {
+        WidgetTimelineSchedule.entryDates(
+            now: now,
+            contentGeneratedAt: contentGeneratedAt
+        ).map { date in
+            WidgetTimelineEntryMapping(
+                date: date,
+                isStale: WidgetContentFreshness.isStale(
+                    contentGeneratedAt: contentGeneratedAt,
+                    at: date
+                )
+            )
+        }
+    }
+}
+
 public enum WidgetRenderFamily: CaseIterable, Sendable {
     case small
     case medium

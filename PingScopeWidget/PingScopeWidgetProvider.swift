@@ -24,16 +24,16 @@ struct Provider: TimelineProvider {
         let now = Date()
         let snapshot = loadSnapshotData()
         let legacyData = snapshot == nil ? loadLegacyData() : nil
-        let entryDates = WidgetTimelineSchedule.entryDates(
+        let entryMappings = WidgetTimelineEntryMapper.entries(
             now: now,
             contentGeneratedAt: snapshot?.generatedAt ?? legacyData?.lastUpdate
         )
-        let entries = entryDates.map {
-            WidgetEntry(date: $0, data: legacyData, snapshot: snapshot)
+        let entries = entryMappings.map {
+            WidgetEntry(date: $0.date, data: legacyData, snapshot: snapshot)
         }
         let timeline = Timeline(
             entries: entries,
-            policy: .after(WidgetTimelineSchedule.reloadDate(after: entryDates))
+            policy: .after(WidgetTimelineSchedule.reloadDate(after: entryMappings.map(\.date)))
         )
 
         completion(timeline)

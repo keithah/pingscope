@@ -1,7 +1,8 @@
 import Foundation
+import PingScopeExtensionSupport
 
 enum WidgetFreshness {
-    static let staleInterval: TimeInterval = 15 * 60
+    static let staleInterval = WidgetTimelineSchedule.staleInterval
 }
 
 struct WidgetData: Codable, Equatable, Sendable {
@@ -46,7 +47,7 @@ struct WidgetData: Codable, Equatable, Sendable {
     }
 
     func isStale(at date: Date) -> Bool {
-        date.timeIntervalSince(lastUpdate) >= WidgetFreshness.staleInterval
+        WidgetContentFreshness.isStale(contentGeneratedAt: lastUpdate, at: date)
     }
 }
 
@@ -141,7 +142,7 @@ struct WidgetSnapshotData: Codable, Equatable, Sendable {
     }
 
     func isStale(at date: Date) -> Bool {
-        date.timeIntervalSince(generatedAt) >= WidgetFreshness.staleInterval
+        WidgetContentFreshness.isStale(contentGeneratedAt: generatedAt, at: date)
     }
 
     func statusLabel(at date: Date) -> String {

@@ -1,3 +1,4 @@
+import PingScopeExtensionSupport
 import WidgetKit
 
 struct WidgetEntry: TimelineEntry {
@@ -10,7 +11,7 @@ struct WidgetEntry: TimelineEntry {
             let hasIssues = snapshot.health.contains { $0.status == "degraded" || $0.status == "down" || $0.failureReason != nil }
             return TimelineEntryRelevance(
                 score: hasIssues ? 100 : 50,
-                duration: 15 * 60
+                duration: WidgetTimelineSchedule.staleInterval
             )
         }
 
