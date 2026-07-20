@@ -209,7 +209,7 @@ final class IOSResourceEfficiencyTests: XCTestCase {
             return (
                 PingScopeIOSMonitorInsightsPresentation(
                     snapshots: snapshots,
-                    diagnose: { hosts, healthByHost, networkStatus in
+                    diagnose: { hosts, healthByHost, networkStatus, _ in
                         diagnosisCount += 1
                         return NetworkPerspectiveDiagnoser().diagnose(
                             hosts: hosts,
@@ -227,7 +227,7 @@ final class IOSResourceEfficiencyTests: XCTestCase {
             return (
                 PingScopeIOSMonitorInsightsPresentation(
                     snapshots: snapshots,
-                    diagnose: { hosts, healthByHost, networkStatus in
+                    diagnose: { hosts, healthByHost, networkStatus, _ in
                         diagnosisCount += 1
                         return NetworkPerspectiveDiagnoser().diagnose(
                             hosts: hosts,

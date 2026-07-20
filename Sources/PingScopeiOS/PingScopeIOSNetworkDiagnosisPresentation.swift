@@ -63,7 +63,8 @@ public struct PingScopeIOSMonitorInsightsPresentation: Equatable, Sendable {
     public typealias Diagnoser = (
         _ hosts: [HostConfig],
         _ healthByHost: [UUID: HostHealth],
-        _ networkStatus: NetworkConnectivityStatus
+        _ networkStatus: NetworkConnectivityStatus,
+        _ activeNetworkInterface: String?
     ) -> NetworkPerspectiveDiagnosis
 
     public let diagnosis: PingScopeIOSDiagnosisPresentation?
@@ -76,11 +77,13 @@ public struct PingScopeIOSMonitorInsightsPresentation: Equatable, Sendable {
     public init(
         snapshots: [LiveMonitorSessionSnapshot],
         networkStatus: NetworkConnectivityStatus = .connected,
-        diagnose: Diagnoser = { hosts, healthByHost, networkStatus in
+        activeNetworkInterface: String? = nil,
+        diagnose: Diagnoser = { hosts, healthByHost, networkStatus, activeNetworkInterface in
             NetworkPerspectiveDiagnoser().diagnose(
                 hosts: hosts,
                 healthByHost: healthByHost,
-                networkStatus: networkStatus
+                networkStatus: networkStatus,
+                activeNetworkInterface: activeNetworkInterface
             )
         }
     ) {
@@ -94,7 +97,7 @@ public struct PingScopeIOSMonitorInsightsPresentation: Equatable, Sendable {
             healthByHost[snapshot.host.id] = snapshot.health
         }
 
-        let coreDiagnosis = diagnose(hosts, healthByHost, networkStatus)
+        let coreDiagnosis = diagnose(hosts, healthByHost, networkStatus, activeNetworkInterface)
         let mappedDiagnosis = PingScopeIOSDiagnosisPresentation(diagnosis: coreDiagnosis)
         diagnosis = mappedDiagnosis.showsCompactRow ? mappedDiagnosis : nil
         starlink = snapshots.compactMap { snapshot in

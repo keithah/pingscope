@@ -343,4 +343,99 @@ final class IOSNetworkDiagnosisPresentationTests: XCTestCase {
         XCTAssertNil(presentation(interface: "cellular").diagnosis)
         XCTAssertEqual(presentation(interface: "wifi").diagnosis?.label, "Router / gateway degraded")
     }
+
+    func testCellularSuppressesLANScopedISPHostButKeepsDegradedUpstreamHost() {
+        let starlink = HostConfig.defaultStarlinkDish
+        let upstream = HostConfig(
+            id: UUID(),
+            displayName: "Public DNS",
+            address: "1.1.1.1",
+            tier: .upstream
+        )
+
+        func downSnapshot(_ host: HostConfig) -> LiveMonitorSessionSnapshot {
+            let result = PingResult.failure(
+                hostID: host.id,
+                reason: .timeout,
+                timestamp: Date(timeIntervalSince1970: 600),
+                networkInterface: "cellular"
+            )
+            var health = HostHealth(hostID: host.id, thresholds: host.thresholds)
+            for _ in 0..<host.thresholds.downAfterFailures { health.ingest(result) }
+            var series = SampleSeries(hostID: host.id)
+            series.append(result)
+            return LiveMonitorSessionSnapshot(host: host, session: nil, health: health, series: series)
+        }
+
+        XCTAssertNil(PingScopeIOSMonitorInsightsPresentation(snapshots: [downSnapshot(starlink)]).diagnosis)
+        XCTAssertEqual(
+            PingScopeIOSMonitorInsightsPresentation(snapshots: [downSnapshot(upstream)]).diagnosis?.label,
+            "Upstream path down"
+        )
+    }
+
+    func testAllNilInterfacesFailOpenAndKeepGatewayDiagnosis() {
+        let gateway = HostConfig.defaultGateway
+        let result = PingResult.failure(hostID: gateway.id, reason: .timeout)
+        var health = HostHealth(hostID: gateway.id, thresholds: gateway.thresholds)
+        for _ in 0..<gateway.thresholds.downAfterFailures { health.ingest(result) }
+
+        let diagnosis = NetworkPerspectiveDiagnoser().diagnose(
+            hosts: [gateway],
+            healthByHost: [gateway.id: health]
+        )
+
+        XCTAssertEqual(diagnosis.scope, .localNetwork)
+    }
+
+    func testMixedWiFiAndCellularLatestWindowDoesNotMisclassifyAsCellular() {
+        let gateway = HostConfig.defaultGateway
+        let local = HostConfig(
+            id: UUID(),
+            displayName: "LAN probe",
+            address: "192.168.1.2",
+            tier: .ispEdge
+        )
+
+        func downHealth(_ host: HostConfig, interface: String, timestamp: TimeInterval) -> HostHealth {
+            let result = PingResult.failure(
+                hostID: host.id,
+                reason: .timeout,
+                timestamp: Date(timeIntervalSince1970: timestamp),
+                networkInterface: interface
+            )
+            var health = HostHealth(hostID: host.id, thresholds: host.thresholds)
+            for _ in 0..<host.thresholds.downAfterFailures { health.ingest(result) }
+            return health
+        }
+
+        let diagnosis = NetworkPerspectiveDiagnoser().diagnose(
+            hosts: [gateway, local],
+            healthByHost: [
+                gateway.id: downHealth(gateway, interface: "wifi", timestamp: 700),
+                local.id: downHealth(local, interface: "cellular", timestamp: 701),
+            ]
+        )
+
+        XCTAssertEqual(diagnosis.scope, .localNetwork)
+    }
+
+    func testGatewayOnlyCellularDiagnosisDoesNotClaimMeasurementsAreMissing() {
+        let gateway = HostConfig.defaultGateway
+        let result = PingResult.failure(
+            hostID: gateway.id,
+            reason: .timeout,
+            networkInterface: "cellular"
+        )
+        var health = HostHealth(hostID: gateway.id, thresholds: gateway.thresholds)
+        for _ in 0..<gateway.thresholds.downAfterFailures { health.ingest(result) }
+
+        let diagnosis = NetworkPerspectiveDiagnoser().diagnose(
+            hosts: [gateway],
+            healthByHost: [gateway.id: health]
+        )
+
+        XCTAssertNotEqual(diagnosis.title, "No recent measurements")
+        XCTAssertEqual(diagnosis.affectedHostIDs, [])
+    }
 }

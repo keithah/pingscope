@@ -1328,7 +1328,10 @@ private final class PingScopeIOSAppModel: ObservableObject {
             session: nil,
             health: HostHealth(hostID: host.id, thresholds: host.thresholds)
         )
-        monitorInsights = PingScopeIOSMonitorInsightsPresentation(snapshots: [snapshot])
+        monitorInsights = PingScopeIOSMonitorInsightsPresentation(
+            snapshots: [snapshot],
+            activeNetworkInterface: historyLocationService.snapshotStore.snapshot().networkInterface
+        )
         await configureNotificationScope()
         guard isCurrentLifecycle(context) else { return }
         await refreshHistory(force: true)
@@ -1407,7 +1410,10 @@ private final class PingScopeIOSAppModel: ObservableObject {
             session: nil,
             health: HostHealth(hostID: host.id, thresholds: host.thresholds)
         )
-        monitorInsights = PingScopeIOSMonitorInsightsPresentation(snapshots: [snapshot])
+        monitorInsights = PingScopeIOSMonitorInsightsPresentation(
+            snapshots: [snapshot],
+            activeNetworkInterface: historyLocationService.snapshotStore.snapshot().networkInterface
+        )
     }
 
     private func reconcileAllHostsAfterMutation() {
@@ -1510,7 +1516,10 @@ private final class PingScopeIOSAppModel: ObservableObject {
             // a stale snapshot must not overwrite the new host's state.
             guard activeController === controller else { return }
             snapshot = refreshedSnapshot
-            monitorInsights = PingScopeIOSMonitorInsightsPresentation(snapshots: [refreshedSnapshot])
+            monitorInsights = PingScopeIOSMonitorInsightsPresentation(
+                snapshots: [refreshedSnapshot],
+                activeNetworkInterface: historyLocationService.snapshotStore.snapshot().networkInterface
+            )
             rebuildGraphSamples()
             await publishWidgetSnapshot()
         }
@@ -1557,7 +1566,10 @@ private final class PingScopeIOSAppModel: ObservableObject {
         allHostLatestResult = presentationUpdate.latestResult
         if let supplemental = presentationUpdate.valueIfPresentationChanged({
             (
-                insights: PingScopeIOSMonitorInsightsPresentation(snapshots: snapshots),
+                insights: PingScopeIOSMonitorInsightsPresentation(
+                    snapshots: snapshots,
+                    activeNetworkInterface: historyLocationService.snapshotStore.snapshot().networkInterface
+                ),
                 endDate: Date()
             )
         }) {

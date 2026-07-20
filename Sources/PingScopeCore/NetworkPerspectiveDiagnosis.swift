@@ -172,7 +172,8 @@ public struct NetworkPerspectiveDiagnoser: Sendable {
     public func diagnose(
         hosts: [HostConfig],
         healthByHost: [UUID: HostHealth],
-        networkStatus: NetworkConnectivityStatus = .connected
+        networkStatus: NetworkConnectivityStatus = .connected,
+        activeNetworkInterface: String? = nil
     ) -> NetworkPerspectiveDiagnosis {
         let enabledHosts = hosts.filter(\.isEnabled)
         guard !enabledHosts.isEmpty else {
@@ -188,13 +189,25 @@ public struct NetworkPerspectiveDiagnoser: Sendable {
             return gatedDiagnosis
         }
 
-        let activeInterface = enabledHosts.compactMap { host -> PingResult? in
-            guard let result = healthByHost[host.id]?.latestResult,
-                  result.networkInterface != nil else { return nil }
-            return result
-        }.max { $0.timestamp < $1.timestamp }?.networkInterface
+        let sampledInterfaces = Set(enabledHosts.compactMap { host in
+            healthByHost[host.id]?.latestResult?.networkInterface
+        })
+        let inferredInterface = sampledInterfaces.count == 1 ? sampledInterfaces.first : nil
+        let activeInterface = NetworkInterfaceNormalizer.normalize(activeNetworkInterface)
+            ?? inferredInterface
         let diagnosticHosts = enabledHosts.filter { host in
-            !(activeInterface == "cellular" && classifier.tier(for: host) == .localGateway)
+            !(activeInterface == "cellular"
+                && (host.requiresLocalNetworkPermission || classifier.tier(for: host) == .localGateway))
+        }
+
+        if activeInterface == "cellular", diagnosticHosts.isEmpty {
+            return NetworkPerspectiveDiagnosis(
+                scope: .allReachable,
+                title: "No cellular-path checks configured",
+                detail: "Local-network hosts are not on the active cellular path.",
+                verdict: .allReachable,
+                confidence: .tentative
+            )
         }
 
         let observed = diagnosticHosts.compactMap { host -> ObservedHost? in
