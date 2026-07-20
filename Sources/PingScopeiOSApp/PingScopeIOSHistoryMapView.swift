@@ -256,15 +256,10 @@ struct PingScopeIOSHistoryMapView: View {
     }
 
     private var noLocatedSamplesNote: some View {
-        let prerequisite = HistoryMapPrerequisitePresentation(
-            authorization: .whenInUse,
-            taggingOptIn: true,
-            locatedSampleCount: 0
-        )
         return VStack(alignment: .leading, spacing: 3) {
-            Label(prerequisite?.title ?? "No location-tagged samples yet", systemImage: "location.slash")
+            Label("No location-tagged samples in this range", systemImage: "location.slash")
                 .font(.subheadline.weight(.semibold))
-            Text(prerequisite?.detail ?? "Keep monitoring with Location Tagging enabled to add future samples.")
+            Text("Choose a longer range, or keep monitoring with Location Tagging enabled.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }

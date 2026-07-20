@@ -237,6 +237,39 @@ final class PingScopeIOSHistoryMapPresentationTests: XCTestCase {
         XCTAssertEqual(decision.permissionRequest, .none)
     }
 
+    func testLoadedLocatedSampleSuppressesContainerEmptyPrerequisiteEndToEnd() {
+        let selection = selection()
+        let sample = locatedSuccess(
+            id: 99,
+            at: 9_900,
+            latency: 20,
+            latitude: 37.33,
+            longitude: -122.01
+        )
+        let endingAt = Date(timeIntervalSince1970: 10_000)
+        let presentation = PingScopeIOSHistoryPresentation(
+            loadResult: PingScopeIOSHistoryLoadResult(
+                hostID: selection.hostID,
+                range: selection.range,
+                cutoff: selection.range.cutoff(endingAt: endingAt),
+                endingAt: endingAt,
+                samples: [sample],
+                chartReduction: HistoryChartReduction(samples: [sample]),
+                isCollecting: false
+            )
+        )
+        let decision = PingScopeIOSHistoryContainerDecision(
+            requestedLens: .map,
+            authorization: .whenInUse,
+            taggingOptIn: true,
+            selection: selection,
+            presentationState: .loaded(selection: selection, presentation: presentation)
+        )
+
+        XCTAssertEqual(presentation.mapPresentation.points.count, 1)
+        XCTAssertNil(decision.prerequisitePresentation)
+    }
+
     func testHistoryContainerLensSwitchReusesExactKeyedHostRangeContent() {
         let selection = selection()
         let presentation = emptyPresentation(selection: selection)
