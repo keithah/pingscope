@@ -171,15 +171,6 @@ struct PingScopeIOSAllHostsSignalHeroGraphCard: View {
         let color: Color
     }
 
-    private static let graphColors: [Color] = [
-        .blue,
-        .cyan,
-        .orange,
-        .pink,
-        .mint,
-        .indigo
-    ]
-
     let presentation: PingScopeIOSAllHostsGraphPresentation
     let range: TimeRange
     @Binding var scrubbedLatencyMilliseconds: Double?
@@ -235,12 +226,12 @@ struct PingScopeIOSAllHostsSignalHeroGraphCard: View {
         series.map { source in
             let colorIndex = PingScopeIOSAllHostsMonitorPresentation.stableColorIndex(
                 for: source.hostID,
-                paletteCount: Self.graphColors.count
+                paletteCount: PingScopeIOSHostIdentityPalette.count
             )
             return RenderSeries(
                 hostID: source.hostID,
                 renderData: source.renderData,
-                color: Self.graphColors[colorIndex]
+                color: PingScopeIOSHostIdentityPalette.color(at: colorIndex).swiftUIColor
             )
         }
     }

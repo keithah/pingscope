@@ -3,7 +3,9 @@ import SwiftUI
 
 #if os(iOS)
 struct PingScopeIOSAllHostsConcentricRingHero: View {
-    private static let identityColors: [Color] = [.blue, .cyan, .orange, .pink, .mint, .indigo]
+    @ScaledMetric(relativeTo: .body) private var ringLineWidth: CGFloat = 8
+    @ScaledMetric(relativeTo: .body) private var ringSpacing: CGFloat = 24
+    @ScaledMetric(relativeTo: .body) private var innerDiameter: CGFloat = 76
 
     let rows: [PingScopeIOSHostRowSnapshot]
     let onSelectHost: (UUID) -> Void
@@ -26,15 +28,23 @@ struct PingScopeIOSAllHostsConcentricRingHero: View {
                         ForEach(presentation.legendRows) { row in
                             legendRow(row)
                         }
-                        if presentation.overflowCount > 0 {
-                            HStack {
-                                Image(systemName: "ellipsis.circle")
-                                    .foregroundStyle(.secondary)
-                                Text(presentation.overflowLabel)
-                                    .font(.caption.weight(.semibold))
-                                Spacer()
+                        if presentation.overflowCount > 0,
+                           let firstOverflowHostID = presentation.firstOverflowHostID {
+                            Button {
+                                onSelectHost(firstOverflowHostID)
+                            } label: {
+                                HStack {
+                                    Image(systemName: "ellipsis.circle")
+                                        .foregroundStyle(.secondary)
+                                    Text(presentation.overflowLabel)
+                                        .font(.caption.weight(.semibold))
+                                    Spacer()
+                                }
+                                .padding(.horizontal, 8)
                             }
-                            .padding(.horizontal, 8)
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("Show (presentation.overflowCount) more hosts")
+                            .accessibilityHint("Focus the first hidden host")
                         }
                     }
                     .frame(maxWidth: .infinity)
@@ -47,27 +57,39 @@ struct PingScopeIOSAllHostsConcentricRingHero: View {
     }
 
     private func concentricRings(_ rings: [PingScopeIOSAllHostsRingCell]) -> some View {
-        ZStack {
+        let maximumRingIndex = rings.map(\.ringIndex).max() ?? 0
+        let outerDiameter = innerDiameter + CGFloat(maximumRingIndex) * ringSpacing
+        let containerExtent = outerDiameter + ringLineWidth
+        return ZStack {
             ForEach(rings) { ring in
-                let diameter = CGFloat(76 + ring.ringIndex * 24)
+                let diameter = innerDiameter + CGFloat(ring.ringIndex) * ringSpacing
                 Circle()
-                    .stroke(identityColor(ring.colorIndex).opacity(0.16), lineWidth: 8)
+                    .stroke(identityColor(ring.colorIndex).opacity(0.16), lineWidth: ringLineWidth)
                     .frame(width: diameter, height: diameter)
                 Circle()
                     .trim(from: 0, to: ring.ringProgress)
-                    .stroke(identityColor(ring.colorIndex), style: StrokeStyle(lineWidth: 8, lineCap: .round))
+                    .stroke(identityColor(ring.colorIndex), style: StrokeStyle(lineWidth: ringLineWidth, lineCap: .round))
                     .rotationEffect(.degrees(-90))
                     .frame(width: diameter, height: diameter)
+                if ring.status == .down {
+                    Circle()
+                        .stroke(
+                            Color(iosStatusColor: ring.status.iosStatusColor),
+                            style: StrokeStyle(lineWidth: 2, dash: [4, 3])
+                        )
+                        .frame(width: diameter + ringLineWidth / 2, height: diameter + ringLineWidth / 2)
+                }
             }
             VStack(spacing: 2) {
                 Text("All Hosts")
                     .font(.subheadline.weight(.semibold))
+                    .minimumScaleFactor(0.75)
                 Text("\(rings.count) shown")
                     .font(.caption2.monospacedDigit())
                     .foregroundStyle(.secondary)
             }
         }
-        .frame(width: 150, height: 164)
+        .frame(width: containerExtent, height: containerExtent)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("All hosts concentric latency rings, innermost to outermost in saved order")
     }
@@ -104,7 +126,20 @@ struct PingScopeIOSAllHostsConcentricRingHero: View {
     }
 
     private func identityColor(_ index: Int) -> Color {
-        Self.identityColors[index % Self.identityColors.count]
+        PingScopeIOSHostIdentityPalette.color(at: index).swiftUIColor
+    }
+}
+
+extension PingScopeIOSHostIdentityPalette.ColorToken {
+    var swiftUIColor: Color {
+        switch self {
+        case .blue: .blue
+        case .cyan: .cyan
+        case .orange: .orange
+        case .pink: .pink
+        case .mint: .mint
+        case .indigo: .indigo
+        }
     }
 }
 

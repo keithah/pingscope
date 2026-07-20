@@ -116,10 +116,39 @@ public struct PingScopeIOSAllHostsRingCell: Identifiable, Equatable, Sendable {
     public let ringIndex: Int
 
     public var id: UUID { hostID }
+
+    public var identityColor: PingScopeIOSHostIdentityPalette.ColorToken {
+        PingScopeIOSHostIdentityPalette.color(at: colorIndex)
+    }
+}
+
+public enum PingScopeIOSHostIdentityPalette {
+    public enum ColorToken: Int, CaseIterable, Equatable, Sendable {
+        case blue
+        case cyan
+        case orange
+        case pink
+        case mint
+        case indigo
+    }
+
+    public static let count = ColorToken.allCases.count
+
+    public static func color(at index: Int) -> ColorToken {
+        let normalized = ((index % count) + count) % count
+        return ColorToken.allCases[normalized]
+    }
+
+    public static func color(for hostID: UUID) -> ColorToken {
+        color(at: PingScopeIOSAllHostsMonitorPresentation.stableColorIndex(
+            for: hostID,
+            paletteCount: count
+        ))
+    }
 }
 
 public enum PingScopeIOSAllHostsRingGridPresentation {
-    public static let paletteCount = 6
+    public static let paletteCount = PingScopeIOSHostIdentityPalette.count
 
     public static func cells(from rows: [PingScopeIOSHostRowSnapshot]) -> [PingScopeIOSAllHostsRingCell] {
         rows.enumerated().map { ringIndex, row in
@@ -153,6 +182,7 @@ public struct PingScopeIOSAllHostsConcentricRingPresentation: Equatable, Sendabl
     public let rings: [PingScopeIOSAllHostsRingCell]
     public let legendRows: [PingScopeIOSAllHostsRingCell]
     public let overflowCount: Int
+    public let firstOverflowHostID: UUID?
 
     public var overflowLabel: String {
         overflowCount > 0 ? "+\(overflowCount) more" : ""
@@ -166,6 +196,7 @@ public struct PingScopeIOSAllHostsConcentricRingPresentation: Equatable, Sendabl
         rings = visibleCells
         legendRows = visibleCells
         overflowCount = max(rows.count - visibleCells.count, 0)
+        firstOverflowHostID = rows.dropFirst(visibleCells.count).first?.hostID
     }
 }
 
@@ -196,32 +227,20 @@ struct PingScopeIOSAllHostsRingRowsFingerprint: Hashable {
 }
 
 @MainActor
-final class PingScopeIOSAllHostsRingGridContentMemo {
-    private var cache = BoundedMemo<
-        PingScopeIOSAllHostsRingRowsFingerprint,
-        [PingScopeIOSAllHostsRingCell]
-    >(capacity: 1)
-
-    func resolve(
-        _ rows: [PingScopeIOSHostRowSnapshot],
-        build: ([PingScopeIOSHostRowSnapshot]) -> [PingScopeIOSAllHostsRingCell]
-    ) -> [PingScopeIOSAllHostsRingCell] {
-        cache.resolve(PingScopeIOSAllHostsRingRowsFingerprint(rows)) {
-            build(rows)
-        }
-    }
-}
-
-@MainActor
 final class PingScopeIOSAllHostsConcentricRingContentMemo {
     private var cache = BoundedMemo<
         PingScopeIOSAllHostsRingRowsFingerprint,
         PingScopeIOSAllHostsConcentricRingPresentation
     >(capacity: 1)
 
-    func resolve(_ rows: [PingScopeIOSHostRowSnapshot]) -> PingScopeIOSAllHostsConcentricRingPresentation {
+    func resolve(
+        _ rows: [PingScopeIOSHostRowSnapshot],
+        build: ([PingScopeIOSHostRowSnapshot]) -> PingScopeIOSAllHostsConcentricRingPresentation = {
+            PingScopeIOSAllHostsConcentricRingPresentation(rows: $0)
+        }
+    ) -> PingScopeIOSAllHostsConcentricRingPresentation {
         cache.resolve(PingScopeIOSAllHostsRingRowsFingerprint(rows)) {
-            PingScopeIOSAllHostsConcentricRingPresentation(rows: rows)
+            build(rows)
         }
     }
 }

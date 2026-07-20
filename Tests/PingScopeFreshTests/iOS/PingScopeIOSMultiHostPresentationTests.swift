@@ -275,6 +275,7 @@ final class PingScopeIOSMultiHostPresentationTests: XCTestCase {
         XCTAssertEqual(presentation.legendRows.map(\.displayName), ["Host 1", "Host 2", "Host 3", "Host 4"])
         XCTAssertEqual(presentation.overflowCount, 2)
         XCTAssertEqual(presentation.overflowLabel, "+2 more")
+        XCTAssertEqual(presentation.firstOverflowHostID, hosts[4].id)
         XCTAssertEqual(presentation.rings.map(\.colorIndex), hosts.prefix(4).map {
             PingScopeIOSAllHostsMonitorPresentation.stableColorIndex(
                 for: $0.id,
@@ -284,6 +285,25 @@ final class PingScopeIOSMultiHostPresentationTests: XCTestCase {
         XCTAssertEqual(presentation.rings.map(\.ringIndex), [0, 1, 2, 3])
         XCTAssertEqual(presentation.legendRows.map(\.status), [.healthy, .healthy, .healthy, .healthy])
         XCTAssertEqual(presentation.legendRows.map(\.latencyText), ["10ms", "20ms", "30ms", "40ms"])
+    }
+
+    func testRingAndGraphDeriveHostIdentityFromOneSharedPalette() {
+        let host = HostConfig(
+            id: UUID(uuidString: "00000000-0000-0000-0000-000000000042")!,
+            displayName: "Shared color",
+            address: "1.1.1.1"
+        )
+        let presentation = PingScopeIOSAllHostsConcentricRingPresentation(rows: [
+            PingScopeIOSHostRowSnapshot(host: host, health: nil)
+        ])
+        let ring = presentation.rings[0]
+        let graphColor = PingScopeIOSHostIdentityPalette.color(for: host.id)
+
+        XCTAssertEqual(
+            PingScopeIOSAllHostsConcentricRingPresentation.paletteCount,
+            PingScopeIOSHostIdentityPalette.count
+        )
+        XCTAssertEqual(ring.identityColor, graphColor)
     }
 
     func testAllHostsConcentricRingPresentationClampsProgressAndHandlesEmptyAndSingleHost() {
@@ -309,23 +329,23 @@ final class PingScopeIOSMultiHostPresentationTests: XCTestCase {
     }
 
     @MainActor
-    func testAllHostsRingCellMemoBuildsIdenticalRowsOnlyOnce() {
+    func testAllHostsConcentricRingMemoBuildsIdenticalRowsOnlyOnce() {
         let host = HostConfig(id: UUID(), displayName: "Router", address: "192.168.1.1")
         let rows = [PingScopeIOSHostRowSnapshot(host: host, health: nil)]
+        let memo = PingScopeIOSAllHostsConcentricRingContentMemo()
         var buildCount = 0
-        let memo = PingScopeIOSAllHostsRingGridContentMemo()
 
-        let first = memo.resolve(rows) { input in
+        let first = memo.resolve(rows) {
             buildCount += 1
-            return PingScopeIOSAllHostsRingGridPresentation.cells(from: input)
+            return PingScopeIOSAllHostsConcentricRingPresentation(rows: $0)
         }
-        let second = memo.resolve(rows) { input in
+        let second = memo.resolve(rows) {
             buildCount += 1
-            return PingScopeIOSAllHostsRingGridPresentation.cells(from: input)
+            return PingScopeIOSAllHostsConcentricRingPresentation(rows: $0)
         }
 
         XCTAssertEqual(first, second)
-        XCTAssertEqual(first.map(\.hostID), [host.id])
+        XCTAssertEqual(first.rings.map(\.hostID), [host.id])
         XCTAssertEqual(buildCount, 1)
     }
 
