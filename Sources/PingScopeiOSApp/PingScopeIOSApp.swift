@@ -1298,7 +1298,7 @@ private final class PingScopeIOSAppModel: ObservableObject {
         if previousScope == .allHosts {
             await multiHostCoordinator.suspendForScopeChange()
         } else {
-            await controller.stop(reason: .userStopped)
+            await controller.stop(reason: .scopeSuspended)
         }
         guard isCurrentLifecycle(context) else { return }
         // Honor the decision contract: .update keeps the existing activity alive
@@ -1358,7 +1358,7 @@ private final class PingScopeIOSAppModel: ObservableObject {
         cancelRefreshLoop()
         await backgroundRuntime.end()
         guard isCurrentLifecycle(context) else { return }
-        await controller.stop(reason: .userStopped)
+        await controller.stop(reason: .scopeSuspended)
         guard isCurrentLifecycle(context) else { return }
         // Honor the decision contract: .update keeps the existing activity alive.
         if activityDecision != .update, liveActivity != nil {
@@ -1452,6 +1452,10 @@ private final class PingScopeIOSAppModel: ObservableObject {
             await multiHostCoordinator.stop(reason: reason)
         } else {
             await controller.stop(reason: reason)
+            // The all-host coordinator may still own graph preservation from a
+            // previous scope transition. A real session end must invalidate it
+            // even while the focused controller is the visible scope.
+            await multiHostCoordinator.stop(reason: reason)
         }
     }
 

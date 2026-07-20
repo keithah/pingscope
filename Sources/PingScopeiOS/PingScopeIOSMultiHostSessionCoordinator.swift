@@ -290,7 +290,7 @@ public actor PingScopeIOSMultiHostSessionCoordinator {
             uniquingKeysWith: { first, _ in first }
         )
         isSuspendedForScopeChange = true
-        await stopControllers(reason: .userStopped)
+        await stopControllers(reason: .scopeSuspended)
     }
 
     private func stopControllers(reason: MonitorSessionEndReason) async {

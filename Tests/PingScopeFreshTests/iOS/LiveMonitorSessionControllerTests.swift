@@ -1900,6 +1900,74 @@ final class LiveMonitorSessionControllerTests: XCTestCase {
             restored.compactMap { $0.series.samples.first?.latency?.milliseconds },
             [10, 11, 12]
         )
+        let stopReasons = await factory.stopReasons
+        XCTAssertEqual(stopReasons, [.scopeSuspended, .scopeSuspended, .scopeSuspended])
+    }
+
+    func testExplicitStopAfterFocusedScopeSuspensionDoesNotResurrectDeadSessionSeries() async {
+        let host = HostConfig(id: UUID(), displayName: "Cloudflare", address: "1.1.1.1")
+        let factory = RecordingIOSAllHostsControllerFactory()
+        let coordinator = PingScopeIOSMultiHostSessionCoordinator(controllerFactory: factory)
+        let sample = PingResult.success(
+            hostID: host.id,
+            latency: .milliseconds(12),
+            timestamp: Date(timeIntervalSince1970: 30_000)
+        )
+
+        await coordinator.reconcile(hosts: [host])
+        await coordinator.start(duration: .continuous)
+        await factory.setSnapshotSamples([sample], for: host.id)
+        await coordinator.suspendForScopeChange()
+
+        // This is the all-host half of PingScopeIOSModel.stopMonitoring while
+        // the focused controller is visible.
+        await coordinator.stop(reason: .userStopped)
+        await factory.setSnapshotSamples([], for: host.id)
+        await coordinator.start(duration: .continuous)
+
+        let restarted = await coordinator.orderedSnapshots()
+        XCTAssertEqual(restarted.first?.series.samples, [])
+    }
+
+    func testRemovingHostWhileScopeSuspendedDropsItsPreservedSeries() async {
+        let hostA = HostConfig(id: UUID(), displayName: "Cloudflare", address: "1.1.1.1")
+        let hostB = HostConfig(id: UUID(), displayName: "Gateway", address: "192.168.1.1")
+        let factory = RecordingIOSAllHostsControllerFactory()
+        let coordinator = PingScopeIOSMultiHostSessionCoordinator(controllerFactory: factory)
+        await coordinator.reconcile(hosts: [hostA, hostB])
+        await coordinator.start(duration: .continuous)
+        await factory.setSnapshotSamples([
+            .success(hostID: hostA.id, latency: .milliseconds(10))
+        ], for: hostA.id)
+        await factory.setSnapshotSamples([
+            .success(hostID: hostB.id, latency: .milliseconds(20))
+        ], for: hostB.id)
+
+        await coordinator.suspendForScopeChange()
+        await coordinator.reconcile(hosts: [hostA])
+        await coordinator.start(duration: .continuous)
+
+        let restarted = await coordinator.orderedSnapshots()
+        XCTAssertEqual(restarted.map(\.host.id), [hostA.id])
+        XCTAssertEqual(restarted.first?.series.samples.count, 1)
+    }
+
+    func testStartWithoutScopeSuspensionDoesNotMergeSamplesFromPriorStoppedSession() async {
+        let host = HostConfig(id: UUID(), displayName: "Cloudflare", address: "1.1.1.1")
+        let factory = RecordingIOSAllHostsControllerFactory()
+        let coordinator = PingScopeIOSMultiHostSessionCoordinator(controllerFactory: factory)
+        await coordinator.reconcile(hosts: [host])
+        await coordinator.start(duration: .continuous)
+        await factory.setSnapshotSamples([
+            .success(hostID: host.id, latency: .milliseconds(10))
+        ], for: host.id)
+        await coordinator.stop(reason: .userStopped)
+        await factory.setSnapshotSamples([], for: host.id)
+
+        await coordinator.start(duration: .continuous)
+
+        let restarted = await coordinator.orderedSnapshots()
+        XCTAssertEqual(restarted.first?.series.samples, [])
     }
 
     func testIOSAllHostsCoordinatorStartsIndependentControllersConcurrentlyAndKeepsSnapshotOrder() async throws {
