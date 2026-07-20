@@ -2,7 +2,10 @@ import Foundation
 
 public enum WidgetTimelineSchedule {
     public static let refreshInterval: TimeInterval = 10 * 60
-    public static let staleInterval: TimeInterval = 15 * 60
+    // WidgetKit commonly budgets refreshes across a 15–60 minute window. Keep
+    // the deadline bounded without marking a live snapshot stale before the
+    // system has had a normal opportunity to honor the app's reload request.
+    public static let staleInterval: TimeInterval = 60 * 60
     public static let horizon: TimeInterval = 30 * 60
 
     public static func entryDates(

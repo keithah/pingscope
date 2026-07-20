@@ -89,7 +89,7 @@ public struct WidgetSnapshot: Codable, Equatable, Sendable {
     )
 
     public var isStale: Bool {
-        Date().timeIntervalSince(generatedAt) > 15 * 60
+        Date().timeIntervalSince(generatedAt) > 60 * 60
     }
 
     public func hasSameContent(as other: WidgetSnapshot?) -> Bool {
