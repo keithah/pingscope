@@ -254,8 +254,9 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
     @Published private(set) var diagnosticsMessage: String?
     @Published var isCloudSyncEnabled: Bool {
         didSet {
+            guard !isApplyingCloudSyncActivationState else { return }
             UserDefaults.standard.set(isCloudSyncEnabled, forKey: PingScopeCloudSyncPreference.enabledKey)
-            configureCloudSync()
+            configureCloudSync(isAutomaticLaunch: false)
         }
     }
     @Published private(set) var cloudSyncStatusText = "Off"
@@ -287,6 +288,8 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
     private var draftTestTask: Task<Void, Never>?
     private var draftTestGeneration = 0
     private var isApplyingStartAtLoginChange = false
+    private var isApplyingCloudSyncActivationState = false
+    private var cloudSyncConfigurationGeneration: UInt64 = 0
     private var lastHistoryKey: String?
     private let displayPresentationRecomputeScheduler = DisplayPresentationRecomputeScheduler()
     private var presentationVisibleHistorySamples: [PingResult] = []
@@ -296,6 +299,7 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
     let widgetPublishPolicy = WidgetSnapshotPublishPolicy()
     private let hostConfigPersistence: HostConfigPersistence
     private let cloudSyncService: PingScopeCloudSyncService?
+    private let cloudSyncActivation: PingScopeCloudSyncActivationController?
     private var lastCloudSyncHostIDs: Set<UUID> = []
     private var lastCloudSyncHostsByID: [UUID: HostConfig] = [:]
     var historySurfaceStore: (any PingHistoryStore)?
@@ -357,6 +361,7 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
         self.historySurfaceStore = historyStore
         self.historySurfaceLoader = MacHistorySurfaceLoader()
         self.cloudSyncService = cloudSyncService
+        self.cloudSyncActivation = cloudSyncService.map { PingScopeCloudSyncActivationController(service: $0) }
         self.hostConfigPersistence = hostConfigPersistence
         self.hostTester = HostTester(probeFactory: probeFactory)
         self.gatewayEndpointResolver = DefaultGatewayEndpointResolver(probeFactory: probeFactory)
@@ -382,7 +387,7 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
         self.lastCloudSyncHostsByID = Dictionary(uniqueKeysWithValues: loadedHosts.hosts.map { ($0.id, $0) })
         self.overlayFrame = UserDefaults.standard.overlayFrame ?? NSRect(x: 80, y: 620, width: 240, height: 96)
         super.init()
-        configureCloudSync()
+        configureCloudSync(isAutomaticLaunch: true)
     }
 
     convenience init(
@@ -1082,17 +1087,27 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
         }
     }
 
-    private func configureCloudSync() {
-        guard let cloudSyncService else {
+    private func configureCloudSync(isAutomaticLaunch: Bool) {
+        guard let cloudSyncActivation else {
             cloudSyncStatusText = "Unavailable"
             return
         }
         let enabled = isCloudSyncEnabled
         let hosts = configuredHosts
-        Task { [weak self] in
-            await cloudSyncService.setEnabled(enabled, hosts: hosts)
-            let status = await cloudSyncService.status()
-            await MainActor.run { self?.cloudSyncStatusText = Self.cloudSyncStatusText(for: status) }
+        cloudSyncConfigurationGeneration &+= 1
+        let generation = cloudSyncConfigurationGeneration
+        cloudSyncStatusText = enabled ? "Checking iCloud account…" : "Off"
+        Task { @MainActor [weak self] in
+            let state = if isAutomaticLaunch {
+                await cloudSyncActivation.activatePersisted(hosts: hosts)
+            } else {
+                await cloudSyncActivation.setEnabledByUser(enabled, hosts: hosts)
+            }
+            guard let self, generation == cloudSyncConfigurationGeneration else { return }
+            isApplyingCloudSyncActivationState = true
+            isCloudSyncEnabled = state.isEnabled
+            isApplyingCloudSyncActivationState = false
+            cloudSyncStatusText = state.statusText
         }
     }
 

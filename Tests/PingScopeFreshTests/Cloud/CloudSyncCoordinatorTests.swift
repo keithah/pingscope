@@ -34,26 +34,35 @@ final class CloudSyncCoordinatorTests: XCTestCase {
         }
     }
 
-    func testDefaultContainerProviderRejectsUnavailableICloudBeforeCreatingContainer() {
+    func testDefaultContainerProviderRejectsMissingEntitlementBeforeCreatingContainer() {
         var didCreateContainer = false
         let provider = DefaultCloudKitContainerProvider(
-            isICloudAvailable: { false },
+            entitledContainerIdentifiers: { [] },
             makeDefaultContainer: {
                 didCreateContainer = true
                 return CKContainer.default()
             }
         )
 
-        XCTAssertThrowsError(try provider.defaultContainer()) { error in
+        XCTAssertThrowsError(try provider.defaultContainer(for: "iCloud.com.example.Missing")) { error in
             XCTAssertEqual(
                 error as? CloudSyncBoundaryError,
-                .missingContainerEntitlement("iCloud account or container entitlement unavailable")
+                .missingContainerEntitlement("iCloud.com.example.Missing")
             )
         }
         XCTAssertFalse(didCreateContainer)
     }
 
-    func testPersistedEnabledLaunchFailureParksSyncDisabledWithVisibleError() async {
+    func testContainerEntitlementGateDoesNotDependOnUbiquityIdentityToken() {
+        let identifier = "iCloud.com.hadm.PingScope"
+        let provider = DefaultCloudKitContainerProvider(
+            entitledContainerIdentifiers: { [identifier] }
+        )
+
+        XCTAssertNoThrow(try provider.validateContainerEntitlement(identifier))
+    }
+
+    func testFirstPersistedLaunchFailureKeepsPreferenceArmedForNextLaunch() async {
         let suiteName = "CloudSyncLaunchFailureTests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
         defer { defaults.removePersistentDomain(forName: suiteName) }
@@ -74,10 +83,125 @@ final class CloudSyncCoordinatorTests: XCTestCase {
         let state = await activation.activatePersisted(hosts: [])
 
         XCTAssertFalse(state.isEnabled)
-        XCTAssertFalse(defaults.bool(forKey: PingScopeCloudSyncPreference.enabledKey))
+        XCTAssertTrue(defaults.bool(forKey: PingScopeCloudSyncPreference.enabledKey))
         XCTAssertEqual(defaults.integer(forKey: PingScopeCloudSyncPreference.automaticStartFailureCountKey), 1)
-        XCTAssertTrue(state.statusText.contains("turned off"))
+        XCTAssertTrue(state.statusText.contains("retry"))
         XCTAssertTrue(state.statusText.contains("missingContainerEntitlement"))
+    }
+
+    func testAutomaticFailuresRetryUntilThresholdThenDisablePersistedPreference() async {
+        let suiteName = "CloudSyncAutomaticRetryTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defaults.set(true, forKey: PingScopeCloudSyncPreference.enabledKey)
+        let service = RecordingActivationService(status: .failed("transient"))
+        let maximumFailures = 3
+
+        for expectedFailureCount in 1..<maximumFailures {
+            let activation = PingScopeCloudSyncActivationController(
+                service: service,
+                defaultsSuiteName: suiteName,
+                maximumAutomaticStartFailures: maximumFailures
+            )
+            let state = await activation.activatePersisted(hosts: [])
+
+            XCTAssertFalse(state.isEnabled)
+            XCTAssertTrue(defaults.bool(forKey: PingScopeCloudSyncPreference.enabledKey))
+            XCTAssertEqual(
+                defaults.integer(forKey: PingScopeCloudSyncPreference.automaticStartFailureCountKey),
+                expectedFailureCount
+            )
+        }
+
+        let finalActivation = PingScopeCloudSyncActivationController(
+            service: service,
+            defaultsSuiteName: suiteName,
+            maximumAutomaticStartFailures: maximumFailures
+        )
+        _ = await finalActivation.activatePersisted(hosts: [])
+        let enableCallCount = await service.enableCallCount()
+
+        XCTAssertFalse(defaults.bool(forKey: PingScopeCloudSyncPreference.enabledKey))
+        XCTAssertEqual(enableCallCount, maximumFailures)
+    }
+
+    func testProcessDeathAfterPrearmedAttemptPreventsAnotherFatalRetryAtThreshold() async {
+        let suiteName = "CloudSyncProcessDeathGuardTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defaults.set(true, forKey: PingScopeCloudSyncPreference.enabledKey)
+        // This is the durable state a process leaves when it dies after pre-arming
+        // its third start attempt and before setEnabled(true) can return.
+        defaults.set(3, forKey: PingScopeCloudSyncPreference.automaticStartFailureCountKey)
+        let service = RecordingActivationService(status: .idle)
+        let activation = PingScopeCloudSyncActivationController(
+            service: service,
+            defaultsSuiteName: suiteName,
+            maximumAutomaticStartFailures: 3
+        )
+
+        let state = await activation.activatePersisted(hosts: [])
+        let enableCallCount = await service.enableCallCount()
+        let disableCallCount = await service.disableCallCount()
+
+        XCTAssertFalse(state.isEnabled)
+        XCTAssertFalse(defaults.bool(forKey: PingScopeCloudSyncPreference.enabledKey))
+        XCTAssertEqual(enableCallCount, 0)
+        XCTAssertEqual(disableCallCount, 1)
+    }
+
+    func testPersistedActivationDurablyPrearmsFailureCountBeforeEnteringService() async {
+        let suiteName = "CloudSyncPrearmOrderingTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defaults.set(true, forKey: PingScopeCloudSyncPreference.enabledKey)
+        let service = GatedActivationService()
+        let activation = PingScopeCloudSyncActivationController(
+            service: service,
+            defaultsSuiteName: suiteName,
+            maximumAutomaticStartFailures: 3
+        )
+
+        let automatic = Task { await activation.activatePersisted(hosts: []) }
+        await service.waitForEnableCall()
+
+        XCTAssertEqual(
+            defaults.integer(forKey: PingScopeCloudSyncPreference.automaticStartFailureCountKey),
+            1,
+            "a hard process death at this point must leave a durable consumed attempt"
+        )
+
+        await service.releaseEnable(with: .idle)
+        _ = await automatic.value
+        XCTAssertEqual(
+            defaults.integer(forKey: PingScopeCloudSyncPreference.automaticStartFailureCountKey),
+            0
+        )
+    }
+
+    func testUserDisableSupersedesInFlightAutomaticActivationWithoutRecordingFailure() async {
+        let suiteName = "CloudSyncActivationGenerationTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defaults.set(true, forKey: PingScopeCloudSyncPreference.enabledKey)
+        let service = GatedActivationService()
+        let activation = PingScopeCloudSyncActivationController(
+            service: service,
+            defaultsSuiteName: suiteName
+        )
+
+        let automatic = Task { await activation.activatePersisted(hosts: []) }
+        await service.waitForEnableCall()
+        let disabled = await activation.setEnabledByUser(false, hosts: [])
+        await service.releaseEnable(with: .failed("superseded"))
+        _ = await automatic.value
+
+        XCTAssertFalse(disabled.isEnabled)
+        XCTAssertFalse(defaults.bool(forKey: PingScopeCloudSyncPreference.enabledKey))
+        XCTAssertEqual(
+            defaults.integer(forKey: PingScopeCloudSyncPreference.automaticStartFailureCountKey),
+            0
+        )
     }
 
     func testRepeatedAutomaticStartFailuresStopFuturePersistedAutoEnable() async {
@@ -1715,8 +1839,63 @@ final class CloudSyncCoordinatorTests: XCTestCase {
 }
 
 private struct ThrowingCloudKitContainerProvider: CloudKitContainerProviding {
-    func defaultContainer() throws -> CKContainer {
+    func defaultContainer(for identifier: String) throws -> CKContainer {
         throw CloudSyncBoundaryError.missingContainerEntitlement("iCloud.com.example.Missing")
+    }
+}
+
+private actor RecordingActivationService: PingScopeCloudSyncControlling {
+    private var currentStatus: PingScopeCloudSyncStatus
+    private var enableCalls = 0
+    private var disableCalls = 0
+
+    init(status: PingScopeCloudSyncStatus) {
+        self.currentStatus = status
+    }
+
+    func setEnabled(_ enabled: Bool, hosts: [HostConfig]) async {
+        if enabled {
+            enableCalls += 1
+        } else {
+            disableCalls += 1
+        }
+    }
+
+    func status() async -> PingScopeCloudSyncStatus { currentStatus }
+    func enableCallCount() -> Int { enableCalls }
+    func disableCallCount() -> Int { disableCalls }
+}
+
+private actor GatedActivationService: PingScopeCloudSyncControlling {
+    private var currentStatus: PingScopeCloudSyncStatus = .checkingAccount
+    private var enableStarted = false
+    private var enableWaiters: [CheckedContinuation<Void, Never>] = []
+    private var enableContinuation: CheckedContinuation<Void, Never>?
+
+    func setEnabled(_ enabled: Bool, hosts: [HostConfig]) async {
+        guard enabled else {
+            currentStatus = .off
+            return
+        }
+        enableStarted = true
+        for waiter in enableWaiters { waiter.resume() }
+        enableWaiters.removeAll()
+        await withCheckedContinuation { continuation in
+            enableContinuation = continuation
+        }
+    }
+
+    func status() async -> PingScopeCloudSyncStatus { currentStatus }
+
+    func waitForEnableCall() async {
+        guard !enableStarted else { return }
+        await withCheckedContinuation { enableWaiters.append($0) }
+    }
+
+    func releaseEnable(with status: PingScopeCloudSyncStatus) {
+        currentStatus = status
+        enableContinuation?.resume()
+        enableContinuation = nil
     }
 }
 

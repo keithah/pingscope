@@ -1,6 +1,7 @@
 @preconcurrency import CloudKit
 import Foundation
 import PingScopeCore
+import Security
 
 enum CloudSyncBoundaryError: Error, Equatable {
     case inactive
@@ -40,30 +41,50 @@ protocol CloudKitEngineHosting: Sendable {
 }
 
 protocol CloudKitContainerProviding: Sendable {
-    func defaultContainer() throws -> CKContainer
+    func defaultContainer(for identifier: String) throws -> CKContainer
 }
 
 struct DefaultCloudKitContainerProvider: CloudKitContainerProviding, @unchecked Sendable {
-    private let isICloudAvailable: () -> Bool
+    private static let containerIdentifiersEntitlement = "com.apple.developer.icloud-container-identifiers"
+
+    private let entitledContainerIdentifiers: () -> [String]
     private let makeDefaultContainer: () -> CKContainer
 
     init(
-        isICloudAvailable: @escaping () -> Bool = {
-            FileManager.default.ubiquityIdentityToken != nil
-        },
+        entitledContainerIdentifiers: @escaping () -> [String] = Self.currentProcessContainerIdentifiers,
         makeDefaultContainer: @escaping () -> CKContainer = { CKContainer.default() }
     ) {
-        self.isICloudAvailable = isICloudAvailable
+        self.entitledContainerIdentifiers = entitledContainerIdentifiers
         self.makeDefaultContainer = makeDefaultContainer
     }
 
-    func defaultContainer() throws -> CKContainer {
-        guard isICloudAvailable() else {
-            throw CloudSyncBoundaryError.missingContainerEntitlement(
-                "iCloud account or container entitlement unavailable"
-            )
-        }
+    func defaultContainer(for identifier: String) throws -> CKContainer {
+        try validateContainerEntitlement(identifier)
         return makeDefaultContainer()
+    }
+
+    func validateContainerEntitlement(_ identifier: String) throws {
+        guard entitledContainerIdentifiers().contains(identifier) else {
+            throw CloudSyncBoundaryError.missingContainerEntitlement(identifier)
+        }
+    }
+
+    private static func currentProcessContainerIdentifiers() -> [String] {
+        guard let task = SecTaskCreateFromSelf(nil),
+              let value = SecTaskCopyValueForEntitlement(
+                  task,
+                  containerIdentifiersEntitlement as CFString,
+                  nil
+              ) else {
+            return []
+        }
+        if let identifiers = value as? [String] {
+            return identifiers
+        }
+        if let identifier = value as? String {
+            return [identifier]
+        }
+        return []
     }
 }
 
@@ -198,7 +219,7 @@ final class LiveCloudKitEngineHost: CloudKitEngineHosting, @unchecked Sendable {
     private func ensureResources() throws -> Resources {
         try lock.withLock {
             if let resources { return resources }
-            let container = try containerProvider.defaultContainer()
+            let container = try containerProvider.defaultContainer(for: containerIdentifier)
             guard container.containerIdentifier == containerIdentifier else {
                 throw CloudSyncBoundaryError.missingContainerEntitlement(containerIdentifier)
             }

@@ -2,9 +2,37 @@ import Combine
 import XCTest
 @testable import PingScope
 import PingScopeCore
+import PingScopeCloudSync
 
 @MainActor
 final class PingScopePresentationViewModelTests: XCTestCase {
+    func testMacPersistedCloudSyncUsesCrashLoopGuardWhenContainerEntitlementIsAbsent() async {
+        let defaults = UserDefaults.standard
+        let enabledKey = PingScopeCloudSyncPreference.enabledKey
+        let failureKey = PingScopeCloudSyncPreference.automaticStartFailureCountKey
+        let oldEnabled = defaults.object(forKey: enabledKey)
+        let oldFailureCount = defaults.object(forKey: failureKey)
+        defer {
+            if let oldEnabled { defaults.set(oldEnabled, forKey: enabledKey) } else { defaults.removeObject(forKey: enabledKey) }
+            if let oldFailureCount { defaults.set(oldFailureCount, forKey: failureKey) } else { defaults.removeObject(forKey: failureKey) }
+        }
+        defaults.set(true, forKey: enabledKey)
+        defaults.set(
+            PingScopeCloudSyncActivationController.defaultMaximumAutomaticStartFailures - 1,
+            forKey: failureKey
+        )
+
+        let model = PingScopeModel()
+        for _ in 0..<100 where model.cloudSyncStatusText == "Checking iCloud account…" {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+
+        XCTAssertFalse(model.isCloudSyncEnabled)
+        XCTAssertFalse(defaults.bool(forKey: enabledKey))
+        XCTAssertTrue(model.cloudSyncStatusText.contains("turned off"))
+        XCTAssertTrue(model.cloudSyncStatusText.contains("iCloud.com.hadm.PingScope"))
+    }
+
     func testLiveDisplayUpdatesDoNotPublishThroughSettingsModel() {
         let model = PingScopeModel()
         var modelChangeCount = 0

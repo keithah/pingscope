@@ -24,6 +24,7 @@ public actor PingScopeCloudSyncActivationController {
     private let service: any PingScopeCloudSyncControlling
     private let defaults: UserDefaults
     private let maximumAutomaticStartFailures: Int
+    private var activationGeneration: UInt64 = 0
 
     public init(
         service: any PingScopeCloudSyncControlling,
@@ -36,6 +37,8 @@ public actor PingScopeCloudSyncActivationController {
     }
 
     public func activatePersisted(hosts: [HostConfig]) async -> PingScopeCloudSyncActivationState {
+        activationGeneration &+= 1
+        let generation = activationGeneration
         guard PingScopeCloudSyncPreference.isEnabled(in: defaults) else {
             await service.setEnabled(false, hosts: hosts)
             return PingScopeCloudSyncActivationState(isEnabled: false, statusText: "Off")
@@ -51,28 +54,52 @@ public actor PingScopeCloudSyncActivationController {
                 statusText: "iCloud sync stayed off after repeated startup failures. Turn it on again to retry."
             )
         }
-        return await attemptEnable(hosts: hosts, recordsAutomaticFailure: true)
+        let prearmedFailureCount = failureCount + 1
+        defaults.set(
+            prearmedFailureCount,
+            forKey: PingScopeCloudSyncPreference.automaticStartFailureCountKey
+        )
+        defaults.synchronize()
+        return await attemptEnable(
+            hosts: hosts,
+            automaticFailureCount: prearmedFailureCount,
+            generation: generation
+        )
     }
 
     public func setEnabledByUser(
         _ enabled: Bool,
         hosts: [HostConfig]
     ) async -> PingScopeCloudSyncActivationState {
+        activationGeneration &+= 1
+        let generation = activationGeneration
+        defaults.set(0, forKey: PingScopeCloudSyncPreference.automaticStartFailureCountKey)
         guard enabled else {
             defaults.set(false, forKey: PingScopeCloudSyncPreference.enabledKey)
             await service.setEnabled(false, hosts: hosts)
             return PingScopeCloudSyncActivationState(isEnabled: false, statusText: "Off")
         }
         defaults.set(true, forKey: PingScopeCloudSyncPreference.enabledKey)
-        return await attemptEnable(hosts: hosts, recordsAutomaticFailure: false)
+        return await attemptEnable(
+            hosts: hosts,
+            automaticFailureCount: nil,
+            generation: generation
+        )
     }
 
     private func attemptEnable(
         hosts: [HostConfig],
-        recordsAutomaticFailure: Bool
+        automaticFailureCount: Int?,
+        generation: UInt64
     ) async -> PingScopeCloudSyncActivationState {
         await service.setEnabled(true, hosts: hosts)
+        guard generation == activationGeneration else {
+            return currentPersistedState()
+        }
         let status = await service.status()
+        guard generation == activationGeneration else {
+            return currentPersistedState()
+        }
         switch status {
         case .idle, .syncing:
             defaults.set(0, forKey: PingScopeCloudSyncPreference.automaticStartFailureCountKey)
@@ -85,19 +112,22 @@ public actor PingScopeCloudSyncActivationController {
             return await parkDisabled(
                 message: "Private iCloud account unavailable",
                 hosts: hosts,
-                recordsAutomaticFailure: recordsAutomaticFailure
+                automaticFailureCount: automaticFailureCount,
+                generation: generation
             )
         case let .failed(message):
             return await parkDisabled(
                 message: message,
                 hosts: hosts,
-                recordsAutomaticFailure: recordsAutomaticFailure
+                automaticFailureCount: automaticFailureCount,
+                generation: generation
             )
         case .off, .checkingAccount:
             return await parkDisabled(
                 message: "iCloud sync did not finish starting",
                 hosts: hosts,
-                recordsAutomaticFailure: recordsAutomaticFailure
+                automaticFailureCount: automaticFailureCount,
+                generation: generation
             )
         }
     }
@@ -105,22 +135,37 @@ public actor PingScopeCloudSyncActivationController {
     private func parkDisabled(
         message: String,
         hosts: [HostConfig],
-        recordsAutomaticFailure: Bool
+        automaticFailureCount: Int?,
+        generation: UInt64
     ) async -> PingScopeCloudSyncActivationState {
-        if recordsAutomaticFailure {
-            let current = defaults.integer(
-                forKey: PingScopeCloudSyncPreference.automaticStartFailureCountKey
-            )
-            defaults.set(
-                current + 1,
-                forKey: PingScopeCloudSyncPreference.automaticStartFailureCountKey
-            )
+        guard generation == activationGeneration else {
+            return currentPersistedState()
         }
-        defaults.set(false, forKey: PingScopeCloudSyncPreference.enabledKey)
+        let reachedAutomaticFailureThreshold = automaticFailureCount.map {
+            $0 >= maximumAutomaticStartFailures
+        } ?? true
+        defaults.set(
+            !reachedAutomaticFailureThreshold,
+            forKey: PingScopeCloudSyncPreference.enabledKey
+        )
         await service.setEnabled(false, hosts: hosts)
+        guard generation == activationGeneration else {
+            return currentPersistedState()
+        }
+        let action = reachedAutomaticFailureThreshold
+            ? "was turned off because it failed to start"
+            : "is paused after a startup failure and will retry next launch"
         return PingScopeCloudSyncActivationState(
             isEnabled: false,
-            statusText: "iCloud sync was turned off because it failed to start: \(message)"
+            statusText: "iCloud sync \(action): \(message)"
+        )
+    }
+
+    private func currentPersistedState() -> PingScopeCloudSyncActivationState {
+        let isEnabled = PingScopeCloudSyncPreference.isEnabled(in: defaults)
+        return PingScopeCloudSyncActivationState(
+            isEnabled: isEnabled,
+            statusText: isEnabled ? "Checking iCloud account…" : "Off"
         )
     }
 }
