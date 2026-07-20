@@ -1961,6 +1961,59 @@ final class LiveMonitorSessionControllerTests: XCTestCase {
         XCTAssertEqual(restarted.first?.series.samples, [])
     }
 
+    func testFocusedFiniteCompletionAfterAllHostsSuspensionDoesNotResurrectDeadSessionSeries() async {
+        let host = HostConfig(id: UUID(), displayName: "Cloudflare", address: "1.1.1.1")
+        let factory = RecordingIOSAllHostsControllerFactory()
+        let coordinator = PingScopeIOSMultiHostSessionCoordinator(controllerFactory: factory)
+        let deadSessionSample = PingResult.success(
+            hostID: host.id,
+            latency: .milliseconds(12),
+            timestamp: Date(timeIntervalSince1970: 30_000)
+        )
+
+        await coordinator.reconcile(hosts: [host])
+        await coordinator.start(duration: .continuous)
+        await factory.setSnapshotSamples([deadSessionSample], for: host.id)
+        await coordinator.suspendForScopeChange()
+
+        // The focused finite session completes while the all-host coordinator
+        // remains suspended, then the user returns to All Hosts and starts a
+        // fresh session.
+        await coordinator.stop(reason: .completed)
+        await factory.setSnapshotSamples([], for: host.id)
+        await coordinator.reconcile(hosts: [host])
+        await coordinator.start(duration: .continuous)
+
+        let restarted = await coordinator.orderedSnapshots()
+        XCTAssertEqual(restarted.first?.series.samples, [])
+    }
+
+    func testFocusedExplicitRestartAfterAllHostsSuspensionDoesNotResurrectDeadSessionSeries() async {
+        let host = HostConfig(id: UUID(), displayName: "Cloudflare", address: "1.1.1.1")
+        let factory = RecordingIOSAllHostsControllerFactory()
+        let coordinator = PingScopeIOSMultiHostSessionCoordinator(controllerFactory: factory)
+        let deadSessionSample = PingResult.success(
+            hostID: host.id,
+            latency: .milliseconds(18),
+            timestamp: Date(timeIntervalSince1970: 31_000)
+        )
+
+        await coordinator.reconcile(hosts: [host])
+        await coordinator.start(duration: .continuous)
+        await factory.setSnapshotSamples([deadSessionSample], for: host.id)
+        await coordinator.suspendForScopeChange()
+
+        // An explicit Start in focused scope begins a fresh logical session.
+        // Returning to All Hosts must not merge the pre-focus session.
+        await coordinator.stop(reason: .userStopped)
+        await factory.setSnapshotSamples([], for: host.id)
+        await coordinator.reconcile(hosts: [host])
+        await coordinator.start(duration: .continuous)
+
+        let restarted = await coordinator.orderedSnapshots()
+        XCTAssertEqual(restarted.first?.series.samples, [])
+    }
+
     func testRemovingHostWhileScopeSuspendedDropsItsPreservedSeries() async {
         let hostA = HostConfig(id: UUID(), displayName: "Cloudflare", address: "1.1.1.1")
         let hostB = HostConfig(id: UUID(), displayName: "Gateway", address: "192.168.1.1")

@@ -1075,10 +1075,8 @@ private final class PingScopeIOSAppModel: ObservableObject {
 
     private func completeFiniteSession() async {
         cancelRefreshLoop()
-        if hostScope == .allHosts {
-            await stopMonitoring(reason: .completed)
-            await refreshSnapshot()
-        }
+        await stopMonitoring(reason: .completed)
+        await refreshSnapshot()
         await refreshHistory(force: true)
         await backgroundRuntime.end()
         await PingScopeIOSLiveActivityRuntimeOrchestrator.finishSession(reason: .completed) { [weak self] in
@@ -1453,6 +1451,9 @@ private final class PingScopeIOSAppModel: ObservableObject {
             await multiHostCoordinator.reconcile(hosts: hosts)
             await multiHostCoordinator.start(duration: duration)
         } else {
+            // An explicit focused start is a fresh logical session, not the
+            // continuation of an All Hosts -> focus scope round trip.
+            await multiHostCoordinator.stop(reason: .userStopped)
             await controller.start(duration: duration)
         }
     }
