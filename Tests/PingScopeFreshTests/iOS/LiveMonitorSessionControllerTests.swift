@@ -133,66 +133,98 @@ final class LiveMonitorSessionControllerTests: XCTestCase {
         )
     }
 
-    func testBackgroundExpirationWithKeepAlivePreservesMonitoringAndLiveActivityUpdates() {
-        let plan = PingScopeIOSBackgroundExpirationPlan.make(keepAliveActive: true)
-
-        XCTAssertFalse(plan.cancelRefreshLoop)
-        XCTAssertFalse(plan.stopMonitoring)
-        XCTAssertFalse(plan.publishPausedLiveActivity)
-        XCTAssertTrue(plan.continueLiveActivityUpdates)
-    }
-
-    func testBackgroundExpirationWithoutKeepAlivePublishesPausedStaleActivityWithoutEndingIt() {
+    @MainActor
+    func testBackgroundExpirationWithKeepAlivePublishesRollingStaleDeadlineWithoutStopping() async {
         let now = Date(timeIntervalSince1970: 1_000)
-        let row = PingScopeLiveActivityHostRow(
-            hostID: UUID(),
-            displayName: "Cloudflare",
-            endpointCaption: "TCP 1.1.1.1",
-            status: .healthy,
-            latestLatencyMilliseconds: 18,
-            samples: [18],
-            isStale: false
-        )
-        let liveState = PingScopeLiveActivityAttributes.ContentState(
-            latencyMilliseconds: 18,
-            status: .healthy,
-            lastUpdatedAt: now,
-            remainingSeconds: 0,
-            isStale: false,
-            hostRows: [row]
+        let recorder = IOSLiveActivityRuntimeRecorder(activityID: "activity-1")
+
+        await PingScopeIOSLiveActivityRuntimeOrchestrator.expireForBackgroundRuntime(
+            keepAliveActive: true,
+            at: now,
+            publishContinuous: { staleDate in recorder.recordContinuous(staleDate: staleDate) },
+            publishPaused: { recorder.record("paused") },
+            stopMonitoring: { recorder.record("stopped") },
+            persistSnapshotAndHistory: { recorder.record("persisted") }
         )
 
-        let plan = PingScopeIOSBackgroundExpirationPlan.make(keepAliveActive: false)
-        let paused = PingScopeIOSPausedLiveActivityState.make(from: liveState, at: now)
-
-        XCTAssertTrue(plan.cancelRefreshLoop)
-        XCTAssertTrue(plan.stopMonitoring)
-        XCTAssertTrue(plan.publishPausedLiveActivity)
-        XCTAssertFalse(plan.endLiveActivity)
-        XCTAssertTrue(paused.contentState.isStale)
-        XCTAssertEqual(paused.contentState.failureMessage, "Monitoring paused — reopen PingScope to resume")
-        XCTAssertTrue(paused.contentState.hostRows.allSatisfy(\.isStale))
-        XCTAssertEqual(paused.staleDate, now.addingTimeInterval(5 * 60))
-    }
-
-    func testForegroundAfterBackgroundPauseReusesSameLiveActivity() {
+        XCTAssertEqual(recorder.events, ["continuous"])
         XCTAssertEqual(
-            PingScopeIOSForegroundLiveActivityDecision.decide(
-                hasActivity: true,
-                wasPausedForBackground: true,
-                monitoringResumed: true
-            ),
-            .resumeExisting
+            recorder.lastStaleDate,
+            now.addingTimeInterval(PingScopeIOSPausedLiveActivityState.staleInterval)
         )
     }
 
-    func testExplicitStopAndFiniteCompletionStillEndLiveActivity() {
-        XCTAssertEqual(PingScopeIOSLiveActivityEndDecision.decide(reason: .userStopped), .end)
-        XCTAssertEqual(PingScopeIOSLiveActivityEndDecision.decide(reason: .completed), .end)
-        XCTAssertEqual(
-            PingScopeIOSLiveActivityEndDecision.decide(reason: .backgroundRuntimeExpired),
-            .pause
+    @MainActor
+    func testBackgroundExpirationPublishesPausedActivityBeforeStoppingAndPersistence() async {
+        let recorder = IOSLiveActivityRuntimeRecorder(activityID: "activity-1")
+
+        await PingScopeIOSLiveActivityRuntimeOrchestrator.expireForBackgroundRuntime(
+            keepAliveActive: false,
+            at: Date(timeIntervalSince1970: 1_000),
+            publishContinuous: { _ in recorder.record("continuous") },
+            publishPaused: { recorder.record("paused") },
+            stopMonitoring: { recorder.record("stopped") },
+            persistSnapshotAndHistory: { recorder.record("persisted") }
         )
+
+        XCTAssertEqual(recorder.events, ["paused", "stopped", "persisted"])
+        XCTAssertEqual(recorder.activityID, "activity-1")
+    }
+
+    @MainActor
+    func testForegroundAfterBackgroundPauseReusesSameLiveActivityID() async {
+        let recorder = IOSLiveActivityRuntimeRecorder(activityID: "activity-1")
+
+        let resumedID = await PingScopeIOSLiveActivityRuntimeOrchestrator.resumeOnForeground(
+            releaseIfDefunct: { recorder.record("released-defunct") },
+            currentActivityID: { recorder.activityID },
+            updateExisting: { recorder.record("updated:activity-1") },
+            requestActivity: { recorder.request("activity-2") }
+        )
+
+        XCTAssertEqual(resumedID, "activity-1")
+        XCTAssertEqual(recorder.events, ["released-defunct", "updated:activity-1"])
+    }
+
+    @MainActor
+    func testForegroundReplacesActivityThatBecomesDefunctDuringResume() async {
+        let recorder = IOSLiveActivityRuntimeRecorder(activityID: "activity-1")
+
+        let resumedID = await PingScopeIOSLiveActivityRuntimeOrchestrator.resumeOnForeground(
+            releaseIfDefunct: { recorder.record("released-defunct") },
+            currentActivityID: { recorder.activityID },
+            updateExisting: {
+                recorder.record("update-lost")
+                recorder.activityID = nil
+            },
+            requestActivity: { recorder.request("activity-2") }
+        )
+
+        XCTAssertEqual(resumedID, "activity-2")
+        XCTAssertEqual(
+            recorder.events,
+            ["released-defunct", "update-lost", "requested:activity-2"]
+        )
+    }
+
+    @MainActor
+    func testExplicitStopAndFiniteCompletionEndButBackgroundExpirationDoesNot() async {
+        let recorder = IOSLiveActivityRuntimeRecorder(activityID: "activity-1")
+
+        let stopped = await PingScopeIOSLiveActivityRuntimeOrchestrator.finishSession(
+            reason: .userStopped
+        ) { recorder.record("ended:user") }
+        let completed = await PingScopeIOSLiveActivityRuntimeOrchestrator.finishSession(
+            reason: .completed
+        ) { recorder.record("ended:completed") }
+        let expired = await PingScopeIOSLiveActivityRuntimeOrchestrator.finishSession(
+            reason: .backgroundRuntimeExpired
+        ) { recorder.record("ended:background") }
+
+        XCTAssertTrue(stopped)
+        XCTAssertTrue(completed)
+        XCTAssertFalse(expired)
+        XCTAssertEqual(recorder.events, ["ended:user", "ended:completed"])
     }
 
     @MainActor
@@ -2361,6 +2393,31 @@ final class LiveMonitorSessionControllerTests: XCTestCase {
 private final class IOSLifecycleTestState {
     var scope: PingScopeIOSHostScope = .focused
     var events: [String] = []
+}
+
+@MainActor
+private final class IOSLiveActivityRuntimeRecorder {
+    var activityID: String?
+    private(set) var events: [String] = []
+    private(set) var lastStaleDate: Date?
+
+    init(activityID: String?) {
+        self.activityID = activityID
+    }
+
+    func record(_ event: String) {
+        events.append(event)
+    }
+
+    func recordContinuous(staleDate: Date) {
+        events.append("continuous")
+        lastStaleDate = staleDate
+    }
+
+    func request(_ id: String) {
+        activityID = id
+        events.append("requested:\(id)")
+    }
 }
 
 @MainActor

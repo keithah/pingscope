@@ -934,7 +934,9 @@ private final class PingScopeIOSAppModel: ObservableObject {
             guard model.isCurrentLifecycle(context) else { return }
             await model.refreshHistory(force: true)
             guard model.isCurrentLifecycle(context) else { return }
-            await model.endLiveActivity()
+            await PingScopeIOSLiveActivityRuntimeOrchestrator.finishSession(reason: .userStopped) {
+                await model.endLiveActivity()
+            }
             guard model.isCurrentLifecycle(context) else { return }
             model.applyBackgroundKeepAlive()
         }
@@ -1079,7 +1081,9 @@ private final class PingScopeIOSAppModel: ObservableObject {
         }
         await refreshHistory(force: true)
         await backgroundRuntime.end()
-        await endLiveActivity()
+        await PingScopeIOSLiveActivityRuntimeOrchestrator.finishSession(reason: .completed) { [weak self] in
+            await self?.endLiveActivity()
+        }
         applyBackgroundKeepAlive()
     }
 
@@ -1839,28 +1843,35 @@ private final class PingScopeIOSAppModel: ObservableObject {
             authorization: historyLocationAuthorization
         ).backgroundActive
         let plan = PingScopeIOSBackgroundExpirationPlan.make(keepAliveActive: keepAliveActive)
-        if plan.continueLiveActivityUpdates {
-            if !refreshLoopDriver.isRunning {
-                startRefreshLoop()
-            }
-            await updateLiveActivity()
-            return
+        if plan.continueLiveActivityUpdates, !refreshLoopDriver.isRunning {
+            startRefreshLoop()
         }
         if plan.cancelRefreshLoop {
             cancelRefreshLoop()
         }
-        if plan.stopMonitoring {
-            await stopMonitoring(reason: .backgroundRuntimeExpired)
+        await PingScopeIOSLiveActivityRuntimeOrchestrator.expireForBackgroundRuntime(
+            keepAliveActive: keepAliveActive,
+            at: Date(),
+            publishContinuous: { [weak self] staleDate in
+                await self?.updateLiveActivity(staleDateOverride: staleDate)
+            },
+            publishPaused: { [weak self] in
+                await self?.pauseLiveActivityForBackgroundRuntime()
+            },
+            stopMonitoring: { [weak self] in
+                await self?.stopMonitoring(reason: .backgroundRuntimeExpired)
+            },
+            persistSnapshotAndHistory: { [weak self] in
+                guard let self, self.isCurrentLifecycle(context) else { return }
+                await self.refreshSnapshot()
+                guard self.isCurrentLifecycle(context) else { return }
+                await self.refreshHistory(force: true)
+            }
+        )
+        guard isCurrentLifecycle(context) else { return }
+        if plan.continueLiveActivityUpdates {
+            return
         }
-        guard isCurrentLifecycle(context) else { return }
-        await refreshSnapshot()
-        guard isCurrentLifecycle(context) else { return }
-        await refreshHistory(force: true)
-        guard isCurrentLifecycle(context) else { return }
-        if plan.publishPausedLiveActivity {
-            await pauseLiveActivityForBackgroundRuntime()
-        }
-        guard isCurrentLifecycle(context) else { return }
         applyBackgroundKeepAlive()
     }
 
@@ -1903,12 +1914,18 @@ private final class PingScopeIOSAppModel: ObservableObject {
         }
     }
 
-    private func updateLiveActivity() async {
+    private func updateLiveActivity(staleDateOverride: Date? = nil) async {
         await releaseLiveActivityIfDefunct()
         guard let liveActivity, let session = presentedSession else { return }
         let state = liveActivityContentState(session: session)
-        guard liveActivityUpdatePolicy.shouldPublish(state) else { return }
-        await liveActivity.update(ActivityContent(state: state, staleDate: session.scheduledEndAt))
+        if staleDateOverride == nil {
+            guard liveActivityUpdatePolicy.shouldPublish(state) else { return }
+        } else {
+            _ = liveActivityUpdatePolicy.shouldPublish(state)
+        }
+        await liveActivity.update(
+            ActivityContent(state: state, staleDate: staleDateOverride ?? session.scheduledEndAt)
+        )
         liveActivityPausedForBackgroundRuntime = false
     }
 
@@ -1975,6 +1992,7 @@ private final class PingScopeIOSAppModel: ObservableObject {
               session.endReason == .backgroundRuntimeExpired else {
             return
         }
+        await releaseLiveActivityIfDefunct()
         let activityDecision = PingScopeIOSForegroundLiveActivityDecision.decide(
             hasActivity: liveActivity != nil,
             wasPausedForBackground: liveActivityPausedForBackgroundRuntime,
@@ -1991,7 +2009,12 @@ private final class PingScopeIOSAppModel: ObservableObject {
         guard isCurrentLifecycle(context) else { return }
         switch activityDecision {
         case .resumeExisting:
-            await updateLiveActivity()
+            _ = await PingScopeIOSLiveActivityRuntimeOrchestrator.resumeOnForeground(
+                releaseIfDefunct: { [weak self] in await self?.releaseLiveActivityIfDefunct() },
+                currentActivityID: { [weak self] in self?.liveActivity?.id },
+                updateExisting: { [weak self] in await self?.updateLiveActivity() },
+                requestActivity: { [weak self] in await self?.startLiveActivity(duration: .continuous) }
+            )
         case .request, .end:
             await startLiveActivity(duration: .continuous)
         case .none:

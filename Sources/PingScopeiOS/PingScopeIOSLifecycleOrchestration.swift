@@ -77,12 +77,55 @@ public enum PingScopeIOSForegroundLiveActivityDecision: Equatable, Sendable {
     }
 }
 
-public enum PingScopeIOSLiveActivityEndDecision: Equatable, Sendable {
-    case pause
-    case end
+@MainActor
+public enum PingScopeIOSLiveActivityRuntimeOrchestrator {
+    @discardableResult
+    public static func finishSession(
+        reason: MonitorSessionEndReason,
+        endActivity: @escaping @MainActor () async -> Void
+    ) async -> Bool {
+        guard reason != .backgroundRuntimeExpired, reason != .scopeSuspended else { return false }
+        await endActivity()
+        return true
+    }
 
-    public static func decide(reason: MonitorSessionEndReason) -> Self {
-        reason == .backgroundRuntimeExpired ? .pause : .end
+    public static func expireForBackgroundRuntime(
+        keepAliveActive: Bool,
+        at date: Date,
+        publishContinuous: @escaping @MainActor (_ staleDate: Date) async -> Void,
+        publishPaused: @escaping @MainActor () async -> Void,
+        stopMonitoring: @escaping @MainActor () async -> Void,
+        persistSnapshotAndHistory: @escaping @MainActor () async -> Void
+    ) async {
+        if keepAliveActive {
+            await publishContinuous(
+                date.addingTimeInterval(PingScopeIOSPausedLiveActivityState.staleInterval)
+            )
+            return
+        }
+
+        // UIKit grants only a small expiration budget. Preserve the headline UI
+        // before any SQLite/history work can consume that budget.
+        await publishPaused()
+        await stopMonitoring()
+        await persistSnapshotAndHistory()
+    }
+
+    @discardableResult
+    public static func resumeOnForeground(
+        releaseIfDefunct: @escaping @MainActor () async -> Void,
+        currentActivityID: @escaping @MainActor () -> String?,
+        updateExisting: @escaping @MainActor () async -> Void,
+        requestActivity: @escaping @MainActor () async -> Void
+    ) async -> String? {
+        await releaseIfDefunct()
+        if currentActivityID() != nil {
+            await updateExisting()
+        }
+        if currentActivityID() == nil {
+            await requestActivity()
+        }
+        return currentActivityID()
     }
 }
 
