@@ -34,7 +34,7 @@ final class CloudSyncCoordinatorTests: XCTestCase {
         }
     }
 
-    func testDefaultContainerProviderRejectsMissingEntitlementBeforeCreatingContainer() {
+    func testDefaultContainerProviderRejectsMissingEntitlementBeforeConstruction() {
         var didCreateContainer = false
         let provider = DefaultCloudKitContainerProvider(
             entitledContainerIdentifiers: { [] },
@@ -53,13 +53,17 @@ final class CloudSyncCoordinatorTests: XCTestCase {
         XCTAssertFalse(didCreateContainer)
     }
 
-    func testContainerEntitlementGateDoesNotDependOnUbiquityIdentityToken() {
-        let identifier = "iCloud.com.hadm.PingScope"
-        let provider = DefaultCloudKitContainerProvider(
-            entitledContainerIdentifiers: { [identifier] }
-        )
+    func testDefaultContainerProviderRejectsUnsignedProcessWithoutConstructingCloudKit() {
+        let provider = DefaultCloudKitContainerProvider()
 
-        XCTAssertNoThrow(try provider.validateContainerEntitlement(identifier))
+        XCTAssertThrowsError(
+            try provider.defaultContainer(for: PingScopeCloudKitModel.containerIdentifier)
+        ) { error in
+            XCTAssertEqual(
+                error as? CloudSyncBoundaryError,
+                .missingContainerEntitlement(PingScopeCloudKitModel.containerIdentifier)
+            )
+        }
     }
 
     func testFirstPersistedLaunchFailureKeepsPreferenceArmedForNextLaunch() async {

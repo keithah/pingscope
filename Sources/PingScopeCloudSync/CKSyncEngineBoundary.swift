@@ -1,7 +1,9 @@
 @preconcurrency import CloudKit
 import Foundation
 import PingScopeCore
+#if os(macOS)
 import Security
+#endif
 
 enum CloudSyncBoundaryError: Error, Equatable {
     case inactive
@@ -46,6 +48,7 @@ protocol CloudKitContainerProviding: Sendable {
 
 struct DefaultCloudKitContainerProvider: CloudKitContainerProviding, @unchecked Sendable {
     private static let containerIdentifiersEntitlement = "com.apple.developer.icloud-container-identifiers"
+    private static let bundledContainerIdentifiersKey = "PingScopeICloudContainerIdentifiers"
 
     private let entitledContainerIdentifiers: () -> [String]
     private let makeDefaultContainer: () -> CKContainer
@@ -59,17 +62,22 @@ struct DefaultCloudKitContainerProvider: CloudKitContainerProviding, @unchecked 
     }
 
     func defaultContainer(for identifier: String) throws -> CKContainer {
-        try validateContainerEntitlement(identifier)
-        return makeDefaultContainer()
-    }
-
-    func validateContainerEntitlement(_ identifier: String) throws {
         guard entitledContainerIdentifiers().contains(identifier) else {
             throw CloudSyncBoundaryError.missingContainerEntitlement(identifier)
         }
+        let container = makeDefaultContainer()
+        guard container.containerIdentifier == identifier else {
+            throw CloudSyncBoundaryError.missingContainerEntitlement(identifier)
+        }
+        return container
     }
 
     private static func currentProcessContainerIdentifiers() -> [String] {
+        #if targetEnvironment(simulator)
+        // Simulator builds are ad-hoc signed without the app's iCloud
+        // entitlement. Calling CKContainer.default() here raises CKException.
+        return []
+        #elseif os(macOS)
         guard let task = SecTaskCreateFromSelf(nil),
               let value = SecTaskCopyValueForEntitlement(
                   task,
@@ -78,13 +86,12 @@ struct DefaultCloudKitContainerProvider: CloudKitContainerProviding, @unchecked 
               ) else {
             return []
         }
-        if let identifiers = value as? [String] {
-            return identifiers
-        }
-        if let identifier = value as? String {
-            return [identifier]
-        }
-        return []
+        return value as? [String] ?? []
+        #else
+        // iOS does not expose SecTask. Couple container construction to the
+        // signed target's explicit bundle declaration instead of iCloud Drive.
+        return Bundle.main.object(forInfoDictionaryKey: bundledContainerIdentifiersKey) as? [String] ?? []
+        #endif
     }
 }
 
