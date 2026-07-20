@@ -365,13 +365,18 @@ public actor CKSyncEngineBoundary: CloudSyncEngineBoundary {
             .saveZone(CKRecordZone(zoneID: PingScopeCloudKitModel.zoneID))
         ], to: engineHandle)
         do {
+            DebugLog.write("CloudKit engine startup sending pending changes")
             try await engineHost.sendChanges(on: engineHandle)
+            DebugLog.write("CloudKit engine startup finished sending pending changes")
             guard self.engineHandle == engineHandle, await delegate.isActive() else {
                 await engineHost.cancelOperations(on: engineHandle)
                 return
             }
+            DebugLog.write("CloudKit engine startup fetching changes")
             try await engineHost.fetchChanges(on: engineHandle)
+            DebugLog.write("CloudKit engine startup finished fetching changes")
         } catch {
+            DebugLog.write("CloudKit engine startup failed: \(error)")
             await engineHost.cancelOperations(on: engineHandle)
             engineHost.releaseEngine(engineHandle)
             self.engineHandle = nil
@@ -382,10 +387,13 @@ public actor CKSyncEngineBoundary: CloudSyncEngineBoundary {
 
     public func stop() async {
         guard resourcesInitialized else { return }
+        let completedDeferredCancellation: Bool
         if let delegate {
-            await delegate.awaitDeferredCancellation()
+            completedDeferredCancellation = await delegate.awaitDeferredCancellation()
+        } else {
+            completedDeferredCancellation = false
         }
-        if let engineHandle {
+        if let engineHandle, !completedDeferredCancellation {
             await engineHost.cancelOperations(on: engineHandle)
         }
         do {
@@ -445,7 +453,7 @@ public actor CKSyncEngineBoundary: CloudSyncEngineBoundary {
             stateKey: stateKey,
             onRemoteChanges: onRemoteChanges,
             onAccountChange: { [weak self] in
-                Task { await self?.accountDidChange() }
+                Task.detached { await self?.accountDidChange() }
             },
             cancelSyncEngine: cancelSyncEngine
         )
@@ -487,15 +495,16 @@ actor PingScopeCKSyncEngineDelegateState {
         active = false
         guard acceptsDeferredCancellation else { return }
         let previousCancellation = deferredCancellation
-        deferredCancellation = Task {
+        deferredCancellation = Task.detached {
             await previousCancellation?.value
             await operation()
         }
     }
 
-    func deactivateAndAwaitDeferredCancellation() async {
+    func deactivateAndAwaitDeferredCancellation() async -> Bool {
         active = false
         acceptsDeferredCancellation = false
+        let completedDeferredCancellation = deferredCancellation != nil
         await deferredCancellation?.value
         deferredCancellation = nil
         stagedRecords.removeAll(keepingCapacity: false)
@@ -503,6 +512,7 @@ actor PingScopeCKSyncEngineDelegateState {
         confirmedRecordSaveIDs.removeAll(keepingCapacity: false)
         failedRecordSaves.removeAll(keepingCapacity: false)
         failedDeletions.removeAll(keepingCapacity: false)
+        return completedDeferredCancellation
     }
 
     @discardableResult
@@ -619,7 +629,9 @@ final class PingScopeCKSyncEngineDelegate: CKSyncEngineDelegate, @unchecked Send
     }
 
     func setActive(_ active: Bool) async { await state.setActive(active) }
-    func awaitDeferredCancellation() async { await state.deactivateAndAwaitDeferredCancellation() }
+    func awaitDeferredCancellation() async -> Bool {
+        await state.deactivateAndAwaitDeferredCancellation()
+    }
     func isActive() async -> Bool { await state.isActive() }
     func stage(records: [CKRecord]) async -> Bool { await state.stage(records) }
     func prepare(records: [CKRecord], deletions: [CKRecord.ID]) async -> Bool {
@@ -641,9 +653,12 @@ final class PingScopeCKSyncEngineDelegate: CKSyncEngineDelegate, @unchecked Send
         if case let .accountChange(change) = event {
             switch PingScopeCKSyncAccountChangePolicy.disposition(for: change.changeType) {
             case .continueSync:
-                // Retire the old engine even for sign-in. CKSyncEngine resets
-                // account-scoped pending state, and the coordinator rebuilds
-                // only after revalidating the new private account.
+                // CKSyncEngine reports the current signed-in account while a
+                // newly created, active engine starts. That is confirmation of
+                // the engine we just created, not a transition requiring a
+                // teardown/restart. An inactive retained delegate still uses
+                // sign-in to ask the coordinator to build a fresh engine.
+                guard !(await state.isActive()) else { return }
                 await state.setActive(false)
             case .stopSync:
                 // CKSyncEngine traps if this callback directly awaits an

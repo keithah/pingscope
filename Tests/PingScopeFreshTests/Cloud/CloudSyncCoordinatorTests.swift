@@ -666,42 +666,61 @@ final class CloudSyncCoordinatorTests: XCTestCase {
         )
     }
 
-    func testAccountChangeOwnsCancellationOutsideTheCloudKitDelegateCallback() throws {
-        let repositoryRoot = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-        let boundarySource = try String(
-            contentsOf: repositoryRoot.appendingPathComponent(
-                "Sources/PingScopeCloudSync/CKSyncEngineBoundary.swift"
-            ),
-            encoding: .utf8
+    func testAccountChangeCancellationEscapesCloudKitDelegateTaskContext() async throws {
+        let contextProbe = CloudKitDelegateTaskContextProbe()
+        let fixture = makeRealBoundaryFixture(
+            cancelSyncEngine: { _ in
+                await contextProbe.record(
+                    inheritedDelegateContext: CloudKitDelegateTaskContext.isActive
+                )
+            }
         )
-        let accountChangeStart = try XCTUnwrap(
-            boundarySource.range(of: "if case let .accountChange(change) = event {")
-        )
-        let sourceAfterAccountChange = boundarySource[accountChangeStart.lowerBound...]
-        let accountChangeEnd = try XCTUnwrap(
-            sourceAfterAccountChange.range(of: "guard await state.isActive() else")
-        )
-        let accountChangeBranch = String(sourceAfterAccountChange[..<accountChangeEnd.lowerBound])
+        let coordinator = PingScopeCloudSyncCoordinator(boundary: fixture.boundary)
+        await coordinator.setEnabled(true)
+        fixture.host.setAvailability(.unavailable)
+        let latestDelegate = await fixture.host.latestDelegate()
+        let delegate = try XCTUnwrap(latestDelegate)
 
-        XCTAssertTrue(
-            accountChangeBranch.contains("await state.scheduleCancellation(operation:"),
-            "CKSyncEngine forbids awaiting cancelOperations from inside a delegate callback"
-        )
-        XCTAssertTrue(accountChangeBranch.contains("await cancelSyncEngine(syncEngine)"))
-        XCTAssertTrue(boundarySource.contains("await delegate.awaitDeferredCancellation()"))
-        XCTAssertFalse(accountChangeBranch.contains("Task.detached"))
-        XCTAssertTrue(accountChangeBranch.contains("case .continueSync:"))
-        XCTAssertTrue(accountChangeBranch.contains("case .stopSync:"))
-        XCTAssertFalse(
-            accountChangeBranch.contains(
-                "await state.setActive(false)\n            await syncEngine.cancelOperations()"
-            ),
-            "A direct await here traps when CloudKit posts an account-change event"
-        )
+        await CloudKitDelegateTaskContext.$isActive.withValue(true) {
+            await delegate.handleEvent(
+                cloudKitAccountChangeEvent(
+                    .signOut(previousUser: CKRecord.ID(recordName: "signed-out-user"))
+                ),
+                syncEngine: inertCloudKitSyncEngineArgument()
+            )
+        }
+        try await waitUntil { await contextProbe.invocationCount() == 1 }
+
+        let inheritedContexts = await contextProbe.inheritedContexts()
+        XCTAssertEqual(inheritedContexts, [false])
+    }
+
+    func testAccountChangeRecoveryEscapesCloudKitDelegateTaskContext() async throws {
+        let contextProbe = CloudKitDelegateTaskContextProbe()
+        let fixture = makeRealBoundaryFixture(cancelSyncEngine: { _ in })
+        await fixture.boundary.setAccountChangeHandler {
+            await contextProbe.record(
+                inheritedDelegateContext: CloudKitDelegateTaskContext.isActive
+            )
+        }
+        _ = try await fixture.boundary.accountAvailability()
+        try await fixture.boundary.start()
+        let latestDelegate = await fixture.host.latestDelegate()
+        let delegate = try XCTUnwrap(latestDelegate)
+
+        await CloudKitDelegateTaskContext.$isActive.withValue(true) {
+            await delegate.handleEvent(
+                cloudKitAccountChangeEvent(
+                    .signOut(previousUser: CKRecord.ID(recordName: "signed-out-user"))
+                ),
+                syncEngine: inertCloudKitSyncEngineArgument()
+            )
+        }
+        try await waitUntil { await contextProbe.invocationCount() == 1 }
+
+        let inheritedContexts = await contextProbe.inheritedContexts()
+        XCTAssertEqual(inheritedContexts, [false])
+        await fixture.boundary.stop()
     }
 
     func testCloudSyncPreferenceDefaultsOff() {
@@ -914,6 +933,32 @@ final class CloudSyncCoordinatorTests: XCTestCase {
         XCTAssertNil(weakOldDelegate.value)
     }
 
+    func testActiveDelegateInitialSignInKeepsTheShippingBoundaryRunning() async throws {
+        let fixture = makeRealBoundaryFixture()
+        let coordinator = PingScopeCloudSyncCoordinator(boundary: fixture.boundary)
+        await coordinator.setEnabled(true)
+        let latestDelegate = await fixture.host.latestDelegate()
+        let delegate = try XCTUnwrap(latestDelegate)
+
+        await delegate.handleEvent(
+            cloudKitAccountChangeEvent(
+                .signIn(currentUser: CKRecord.ID(recordName: "signed-in-user"))
+            ),
+            syncEngine: inertCloudKitSyncEngineArgument()
+        )
+        try await Task.sleep(for: .milliseconds(25))
+
+        let status = await coordinator.status
+        let creationCount = await fixture.host.engineCreationCount()
+        let activeHandleCount = await fixture.host.activeHandleCount()
+        let releaseCount = await fixture.host.releaseCount()
+        XCTAssertEqual(status, .idle)
+        XCTAssertEqual(creationCount, 1)
+        XCTAssertEqual(activeHandleCount, 1)
+        XCTAssertEqual(releaseCount, 0)
+        await coordinator.setEnabled(false)
+    }
+
     func testDelegateSignOutEventDefersCancellationAndFullyRetiresBoundary() async throws {
         try await assertAccountLossEventFullyRetiresBoundary(
             .signOut(previousUser: CKRecord.ID(recordName: "signed-out-user"))
@@ -926,6 +971,38 @@ final class CloudSyncCoordinatorTests: XCTestCase {
                 previousUser: CKRecord.ID(recordName: "previous-user"),
                 currentUser: CKRecord.ID(recordName: "current-user")
             )
+        )
+    }
+
+    func testAccountLossCancelsTheShippingBoundaryEngineOnlyOnce() async throws {
+        let cancellationGate = DeferredCancellationGate()
+        let fixture = makeRealBoundaryFixture(
+            cancelSyncEngine: { _ in await cancellationGate.run() }
+        )
+        let coordinator = PingScopeCloudSyncCoordinator(boundary: fixture.boundary)
+        await coordinator.setEnabled(true)
+        fixture.host.setAvailability(.unavailable)
+        let latestDelegate = await fixture.host.latestDelegate()
+        let delegate = try XCTUnwrap(latestDelegate)
+
+        let eventTask = Task {
+            await delegate.handleEvent(
+                cloudKitAccountChangeEvent(
+                    .signOut(previousUser: CKRecord.ID(recordName: "signed-out-user"))
+                ),
+                syncEngine: inertCloudKitSyncEngineArgument()
+            )
+        }
+        await cancellationGate.waitUntilStarted()
+        await cancellationGate.release()
+        await eventTask.value
+        try await waitUntil { await fixture.host.activeHandleCount() == 0 }
+
+        let boundaryCancellationCount = await fixture.host.events().filter { $0 == .cancel }.count
+        XCTAssertEqual(
+            boundaryCancellationCount,
+            0,
+            "The deferred account-loss cancellation already owns CKSyncEngine.cancelOperations()"
         )
     }
 
@@ -1494,7 +1571,7 @@ final class CloudSyncCoordinatorTests: XCTestCase {
         )
         await state.recordDeleteFailures([deletionID: CKError(.networkFailure)])
 
-        await state.deactivateAndAwaitDeferredCancellation()
+        _ = await state.deactivateAndAwaitDeferredCancellation()
 
         let counts = await state.cacheCounts()
         XCTAssertEqual(counts.stagedRecords, 0)
@@ -1526,7 +1603,7 @@ final class CloudSyncCoordinatorTests: XCTestCase {
         XCTAssertNotNil(weakLifetimeToken.value)
 
         await gate.release()
-        await definitiveStop.value
+        _ = await definitiveStop.value
 
         XCTAssertNil(weakLifetimeToken.value)
     }
@@ -1537,7 +1614,7 @@ final class CloudSyncCoordinatorTests: XCTestCase {
         await state.setActive(true)
 
         let staleUploadObservedActiveState = await state.isActive()
-        await state.deactivateAndAwaitDeferredCancellation()
+        _ = await state.deactivateAndAwaitDeferredCancellation()
         XCTAssertTrue(staleUploadObservedActiveState)
         await state.prepare(records: [record], deletions: [])
 
@@ -2492,6 +2569,21 @@ private func cloudKitAccountChangeEvent(
     return .accountChange(
         unsafeBitCast(changeType, to: CKSyncEngine.Event.AccountChange.self)
     )
+}
+
+private enum CloudKitDelegateTaskContext {
+    @TaskLocal static var isActive = false
+}
+
+private actor CloudKitDelegateTaskContextProbe {
+    private var inheritedDelegateContexts: [Bool] = []
+
+    func record(inheritedDelegateContext: Bool) {
+        inheritedDelegateContexts.append(inheritedDelegateContext)
+    }
+
+    func invocationCount() -> Int { inheritedDelegateContexts.count }
+    func inheritedContexts() -> [Bool] { inheritedDelegateContexts }
 }
 
 private actor DeferredCancellationGate {

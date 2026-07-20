@@ -138,6 +138,7 @@ public actor PingScopeCloudSyncActivationController {
         automaticFailureCount: Int?,
         generation: UInt64
     ) async -> PingScopeCloudSyncActivationState {
+        DebugLog.write("iCloud sync activation parked disabled: \(message)")
         guard generation == activationGeneration else {
             return currentPersistedState()
         }
