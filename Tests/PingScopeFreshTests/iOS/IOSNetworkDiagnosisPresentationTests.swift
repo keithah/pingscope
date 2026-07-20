@@ -344,8 +344,13 @@ final class IOSNetworkDiagnosisPresentationTests: XCTestCase {
         XCTAssertEqual(presentation(interface: "wifi").diagnosis?.label, "Router / gateway degraded")
     }
 
-    func testCellularSuppressesLANScopedISPHostButKeepsDegradedUpstreamHost() {
-        let starlink = HostConfig.defaultStarlinkDish
+    func testCellularSuppressesNonGatewayPrivateHostButKeepsDownUpstreamHost() {
+        let privateISPEdge = HostConfig(
+            id: UUID(),
+            displayName: "Modem",
+            address: "192.168.100.1",
+            tier: .ispEdge
+        )
         let upstream = HostConfig(
             id: UUID(),
             displayName: "Public DNS",
@@ -367,7 +372,8 @@ final class IOSNetworkDiagnosisPresentationTests: XCTestCase {
             return LiveMonitorSessionSnapshot(host: host, session: nil, health: health, series: series)
         }
 
-        XCTAssertNil(PingScopeIOSMonitorInsightsPresentation(snapshots: [downSnapshot(starlink)]).diagnosis)
+        XCTAssertTrue(privateISPEdge.requiresLocalNetworkPermission)
+        XCTAssertNil(PingScopeIOSMonitorInsightsPresentation(snapshots: [downSnapshot(privateISPEdge)]).diagnosis)
         XCTAssertEqual(
             PingScopeIOSMonitorInsightsPresentation(snapshots: [downSnapshot(upstream)]).diagnosis?.label,
             "Upstream path down"
@@ -418,9 +424,10 @@ final class IOSNetworkDiagnosisPresentationTests: XCTestCase {
         )
 
         XCTAssertEqual(diagnosis.scope, .localNetwork)
+        XCTAssertEqual(diagnosis.confidence, .tentative)
     }
 
-    func testGatewayOnlyCellularDiagnosisDoesNotClaimMeasurementsAreMissing() {
+    func testGatewayOnlyCellularDiagnosisIsNeutralRatherThanAllReachable() {
         let gateway = HostConfig.defaultGateway
         let result = PingResult.failure(
             hostID: gateway.id,
@@ -435,7 +442,9 @@ final class IOSNetworkDiagnosisPresentationTests: XCTestCase {
             healthByHost: [gateway.id: health]
         )
 
-        XCTAssertNotEqual(diagnosis.title, "No recent measurements")
+        XCTAssertEqual(diagnosis.scope, .noData)
+        XCTAssertEqual(diagnosis.verdict, .noData)
+        XCTAssertEqual(diagnosis.title, "No cellular-path checks configured")
         XCTAssertEqual(diagnosis.affectedHostIDs, [])
     }
 }

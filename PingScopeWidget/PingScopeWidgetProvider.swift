@@ -13,7 +13,7 @@ struct Provider: TimelineProvider {
     #endif
 
     func placeholder(in context: Context) -> WidgetEntry {
-        WidgetEntry(date: Date(), data: .placeholder, snapshot: nil)
+        WidgetEntry(date: Date(), data: .placeholder, snapshot: nil, isStale: false)
     }
 
     func getSnapshot(in context: Context, completion: @escaping (WidgetEntry) -> Void) {
@@ -29,7 +29,7 @@ struct Provider: TimelineProvider {
             contentGeneratedAt: snapshot?.generatedAt ?? legacyData?.lastUpdate
         )
         let entries = entryMappings.map {
-            WidgetEntry(date: $0.date, data: legacyData, snapshot: snapshot)
+            WidgetEntry(date: $0.date, data: legacyData, snapshot: snapshot, isStale: $0.isStale)
         }
         let timeline = Timeline(
             entries: entries,
@@ -41,7 +41,13 @@ struct Provider: TimelineProvider {
 
     private func makeEntry(date: Date = Date()) -> WidgetEntry {
         let snapshot = loadSnapshotData()
-        return WidgetEntry(date: date, data: snapshot == nil ? loadLegacyData() : nil, snapshot: snapshot)
+        let legacyData = snapshot == nil ? loadLegacyData() : nil
+        return WidgetEntry(
+            date: date,
+            data: legacyData,
+            snapshot: snapshot,
+            isStale: snapshot?.isStale(at: date) ?? legacyData?.isStale(at: date) ?? false
+        )
     }
 
     private func loadSnapshotData() -> WidgetSnapshotData? {

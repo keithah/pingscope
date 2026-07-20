@@ -59,6 +59,18 @@ public struct PingScopeIOSPausedLiveActivityState: Equatable, Sendable {
     }
 }
 
+public enum PingScopeIOSLiveActivityStaleness {
+    public static func updateStaleDate(
+        override: Date?,
+        scheduledEndAt: Date?,
+        now: Date = Date()
+    ) -> Date {
+        override
+            ?? scheduledEndAt
+            ?? now.addingTimeInterval(PingScopeIOSPausedLiveActivityState.staleInterval)
+    }
+}
+
 public enum PingScopeIOSForegroundLiveActivityDecision: Equatable, Sendable {
     case none
     case request
@@ -84,7 +96,7 @@ public enum PingScopeIOSLiveActivityRuntimeOrchestrator {
         reason: MonitorSessionEndReason,
         endActivity: @escaping @MainActor () async -> Void
     ) async -> Bool {
-        guard reason != .backgroundRuntimeExpired, reason != .scopeSuspended else { return false }
+        guard reason != .backgroundRuntimeExpired else { return false }
         await endActivity()
         return true
     }

@@ -154,6 +154,7 @@ public struct HistoryMapPresentation: Equatable, Sendable {
     public let points: [HistoryMapPoint]
     public let route: [HistoryMapRoutePoint]
     public let summary: HistoryMapSummary
+    public let locatedSampleCount: Int
 
     public init(
         samples: [PingResult],
@@ -165,6 +166,7 @@ public struct HistoryMapPresentation: Equatable, Sendable {
             return HistoryMapPoint(sample: sample, location: location)
         }
         let chronological = Self.chronological(located)
+        locatedSampleCount = chronological.count
         points = Self.spatialReduction(chronological, limit: maximumPointCount)
         route = Self.routeReduction(chronological, limit: maximumRoutePointCount)
 

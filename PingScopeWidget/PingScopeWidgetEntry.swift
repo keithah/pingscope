@@ -5,6 +5,7 @@ struct WidgetEntry: TimelineEntry {
     let date: Date
     let data: WidgetData?
     let snapshot: WidgetSnapshotData?
+    let isStale: Bool
 
     var relevance: TimelineEntryRelevance? {
         if let snapshot {
@@ -23,10 +24,6 @@ struct WidgetEntry: TimelineEntry {
             score: hasIssues ? 100 : 50,
             duration: WidgetFreshness.staleInterval
         )
-    }
-
-    var isStale: Bool {
-        snapshot?.isStale(at: date) ?? data?.isStale(at: date) ?? false
     }
 
     var statusLabel: String {

@@ -3,6 +3,21 @@ import PingScopeCore
 @testable import PingScopeiOS
 
 final class LiveMonitorSessionControllerTests: XCTestCase {
+    func testContinuousLiveActivityUpdateKeepsRollingStaleDeadline() {
+        let now = Date(timeIntervalSince1970: 10_000)
+
+        let staleDate = PingScopeIOSLiveActivityStaleness.updateStaleDate(
+            override: nil,
+            scheduledEndAt: nil,
+            now: now
+        )
+
+        XCTAssertEqual(
+            staleDate,
+            now.addingTimeInterval(PingScopeIOSPausedLiveActivityState.staleInterval)
+        )
+    }
+
     func testIOSHostEditorDraftAcceptsAndRoundTripsHTTPSWithDefaultPort() {
         var draft = PingScopeIOSHostDraft(
             host: HostConfig(displayName: "Web", address: "example.com", method: .tcp, port: 80)

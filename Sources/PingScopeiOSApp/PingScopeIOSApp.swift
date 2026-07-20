@@ -1937,7 +1937,13 @@ private final class PingScopeIOSAppModel: ObservableObject {
             _ = liveActivityUpdatePolicy.shouldPublish(state)
         }
         await liveActivity.update(
-            ActivityContent(state: state, staleDate: staleDateOverride ?? session.scheduledEndAt)
+            ActivityContent(
+                state: state,
+                staleDate: PingScopeIOSLiveActivityStaleness.updateStaleDate(
+                    override: staleDateOverride,
+                    scheduledEndAt: session.scheduledEndAt
+                )
+            )
         )
         liveActivityPausedForBackgroundRuntime = false
     }

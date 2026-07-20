@@ -193,7 +193,8 @@ public struct NetworkPerspectiveDiagnoser: Sendable {
             healthByHost[host.id]?.latestResult?.networkInterface
         })
         let inferredInterface = sampledInterfaces.count == 1 ? sampledInterfaces.first : nil
-        let activeInterface = NetworkInterfaceNormalizer.normalize(activeNetworkInterface)
+        let normalizedActiveInterface = NetworkInterfaceNormalizer.normalize(activeNetworkInterface)
+        let activeInterface = normalizedActiveInterface
             ?? inferredInterface
         let diagnosticHosts = enabledHosts.filter { host in
             !(activeInterface == "cellular"
@@ -202,10 +203,10 @@ public struct NetworkPerspectiveDiagnoser: Sendable {
 
         if activeInterface == "cellular", diagnosticHosts.isEmpty {
             return NetworkPerspectiveDiagnosis(
-                scope: .allReachable,
+                scope: .noData,
                 title: "No cellular-path checks configured",
                 detail: "Local-network hosts are not on the active cellular path.",
-                verdict: .allReachable,
+                verdict: .noData,
                 confidence: .tentative
             )
         }
@@ -271,13 +272,19 @@ public struct NetworkPerspectiveDiagnoser: Sendable {
         switch fault.tier {
         case .localGateway:
             let title = fault.down.contains { $0.host.displayName.localizedCaseInsensitiveContains("gateway") } ? "Default gateway down" : "Local network down"
+            let localConfidence: NetworkPerspectiveDiagnosis.Confidence = if normalizedActiveInterface == nil,
+                                                                            sampledInterfaces.count > 1 {
+                .tentative
+            } else {
+                confidence
+            }
             return NetworkPerspectiveDiagnosis(
                 scope: .localNetwork,
                 title: title,
                 detail: "\(names(fault.down)) not responding; failures beyond the router are unknown.",
                 affectedHostIDs: affected,
                 verdict: .localNetworkDown,
-                confidence: confidence,
+                confidence: localConfidence,
                 faultTier: fault.tier,
                 evidenceNote: evidence,
                 tierEvidence: tierEvidence

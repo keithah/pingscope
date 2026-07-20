@@ -237,7 +237,7 @@ final class PingScopeIOSHistoryMapPresentationTests: XCTestCase {
         XCTAssertEqual(decision.permissionRequest, .none)
     }
 
-    func testLoadedLocatedSampleSuppressesContainerEmptyPrerequisiteEndToEnd() {
+    func testLoadedLocatedSampleHidesContainerEmptyPrerequisite() {
         let selection = selection()
         let sample = locatedSuccess(
             id: 99,
@@ -268,6 +268,25 @@ final class PingScopeIOSHistoryMapPresentationTests: XCTestCase {
 
         XCTAssertEqual(presentation.mapPresentation.points.count, 1)
         XCTAssertNil(decision.prerequisitePresentation)
+    }
+
+    func testLoadedEmptyMapRendersNoLocatedSamplesPrerequisite() throws {
+        let selection = selection()
+        let presentation = emptyPresentation(selection: selection)
+
+        let decision = PingScopeIOSHistoryContainerDecision(
+            requestedLens: .map,
+            authorization: .whenInUse,
+            taggingOptIn: true,
+            selection: selection,
+            presentationState: .loaded(selection: selection, presentation: presentation)
+        )
+
+        XCTAssertTrue(decision.showsContextualPermissionPrompt)
+        XCTAssertEqual(
+            try XCTUnwrap(decision.prerequisitePresentation).title,
+            "No location-tagged samples yet"
+        )
     }
 
     func testHistoryContainerLensSwitchReusesExactKeyedHostRangeContent() {
@@ -356,6 +375,7 @@ final class PingScopeIOSHistoryMapPresentationTests: XCTestCase {
 
         let presentation = HistoryMapPresentation(samples: dense + sameCell, maximumPointCount: 500)
 
+        XCTAssertEqual(presentation.locatedSampleCount, dense.count + sameCell.count)
         XCTAssertLessThanOrEqual(presentation.points.count, 500)
         XCTAssertTrue(presentation.points.contains { $0.id == sameCell[2].id })
         XCTAssertFalse(presentation.points.contains { $0.id == sameCell[0].id })

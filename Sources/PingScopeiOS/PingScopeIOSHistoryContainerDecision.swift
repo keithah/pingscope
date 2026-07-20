@@ -97,21 +97,30 @@ public struct PingScopeIOSHistoryContainerDecision: Equatable, Sendable {
         self.selection = selection
         self.isMapAvailable = authorizationPresentation.isMapAvailable
         self.effectiveLens = authorizationPresentation.effectiveLens(requested: requestedLens)
-        self.showsContextualPermissionPrompt = authorizationPresentation.showsContextualPrompt
         self.permissionRequest = authorizationPresentation.requestDecision
         let resolvedPresentation = PingScopeIOSHistoryPresentationResolver.resolve(
             presentationState,
             for: selection
         )
-        let locatedSampleCount = switch resolvedPresentation {
-        case .loading: 0
-        case let .content(presentation): presentation.mapPresentation.points.count
+        let prerequisitePresentation = switch resolvedPresentation {
+        case .loading:
+            authorizationPresentation.showsContextualPrompt
+                ? HistoryMapPrerequisitePresentation(
+                    authorization: authorization,
+                    taggingOptIn: taggingOptIn,
+                    locatedSampleCount: 0
+                )
+                : nil
+        case let .content(presentation):
+            HistoryMapPrerequisitePresentation(
+                authorization: authorization,
+                taggingOptIn: taggingOptIn,
+                locatedSampleCount: presentation.mapPresentation.locatedSampleCount
+            )
         }
-        self.prerequisitePresentation = HistoryMapPrerequisitePresentation(
-            authorization: authorization,
-            taggingOptIn: taggingOptIn,
-            locatedSampleCount: locatedSampleCount
-        )
+        self.showsContextualPermissionPrompt = authorizationPresentation.showsContextualPrompt
+            || prerequisitePresentation != nil
+        self.prerequisitePresentation = prerequisitePresentation
         self.resolvedPresentation = resolvedPresentation
     }
 }
