@@ -96,7 +96,7 @@ public enum PingScopeIOSLiveActivityRuntimeOrchestrator {
         reason: MonitorSessionEndReason,
         endActivity: @escaping @MainActor () async -> Void
     ) async -> Bool {
-        guard reason != .backgroundRuntimeExpired else { return false }
+        guard reason != .backgroundRuntimeExpired, reason != .scopeSuspended else { return false }
         await endActivity()
         return true
     }

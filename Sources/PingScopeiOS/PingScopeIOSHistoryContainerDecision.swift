@@ -118,8 +118,10 @@ public struct PingScopeIOSHistoryContainerDecision: Equatable, Sendable {
                 locatedSampleCount: presentation.mapPresentation.locatedSampleCount
             )
         }
+        // Empty authorized maps render their own in-map note. The top prompt is
+        // reserved for an actionable authorization/tagging prerequisite so it
+        // cannot cover the Chart lens or duplicate the map's empty state.
         self.showsContextualPermissionPrompt = authorizationPresentation.showsContextualPrompt
-            || prerequisitePresentation != nil
         self.prerequisitePresentation = prerequisitePresentation
         self.resolvedPresentation = resolvedPresentation
     }

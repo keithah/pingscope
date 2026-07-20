@@ -134,6 +134,7 @@ private final class CloudKitAccountChangeObserver: @unchecked Sendable {
 final class LiveCloudKitEngineHost: CloudKitEngineHosting, @unchecked Sendable {
     private let containerIdentifier: String
     private let containerProvider: any CloudKitContainerProviding
+    private let injectedAccountStatus: (@Sendable () async throws -> CKAccountStatus)?
     private let accountChangeObserver = CloudKitAccountChangeObserver()
     private let lock = NSLock()
     private var resources: Resources?
@@ -146,10 +147,12 @@ final class LiveCloudKitEngineHost: CloudKitEngineHosting, @unchecked Sendable {
 
     init(
         containerIdentifier: String,
-        containerProvider: any CloudKitContainerProviding = DefaultCloudKitContainerProvider()
+        containerProvider: any CloudKitContainerProviding = DefaultCloudKitContainerProvider(),
+        accountStatus: (@Sendable () async throws -> CKAccountStatus)? = nil
     ) {
         self.containerIdentifier = containerIdentifier
         self.containerProvider = containerProvider
+        self.injectedAccountStatus = accountStatus
     }
 
     func prepareResources() throws {
@@ -157,6 +160,14 @@ final class LiveCloudKitEngineHost: CloudKitEngineHosting, @unchecked Sendable {
     }
 
     func accountAvailability() async throws -> CloudSyncAccountAvailability {
+        if let injectedAccountStatus {
+            do {
+                return try await injectedAccountStatus() == .available ? .privateAccount : .unavailable
+            } catch {
+                return .unavailable
+            }
+        }
+
         let resources = try ensureResources()
         do {
             return try await resources.container.accountStatus() == .available ? .privateAccount : .unavailable

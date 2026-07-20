@@ -1375,6 +1375,11 @@ private final class PingScopeIOSAppModel: ObservableObject {
         await configureNotificationScope()
         guard isCurrentLifecycle(context) else { return }
         persistHostSelection()
+        await PingScopeIOSAppMonitoringOrchestration.prepareAllHostsReturn(
+            restartDuration: restartDuration,
+            coordinator: multiHostCoordinator
+        )
+        guard isCurrentLifecycle(context) else { return }
         await multiHostCoordinator.reconcile(hosts: hosts)
         guard isCurrentLifecycle(context) else { return }
         if let restartDuration {
@@ -1447,26 +1452,23 @@ private final class PingScopeIOSAppModel: ObservableObject {
 
     private func startMonitoring(duration: MonitorSessionDuration) async {
         await configureNotificationScope(requestAuthorization: true)
-        if hostScope == .allHosts {
-            await multiHostCoordinator.reconcile(hosts: hosts)
-            await multiHostCoordinator.start(duration: duration)
-        } else {
-            // An explicit focused start is a fresh logical session, not the
-            // continuation of an All Hosts -> focus scope round trip.
-            await multiHostCoordinator.stop(reason: .userStopped)
+        await PingScopeIOSAppMonitoringOrchestration.startMonitoring(
+            scope: hostScope,
+            duration: duration,
+            hosts: hosts,
+            coordinator: multiHostCoordinator
+        ) { [controller] in
             await controller.start(duration: duration)
         }
     }
 
     private func stopMonitoring(reason: MonitorSessionEndReason) async {
-        if hostScope == .allHosts {
-            await multiHostCoordinator.stop(reason: reason)
-        } else {
+        await PingScopeIOSAppMonitoringOrchestration.stopMonitoring(
+            scope: hostScope,
+            reason: reason,
+            coordinator: multiHostCoordinator
+        ) { [controller] in
             await controller.stop(reason: reason)
-            // The all-host coordinator may still own graph preservation from a
-            // previous scope transition. A real session end must invalidate it
-            // even while the focused controller is the visible scope.
-            await multiHostCoordinator.stop(reason: reason)
         }
     }
 

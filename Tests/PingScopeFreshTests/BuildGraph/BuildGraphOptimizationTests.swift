@@ -16,7 +16,7 @@ final class BuildGraphOptimizationTests: XCTestCase {
         let expectedTargets: [(String, [String], String)] = [
             ("PingScopeCoreTests", ["PingScopeCore"], "Tests/PingScopeFreshTests/Core"),
             ("PingScopeHistoryKitTests", ["PingScopeCore", "PingScopeHistoryKit"], "Tests/PingScopeFreshTests/History"),
-            ("PingScopeCloudSyncTests", ["PingScopeCore", "PingScopeCloudSync"], "Tests/PingScopeFreshTests/Cloud"),
+            ("PingScopeCloudSyncTests", ["PingScopeCore", "PingScopeCloudSync", "PingScopeObjCExceptionBoundary"], "Tests/PingScopeFreshTests/Cloud"),
             ("PingScopeiOSTests", ["PingScopeCore", "PingScopeHistoryKit", "PingScopeiOS"], "Tests/PingScopeFreshTests/iOS"),
             ("PingScopeMacAppTests", ["PingScopeCore", "PingScopeHistoryKit", "PingScope"], "Tests/PingScopeFreshTests/MacApp"),
             ("PingScopeExtensionSupportTests", ["PingScopeCore", "PingScopeExtensionSupport"], "Tests/PingScopeFreshTests/ExtensionSupport"),
@@ -237,7 +237,7 @@ final class BuildGraphOptimizationTests: XCTestCase {
         XCTAssertFalse(marketingVersions.isEmpty)
         XCTAssertTrue(marketingVersions.allSatisfy { $0.contains("MARKETING_VERSION = 0.5.0;") })
         XCTAssertFalse(buildVersions.isEmpty)
-        XCTAssertTrue(buildVersions.allSatisfy { $0.contains("CURRENT_PROJECT_VERSION = 89;") })
+        XCTAssertTrue(buildVersions.allSatisfy { $0.contains("CURRENT_PROJECT_VERSION = 90;") })
     }
 
     private func repositoryRoot() throws -> URL {

@@ -3,7 +3,10 @@
 id _Nullable PingScopePerformCatchingObjCException(id _Nullable (^operation)(void)) {
     @try {
         return operation();
-    } @catch (__unused NSException *exception) {
+    } @catch (NSException *exception) {
+        NSLog(@"PingScope caught Objective-C exception %@: %@",
+              exception.name,
+              exception.reason ?: @"<no reason>");
         return nil;
     }
 }

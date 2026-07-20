@@ -35,6 +35,25 @@ final class CloudSyncCoordinatorTests: XCTestCase {
         }
     }
 
+    func testLiveCloudKitHostMapsInjectedAccountStatusWithoutConstructingContainer() async throws {
+        let availableHost = LiveCloudKitEngineHost(
+            containerIdentifier: "iCloud.com.example.Unconstructed",
+            containerProvider: ThrowingCloudKitContainerProvider(),
+            accountStatus: { .available }
+        )
+        let unavailableHost = LiveCloudKitEngineHost(
+            containerIdentifier: "iCloud.com.example.Unconstructed",
+            containerProvider: ThrowingCloudKitContainerProvider(),
+            accountStatus: { .noAccount }
+        )
+
+        let available = try await availableHost.accountAvailability()
+        let unavailable = try await unavailableHost.accountAvailability()
+
+        XCTAssertEqual(available, .privateAccount)
+        XCTAssertEqual(unavailable, .unavailable)
+    }
+
     func testDefaultContainerProviderRejectsMissingEntitlementBeforeConstruction() {
         var didCreateContainer = false
         let provider = DefaultCloudKitContainerProvider(

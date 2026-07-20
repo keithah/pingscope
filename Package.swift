@@ -64,7 +64,10 @@ let package = Package(
         .target(
             name: "PingScopeObjCExceptionBoundary",
             path: "Sources/PingScopeObjCExceptionBoundary",
-            publicHeadersPath: "include"
+            publicHeadersPath: "include",
+            cSettings: [
+                .unsafeFlags(["-fobjc-arc-exceptions"])
+            ]
         ),
         .target(
             name: "PingScopeHistoryKit",
@@ -108,7 +111,7 @@ let package = Package(
         ),
         .testTarget(
             name: "PingScopeCloudSyncTests",
-            dependencies: ["PingScopeCore", "PingScopeCloudSync"],
+            dependencies: ["PingScopeCore", "PingScopeCloudSync", "PingScopeObjCExceptionBoundary"],
             path: "Tests/PingScopeFreshTests/Cloud"
         ),
         .testTarget(

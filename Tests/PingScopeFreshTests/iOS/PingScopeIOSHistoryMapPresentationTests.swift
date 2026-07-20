@@ -270,11 +270,18 @@ final class PingScopeIOSHistoryMapPresentationTests: XCTestCase {
         XCTAssertNil(decision.prerequisitePresentation)
     }
 
-    func testLoadedEmptyMapRendersNoLocatedSamplesPrerequisite() throws {
+    func testLoadedEmptyHistoryShowsNoTopBannerOutsideOrInsideMapLens() throws {
         let selection = selection()
         let presentation = emptyPresentation(selection: selection)
 
-        let decision = PingScopeIOSHistoryContainerDecision(
+        let chartDecision = PingScopeIOSHistoryContainerDecision(
+            requestedLens: .chart,
+            authorization: .whenInUse,
+            taggingOptIn: true,
+            selection: selection,
+            presentationState: .loaded(selection: selection, presentation: presentation)
+        )
+        let mapDecision = PingScopeIOSHistoryContainerDecision(
             requestedLens: .map,
             authorization: .whenInUse,
             taggingOptIn: true,
@@ -282,11 +289,13 @@ final class PingScopeIOSHistoryMapPresentationTests: XCTestCase {
             presentationState: .loaded(selection: selection, presentation: presentation)
         )
 
-        XCTAssertTrue(decision.showsContextualPermissionPrompt)
+        XCTAssertFalse(chartDecision.showsContextualPermissionPrompt)
+        XCTAssertFalse(mapDecision.showsContextualPermissionPrompt)
         XCTAssertEqual(
-            try XCTUnwrap(decision.prerequisitePresentation).title,
+            try XCTUnwrap(mapDecision.prerequisitePresentation).title,
             "No location-tagged samples yet"
         )
+        XCTAssertTrue(presentation.mapPresentation.points.isEmpty)
     }
 
     func testHistoryContainerLensSwitchReusesExactKeyedHostRangeContent() {
