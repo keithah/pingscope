@@ -224,14 +224,10 @@ struct PingScopeIOSAllHostsSignalHeroGraphCard: View {
         from series: [PingScopeIOSAllHostsPreparedGraphSeries]
     ) -> [RenderSeries] {
         series.map { source in
-            let colorIndex = PingScopeIOSAllHostsMonitorPresentation.stableColorIndex(
-                for: source.hostID,
-                paletteCount: PingScopeIOSHostIdentityPalette.count
-            )
             return RenderSeries(
                 hostID: source.hostID,
                 renderData: source.renderData,
-                color: PingScopeIOSHostIdentityPalette.color(at: colorIndex).swiftUIColor
+                color: source.identityColor.swiftUIColor
             )
         }
     }

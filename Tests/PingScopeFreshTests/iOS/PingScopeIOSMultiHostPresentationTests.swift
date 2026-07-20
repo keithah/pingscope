@@ -288,23 +288,37 @@ final class PingScopeIOSMultiHostPresentationTests: XCTestCase {
         XCTAssertEqual(presentation.legendRows.map(\.latencyText), ["10ms", "20ms", "30ms", "40ms"])
     }
 
-    func testRingAndGraphDeriveHostIdentityFromOneSharedPalette() {
+    func testRingIdentityMatchesProductionGraphPreparedSeries() throws {
         let host = HostConfig(
             id: UUID(uuidString: "00000000-0000-0000-0000-000000000042")!,
             displayName: "Shared color",
             address: "1.1.1.1"
         )
-        let presentation = PingScopeIOSAllHostsConcentricRingPresentation(rows: [
+        let rings = PingScopeIOSAllHostsConcentricRingPresentation(rows: [
             PingScopeIOSHostRowSnapshot(host: host, health: nil)
         ])
-        let ring = presentation.rings[0]
-        let graphColor = PingScopeIOSHostIdentityPalette.color(for: host.id)
+        let graph = PingScopeIOSAllHostsMonitorPresentation.graphPresentation(
+            from: [PingScopeIOSHostGraphSeries(hostID: host.id, samples: [])],
+            range: .oneMinute,
+            endDate: Date(timeIntervalSince1970: 1_000)
+        )
+        let preparedSeries = try XCTUnwrap(graph.series.first)
 
         XCTAssertEqual(
             PingScopeIOSAllHostsConcentricRingPresentation.paletteCount,
             PingScopeIOSHostIdentityPalette.count
         )
-        XCTAssertEqual(ring.identityColor, graphColor)
+        XCTAssertEqual(rings.rings[0].identityColor, preparedSeries.identityColor)
+    }
+
+    func testHostIdentityPaletteNormalizesAllIntegerIndexes() {
+        let count = PingScopeIOSHostIdentityPalette.count
+
+        XCTAssertEqual(PingScopeIOSHostIdentityPalette.color(at: -1), .bronze)
+        XCTAssertEqual(PingScopeIOSHostIdentityPalette.color(at: count), .cobalt)
+        XCTAssertEqual(PingScopeIOSHostIdentityPalette.color(at: count + 2), .teal)
+        XCTAssertEqual(PingScopeIOSHostIdentityPalette.color(at: Int.min), .gold)
+        XCTAssertEqual(PingScopeIOSHostIdentityPalette.color(at: Int.max), .purple)
     }
 
     func testSharedHostIdentityPaletteUsesTwelveDeterministicBuckets() {

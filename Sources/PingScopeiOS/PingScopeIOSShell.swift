@@ -63,12 +63,18 @@ public struct PingScopeIOSAllHostsGraphRenderSeries: Equatable, Sendable {
 public struct PingScopeIOSAllHostsPreparedGraphSeries: Equatable, Sendable, Identifiable {
     public let hostID: UUID
     public let renderData: PingScopeIOSLatencyGraphData
+    public let identityColor: PingScopeIOSHostIdentityPalette.ColorToken
 
     public var id: UUID { hostID }
 
-    public init(hostID: UUID, renderData: PingScopeIOSLatencyGraphData) {
+    public init(
+        hostID: UUID,
+        renderData: PingScopeIOSLatencyGraphData,
+        identityColor: PingScopeIOSHostIdentityPalette.ColorToken
+    ) {
         self.hostID = hostID
         self.renderData = renderData
+        self.identityColor = identityColor
     }
 }
 
@@ -225,6 +231,12 @@ public enum PingScopeIOSAllHostsMonitorPresentation {
         allHostGraphSeries.first { $0.hostID == row.hostID }?.samples ?? row.samples
     }
 
+    public static func graphIdentityColor(
+        for hostID: UUID
+    ) -> PingScopeIOSHostIdentityPalette.ColorToken {
+        PingScopeIOSHostIdentityPalette.color(for: hostID)
+    }
+
     public static func graphRenderSeries(
         from series: [PingScopeIOSHostGraphSeries],
         range: TimeRange,
@@ -257,7 +269,8 @@ public enum PingScopeIOSAllHostsMonitorPresentation {
                     samples: source.samples,
                     startDate: source.startDate,
                     endDate: source.endDate
-                )
+                ),
+                identityColor: graphIdentityColor(for: source.hostID)
             )
         }
         return PingScopeIOSAllHostsGraphPresentation(
