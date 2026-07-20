@@ -188,6 +188,10 @@ public struct PingScopeIOSAllHostsConcentricRingPresentation: Equatable, Sendabl
         overflowCount > 0 ? "+\(overflowCount) more" : ""
     }
 
+    public var overflowAccessibilityLabel: String {
+        overflowCount > 0 ? "Show \(overflowCount) more hosts" : ""
+    }
+
     public init(rows: [PingScopeIOSHostRowSnapshot]) {
         let visibleCells = Array(
             PingScopeIOSAllHostsRingGridPresentation.cells(from: rows)

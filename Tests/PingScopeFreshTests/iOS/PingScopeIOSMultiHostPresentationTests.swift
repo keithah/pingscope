@@ -275,6 +275,7 @@ final class PingScopeIOSMultiHostPresentationTests: XCTestCase {
         XCTAssertEqual(presentation.legendRows.map(\.displayName), ["Host 1", "Host 2", "Host 3", "Host 4"])
         XCTAssertEqual(presentation.overflowCount, 2)
         XCTAssertEqual(presentation.overflowLabel, "+2 more")
+        XCTAssertEqual(presentation.overflowAccessibilityLabel, "Show 2 more hosts")
         XCTAssertEqual(presentation.firstOverflowHostID, hosts[4].id)
         XCTAssertEqual(presentation.rings.map(\.colorIndex), hosts.prefix(4).map {
             PingScopeIOSAllHostsMonitorPresentation.stableColorIndex(

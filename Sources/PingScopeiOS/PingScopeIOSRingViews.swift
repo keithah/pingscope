@@ -43,7 +43,7 @@ struct PingScopeIOSAllHostsConcentricRingHero: View {
                                 .padding(.horizontal, 8)
                             }
                             .buttonStyle(.plain)
-                            .accessibilityLabel("Show (presentation.overflowCount) more hosts")
+                            .accessibilityLabel(presentation.overflowAccessibilityLabel)
                             .accessibilityHint("Focus the first hidden host")
                         }
                     }

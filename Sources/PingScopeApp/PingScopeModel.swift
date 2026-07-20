@@ -255,7 +255,7 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
     @Published var isCloudSyncEnabled: Bool {
         didSet {
             guard !isApplyingCloudSyncActivationState else { return }
-            UserDefaults.standard.set(isCloudSyncEnabled, forKey: PingScopeCloudSyncPreference.enabledKey)
+            cloudSyncDefaults.set(isCloudSyncEnabled, forKey: PingScopeCloudSyncPreference.enabledKey)
             configureCloudSync(isAutomaticLaunch: false)
         }
     }
@@ -300,6 +300,7 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
     private let hostConfigPersistence: HostConfigPersistence
     private let cloudSyncService: PingScopeCloudSyncService?
     private let cloudSyncActivation: PingScopeCloudSyncActivationController?
+    private let cloudSyncDefaults: UserDefaults
     private var lastCloudSyncHostIDs: Set<UUID> = []
     private var lastCloudSyncHostsByID: [UUID: HostConfig] = [:]
     var historySurfaceStore: (any PingHistoryStore)?
@@ -310,7 +311,12 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
     var onOverlayGraphClicked: (() -> Void)?
     var onPresentationChanged: (() -> Void)?
 
-    override init() {
+    override convenience init() {
+        self.init(cloudSyncDefaultsSuiteName: nil)
+    }
+
+    init(cloudSyncDefaultsSuiteName: String?) {
+        let cloudSyncDefaults = cloudSyncDefaultsSuiteName.flatMap(UserDefaults.init(suiteName:)) ?? .standard
         let hostConfigPersistence = HostConfigPersistence()
         let loadedHosts = hostConfigPersistence.loadInitialConfiguration { message in
             DebugLog.write(message)
@@ -361,7 +367,13 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
         self.historySurfaceStore = historyStore
         self.historySurfaceLoader = MacHistorySurfaceLoader()
         self.cloudSyncService = cloudSyncService
-        self.cloudSyncActivation = cloudSyncService.map { PingScopeCloudSyncActivationController(service: $0) }
+        self.cloudSyncActivation = cloudSyncService.map {
+            PingScopeCloudSyncActivationController(
+                service: $0,
+                defaultsSuiteName: cloudSyncDefaultsSuiteName
+            )
+        }
+        self.cloudSyncDefaults = cloudSyncDefaults
         self.hostConfigPersistence = hostConfigPersistence
         self.hostTester = HostTester(probeFactory: probeFactory)
         self.gatewayEndpointResolver = DefaultGatewayEndpointResolver(probeFactory: probeFactory)
@@ -382,7 +394,7 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
             UserDefaults.standard.widgetsEnabled = false
         }
         self.widgetsEnabled = widgetsEnabled
-        self.isCloudSyncEnabled = PingScopeCloudSyncPreference.isEnabled()
+        self.isCloudSyncEnabled = PingScopeCloudSyncPreference.isEnabled(in: cloudSyncDefaults)
         self.lastCloudSyncHostIDs = Set(loadedHosts.hosts.map(\.id))
         self.lastCloudSyncHostsByID = Dictionary(uniqueKeysWithValues: loadedHosts.hosts.map { ($0.id, $0) })
         self.overlayFrame = UserDefaults.standard.overlayFrame ?? NSRect(x: 80, y: 620, width: 240, height: 96)

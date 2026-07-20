@@ -1,6 +1,7 @@
 @preconcurrency import CloudKit
 import Foundation
 import PingScopeCore
+import PingScopeObjCExceptionBoundary
 #if os(macOS)
 import Security
 #endif
@@ -65,7 +66,9 @@ struct DefaultCloudKitContainerProvider: CloudKitContainerProviding, @unchecked 
         guard entitledContainerIdentifiers().contains(identifier) else {
             throw CloudSyncBoundaryError.missingContainerEntitlement(identifier)
         }
-        let container = makeDefaultContainer()
+        guard let container = PingScopePerformCatchingObjCException({ makeDefaultContainer() }) as? CKContainer else {
+            throw CloudSyncBoundaryError.missingContainerEntitlement(identifier)
+        }
         guard container.containerIdentifier == identifier else {
             throw CloudSyncBoundaryError.missingContainerEntitlement(identifier)
         }

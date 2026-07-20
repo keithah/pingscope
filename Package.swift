@@ -58,8 +58,13 @@ let package = Package(
         ),
         .target(
             name: "PingScopeCloudSync",
-            dependencies: ["PingScopeCore"],
+            dependencies: ["PingScopeCore", "PingScopeObjCExceptionBoundary"],
             path: "Sources/PingScopeCloudSync"
+        ),
+        .target(
+            name: "PingScopeObjCExceptionBoundary",
+            path: "Sources/PingScopeObjCExceptionBoundary",
+            publicHeadersPath: "include"
         ),
         .target(
             name: "PingScopeHistoryKit",

@@ -1,6 +1,7 @@
 import CloudKit
 import XCTest
 import PingScopeCore
+import PingScopeObjCExceptionBoundary
 @testable import PingScopeCloudSync
 
 // SwiftPM tests cover CKSyncEngineBoundary orchestration through an injected
@@ -51,6 +52,82 @@ final class CloudSyncCoordinatorTests: XCTestCase {
             )
         }
         XCTAssertFalse(didCreateContainer)
+    }
+
+    func testDefaultContainerProviderConvertsDefaultContainerExceptionIntoMissingEntitlement() {
+        let identifier = "iCloud.com.example.Misprovisioned"
+        let provider = DefaultCloudKitContainerProvider(
+            entitledContainerIdentifiers: { [identifier] },
+            makeDefaultContainer: {
+                NSException(
+                    name: .internalInconsistencyException,
+                    reason: "missing signed iCloud entitlement"
+                ).raise()
+                return CKContainer.default()
+            }
+        )
+
+        XCTAssertThrowsError(try provider.defaultContainer(for: identifier)) { error in
+            XCTAssertEqual(
+                error as? CloudSyncBoundaryError,
+                .missingContainerEntitlement(identifier)
+            )
+        }
+    }
+
+    func testObjCExceptionBoundaryReturnsNilWhenOperationRaises() {
+        let result = PingScopePerformCatchingObjCException {
+            NSException(
+                name: .internalInconsistencyException,
+                reason: "test exception"
+            ).raise()
+            return NSObject()
+        }
+
+        XCTAssertNil(result)
+    }
+
+    func testMisprovisionedDefaultContainerParksPersistedActivationDisabled() async {
+        let identifier = "iCloud.com.example.Misprovisioned"
+        let provider = DefaultCloudKitContainerProvider(
+            entitledContainerIdentifiers: { [identifier] },
+            makeDefaultContainer: {
+                NSException(
+                    name: .internalInconsistencyException,
+                    reason: "missing signed iCloud entitlement"
+                ).raise()
+                return CKContainer.default()
+            }
+        )
+        let engineHost = LiveCloudKitEngineHost(
+            containerIdentifier: identifier,
+            containerProvider: provider
+        )
+        let boundary = CKSyncEngineBoundary(
+            engineHost: engineHost,
+            stateKey: "CloudSyncMisprovisionedContainerTests",
+            subscriptionID: "CloudSyncMisprovisionedContainerTests"
+        )
+        let suiteName = "CloudSyncMisprovisionedContainerTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defaults.set(true, forKey: PingScopeCloudSyncPreference.enabledKey)
+        let service = PingScopeCloudSyncService(
+            historyStore: InMemoryHistoryStore(),
+            hostStore: LockedSharedHostStore(state: SharedHostStoreState(hosts: [])),
+            boundary: boundary,
+            recordBuilder: DefaultCloudSyncRecordBuilder(),
+            registrySuiteName: suiteName
+        )
+        let activation = PingScopeCloudSyncActivationController(
+            service: service,
+            defaultsSuiteName: suiteName
+        )
+
+        let state = await activation.activatePersisted(hosts: [])
+
+        XCTAssertFalse(state.isEnabled)
+        XCTAssertTrue(state.statusText.contains("missingContainerEntitlement"))
     }
 
     func testDefaultContainerProviderRejectsUnsignedProcessWithoutConstructingCloudKit() {

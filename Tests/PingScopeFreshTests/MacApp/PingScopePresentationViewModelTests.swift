@@ -7,25 +7,29 @@ import PingScopeCloudSync
 @MainActor
 final class PingScopePresentationViewModelTests: XCTestCase {
     func testMacPersistedCloudSyncUsesCrashLoopGuardWhenContainerEntitlementIsAbsent() async {
-        let defaults = UserDefaults.standard
+        let suiteName = "PingScopePresentationCrashGuardTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
         let enabledKey = PingScopeCloudSyncPreference.enabledKey
         let failureKey = PingScopeCloudSyncPreference.automaticStartFailureCountKey
-        let oldEnabled = defaults.object(forKey: enabledKey)
-        let oldFailureCount = defaults.object(forKey: failureKey)
-        defer {
-            if let oldEnabled { defaults.set(oldEnabled, forKey: enabledKey) } else { defaults.removeObject(forKey: enabledKey) }
-            if let oldFailureCount { defaults.set(oldFailureCount, forKey: failureKey) } else { defaults.removeObject(forKey: failureKey) }
-        }
         defaults.set(true, forKey: enabledKey)
         defaults.set(
             PingScopeCloudSyncActivationController.defaultMaximumAutomaticStartFailures - 1,
             forKey: failureKey
         )
 
-        let model = PingScopeModel()
-        for _ in 0..<100 where model.cloudSyncStatusText == "Checking iCloud account…" {
-            try? await Task.sleep(for: .milliseconds(10))
+        let model = PingScopeModel(cloudSyncDefaultsSuiteName: suiteName)
+        let activationFinished = expectation(description: "persisted CloudKit activation finished")
+        var cancellable: AnyCancellable?
+        if model.cloudSyncStatusText == "Checking iCloud account…" {
+            cancellable = model.$cloudSyncStatusText
+                .dropFirst()
+                .filter { $0 != "Checking iCloud account…" }
+                .prefix(1)
+                .sink { _ in activationFinished.fulfill() }
+            await fulfillment(of: [activationFinished], timeout: 10)
         }
+        withExtendedLifetime(cancellable) {}
 
         XCTAssertFalse(model.isCloudSyncEnabled)
         XCTAssertFalse(defaults.bool(forKey: enabledKey))
