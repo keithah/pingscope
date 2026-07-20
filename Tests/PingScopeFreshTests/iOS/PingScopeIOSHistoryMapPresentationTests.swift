@@ -289,13 +289,12 @@ final class PingScopeIOSHistoryMapPresentationTests: XCTestCase {
             presentationState: .loaded(selection: selection, presentation: presentation)
         )
 
-        XCTAssertFalse(chartDecision.showsContextualPermissionPrompt)
-        XCTAssertFalse(mapDecision.showsContextualPermissionPrompt)
-        XCTAssertEqual(
-            try XCTUnwrap(mapDecision.prerequisitePresentation).title,
-            "No location-tagged samples yet"
-        )
-        XCTAssertTrue(presentation.mapPresentation.points.isEmpty)
+        let chartRendering = PingScopeIOSHistoryRenderingState(decision: chartDecision)
+        let mapRendering = PingScopeIOSHistoryRenderingState(decision: mapDecision)
+
+        XCTAssertEqual([chartRendering.topBannerShown, chartRendering.mapNoteShown], [false, false])
+        XCTAssertEqual([mapRendering.topBannerShown, mapRendering.mapNoteShown], [false, true])
+        XCTAssertNil(mapDecision.prerequisitePresentation)
     }
 
     func testHistoryContainerLensSwitchReusesExactKeyedHostRangeContent() {

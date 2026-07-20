@@ -66,6 +66,8 @@ let package = Package(
             path: "Sources/PingScopeObjCExceptionBoundary",
             publicHeadersPath: "include",
             cSettings: [
+                // This package must remain a local/root dependency: unsafeFlags
+                // prevents it from being consumed as a versioned dependency.
                 .unsafeFlags(["-fobjc-arc-exceptions"])
             ]
         ),

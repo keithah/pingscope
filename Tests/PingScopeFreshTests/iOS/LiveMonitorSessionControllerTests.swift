@@ -3,6 +3,28 @@ import PingScopeCore
 @testable import PingScopeiOS
 
 final class LiveMonitorSessionControllerTests: XCTestCase {
+    @MainActor
+    func testInitialContinuousLiveActivityRequestHasRollingStaleDeadline() {
+        let now = Date(timeIntervalSince1970: 500)
+
+        let content = PingScopeIOSLiveActivityStartup.initialContent(
+            state: PingScopeLiveActivityAttributes.ContentState(
+                latencyMilliseconds: 12,
+                status: .healthy,
+                lastUpdatedAt: now,
+                remainingSeconds: 0,
+                isStale: false
+            ),
+            scheduledEndAt: nil,
+            now: now
+        )
+
+        XCTAssertEqual(
+            content.staleDate,
+            now.addingTimeInterval(PingScopeIOSPausedLiveActivityState.staleInterval)
+        )
+    }
+
     func testContinuousLiveActivityUpdateKeepsRollingStaleDeadline() {
         let now = Date(timeIntervalSince1970: 10_000)
 
@@ -146,6 +168,39 @@ final class LiveMonitorSessionControllerTests: XCTestCase {
             ),
             .restart
         )
+    }
+
+    @MainActor
+    func testAppSessionModelRestartsLiveActivityAcrossActiveAllHostsToFocusSwitch() async {
+        let hostID = UUID()
+        let sessionModel = PingScopeIOSAppSessionModel(
+            coordinator: PingScopeIOSMultiHostSessionCoordinator(
+                controllerFactory: RecordingIOSAllHostsControllerFactory()
+            )
+        )
+        var events: [String] = []
+
+        let switched = await sessionModel.performLiveActivityScopeSwitch(
+            isSessionActive: true,
+            previousScope: .allHosts,
+            newScope: .focused,
+            previousFocusedHostID: hostID,
+            newFocusedHostID: hostID,
+            hasLiveActivity: true,
+            prepareScopeSwitch: {
+                events.append("prepared")
+                return true
+            },
+            endActivity: { events.append("ended") },
+            completeScopeSwitch: {
+                events.append("switched")
+                return true
+            },
+            resumeActivity: { events.append("restarted") }
+        )
+
+        XCTAssertTrue(switched)
+        XCTAssertEqual(events, ["prepared", "ended", "switched", "restarted"])
     }
 
     @MainActor
@@ -1955,6 +2010,7 @@ final class LiveMonitorSessionControllerTests: XCTestCase {
         XCTAssertEqual(stopReasons, [.scopeSuspended, .scopeSuspended, .scopeSuspended])
     }
 
+    @MainActor
     func testEndedFocusedReturnClearsSuspendedAllHostsSeriesBeforeNextStart() async {
         let host = HostConfig(id: UUID(), displayName: "Cloudflare", address: "1.1.1.1")
         let factory = RecordingIOSAllHostsControllerFactory()
@@ -1973,13 +2029,50 @@ final class LiveMonitorSessionControllerTests: XCTestCase {
         // The focused session has already ended, but its refresh-loop completion
         // lost the lifecycle race. Returning to All Hosts must clear the suspended
         // coordinator before the user's next explicit Start.
-        await PingScopeIOSAppMonitoringOrchestration.prepareAllHostsReturn(
+        let sessionModel = PingScopeIOSAppSessionModel(coordinator: coordinator)
+        _ = await sessionModel.switchToAllHosts(
             restartDuration: nil,
-            coordinator: coordinator
+            hosts: [host]
         )
-        await coordinator.reconcile(hosts: [host])
         await factory.setSnapshotSamples([], for: host.id)
+        let returned = await coordinator.orderedSnapshots()
+        XCTAssertEqual(returned.first?.series.samples, [])
+
+        await sessionModel.startMonitoring(
+            scope: .allHosts,
+            duration: .continuous,
+            hosts: [host],
+            startFocusedController: {}
+        )
+
+        let restarted = await coordinator.orderedSnapshots()
+        XCTAssertEqual(restarted.first?.series.samples, [])
+    }
+
+    @MainActor
+    func testExplicitAllHostsStartClearsSuspendedSeriesBeforeStartingFreshSession() async {
+        let host = HostConfig(id: UUID(), displayName: "Cloudflare", address: "1.1.1.1")
+        let factory = RecordingIOSAllHostsControllerFactory()
+        let coordinator = PingScopeIOSMultiHostSessionCoordinator(controllerFactory: factory)
+        let deadSessionSample = PingResult.success(
+            hostID: host.id,
+            latency: .milliseconds(55),
+            timestamp: Date(timeIntervalSince1970: 33_000)
+        )
+
+        await coordinator.reconcile(hosts: [host])
         await coordinator.start(duration: .continuous)
+        await factory.setSnapshotSamples([deadSessionSample], for: host.id)
+        await coordinator.suspendForScopeChange()
+        await factory.setSnapshotSamples([], for: host.id)
+
+        let sessionModel = PingScopeIOSAppSessionModel(coordinator: coordinator)
+        await sessionModel.startMonitoring(
+            scope: .allHosts,
+            duration: .continuous,
+            hosts: [host],
+            startFocusedController: {}
+        )
 
         let restarted = await coordinator.orderedSnapshots()
         XCTAssertEqual(restarted.first?.series.samples, [])
@@ -2011,7 +2104,7 @@ final class LiveMonitorSessionControllerTests: XCTestCase {
     }
 
     @MainActor
-    func testAppModelFocusedFiniteCompletionClearsSuspendedAllHostsSeries() async {
+    func testAppSessionModelFocusedFiniteCompletionClearsSuspendedAllHostsSeries() async {
         let host = HostConfig(id: UUID(), displayName: "Cloudflare", address: "1.1.1.1")
         let factory = RecordingIOSAllHostsControllerFactory()
         let coordinator = PingScopeIOSMultiHostSessionCoordinator(controllerFactory: factory)
@@ -2027,10 +2120,10 @@ final class LiveMonitorSessionControllerTests: XCTestCase {
         await coordinator.suspendForScopeChange()
 
         var focusedControllerWasStopped = false
-        await PingScopeIOSAppMonitoringOrchestration.stopMonitoring(
+        let sessionModel = PingScopeIOSAppSessionModel(coordinator: coordinator)
+        await sessionModel.stopMonitoring(
             scope: .focused,
-            reason: .completed,
-            coordinator: coordinator
+            reason: .completed
         ) {
             focusedControllerWasStopped = true
         }
@@ -2044,7 +2137,7 @@ final class LiveMonitorSessionControllerTests: XCTestCase {
     }
 
     @MainActor
-    func testAppModelFocusedExplicitStartClearsSuspendedAllHostsSeries() async {
+    func testAppSessionModelFocusedExplicitStartClearsSuspendedAllHostsSeries() async {
         let host = HostConfig(id: UUID(), displayName: "Cloudflare", address: "1.1.1.1")
         let factory = RecordingIOSAllHostsControllerFactory()
         let coordinator = PingScopeIOSMultiHostSessionCoordinator(controllerFactory: factory)
@@ -2060,11 +2153,11 @@ final class LiveMonitorSessionControllerTests: XCTestCase {
         await coordinator.suspendForScopeChange()
 
         var focusedControllerWasStarted = false
-        await PingScopeIOSAppMonitoringOrchestration.startMonitoring(
+        let sessionModel = PingScopeIOSAppSessionModel(coordinator: coordinator)
+        await sessionModel.startMonitoring(
             scope: .focused,
             duration: .continuous,
-            hosts: [host],
-            coordinator: coordinator
+            hosts: [host]
         ) {
             focusedControllerWasStarted = true
         }

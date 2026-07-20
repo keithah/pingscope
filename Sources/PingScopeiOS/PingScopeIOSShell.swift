@@ -441,7 +441,7 @@ public struct PingScopeIOSRootView: View {
     public var historyMapLens: HistoryMapLens
     public var historyLocationAuthorization: PingScopeIOSHistoryLocationAuthorization
     public var historyLocationTaggingOptIn: Bool
-    public var historyMapContent: (PingScopeIOSHistorySelection, PingScopeIOSResolvedHistoryPresentation, HistoryMapLens) -> AnyView
+    public var historyMapContent: (PingScopeIOSHistorySelection, PingScopeIOSResolvedHistoryPresentation, HistoryMapLens, Bool) -> AnyView
     public var selectedGraphRange: TimeRange
     public var gatewayDetectionText: String?
     public var backgroundKeepAliveEnabled: Bool
@@ -497,7 +497,7 @@ public struct PingScopeIOSRootView: View {
         historyMapLens: HistoryMapLens? = nil,
         historyLocationAuthorization: PingScopeIOSHistoryLocationAuthorization = .undetermined,
         historyLocationTaggingOptIn: Bool = false,
-        historyMapContent: @escaping (PingScopeIOSHistorySelection, PingScopeIOSResolvedHistoryPresentation, HistoryMapLens) -> AnyView = { _, _, _ in AnyView(EmptyView()) },
+        historyMapContent: @escaping (PingScopeIOSHistorySelection, PingScopeIOSResolvedHistoryPresentation, HistoryMapLens, Bool) -> AnyView = { _, _, _, _ in AnyView(EmptyView()) },
         selectedGraphRange: TimeRange = .fiveMinutes,
         gatewayDetectionText: String? = nil,
         backgroundKeepAliveEnabled: Bool = false,
@@ -1069,7 +1069,12 @@ public struct PingScopeIOSRootView: View {
             requestedLens: historyLens,
             selectedMapLens: historyMapLens,
             decision: decision,
-            mapContent: historyMapContent(selection, decision.resolvedPresentation, historyMapLens),
+            mapContent: historyMapContent(
+                selection,
+                decision.resolvedPresentation,
+                historyMapLens,
+                PingScopeIOSHistoryRenderingState(decision: decision).mapNoteShown
+            ),
             onSelectRange: onSelectHistoryRange,
             onSelectLens: onSelectHistoryLens,
             onSelectMapLens: onSelectHistoryMapLens,

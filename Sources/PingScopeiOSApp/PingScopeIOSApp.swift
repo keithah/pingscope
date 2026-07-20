@@ -100,12 +100,13 @@ struct PingScopeIOSApp: App {
                 historyMapLens: model.effectiveHistoryMapLens,
                 historyLocationAuthorization: model.historyLocationAuthorization,
                 historyLocationTaggingOptIn: model.historyLocationTaggingEnabled,
-                historyMapContent: { selection, presentation, lens in
+                historyMapContent: { selection, presentation, lens, showsEmptyNote in
                     AnyView(
                         PingScopeIOSHistoryMapView(
                             selection: selection,
                             resolvedPresentation: presentation,
                             selectedLens: lens,
+                            showsEmptyNote: showsEmptyNote,
                             onSelectLens: { selectedLens in
                                 model.selectHistoryMapLens(selectedLens)
                             },
@@ -315,7 +316,10 @@ private final class PingScopeIOSAppModel: ObservableObject {
     private let gatewayDetector = PingScopeIOSGatewayDetector()
     private let presenter = DisplayStatePresenter()
     private let backgroundRuntime: LiveMonitorBackgroundRuntime
-    private let multiHostCoordinator: PingScopeIOSMultiHostSessionCoordinator
+    private let sessionModel: PingScopeIOSAppSessionModel
+    private var multiHostCoordinator: PingScopeIOSMultiHostSessionCoordinator {
+        sessionModel.coordinator
+    }
     private let notificationEngine: PingScopeIOSNotificationEngine
     private let failureLogSuppressor: PingScopeIOSFailureLogSuppressor
     private let historyLocationService: HistoryLocationService
@@ -383,7 +387,7 @@ private final class PingScopeIOSAppModel: ObservableObject {
         self.cloudSyncActivation = cloudSyncService.map {
             PingScopeCloudSyncActivationController(service: $0)
         }
-        self.multiHostCoordinator = PingScopeIOSMultiHostSessionCoordinator(
+        let multiHostCoordinator = PingScopeIOSMultiHostSessionCoordinator(
             historyStore: loadedHistoryStore,
             historySampleEnricher: historySampleEnricher,
             measurementObserver: { result, previousStatus, currentStatus in
@@ -398,6 +402,7 @@ private final class PingScopeIOSAppModel: ObservableObject {
                 )
             }
         )
+        self.sessionModel = PingScopeIOSAppSessionModel(coordinator: multiHostCoordinator)
         self.backgroundRuntime = LiveMonitorBackgroundRuntime(client: UIApplicationBackgroundTaskClient())
         self.backgroundKeepAliveEnabled = UserDefaults.standard.bool(forKey: Self.backgroundKeepAliveEnabledKey)
         self.displayMode = UserDefaults.standard.pingScopeIOSDisplayMode
@@ -1287,66 +1292,74 @@ private final class PingScopeIOSAppModel: ObservableObject {
         context: LifecycleContext? = nil
     ) async {
         let previousScope = hostScope
-        let activityDecision = PingScopeIOSLiveActivityDecision.decide(
+        _ = await sessionModel.performLiveActivityScopeSwitch(
             isSessionActive: restartDuration != nil,
             previousScope: previousScope,
             newScope: .focused,
             previousFocusedHostID: snapshot.host.id,
-            newFocusedHostID: host.id
+            newFocusedHostID: host.id,
+            hasLiveActivity: liveActivity != nil,
+            prepareScopeSwitch: { [weak self] in
+                guard let self else { return false }
+                self.cancelRefreshLoop()
+                await self.backgroundRuntime.end()
+                guard self.isCurrentLifecycle(context) else { return false }
+                if previousScope == .allHosts {
+                    await self.multiHostCoordinator.suspendForScopeChange()
+                } else {
+                    await self.controller.stop(reason: .scopeSuspended)
+                }
+                // Lifecycle tasks are unstructured and never cancelled today,
+                // so this guard cannot strand a suspended coordinator. Explicit
+                // Start also clears suspended state defensively before starting.
+                guard self.isCurrentLifecycle(context) else { return false }
+                return true
+            },
+            endActivity: { [weak self] in await self?.endLiveActivity() },
+            completeScopeSwitch: { [weak self] in
+                guard let self else { return false }
+                self.hostScope = .focused
+                if saveSelection {
+                    self.hostStore.save(hosts: self.hosts, selectedHostID: host.id, hostScope: .focused)
+                }
+                self.controller = LiveMonitorSessionController(
+                    host: host,
+                    historyStore: self.historyStore,
+                    historySampleEnricher: self.historyLocationService.snapshotStore.makeHistorySampleEnricher(),
+                    measurementObserver: self.notificationMeasurementObserver()
+                )
+                self.snapshot = LiveMonitorSessionSnapshot(
+                    host: host,
+                    session: nil,
+                    health: HostHealth(hostID: host.id, thresholds: host.thresholds)
+                )
+                self.monitorInsights = PingScopeIOSMonitorInsightsPresentation(
+                    snapshots: [self.snapshot],
+                    activeNetworkInterface: self.historyLocationService.snapshotStore.snapshot().networkInterface
+                )
+                await self.configureNotificationScope()
+                guard self.isCurrentLifecycle(context) else { return false }
+                await self.refreshHistory(force: true)
+                guard self.isCurrentLifecycle(context) else { return false }
+                if let restartDuration {
+                    self.invalidateLifecycleSession()
+                    await self.controller.start(duration: restartDuration)
+                    guard self.isCurrentLifecycle(context) else { return false }
+                    await self.refreshSnapshot()
+                    guard self.isCurrentLifecycle(context) else { return false }
+                } else {
+                    self.applyBackgroundKeepAlive()
+                }
+                return true
+            },
+            resumeActivity: { [weak self] in
+                guard let self, let restartDuration else { return }
+                await self.startLiveActivity(duration: restartDuration)
+                guard self.isCurrentLifecycle(context) else { return }
+                self.applyBackgroundKeepAlive()
+                self.startRefreshLoop()
+            }
         )
-        cancelRefreshLoop()
-        await backgroundRuntime.end()
-        guard isCurrentLifecycle(context) else { return }
-        if previousScope == .allHosts {
-            await multiHostCoordinator.suspendForScopeChange()
-        } else {
-            await controller.stop(reason: .scopeSuspended)
-        }
-        guard isCurrentLifecycle(context) else { return }
-        // Honor the decision contract: .update keeps the existing activity alive
-        // (startLiveActivity routes an existing activity to update()); ending it
-        // here would flicker the lock screen on a same-host reselect.
-        if activityDecision != .update, liveActivity != nil {
-            await endLiveActivity()
-        }
-        guard isCurrentLifecycle(context) else { return }
-
-        hostScope = .focused
-        if saveSelection {
-            hostStore.save(hosts: hosts, selectedHostID: host.id, hostScope: .focused)
-        }
-        controller = LiveMonitorSessionController(
-            host: host,
-            historyStore: historyStore,
-            historySampleEnricher: historyLocationService.snapshotStore.makeHistorySampleEnricher(),
-            measurementObserver: notificationMeasurementObserver()
-        )
-        snapshot = LiveMonitorSessionSnapshot(
-            host: host,
-            session: nil,
-            health: HostHealth(hostID: host.id, thresholds: host.thresholds)
-        )
-        monitorInsights = PingScopeIOSMonitorInsightsPresentation(
-            snapshots: [snapshot],
-            activeNetworkInterface: historyLocationService.snapshotStore.snapshot().networkInterface
-        )
-        await configureNotificationScope()
-        guard isCurrentLifecycle(context) else { return }
-        await refreshHistory(force: true)
-        guard isCurrentLifecycle(context) else { return }
-        if let restartDuration {
-            invalidateLifecycleSession()
-            await controller.start(duration: restartDuration)
-            guard isCurrentLifecycle(context) else { return }
-            await refreshSnapshot()
-            guard isCurrentLifecycle(context) else { return }
-            await startLiveActivity(duration: restartDuration)
-            guard isCurrentLifecycle(context) else { return }
-            applyBackgroundKeepAlive()
-            startRefreshLoop()
-        } else {
-            applyBackgroundKeepAlive()
-        }
     }
 
     private func switchToAllHostsAsync(
@@ -1375,18 +1388,12 @@ private final class PingScopeIOSAppModel: ObservableObject {
         await configureNotificationScope()
         guard isCurrentLifecycle(context) else { return }
         persistHostSelection()
-        await PingScopeIOSAppMonitoringOrchestration.prepareAllHostsReturn(
+        guard await sessionModel.switchToAllHosts(
             restartDuration: restartDuration,
-            coordinator: multiHostCoordinator
-        )
-        guard isCurrentLifecycle(context) else { return }
-        await multiHostCoordinator.reconcile(hosts: hosts)
-        guard isCurrentLifecycle(context) else { return }
-        if let restartDuration {
-            invalidateLifecycleSession()
-            await multiHostCoordinator.start(duration: restartDuration)
-            guard isCurrentLifecycle(context) else { return }
-        }
+            hosts: hosts,
+            beforeRestart: { [weak self] in self?.invalidateLifecycleSession() },
+            isCurrentLifecycle: { [weak self] in self?.isCurrentLifecycle(context) == true }
+        ) else { return }
         await refreshSnapshot()
         guard isCurrentLifecycle(context) else { return }
         if let restartDuration {
@@ -1452,21 +1459,19 @@ private final class PingScopeIOSAppModel: ObservableObject {
 
     private func startMonitoring(duration: MonitorSessionDuration) async {
         await configureNotificationScope(requestAuthorization: true)
-        await PingScopeIOSAppMonitoringOrchestration.startMonitoring(
+        await sessionModel.startMonitoring(
             scope: hostScope,
             duration: duration,
-            hosts: hosts,
-            coordinator: multiHostCoordinator
+            hosts: hosts
         ) { [controller] in
             await controller.start(duration: duration)
         }
     }
 
     private func stopMonitoring(reason: MonitorSessionEndReason) async {
-        await PingScopeIOSAppMonitoringOrchestration.stopMonitoring(
+        await sessionModel.stopMonitoring(
             scope: hostScope,
-            reason: reason,
-            coordinator: multiHostCoordinator
+            reason: reason
         ) { [controller] in
             await controller.stop(reason: reason)
         }
@@ -1909,13 +1914,19 @@ private final class PingScopeIOSAppModel: ObservableObject {
                 return
             }
             let state = liveActivityContentState(session: session)
-            let staleDate = session.scheduledEndAt
+            let initialContent = PingScopeIOSLiveActivityStartup.initialContent(
+                state: state,
+                scheduledEndAt: session.scheduledEndAt
+            )
             let requestedActivity = try await PingScopeIOSLiveActivityStartup.requestReplacingOrphans(
                 in: ActivityKitLiveActivityDirectory()
             ) {
                 try Activity.request(
                     attributes: attributes,
-                    content: ActivityContent(state: state, staleDate: staleDate),
+                    content: ActivityContent(
+                        state: initialContent.state,
+                        staleDate: initialContent.staleDate
+                    ),
                     pushType: nil
                 )
             }

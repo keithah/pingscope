@@ -9,6 +9,7 @@ struct PingScopeIOSHistoryMapView: View {
     let selection: PingScopeIOSHistorySelection
     let resolvedPresentation: PingScopeIOSResolvedHistoryPresentation
     let selectedLens: HistoryMapLens
+    let showsEmptyNote: Bool
     let onSelectLens: (HistoryMapLens) -> Void
     let onShare: (HistoryExportFormat) -> Void
     let onShareReport: (HistoryReportFormat) -> Void
@@ -76,7 +77,7 @@ struct PingScopeIOSHistoryMapView: View {
 
             VStack(alignment: .trailing, spacing: 12) {
                 mapLensControl
-                if presentation.points.isEmpty {
+                if showsEmptyNote {
                     noLocatedSamplesNote
                 }
             }

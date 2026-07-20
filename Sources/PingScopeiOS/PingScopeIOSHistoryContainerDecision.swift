@@ -112,11 +112,13 @@ public struct PingScopeIOSHistoryContainerDecision: Equatable, Sendable {
                 )
                 : nil
         case let .content(presentation):
-            HistoryMapPrerequisitePresentation(
-                authorization: authorization,
-                taggingOptIn: taggingOptIn,
-                locatedSampleCount: presentation.mapPresentation.locatedSampleCount
-            )
+            authorizationPresentation.showsContextualPrompt
+                ? HistoryMapPrerequisitePresentation(
+                    authorization: authorization,
+                    taggingOptIn: taggingOptIn,
+                    locatedSampleCount: presentation.mapPresentation.locatedSampleCount
+                )
+                : nil
         }
         // Empty authorized maps render their own in-map note. The top prompt is
         // reserved for an actionable authorization/tagging prerequisite so it
@@ -124,5 +126,20 @@ public struct PingScopeIOSHistoryContainerDecision: Equatable, Sendable {
         self.showsContextualPermissionPrompt = authorizationPresentation.showsContextualPrompt
         self.prerequisitePresentation = prerequisitePresentation
         self.resolvedPresentation = resolvedPresentation
+    }
+}
+
+public struct PingScopeIOSHistoryRenderingState: Equatable, Sendable {
+    public let topBannerShown: Bool
+    public let mapNoteShown: Bool
+
+    public init(decision: PingScopeIOSHistoryContainerDecision) {
+        topBannerShown = decision.showsContextualPermissionPrompt
+        if decision.effectiveLens == .map,
+           case let .content(presentation) = decision.resolvedPresentation {
+            mapNoteShown = presentation.mapPresentation.points.isEmpty
+        } else {
+            mapNoteShown = false
+        }
     }
 }

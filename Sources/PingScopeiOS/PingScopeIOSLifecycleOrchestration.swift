@@ -60,6 +60,17 @@ public struct PingScopeIOSPausedLiveActivityState: Equatable, Sendable {
 }
 
 public enum PingScopeIOSLiveActivityStaleness {
+    public static func initialStaleDate(
+        scheduledEndAt: Date?,
+        now: Date = Date()
+    ) -> Date {
+        updateStaleDate(
+            override: nil,
+            scheduledEndAt: scheduledEndAt,
+            now: now
+        )
+    }
+
     public static func updateStaleDate(
         override: Date?,
         scheduledEndAt: Date?,
@@ -96,6 +107,9 @@ public enum PingScopeIOSLiveActivityRuntimeOrchestrator {
         reason: MonitorSessionEndReason,
         endActivity: @escaping @MainActor () async -> Void
     ) async -> Bool {
+        // No current scope-switch caller invokes finishSession with
+        // .scopeSuspended; keep this defensive guard to prevent future wiring
+        // from tearing down an activity during an ordinary scope change.
         guard reason != .backgroundRuntimeExpired, reason != .scopeSuspended else { return false }
         await endActivity()
         return true
@@ -255,6 +269,25 @@ public protocol PingScopeIOSLiveActivityDirectory {
 
 @MainActor
 public enum PingScopeIOSLiveActivityStartup {
+    public struct InitialContent: Equatable, Sendable {
+        public let state: PingScopeLiveActivityAttributes.ContentState
+        public let staleDate: Date
+    }
+
+    public static func initialContent(
+        state: PingScopeLiveActivityAttributes.ContentState,
+        scheduledEndAt: Date?,
+        now: Date = Date()
+    ) -> InitialContent {
+        InitialContent(
+            state: state,
+            staleDate: PingScopeIOSLiveActivityStaleness.initialStaleDate(
+                scheduledEndAt: scheduledEndAt,
+                now: now
+            )
+        )
+    }
+
     public static func requestReplacingOrphans<Directory, RequestedActivity>(
         in directory: Directory,
         request: () async throws -> RequestedActivity

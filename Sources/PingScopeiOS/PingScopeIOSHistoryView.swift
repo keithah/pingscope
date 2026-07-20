@@ -46,6 +46,7 @@ public struct PingScopeIOSHistoryView: View {
     }
 
     public var body: some View {
+        let renderingState = PingScopeIOSHistoryRenderingState(decision: decision)
         VStack(spacing: 0) {
             header
 
@@ -59,7 +60,7 @@ public struct PingScopeIOSHistoryView: View {
                     .padding(.top, 10)
             }
 
-            if decision.showsContextualPermissionPrompt {
+            if renderingState.topBannerShown {
                 permissionPrompt
                     .padding(.horizontal, 20)
                     .padding(.top, 10)
