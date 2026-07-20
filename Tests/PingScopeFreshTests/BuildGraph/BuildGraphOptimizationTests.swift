@@ -237,7 +237,7 @@ final class BuildGraphOptimizationTests: XCTestCase {
         XCTAssertFalse(marketingVersions.isEmpty)
         XCTAssertTrue(marketingVersions.allSatisfy { $0.contains("MARKETING_VERSION = 0.5.0;") })
         XCTAssertFalse(buildVersions.isEmpty)
-        XCTAssertTrue(buildVersions.allSatisfy { $0.contains("CURRENT_PROJECT_VERSION = 93;") })
+        XCTAssertTrue(buildVersions.allSatisfy { $0.contains("CURRENT_PROJECT_VERSION = 94;") })
     }
 
     private func repositoryRoot() throws -> URL {
