@@ -307,6 +307,43 @@ final class PingScopeIOSMultiHostPresentationTests: XCTestCase {
         XCTAssertEqual(ring.identityColor, graphColor)
     }
 
+    func testSharedHostIdentityPaletteUsesTwelveDeterministicBuckets() {
+        let hostIDs = (1...256).compactMap { value in
+            UUID(uuidString: String(format: "00000000-0000-0000-0000-%012X", value))
+        }
+
+        let firstPass = hostIDs.map(PingScopeIOSHostIdentityPalette.color(for:))
+        let secondPass = hostIDs.map(PingScopeIOSHostIdentityPalette.color(for:))
+
+        XCTAssertEqual(PingScopeIOSHostIdentityPalette.count, 12)
+        XCTAssertEqual(firstPass, secondPass)
+        XCTAssertTrue(firstPass.contains { $0.rawValue >= 6 })
+    }
+
+    func testEveryHostIdentityTokenHasUniqueLightAndDarkComponents() {
+        let tokens = PingScopeIOSHostIdentityPalette.ColorToken.allCases
+
+        XCTAssertEqual(Set(tokens.map(\.lightRGB)).count, 12)
+        XCTAssertEqual(Set(tokens.map(\.darkRGB)).count, 12)
+        XCTAssertTrue(tokens.allSatisfy { $0.lightRGB != $0.darkRGB })
+    }
+
+    func testExpandedRingCellsStillMatchSharedGraphIdentityTokens() {
+        let hosts = (1...12).compactMap { value -> HostConfig? in
+            guard let id = UUID(
+                uuidString: String(format: "10000000-0000-0000-0000-%012X", value)
+            ) else { return nil }
+            return HostConfig(id: id, displayName: "Host \(value)", address: "192.0.2.\(value)")
+        }
+        let rows = hosts.map { PingScopeIOSHostRowSnapshot(host: $0, health: nil) }
+        let cells = PingScopeIOSAllHostsRingGridPresentation.cells(from: rows)
+
+        XCTAssertEqual(
+            cells.map(\.identityColor),
+            hosts.map { PingScopeIOSHostIdentityPalette.color(for: $0.id) }
+        )
+    }
+
     func testAllHostsConcentricRingPresentationClampsProgressAndHandlesEmptyAndSingleHost() {
         XCTAssertEqual(PingScopeIOSAllHostsConcentricRingPresentation(rows: []).rings, [])
         XCTAssertEqual(PingScopeIOSAllHostsConcentricRingPresentation(rows: []).legendRows, [])

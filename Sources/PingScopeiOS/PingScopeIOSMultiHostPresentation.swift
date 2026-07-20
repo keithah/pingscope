@@ -123,13 +123,65 @@ public struct PingScopeIOSAllHostsRingCell: Identifiable, Equatable, Sendable {
 }
 
 public enum PingScopeIOSHostIdentityPalette {
+    public struct RGB: Equatable, Hashable, Sendable {
+        public let red: UInt8
+        public let green: UInt8
+        public let blue: UInt8
+
+        public init(red: UInt8, green: UInt8, blue: UInt8) {
+            self.red = red
+            self.green = green
+            self.blue = blue
+        }
+    }
+
     public enum ColorToken: Int, CaseIterable, Equatable, Sendable {
-        case blue
-        case cyan
+        case cobalt
+        case magenta
+        case teal
+        case violet
+        case gold
         case orange
-        case pink
-        case mint
-        case indigo
+        case seaGreen
+        case purple
+        case azure
+        case crimson
+        case olive
+        case bronze
+
+        public var lightRGB: RGB {
+            switch self {
+            case .cobalt: RGB(red: 0x25, green: 0x63, blue: 0xEB)
+            case .magenta: RGB(red: 0xDB, green: 0x27, blue: 0x77)
+            case .teal: RGB(red: 0x08, green: 0x91, blue: 0xB2)
+            case .violet: RGB(red: 0x7C, green: 0x3A, blue: 0xED)
+            case .gold: RGB(red: 0xCA, green: 0x8A, blue: 0x04)
+            case .orange: RGB(red: 0xEA, green: 0x58, blue: 0x0C)
+            case .seaGreen: RGB(red: 0x0F, green: 0x76, blue: 0x6E)
+            case .purple: RGB(red: 0x93, green: 0x33, blue: 0xEA)
+            case .azure: RGB(red: 0x03, green: 0x69, blue: 0xA1)
+            case .crimson: RGB(red: 0xBE, green: 0x12, blue: 0x3C)
+            case .olive: RGB(red: 0x4D, green: 0x7C, blue: 0x0F)
+            case .bronze: RGB(red: 0xA1, green: 0x62, blue: 0x07)
+            }
+        }
+
+        public var darkRGB: RGB {
+            switch self {
+            case .cobalt: RGB(red: 0x60, green: 0xA5, blue: 0xFA)
+            case .magenta: RGB(red: 0xF4, green: 0x72, blue: 0xB6)
+            case .teal: RGB(red: 0x22, green: 0xD3, blue: 0xEE)
+            case .violet: RGB(red: 0xA7, green: 0x8B, blue: 0xFA)
+            case .gold: RGB(red: 0xFA, green: 0xCC, blue: 0x15)
+            case .orange: RGB(red: 0xFB, green: 0x92, blue: 0x3C)
+            case .seaGreen: RGB(red: 0x2D, green: 0xD4, blue: 0xBF)
+            case .purple: RGB(red: 0xC0, green: 0x84, blue: 0xFC)
+            case .azure: RGB(red: 0x38, green: 0xBD, blue: 0xF8)
+            case .crimson: RGB(red: 0xFB, green: 0x71, blue: 0x85)
+            case .olive: RGB(red: 0xA3, green: 0xE6, blue: 0x35)
+            case .bronze: RGB(red: 0xFB, green: 0xBF, blue: 0x24)
+            }
+        }
     }
 
     public static let count = ColorToken.allCases.count

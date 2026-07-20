@@ -2,6 +2,8 @@ import PingScopeCore
 import SwiftUI
 
 #if os(iOS)
+import UIKit
+
 struct PingScopeIOSAllHostsConcentricRingHero: View {
     @ScaledMetric(relativeTo: .body) private var ringLineWidth: CGFloat = 8
     @ScaledMetric(relativeTo: .body) private var ringSpacing: CGFloat = 24
@@ -132,14 +134,15 @@ struct PingScopeIOSAllHostsConcentricRingHero: View {
 
 extension PingScopeIOSHostIdentityPalette.ColorToken {
     var swiftUIColor: Color {
-        switch self {
-        case .blue: .blue
-        case .cyan: .cyan
-        case .orange: .orange
-        case .pink: .pink
-        case .mint: .mint
-        case .indigo: .indigo
-        }
+        Color(uiColor: UIColor { traits in
+            let rgb = traits.userInterfaceStyle == .dark ? darkRGB : lightRGB
+            return UIColor(
+                red: CGFloat(rgb.red) / 255,
+                green: CGFloat(rgb.green) / 255,
+                blue: CGFloat(rgb.blue) / 255,
+                alpha: 1
+            )
+        })
     }
 }
 
