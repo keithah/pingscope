@@ -202,6 +202,7 @@ struct PingScopeIOSAllHostsRingRowsFingerprint: Hashable {
         let isStale: Bool
         let isCached: Bool
         let degradedThresholdBitPattern: UInt64
+        let resolvedColor: ResolvedHostDisplayColor
     }
 
     let rows: [Row]
@@ -215,7 +216,8 @@ struct PingScopeIOSAllHostsRingRowsFingerprint: Hashable {
                 latencyBitPattern: row.latestLatencyMilliseconds?.bitPattern,
                 isStale: row.isStale,
                 isCached: row.isCached,
-                degradedThresholdBitPattern: row.degradedThresholdMilliseconds.bitPattern
+                degradedThresholdBitPattern: row.degradedThresholdMilliseconds.bitPattern,
+                resolvedColor: row.resolvedColor
             )
         }
     }

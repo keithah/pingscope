@@ -45,8 +45,11 @@ struct AllHostStatusRow: View {
     }
 
     private var identityColor: Color {
-        graphSeries?.color
-            ?? ResolvedHostDisplayColor(hostID: summary.id, displayColor: nil).swiftUIColor
+        resolvedColor.swiftUIColor
+    }
+
+    var resolvedColor: ResolvedHostDisplayColor {
+        graphSeries?.resolvedColor ?? summary.resolvedColor
     }
 }
 

@@ -3,6 +3,38 @@ import XCTest
 @testable import PingScopeCore
 
 final class LatencyGraphPresentationTests: XCTestCase {
+    @MainActor
+    func testDisabledCustomColorReachesAllHostStatusRowWithoutGraphSeries() {
+        let custom = HostDisplayColor(red: 0.75, green: 0.15, blue: 0.65)
+        let host = HostConfig(
+            id: UUID(uuidString: "00000000-0000-0000-0000-000000000061")!,
+            displayName: "Disabled custom",
+            address: "192.0.2.61",
+            isEnabled: false,
+            displayColor: custom
+        )
+        let snapshot = RuntimeSnapshot(
+            hosts: [host],
+            primaryHostID: host.id,
+            healthByHost: [:],
+            samplesByHost: [:]
+        )
+        let presentation = PingScopeDisplayPresentation(
+            snapshot: snapshot,
+            selectedRange: .oneMinute,
+            visibleHistorySamples: [],
+            includesAllHosts: true,
+            presenter: DisplayStatePresenter(),
+            now: Date(timeIntervalSince1970: 1_000)
+        )
+        let summary = presentation.hostStatusSummaries[0]
+        let row = AllHostStatusRow(summary: summary, graphSeries: nil)
+
+        XCTAssertTrue(presentation.allHostGraphSeries.isEmpty)
+        XCTAssertEqual(summary.resolvedColor, .custom(custom))
+        XCTAssertEqual(row.resolvedColor, .custom(custom))
+    }
+
     func testAllHostGraphSeriesResolveDecodedCustomAndAutomaticColors() throws {
         let custom = HostDisplayColor(red: 0.95, green: 0.2, blue: 0.55)
         let customHost = try decodedHost(

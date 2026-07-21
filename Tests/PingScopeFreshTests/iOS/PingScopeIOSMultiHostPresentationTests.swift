@@ -3,6 +3,68 @@ import XCTest
 @testable import PingScopeiOS
 
 final class PingScopeIOSMultiHostPresentationTests: XCTestCase {
+    @MainActor
+    func testGraphMemoInvalidatesWhenOnlyResolvedColorChanges() {
+        let hostID = UUID(uuidString: "00000000-0000-0000-0000-000000000051")!
+        let firstColor = HostDisplayColor(red: 0.9, green: 0.1, blue: 0.2)
+        let secondColor = HostDisplayColor(red: 0.1, green: 0.7, blue: 0.8)
+        let firstHost = HostConfig(
+            id: hostID,
+            displayName: "Color edit",
+            address: "192.0.2.51",
+            displayColor: firstColor
+        )
+        let secondHost = HostConfig(
+            id: hostID,
+            displayName: "Color edit",
+            address: "192.0.2.51",
+            displayColor: secondColor
+        )
+        let memo = PingScopeIOSAllHostsGraphPresentationMemo()
+        let endDate = Date(timeIntervalSince1970: 1_000)
+
+        let first = memo.resolve(
+            series: [PingScopeIOSHostGraphSeries(host: firstHost, samples: [])],
+            range: .oneMinute,
+            endDate: endDate
+        )
+        let second = memo.resolve(
+            series: [PingScopeIOSHostGraphSeries(host: secondHost, samples: [])],
+            range: .oneMinute,
+            endDate: endDate
+        )
+
+        XCTAssertEqual(first.series[0].resolvedColor, .custom(firstColor))
+        XCTAssertEqual(second.series[0].resolvedColor, .custom(secondColor))
+    }
+
+    @MainActor
+    func testRingMemoInvalidatesWhenOnlyResolvedColorChanges() {
+        let hostID = UUID(uuidString: "00000000-0000-0000-0000-000000000052")!
+        let firstColor = HostDisplayColor(red: 0.8, green: 0.2, blue: 0.3)
+        let secondColor = HostDisplayColor(red: 0.2, green: 0.6, blue: 0.9)
+        let firstHost = HostConfig(
+            id: hostID,
+            displayName: "Color edit",
+            address: "192.0.2.52",
+            displayColor: firstColor
+        )
+        let secondHost = HostConfig(
+            id: hostID,
+            displayName: "Color edit",
+            address: "192.0.2.52",
+            displayColor: secondColor
+        )
+        let memo = PingScopeIOSAllHostsConcentricRingContentMemo()
+
+        let first = memo.resolve([PingScopeIOSHostRowSnapshot(host: firstHost, health: nil)])
+        let second = memo.resolve([PingScopeIOSHostRowSnapshot(host: secondHost, health: nil)])
+
+        XCTAssertEqual(first.rings[0].resolvedColor, .custom(firstColor))
+        XCTAssertEqual(second.rings[0].resolvedColor, .custom(secondColor))
+        XCTAssertEqual(second.legendRows[0].resolvedColor, .custom(secondColor))
+    }
+
     func testCustomAndAutomaticIdentityColorsReachGraphRingAndRowPresentations() throws {
         let custom = HostDisplayColor(red: 0.95, green: 0.2, blue: 0.55)
         let customHost = try decodedHost(

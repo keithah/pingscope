@@ -469,9 +469,8 @@ public enum PingScopeIOSRootTab: String, CaseIterable, Identifiable, Sendable {
     }
 }
 
-#if os(iOS)
 @MainActor
-private final class PingScopeIOSAllHostsGraphPresentationMemo: ObservableObject {
+final class PingScopeIOSAllHostsGraphPresentationMemo: ObservableObject {
     private struct CacheKey: Hashable {
         let rangeDuration: TimeInterval
         let endDate: Date
@@ -481,6 +480,7 @@ private final class PingScopeIOSAllHostsGraphPresentationMemo: ObservableObject 
     private struct SeriesKey: Hashable {
         let hostID: UUID
         let samples: AppendOnlySequenceFingerprint<UUID>
+        let resolvedColor: ResolvedHostDisplayColor
     }
 
     private var cache = BoundedMemo<CacheKey, PingScopeIOSAllHostsGraphPresentation>(capacity: 1)
@@ -496,7 +496,8 @@ private final class PingScopeIOSAllHostsGraphPresentationMemo: ObservableObject 
             series: series.map {
                 SeriesKey(
                     hostID: $0.hostID,
-                    samples: AppendOnlySequenceFingerprint(samples: $0.samples)
+                    samples: AppendOnlySequenceFingerprint(samples: $0.samples),
+                    resolvedColor: $0.resolvedColor
                 )
             }
         )
@@ -510,6 +511,7 @@ private final class PingScopeIOSAllHostsGraphPresentationMemo: ObservableObject 
     }
 }
 
+#if os(iOS)
 private struct PingScopeIOSGraphReadingGroup<Reading: View, Graph: View>: View {
     @State private var scrubbedLatencyMilliseconds: Double?
 

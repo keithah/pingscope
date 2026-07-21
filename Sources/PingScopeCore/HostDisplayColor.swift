@@ -1,6 +1,6 @@
 import Foundation
 
-public struct HostDisplayColor: Codable, Equatable, Sendable {
+public struct HostDisplayColor: Codable, Equatable, Hashable, Sendable {
     public var red: Double
     public var green: Double
     public var blue: Double
@@ -46,7 +46,7 @@ public enum HostDisplayColorAutomaticPalette {
         }
     }
 
-    public enum ColorToken: Int, CaseIterable, Equatable, Sendable {
+    public enum ColorToken: Int, CaseIterable, Equatable, Hashable, Sendable {
         case cobalt
         case magenta
         case teal
@@ -128,7 +128,7 @@ public enum HostDisplayColorAutomaticPalette {
     }
 }
 
-public enum ResolvedHostDisplayColor: Equatable, Sendable {
+public enum ResolvedHostDisplayColor: Equatable, Hashable, Sendable {
     case custom(HostDisplayColor)
     case automatic(HostDisplayColorAutomaticPalette.ColorToken)
 

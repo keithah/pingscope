@@ -51,6 +51,7 @@ public struct HostStatusSummary: Equatable, Sendable {
     public var statusText: String
     public var latencyText: String
     public var color: StatusColor
+    public var resolvedColor: ResolvedHostDisplayColor
     public var accessibilityLabel: String
 
     public init(
@@ -60,6 +61,7 @@ public struct HostStatusSummary: Equatable, Sendable {
         statusText: String,
         latencyText: String,
         color: StatusColor,
+        resolvedColor: ResolvedHostDisplayColor? = nil,
         accessibilityLabel: String
     ) {
         self.id = id
@@ -68,6 +70,8 @@ public struct HostStatusSummary: Equatable, Sendable {
         self.statusText = statusText
         self.latencyText = latencyText
         self.color = color
+        self.resolvedColor = resolvedColor
+            ?? ResolvedHostDisplayColor(hostID: id, displayColor: nil)
         self.accessibilityLabel = accessibilityLabel
     }
 }
@@ -300,6 +304,7 @@ public struct DisplayStatePresenter: Sendable {
                 statusText: statusText,
                 latencyText: latencyText,
                 color: color(for: status),
+                resolvedColor: ResolvedHostDisplayColor(hostID: host.id, displayColor: host.displayColor),
                 accessibilityLabel: "\(host.displayName) \(endpoint) \(statusText) \(latencyText)"
             )
         }
