@@ -2267,6 +2267,71 @@ final class LiveMonitorSessionControllerTests: XCTestCase {
         XCTAssertEqual(update.selectedHostID, gateway.id)
     }
 
+    @MainActor
+    func testRepeatedGatewayDetectionRepairsSavedAddressDriftDespiteSameLastDetection() {
+        let gatewayID = UUID()
+        let displayColor = HostDisplayColor(red: 0.31, green: 0.52, blue: 0.74)
+        let leadingHost = HostConfig(id: UUID(), displayName: "First", address: "1.1.1.1")
+        let gateway = HostConfig(
+            id: gatewayID,
+            displayName: "Default Gateway",
+            address: "192.168.10.1",
+            tier: .localGateway,
+            method: .udp,
+            port: 5353,
+            interval: .milliseconds(1_500),
+            timeout: .milliseconds(800),
+            thresholds: LatencyThresholds(degradedMilliseconds: 41, downAfterFailures: 4),
+            isEnabled: false,
+            notifications: .enabled,
+            displayColor: displayColor
+        )
+        let trailingHost = HostConfig(id: UUID(), displayName: "Last", address: "8.8.8.8")
+        let detectedHost = HostConfig.defaultGatewayHost(address: "192.168.44.1")
+        let sessionModel = PingScopeIOSAppSessionModel(coordinator: PingScopeIOSMultiHostSessionCoordinator())
+
+        let firstRefresh = sessionModel.gatewayHostUpdate(
+            hosts: [leadingHost, gateway, trailingHost],
+            selectedHostID: gatewayID,
+            detectedHost: detectedHost,
+            shouldCreateIfMissing: false,
+            shouldSelect: false
+        )
+        XCTAssertEqual(firstRefresh.hosts[1].address, "192.168.44.1")
+
+        var externallyReconciledHosts = firstRefresh.hosts
+        externallyReconciledHosts[1].address = "192.168.77.1"
+
+        let secondRefresh = sessionModel.gatewayHostUpdate(
+            hosts: externallyReconciledHosts,
+            selectedHostID: gatewayID,
+            detectedHost: detectedHost,
+            shouldCreateIfMissing: false,
+            shouldSelect: false
+        )
+
+        XCTAssertEqual(secondRefresh.change, .updated(index: 1, previousAddress: "192.168.77.1"))
+        XCTAssertEqual(
+            secondRefresh.hosts[1].address,
+            "192.168.44.1",
+            "A repeated satisfied-path detection must repair saved gateway drift even when the network address is unchanged."
+        )
+        XCTAssertEqual(secondRefresh.selectedHostID, gatewayID)
+        XCTAssertEqual(secondRefresh.hosts.map(\.id), [leadingHost.id, gatewayID, trailingHost.id])
+
+        var expectedGateway = gateway
+        expectedGateway.address = "192.168.44.1"
+        XCTAssertEqual(secondRefresh.hosts[1], expectedGateway)
+        XCTAssertEqual(secondRefresh.hosts[1].displayColor, displayColor)
+        XCTAssertEqual(secondRefresh.hosts[1].notifications, .enabled)
+        XCTAssertFalse(secondRefresh.hosts[1].isEnabled)
+        XCTAssertEqual(secondRefresh.hosts[1].method, .udp)
+        XCTAssertEqual(secondRefresh.hosts[1].port, 5353)
+        XCTAssertEqual(secondRefresh.hosts[1].interval, .milliseconds(1_500))
+        XCTAssertEqual(secondRefresh.hosts[1].timeout, .milliseconds(800))
+        XCTAssertEqual(secondRefresh.hosts[1].thresholds, gateway.thresholds)
+    }
+
     func testBackgroundRuntimeEndsPreviousTaskWhenBeginningAgain() async {
         let client = RecordingBackgroundTaskClient()
         let runtime = LiveMonitorBackgroundRuntime(client: client)

@@ -360,7 +360,6 @@ private final class PingScopeIOSAppModel: ObservableObject {
     private var liveActivityUpdatePolicy = PingScopeIOSLiveActivityUpdatePolicy()
     private var liveActivityPausedForBackgroundRuntime = false
     private var initialSessionCoordinator = PingScopeIOSInitialSessionCoordinator()
-    private var lastGatewayAddress: String?
     @Published private(set) var historyLocationTaggingEnabled: Bool
     private var lastHistoryRefreshAt: Date?
     private var lastPublishedWidgetSnapshot: WidgetSnapshot?
@@ -1304,13 +1303,6 @@ private final class PingScopeIOSAppModel: ObservableObject {
     ) async -> Bool {
         let detectedHost = await gatewayDetector.detect()
         guard isCurrentLifecycle(context) else { return false }
-
-        if let detectedHost {
-            guard detectedHost.address != lastGatewayAddress || shouldCreateIfMissing else {
-                return true
-            }
-            lastGatewayAddress = detectedHost.address
-        }
 
         let normalizedDetectedHost = detectedHost.map(BuildFlavor.appStore.normalizedHost)
         let update = sessionModel.gatewayHostUpdate(

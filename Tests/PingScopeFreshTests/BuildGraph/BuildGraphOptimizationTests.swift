@@ -172,6 +172,7 @@ final class BuildGraphOptimizationTests: XCTestCase {
         )
         let decisionRoute = source[decisionStart.lowerBound..<decisionEnd.lowerBound]
         XCTAssertTrue(decisionRoute.contains("sessionModel.gatewayHostUpdate("))
+        XCTAssertFalse(decisionRoute.contains("detectedHost.address != lastGatewayAddress"))
     }
 
     func testIOSFocusedLaunchHydratesAndMarksPeerRowsCachedWithinBoundedHistory() throws {
