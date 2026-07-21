@@ -5,6 +5,7 @@ public struct PingScopeIOSHostDraft: Equatable, Sendable {
     public var id: UUID
     public var displayName: String
     public var address: String
+    public var tier: NetworkTier?
     public var method: PingMethod
     public var portText: String
     public var intervalMilliseconds: Double
@@ -19,6 +20,7 @@ public struct PingScopeIOSHostDraft: Equatable, Sendable {
         self.id = host.id
         self.displayName = host.displayName
         self.address = host.address
+        self.tier = host.tier
         self.method = host.method
         self.portText = host.port.map(String.init) ?? ""
         self.intervalMilliseconds = host.interval.seconds * 1_000
@@ -35,6 +37,7 @@ public struct PingScopeIOSHostDraft: Equatable, Sendable {
             id: id,
             displayName: displayName.trimmingCharacters(in: .whitespacesAndNewlines),
             address: address.trimmingCharacters(in: .whitespacesAndNewlines),
+            tier: tier,
             method: method,
             port: UInt16(portText),
             interval: .milliseconds(intervalMilliseconds),

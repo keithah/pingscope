@@ -2070,6 +2070,51 @@ final class LiveMonitorSessionControllerTests: XCTestCase {
         XCTAssertNil(draft.finalizedHost.displayColor)
     }
 
+    func testIOSHostEditorDraftPreservesEntireExplicitTierHostAcrossColorSaveAutomaticAndCancel() {
+        let originalColor = HostDisplayColor(red: 0.1, green: 0.2, blue: 0.3)
+        let editedColor = HostDisplayColor(red: 0.7, green: 0.4, blue: 0.2)
+        let original = HostConfig(
+            id: UUID(),
+            displayName: "Starlink",
+            address: "192.168.100.1",
+            tier: .localGateway,
+            method: .starlink,
+            port: 9200,
+            interval: .milliseconds(1_750),
+            timeout: .milliseconds(825),
+            thresholds: LatencyThresholds(degradedMilliseconds: 137, downAfterFailures: 5),
+            isEnabled: false,
+            notifications: .muted,
+            displayColor: originalColor
+        )
+        var draft = PingScopeIOSHostDraft(host: original)
+
+        draft.displayColor = editedColor
+        var expectedCustom = original
+        expectedCustom.displayColor = editedColor
+        XCTAssertEqual(
+            draft.finalizedHost,
+            expectedCustom,
+            "Saving a color-only edit must preserve every untouched HostConfig field, including explicit tier."
+        )
+
+        draft.displayColor = nil
+        var expectedAutomatic = original
+        expectedAutomatic.displayColor = nil
+        XCTAssertEqual(
+            draft.finalizedHost,
+            expectedAutomatic,
+            "Using Automatic must alter only displayColor."
+        )
+
+        var didCancel = false
+        let cancelBinding = HostDisplayColorEditorBinding(hostID: original.id, displayColor: original.displayColor)
+        cancelBinding.cancel { didCancel = true }
+        XCTAssertTrue(didCancel)
+        XCTAssertEqual(original.tier, NetworkTier.localGateway)
+        XCTAssertEqual(original.displayColor, originalColor)
+    }
+
     func testIOSHostDraftTreatsInvalidDecodableColorsAsAutomaticAndClearsThemOnSave() {
         for invalidColor in [
             HostDisplayColor(red: 1.1, green: 0.4, blue: 0.8),
