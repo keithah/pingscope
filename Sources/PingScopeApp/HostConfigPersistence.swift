@@ -109,11 +109,18 @@ final class HostConfigPersistence {
     }
 
     func resolveAcceptedHostState(_ captured: SharedHostStoreState) -> SharedHostStoreState {
-        let resolved = sharedStore.load().state.map(Self.sanitizedSharedState)
+        sharedStore.load().state.map(Self.sanitizedSharedState)
             ?? Self.sanitizedSharedState(captured)
-        lastObservedSharedState = resolved
-        preservedSelectedHostID = resolved.selectedHostID
-        return resolved
+    }
+
+    func commitAcceptedHostState(_ state: SharedHostStoreState) {
+        let accepted = Self.sanitizedSharedState(state)
+        lastObservedSharedState = accepted
+        preservedSelectedHostID = accepted.selectedHostID
+        lastPersistedHostState = PersistedHostState(
+            hosts: accepted.hosts,
+            primaryHostID: accepted.primaryHostID
+        )
     }
 
     func allowUserManagedPersistence() {

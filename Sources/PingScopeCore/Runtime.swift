@@ -543,6 +543,7 @@ public actor PingRuntime {
     private var healthByHost: [UUID: HostHealth] = [:]
     private var samplesByHost: [UUID: SampleSeries] = [:]
     private var streamTask: Task<Void, Never>?
+    private var schedulerNeedsRestartAfterSupersededReconciliation = false
     private var continuation: AsyncStream<RuntimeSnapshot>.Continuation?
     private var continuationToken: UUID?
     private var alertContinuationToken: UUID?
@@ -642,6 +643,7 @@ public actor PingRuntime {
                 await ingest(result)
             }
         }
+        schedulerNeedsRestartAfterSupersededReconciliation = false
         publishSnapshot()
     }
 
@@ -767,23 +769,40 @@ public actor PingRuntime {
 
     @discardableResult
     public func reconcileAcceptedHostState(_ state: SharedHostStoreState) async -> RuntimeSnapshot {
+        await reconcileAcceptedHostStateIfCurrent(state, isCurrent: { true }) ?? makeSnapshot()
+    }
+
+    /// Reconciles an accepted host snapshot only while its caller's mutation
+    /// generation remains current. A superseded reconciliation may have crossed
+    /// an actor hop into `HostStore`; returning `nil` tells the caller to reload
+    /// the shared state and repair that transient write before publishing it.
+    @discardableResult
+    public func reconcileAcceptedHostStateIfCurrent(
+        _ state: SharedHostStoreState,
+        isCurrent: @escaping @Sendable () async -> Bool
+    ) async -> RuntimeSnapshot? {
+        guard await isCurrent() else { return nil }
         await refreshHostCache()
+        guard await isCurrent() else { return nil }
         let previousHostsByID = hostByID
         let acceptedHosts = HostConfig.sanitizedHosts(state.hosts)
         let acceptedHostsByID = Dictionary(uniqueKeysWithValues: acceptedHosts.map { ($0.id, $0) })
         let previousEnabledHostsByID = previousHostsByID.filter { $0.value.isEnabled }
         let acceptedEnabledHostsByID = acceptedHostsByID.filter { $0.value.isEnabled }
-        let requiresProbeRestart = previousEnabledHostsByID.keys != acceptedEnabledHostsByID.keys
+        let requiresProbeRestart = schedulerNeedsRestartAfterSupersededReconciliation
+            || previousEnabledHostsByID.keys != acceptedEnabledHostsByID.keys
             || acceptedEnabledHostsByID.contains { id, host in
                 guard let previous = previousEnabledHostsByID[id] else { return true }
                 return !previous.hasSameProbeConfiguration(as: host)
             }
 
+        guard await isCurrent() else { return nil }
         await hostStore.reconcile(
             hosts: acceptedHosts,
             primaryHostID: state.primaryHostID ?? state.selectedHostID ?? cachedPrimaryHostID
         )
         await refreshHostCache()
+        guard await isCurrent() else { return nil }
 
         let acceptedHostIDs = Set(acceptedHostsByID.keys)
         healthByHost = healthByHost.filter { acceptedHostIDs.contains($0.key) }
@@ -799,11 +818,33 @@ public actor PingRuntime {
         }
 
         if requiresProbeRestart {
-            await restartScheduler(refreshCache: false)
+            guard await restartSchedulerIfCurrent(isCurrent) else { return nil }
         } else {
+            guard await isCurrent() else { return nil }
             publishSnapshot()
         }
         return makeSnapshot()
+    }
+
+    private func restartSchedulerIfCurrent(
+        _ isCurrent: @escaping @Sendable () async -> Bool
+    ) async -> Bool {
+        guard await isCurrent() else { return false }
+        streamTask?.cancel()
+        schedulerNeedsRestartAfterSupersededReconciliation = true
+        let resultStream = await scheduler.start(
+            hosts: cachedHosts.filter(\.isEnabled),
+            allowsLocalNetworkProbes: allowsLocalNetworkProbes
+        )
+        guard await isCurrent() else { return false }
+        streamTask = Task { [self] in
+            for await result in resultStream {
+                await ingest(result)
+            }
+        }
+        schedulerNeedsRestartAfterSupersededReconciliation = false
+        publishSnapshot()
+        return true
     }
 
     public func deleteHost(_ id: UUID) async {

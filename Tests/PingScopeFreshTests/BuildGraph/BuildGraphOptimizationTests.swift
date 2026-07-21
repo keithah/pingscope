@@ -213,7 +213,13 @@ final class BuildGraphOptimizationTests: XCTestCase {
         )
 
         XCTAssertTrue(iosApp.contains("hostStore.resolveAcceptedHostState(state)"))
+        XCTAssertTrue(iosApp.contains("let generation = self.hostMutationGeneration"))
+        XCTAssertTrue(iosApp.contains("isCurrentMutation:"))
+        XCTAssertTrue(iosApp.contains("hostStore.commitAcceptedHostState(resolvedState)"))
         XCTAssertTrue(macApp.contains("hostConfigPersistence.resolveAcceptedHostState(state)"))
+        XCTAssertTrue(macApp.contains("let generation = hostMutationGeneration"))
+        XCTAssertTrue(macApp.contains("reconcileAcceptedHostStateIfCurrent("))
+        XCTAssertTrue(macApp.contains("hostConfigPersistence.commitAcceptedHostState(resolvedState)"))
     }
 
     func testIOSFocusedLaunchHydratesAndMarksPeerRowsCachedWithinBoundedHistory() throws {

@@ -112,7 +112,7 @@ final class LiveDisplayModel: ObservableObject {
 final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
     nonisolated static let historyRetention = PingHistoryRetention.maximumDuration
 
-    let liveDisplay = LiveDisplayModel()
+    let liveDisplay: LiveDisplayModel
     var snapshot: RuntimeSnapshot { liveDisplay.snapshot }
     var displayPresentation: PingScopeDisplayPresentation { liveDisplay.displayPresentation }
     @Published private(set) var configuredHosts = HostConfig.defaultHosts()
@@ -292,6 +292,7 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
     private var isApplyingStartAtLoginChange = false
     private var isApplyingCloudSyncActivationState = false
     private var cloudSyncConfigurationGeneration: UInt64 = 0
+    private let hostMutationGeneration = HostMutationGenerationCounter()
     private var lastHistoryKey: String?
     private let displayPresentationRecomputeScheduler = DisplayPresentationRecomputeScheduler()
     private var presentationVisibleHistorySamples: [PingResult] = []
@@ -303,6 +304,8 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
     private let cloudSyncService: PingScopeCloudSyncService?
     private let cloudSyncActivation: PingScopeCloudSyncActivationController?
     private let cloudSyncDefaults: UserDefaults
+    private let acceptedHostReconciliationGate: @Sendable () async -> Void
+    private let cloudHostUploadObserver: @Sendable ([HostConfig]) -> Void
     private var lastCloudSyncHostIDs: Set<UUID> = []
     private var lastCloudSyncHostsByID: [UUID: HostConfig] = [:]
     var historySurfaceStore: (any PingHistoryStore)?
@@ -317,12 +320,25 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
         self.init(cloudSyncDefaultsSuiteName: nil)
     }
 
-    init(cloudSyncDefaultsSuiteName: String?, runtimeOverride: PingRuntime? = nil) {
+    init(
+        cloudSyncDefaultsSuiteName: String?,
+        runtimeOverride: PingRuntime? = nil,
+        acceptedHostReconciliationGate: @escaping @Sendable () async -> Void = {},
+        cloudHostUploadObserver: @escaping @Sendable ([HostConfig]) -> Void = { _ in }
+    ) {
         let cloudSyncDefaults = cloudSyncDefaultsSuiteName.flatMap(UserDefaults.init(suiteName:)) ?? .standard
         let hostConfigPersistence = HostConfigPersistence(defaults: cloudSyncDefaults)
         let loadedHosts = hostConfigPersistence.loadInitialConfiguration { message in
             DebugLog.write(message)
         }
+        self.liveDisplay = LiveDisplayModel(
+            snapshot: RuntimeSnapshot(
+                hosts: loadedHosts.hosts,
+                primaryHostID: loadedHosts.primaryHostID ?? loadedHosts.hosts.first?.id,
+                healthByHost: [:],
+                samplesByHost: [:]
+            )
+        )
         let hostStore = HostStore(defaultHosts: loadedHosts.hosts, primaryHostID: loadedHosts.primaryHostID)
         let probeFactory = DefaultProbeFactory()
         let networkCaptureStore = NetworkCaptureSnapshotStore()
@@ -376,6 +392,8 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
             )
         }
         self.cloudSyncDefaults = cloudSyncDefaults
+        self.acceptedHostReconciliationGate = acceptedHostReconciliationGate
+        self.cloudHostUploadObserver = cloudHostUploadObserver
         self.hostConfigPersistence = hostConfigPersistence
         self.hostTester = HostTester(probeFactory: probeFactory)
         self.gatewayEndpointResolver = DefaultGatewayEndpointResolver(probeFactory: probeFactory)
@@ -686,9 +704,10 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
         host.displayName = host.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
         host.address = host.address.trimmingCharacters(in: .whitespacesAndNewlines)
         let savedHost = host
+        beginUserHostMutation()
         applyHostOptimistically(savedHost)
         clearDraftHost()
-        performUserHostMutation { runtime in
+        Task { [runtime] in
             await runtime.upsertHost(savedHost)
         }
     }
@@ -1108,6 +1127,7 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
         let deletedIDs = lastCloudSyncHostIDs.subtracting(currentIDs)
         lastCloudSyncHostIDs = currentIDs
         lastCloudSyncHostsByID = hostsByID
+        cloudHostUploadObserver(persistedHosts)
         Task {
             await cloudSyncService.uploadHosts(persistedHosts)
             for id in deletedIDs { await cloudSyncService.deleteHost(id: id) }
@@ -1144,18 +1164,45 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
     }
 
     func reconcileAcceptedCloudHostState(_ state: SharedHostStoreState) async {
-        let resolvedState = hostConfigPersistence.resolveAcceptedHostState(state)
-        let acceptedHosts = HostConfig.sanitizedHosts(resolvedState.hosts)
-        lastCloudSyncHostIDs = Set(acceptedHosts.map(\.id))
-        lastCloudSyncHostsByID = Dictionary(uniqueKeysWithValues: acceptedHosts.map { ($0.id, $0) })
-        let acceptedSnapshot = await runtime.reconcileAcceptedHostState(
-            SharedHostStoreState(
-                hosts: acceptedHosts,
-                primaryHostID: resolvedState.primaryHostID,
-                selectedHostID: resolvedState.selectedHostID
-            )
-        )
-        processRuntimeSnapshot(acceptedSnapshot)
+        while true {
+            let generation = hostMutationGeneration.current()
+            let resolvedState = hostConfigPersistence.resolveAcceptedHostState(state)
+            await acceptedHostReconciliationGate()
+            guard generation == hostMutationGeneration.current() else { continue }
+
+            let acceptedHosts = HostConfig.sanitizedHosts(resolvedState.hosts)
+            guard let acceptedSnapshot = await runtime.reconcileAcceptedHostStateIfCurrent(
+                SharedHostStoreState(
+                    hosts: acceptedHosts,
+                    primaryHostID: resolvedState.primaryHostID,
+                    selectedHostID: resolvedState.selectedHostID
+                ),
+                isCurrent: { [hostMutationGeneration] in
+                    generation == hostMutationGeneration.current()
+                }
+            ) else {
+                continue
+            }
+            guard generation == hostMutationGeneration.current() else { continue }
+
+            hostConfigPersistence.commitAcceptedHostState(resolvedState)
+            lastCloudSyncHostIDs = Set(acceptedHosts.map(\.id))
+            lastCloudSyncHostsByID = Dictionary(uniqueKeysWithValues: acceptedHosts.map { ($0.id, $0) })
+            processRuntimeSnapshot(acceptedSnapshot)
+            return
+        }
+    }
+
+    private func beginUserHostMutation() {
+        hostMutationGeneration.advance()
+        hostConfigPersistence.allowUserManagedPersistence()
+    }
+
+    private func performUserHostMutation(_ mutation: @escaping @Sendable (PingRuntime) async -> Void) {
+        beginUserHostMutation()
+        Task { [runtime] in
+            await mutation(runtime)
+        }
     }
 
     private static func cloudSyncStatusText(for status: PingScopeCloudSyncStatus) -> String {
@@ -1166,13 +1213,6 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
         case .syncing: "Syncing…"
         case .accountUnavailable: "Private iCloud account unavailable"
         case let .failed(message): "Sync error: \(message)"
-        }
-    }
-
-    private func performUserHostMutation(_ mutation: @escaping @Sendable (PingRuntime) async -> Void) {
-        hostConfigPersistence.allowUserManagedPersistence()
-        Task { [runtime] in
-            await mutation(runtime)
         }
     }
 
@@ -1295,4 +1335,21 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
         }
     }
 
+}
+
+private nonisolated final class HostMutationGenerationCounter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value: UInt64 = 0
+
+    func current() -> UInt64 {
+        lock.lock()
+        defer { lock.unlock() }
+        return value
+    }
+
+    func advance() {
+        lock.lock()
+        value &+= 1
+        lock.unlock()
+    }
 }

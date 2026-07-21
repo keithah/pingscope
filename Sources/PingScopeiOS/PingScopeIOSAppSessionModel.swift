@@ -25,6 +25,7 @@ public struct PingScopeIOSGatewayHostUpdate: Equatable, Sendable {
 
 public enum PingScopeIOSAcceptedHostStateDisposition: Equatable, Sendable {
     case unavailable
+    case superseded
     case focusedPreserved(LiveMonitorSessionSnapshot)
     case focusedRequiresReplacement(HostConfig)
     case allHosts([LiveMonitorSessionSnapshot])
@@ -178,8 +179,18 @@ public final class PingScopeIOSAppSessionModel {
         currentHosts: [HostConfig],
         currentFocusedHostID: UUID,
         scope: PingScopeIOSHostScope,
-        focusedController: LiveMonitorSessionController
+        focusedController: LiveMonitorSessionController,
+        beforeAcceptedCommit: @MainActor () async -> Void = {},
+        isCurrentMutation: @MainActor () -> Bool = { true }
     ) async -> PingScopeIOSAcceptedHostStateReconciliation {
+        func superseded() -> PingScopeIOSAcceptedHostStateReconciliation {
+            PingScopeIOSAcceptedHostStateReconciliation(
+                hosts: currentHosts,
+                selectedHostID: currentFocusedHostID,
+                disposition: .superseded
+            )
+        }
+
         let acceptedHosts = HostConfig.sanitizedHosts(state.hosts)
         guard !acceptedHosts.isEmpty else {
             return PingScopeIOSAcceptedHostStateReconciliation(
@@ -197,9 +208,12 @@ public final class PingScopeIOSAppSessionModel {
             }
             ?? acceptedHosts.first(where: \.isEnabled)
             ?? acceptedHosts[0]
+        await beforeAcceptedCommit()
+        guard isCurrentMutation() else { return superseded() }
         switch scope {
         case .focused:
             let currentSnapshot = await focusedController.snapshot()
+            guard isCurrentMutation() else { return superseded() }
             guard currentSnapshot.host.id == selectedHost.id,
                   currentSnapshot.host.isEnabled == selectedHost.isEnabled,
                   currentSnapshot.host.hasSameProbeConfiguration(as: selectedHost) else {
@@ -209,22 +223,35 @@ public final class PingScopeIOSAppSessionModel {
                     disposition: .focusedRequiresReplacement(selectedHost)
                 )
             }
-            _ = await reconcileFocusedHostEdit(
+            let preserved = await reconcileFocusedHostEdit(
                 currentHost: currentSnapshot.host,
                 updatedHost: selectedHost,
                 controller: focusedController
             )
+            guard isCurrentMutation() else { return superseded() }
+            guard preserved else {
+                return PingScopeIOSAcceptedHostStateReconciliation(
+                    hosts: acceptedHosts,
+                    selectedHostID: selectedHost.id,
+                    disposition: .focusedRequiresReplacement(selectedHost)
+                )
+            }
+            let acceptedSnapshot = await focusedController.snapshot()
+            guard isCurrentMutation() else { return superseded() }
             return PingScopeIOSAcceptedHostStateReconciliation(
                 hosts: acceptedHosts,
                 selectedHostID: selectedHost.id,
-                disposition: .focusedPreserved(await focusedController.snapshot())
+                disposition: .focusedPreserved(acceptedSnapshot)
             )
         case .allHosts:
             await coordinator.reconcile(hosts: acceptedHosts)
+            guard isCurrentMutation() else { return superseded() }
+            let acceptedSnapshots = await coordinator.orderedSnapshots()
+            guard isCurrentMutation() else { return superseded() }
             return PingScopeIOSAcceptedHostStateReconciliation(
                 hosts: acceptedHosts,
                 selectedHostID: selectedHost.id,
-                disposition: .allHosts(await coordinator.orderedSnapshots())
+                disposition: .allHosts(acceptedSnapshots)
             )
         }
     }

@@ -370,6 +370,7 @@ private final class PingScopeIOSAppModel: ObservableObject {
     private let onboardingStore = PingScopeIOSOnboardingStore()
     private let intentCommandStore = PingScopeIOSIntentCommandStore()
     private var cloudSyncConfigurationGeneration: UInt = 0
+    private var hostMutationGeneration: UInt = 0
 
     init() {
         self.hostStore = PingScopeIOSHostStore()
@@ -785,7 +786,7 @@ private final class PingScopeIOSAppModel: ObservableObject {
         } else {
             hosts.append(normalizedHost)
         }
-        let persisted = hostStore.save(
+        let persisted = persistLocalHostState(
             hosts: hosts,
             selectedHostID: hostScope == .focused ? normalizedHost.id : snapshot.host.id,
             hostScope: hostScope
@@ -840,7 +841,7 @@ private final class PingScopeIOSAppModel: ObservableObject {
         }
         let replacement = hosts.first ?? HostConfig.defaultInternet
         guard hostScope == .allHosts else {
-            hostStore.save(hosts: hosts, selectedHostID: replacement.id, hostScope: .focused)
+            persistLocalHostState(hosts: hosts, selectedHostID: replacement.id, hostScope: .focused)
             selectHost(replacement.id)
             return
         }
@@ -901,43 +902,70 @@ private final class PingScopeIOSAppModel: ObservableObject {
         await lifecycleHarness.enqueue { @MainActor [weak self] in
             guard let self else { return }
             let context = LifecycleContext()
-            let resolvedState = self.hostStore.resolveAcceptedHostState(state)
-            let reconciliation = await self.sessionModel.reconcileAcceptedHostState(
-                resolvedState,
-                currentHosts: self.hosts,
-                currentFocusedHostID: self.snapshot.host.id,
-                scope: self.hostScope,
-                focusedController: self.controller
-            )
-            guard self.isCurrentLifecycle(context) else { return }
-            self.hosts = reconciliation.hosts
-            switch reconciliation.disposition {
-            case .unavailable:
-                return
-            case let .focusedPreserved(acceptedSnapshot):
-                self.snapshot = acceptedSnapshot
-                self.monitorInsights = PingScopeIOSMonitorInsightsPresentation(
-                    snapshots: [acceptedSnapshot],
-                    activeNetworkInterface: self.historyLocationService.snapshotStore.snapshot().networkInterface
+            while true {
+                let generation = self.hostMutationGeneration
+                let resolvedState = self.hostStore.resolveAcceptedHostState(state)
+                let reconciliation = await self.sessionModel.reconcileAcceptedHostState(
+                    resolvedState,
+                    currentHosts: self.hosts,
+                    currentFocusedHostID: self.snapshot.host.id,
+                    scope: self.hostScope,
+                    focusedController: self.controller,
+                    isCurrentMutation: { [weak self] in
+                        self?.hostMutationGeneration == generation
+                    }
                 )
-                await self.configureNotificationScope()
                 guard self.isCurrentLifecycle(context) else { return }
-                await self.refreshHistory(force: true)
-                guard self.isCurrentLifecycle(context) else { return }
-                await self.ensureLiveActivityForPresentedSession()
-            case let .focusedRequiresReplacement(host):
-                await self.switchToHostAsync(
-                    host,
-                    restartDuration: self.activeRestartDuration,
-                    saveSelection: false,
-                    context: context
-                )
-            case .allHosts:
-                await self.configureNotificationScope()
-                guard self.isCurrentLifecycle(context) else { return }
-                await self.refreshSnapshot()
-                guard self.isCurrentLifecycle(context) else { return }
-                await self.ensureLiveActivityForPresentedSession()
+                guard generation == self.hostMutationGeneration else { continue }
+                switch reconciliation.disposition {
+                case .superseded:
+                    continue
+                case .unavailable:
+                    return
+                case .focusedPreserved, .focusedRequiresReplacement, .allHosts:
+                    break
+                }
+
+                self.hostStore.commitAcceptedHostState(resolvedState)
+                self.hosts = reconciliation.hosts
+                switch reconciliation.disposition {
+                case .unavailable, .superseded:
+                    continue
+                case let .focusedPreserved(acceptedSnapshot):
+                    self.snapshot = acceptedSnapshot
+                    self.monitorInsights = PingScopeIOSMonitorInsightsPresentation(
+                        snapshots: [acceptedSnapshot],
+                        activeNetworkInterface: self.historyLocationService.snapshotStore.snapshot().networkInterface
+                    )
+                    await self.configureNotificationScope()
+                    guard self.isCurrentLifecycle(context) else { return }
+                    guard generation == self.hostMutationGeneration else { continue }
+                    await self.refreshHistory(force: true)
+                    guard self.isCurrentLifecycle(context) else { return }
+                    guard generation == self.hostMutationGeneration else { continue }
+                    await self.ensureLiveActivityForPresentedSession()
+                    guard generation == self.hostMutationGeneration else { continue }
+                    return
+                case let .focusedRequiresReplacement(host):
+                    await self.switchToHostAsync(
+                        host,
+                        restartDuration: self.activeRestartDuration,
+                        saveSelection: false,
+                        context: context
+                    )
+                    guard generation == self.hostMutationGeneration else { continue }
+                    return
+                case .allHosts:
+                    await self.configureNotificationScope()
+                    guard self.isCurrentLifecycle(context) else { return }
+                    guard generation == self.hostMutationGeneration else { continue }
+                    await self.refreshSnapshot()
+                    guard self.isCurrentLifecycle(context) else { return }
+                    guard generation == self.hostMutationGeneration else { continue }
+                    await self.ensureLiveActivityForPresentedSession()
+                    guard generation == self.hostMutationGeneration else { continue }
+                    return
+                }
             }
         }.value
     }
@@ -1407,7 +1435,7 @@ private final class PingScopeIOSAppModel: ObservableObject {
                     return false
                 }
             } else {
-                hostStore.save(hosts: hosts, selectedHostID: createdHost.id, hostScope: .focused)
+                persistLocalHostState(hosts: hosts, selectedHostID: createdHost.id, hostScope: .focused)
                 await switchToHostAsync(
                     createdHost,
                     restartDuration: activeRestartDuration,
@@ -1485,7 +1513,7 @@ private final class PingScopeIOSAppModel: ObservableObject {
                 )
                 self.hostScope = .focused
                 if saveSelection {
-                    self.hostStore.save(hosts: self.hosts, selectedHostID: host.id, hostScope: .focused)
+                    self.persistLocalHostState(hosts: self.hosts, selectedHostID: host.id, hostScope: .focused)
                 }
                 self.controller = LiveMonitorSessionController(
                     host: host,
@@ -1570,9 +1598,23 @@ private final class PingScopeIOSAppModel: ObservableObject {
     }
 
     private func persistHostSelection(selectedHostID: UUID? = nil) {
-        hostStore.save(
+        persistLocalHostState(
             hosts: hosts,
             selectedHostID: selectedHostID ?? snapshot.host.id,
+            hostScope: hostScope
+        )
+    }
+
+    @discardableResult
+    private func persistLocalHostState(
+        hosts: [HostConfig],
+        selectedHostID: UUID,
+        hostScope: PingScopeIOSHostScope
+    ) -> PingScopeIOSHostState {
+        hostMutationGeneration &+= 1
+        return hostStore.save(
+            hosts: hosts,
+            selectedHostID: selectedHostID,
             hostScope: hostScope
         )
     }

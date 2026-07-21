@@ -309,6 +309,60 @@ final class HostConfigPersistenceTests: XCTestCase {
         await runtime.stop()
     }
 
+    @MainActor
+    func testMacLocalSaveAfterAcceptedResolutionCannotRollbackModelRuntimeStoreOrUploads() async throws {
+        let suite = "MacAcceptedCommitRace.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let host = HostConfig(id: UUID(), displayName: "Edge", address: "edge.example")
+        let peer = HostConfig(id: UUID(), displayName: "Peer", address: "peer.example")
+        let sharedStore = UserDefaultsSharedHostStore(defaults: defaults, legacyPlatform: .macOS)
+        try sharedStore.save(SharedHostStoreState(hosts: [host, peer], primaryHostID: host.id))
+        let runtime = PingRuntime(
+            hostStore: HostStore(defaultHosts: [host, peer], primaryHostID: host.id),
+            scheduler: MeasurementScheduler(probeFactory: DefaultProbeFactory())
+        )
+        let retainedSample = PingResult.success(hostID: host.id, latency: .milliseconds(19))
+        await runtime.ingest(retainedSample)
+        let commitGate = MacAcceptedHostDeliveryGate()
+        let uploadRecorder = MacHostUploadRecorder()
+        let model = PingScopeModel(
+            cloudSyncDefaultsSuiteName: suite,
+            runtimeOverride: runtime,
+            acceptedHostReconciliationGate: { await commitGate.block() },
+            cloudHostUploadObserver: uploadRecorder.record
+        )
+        var remoteHost = host
+        remoteHost.displayColor = HostDisplayColor(red: 0.18, green: 0.46, blue: 0.79)
+        let capturedRemoteState = SharedHostStoreState(
+            hosts: [remoteHost, peer],
+            primaryHostID: host.id
+        )
+        try sharedStore.save(capturedRemoteState)
+
+        let delivery = Task { @MainActor in
+            await model.reconcileAcceptedCloudHostState(capturedRemoteState)
+        }
+        await commitGate.waitUntilBlocked()
+
+        model.loadDraft(from: peer)
+        model.draftNotificationPolicy = .muted
+        model.addDraftHost()
+        try await waitUntilRuntimeHost(runtime, hostID: peer.id) { $0.notifications == .muted }
+        await commitGate.release()
+        await delivery.value
+
+        var locallyEditedPeer = peer
+        locallyEditedPeer.notifications = .muted
+        let expectedHosts = [remoteHost, locallyEditedPeer]
+        XCTAssertEqual(model.snapshot.hosts, expectedHosts)
+        let runtimeSnapshot = try await currentSnapshot(runtime)
+        XCTAssertEqual(runtimeSnapshot.hosts, expectedHosts)
+        XCTAssertEqual(runtimeSnapshot.samplesByHost[host.id]?.samples, [retainedSample])
+        XCTAssertEqual(sharedStore.load().state?.hosts, expectedHosts)
+        XCTAssertEqual(uploadRecorder.values(), [expectedHosts])
+    }
+
     func testMacSharedHostStoreSameHostLaterLocalEditWinsWholeHostConflict() throws {
         let suite = "MacAcceptedDeliverySameHost.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
@@ -387,6 +441,19 @@ private actor MacAcceptedHostDeliveryGate {
         isReleased = true
         releaseWaiters.forEach { $0.resume() }
         releaseWaiters.removeAll()
+    }
+}
+
+private final class MacHostUploadRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var uploads: [[HostConfig]] = []
+
+    func record(_ hosts: [HostConfig]) {
+        lock.withLock { uploads.append(hosts) }
+    }
+
+    func values() -> [[HostConfig]] {
+        lock.withLock { uploads }
     }
 }
 

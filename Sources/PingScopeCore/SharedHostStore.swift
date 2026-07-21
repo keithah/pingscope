@@ -145,8 +145,14 @@ public protocol SharedHostStoring: Sendable {
 /// then mirrors the legacy representation so a downgraded app retains the latest
 /// successfully saved host configuration.
 public final class UserDefaultsSharedHostStore: SharedHostStoring, @unchecked Sendable {
+    /// Cloud reception and app persistence construct separate store instances
+    /// over the same defaults domain. One process-wide coordinator makes the
+    /// compare/merge/save step indivisible across every such instance.
+    private static let atomicCoordinator = SharedHostStoreAtomicCoordinator()
+
     private let defaults: UserDefaults
     private let legacyPlatform: SharedHostStoreLegacyPlatform
+    private var lastObservedState: SharedHostStoreState?
 
     public init(defaults: UserDefaults = .standard, legacyPlatform: SharedHostStoreLegacyPlatform) {
         self.defaults = defaults
@@ -154,6 +160,41 @@ public final class UserDefaultsSharedHostStore: SharedHostStoring, @unchecked Se
     }
 
     public func load() -> SharedHostStoreLoadResult {
+        Self.atomicCoordinator.withLock {
+            let result = loadUnlocked()
+            lastObservedState = result.state
+            return result
+        }
+    }
+
+    public func save(_ desiredState: SharedHostStoreState) throws {
+        try Self.atomicCoordinator.withLock {
+            let latest = loadUnlocked()
+            let resolvedState = if let baseline = lastObservedState, let latestState = latest.state {
+                SharedHostStoreReconciliation.mergingLocalChanges(
+                    from: baseline,
+                    desired: desiredState,
+                    into: latestState
+                )
+            } else {
+                // Without a prior observation there is no trustworthy intent
+                // delta to merge. Preserve save()'s whole-state semantics.
+                desiredState
+            }
+            do {
+                try saveUnlocked(resolvedState)
+            } catch {
+                // The shared envelope is written before its legacy mirror. If
+                // the mirror cannot encode, retain the envelope as our baseline
+                // so a retry does not treat it as an unrelated concurrent edit.
+                lastObservedState = resolvedState
+                throw error
+            }
+            lastObservedState = resolvedState
+        }
+    }
+
+    private func loadUnlocked() -> SharedHostStoreLoadResult {
         var encounteredUnreadableData = false
         if let data = defaults.data(forKey: SharedHostStoreKeys.current) {
             do {
@@ -185,7 +226,7 @@ public final class UserDefaultsSharedHostStore: SharedHostStoring, @unchecked Se
         )
     }
 
-    public func save(_ state: SharedHostStoreState) throws {
+    private func saveUnlocked(_ state: SharedHostStoreState) throws {
         let sharedData = try SharedHostStoreCodec.encode(state)
         defaults.set(sharedData, forKey: SharedHostStoreKeys.current)
 
@@ -222,6 +263,16 @@ public final class UserDefaultsSharedHostStore: SharedHostStoring, @unchecked Se
             nan: "NaN"
         )
         return try decoder.decode(LossyHostConfigArray.self, from: data).values
+    }
+}
+
+private final class SharedHostStoreAtomicCoordinator: @unchecked Sendable {
+    private let lock = NSLock()
+
+    func withLock<T>(_ operation: () throws -> T) rethrows -> T {
+        lock.lock()
+        defer { lock.unlock() }
+        return try operation()
     }
 }
 

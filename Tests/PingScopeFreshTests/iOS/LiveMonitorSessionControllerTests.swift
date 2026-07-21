@@ -2336,6 +2336,96 @@ final class LiveMonitorSessionControllerTests: XCTestCase {
         await controller.stop(reason: .completed)
     }
 
+    @MainActor
+    func testIOSLocalSaveAfterAcceptedResolutionCannotRollbackModelControllerStoreOrUploads() async throws {
+        let suite = "IOSAcceptedCommitRace.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let host = HostConfig(id: UUID(), displayName: "Edge", address: "edge.example")
+        let peer = HostConfig(id: UUID(), displayName: "Peer", address: "peer.example")
+        let store = PingScopeIOSHostStore(defaults: defaults, defaultHosts: [host, peer])
+        store.save(hosts: [host, peer], selectedHostID: peer.id, hostScope: .focused)
+        _ = store.load()
+
+        let probe = RecordingProbe(results: [.success(hostID: peer.id, latency: .milliseconds(17))])
+        let clock = ManualClock()
+        let controller = LiveMonitorSessionController(
+            host: peer,
+            probeFactory: StaticProbeFactory(probe: probe),
+            policy: MonitorSessionPolicy(probeInterval: .seconds(60)),
+            clock: clock,
+            now: { clock.currentDate }
+        )
+        let sessionModel = PingScopeIOSAppSessionModel(coordinator: PingScopeIOSMultiHostSessionCoordinator())
+        await controller.start(duration: .continuous, at: clock.baseDate)
+        try await clock.waitForSleepers(atLeast: 1)
+        let before = await controller.snapshot()
+
+        var remoteHost = host
+        remoteHost.displayColor = HostDisplayColor(red: 0.18, green: 0.46, blue: 0.79)
+        let capturedRemoteState = SharedHostStoreState(
+            hosts: [remoteHost, peer],
+            selectedHostID: peer.id
+        )
+        let sharedStore = UserDefaultsSharedHostStore(defaults: defaults, legacyPlatform: .iOS)
+        try sharedStore.save(capturedRemoteState)
+        let commitGate = IOSLifecycleGate()
+        var appHosts = [host, peer]
+        var uploads: [[HostConfig]] = []
+        var mutationGeneration: UInt = 0
+
+        let delivery = Task { @MainActor in
+            while true {
+                let generation = mutationGeneration
+                let resolved = store.resolveAcceptedHostState(capturedRemoteState)
+                let reconciliation = await sessionModel.reconcileAcceptedHostState(
+                    resolved,
+                    currentHosts: appHosts,
+                    currentFocusedHostID: peer.id,
+                    scope: .focused,
+                    focusedController: controller,
+                    beforeAcceptedCommit: { await commitGate.block() },
+                    isCurrentMutation: { generation == mutationGeneration }
+                )
+                guard generation == mutationGeneration else { continue }
+                if case .superseded = reconciliation.disposition { continue }
+                store.commitAcceptedHostState(resolved)
+                appHosts = reconciliation.hosts
+                return
+            }
+        }
+        await commitGate.waitUntilBlocked()
+
+        var locallyEditedPeer = peer
+        locallyEditedPeer.notifications = .muted
+        mutationGeneration &+= 1
+        let persisted = store.save(
+            hosts: [host, locallyEditedPeer],
+            selectedHostID: peer.id,
+            hostScope: .focused
+        )
+        uploads.append(persisted.hosts)
+        _ = await sessionModel.reconcileFocusedHostEdit(
+            currentHost: peer,
+            updatedHost: locallyEditedPeer,
+            controller: controller
+        )
+        await commitGate.release()
+        await delivery.value
+
+        let expectedHosts = [remoteHost, locallyEditedPeer]
+        XCTAssertEqual(appHosts, expectedHosts)
+        let finalSnapshot = await controller.snapshot()
+        XCTAssertEqual(finalSnapshot.host, locallyEditedPeer)
+        XCTAssertEqual(finalSnapshot.session, before.session)
+        XCTAssertEqual(finalSnapshot.series.samples, before.series.samples)
+        XCTAssertEqual(store.load().hosts, expectedHosts)
+        XCTAssertEqual(uploads, [expectedHosts])
+        let measurementCount = await probe.measurementCount
+        XCTAssertEqual(measurementCount, 1)
+        await controller.stop(reason: .completed)
+    }
+
     func testIOSSharedHostStoreSameHostLaterLocalEditWinsWholeHostConflict() throws {
         let suite = "IOSAcceptedDeliverySameHost.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))

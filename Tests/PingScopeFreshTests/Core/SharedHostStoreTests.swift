@@ -95,6 +95,60 @@ final class SharedHostStoreTests: XCTestCase {
         }
     }
 
+    func testOverlappingReceiverThenLocalSavePreservesBothWritersAndReceiverWinsSameHost() async throws {
+        let scenario = SharedHostStoreOverlapScenario()
+        let suiteName = "SharedHostStoreOverlapTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let receiverStore = UserDefaultsSharedHostStore(defaults: defaults, legacyPlatform: .macOS)
+        let localStore = UserDefaultsSharedHostStore(defaults: defaults, legacyPlatform: .macOS)
+        try receiverStore.save(scenario.initialState)
+        let receiverGate = SharedHostStoreOverlapGate()
+
+        let receiver = Task.detached {
+            _ = receiverStore.load()
+            await receiverGate.blockAfterLoad()
+            try receiverStore.save(scenario.receiverState)
+        }
+        await receiverGate.waitUntilBlocked()
+        _ = localStore.load()
+        try localStore.save(scenario.localState)
+        await receiverGate.release()
+        try await receiver.value
+
+        let finalState = try XCTUnwrap(receiverStore.load().state)
+        XCTAssertEqual(finalState.hosts, scenario.receiverWinsHosts)
+        XCTAssertEqual(finalState.primaryHostID, scenario.receiverOnly.id)
+        XCTAssertEqual(finalState.selectedHostID, scenario.localOnly.id)
+    }
+
+    func testOverlappingLocalThenReceiverSavePreservesBothWritersAndLocalWinsSameHost() async throws {
+        let scenario = SharedHostStoreOverlapScenario()
+        let suiteName = "SharedHostStoreOverlapTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let receiverStore = UserDefaultsSharedHostStore(defaults: defaults, legacyPlatform: .iOS)
+        let localStore = UserDefaultsSharedHostStore(defaults: defaults, legacyPlatform: .iOS)
+        try receiverStore.save(scenario.initialState)
+        let localGate = SharedHostStoreOverlapGate()
+
+        let local = Task.detached {
+            _ = localStore.load()
+            await localGate.blockAfterLoad()
+            try localStore.save(scenario.localState)
+        }
+        await localGate.waitUntilBlocked()
+        _ = receiverStore.load()
+        try receiverStore.save(scenario.receiverState)
+        await localGate.release()
+        try await local.value
+
+        let finalState = try XCTUnwrap(localStore.load().state)
+        XCTAssertEqual(finalState.hosts, scenario.localWinsHosts)
+        XCTAssertEqual(finalState.primaryHostID, scenario.receiverOnly.id)
+        XCTAssertEqual(finalState.selectedHostID, scenario.localOnly.id)
+    }
+
     func testStoreFallsBackToLegacyForMalformedOrFutureSharedData() throws {
         try withDefaults { defaults in
             let hosts = [HostConfig(id: UUID(), displayName: "Legacy", address: "9.9.9.9")]
@@ -238,5 +292,91 @@ final class SharedHostStoreTests: XCTestCase {
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
         defer { defaults.removePersistentDomain(forName: suiteName) }
         try body(defaults)
+    }
+}
+
+private struct SharedHostStoreOverlapScenario: Sendable {
+    let conflict = HostConfig(id: UUID(), displayName: "Conflict", address: "conflict.example")
+    let receiverOnly = HostConfig(id: UUID(), displayName: "Receiver", address: "receiver.example")
+    let localOnly = HostConfig(id: UUID(), displayName: "Local", address: "local.example")
+
+    var receiverConflict: HostConfig {
+        var host = conflict
+        host.displayName = "Receiver Wins"
+        host.displayColor = HostDisplayColor(red: 0.18, green: 0.46, blue: 0.79)
+        return host
+    }
+
+    var localConflict: HostConfig {
+        var host = conflict
+        host.displayName = "Local Wins"
+        host.notifications = .muted
+        return host
+    }
+
+    var receiverEdited: HostConfig {
+        var host = receiverOnly
+        host.displayColor = HostDisplayColor(red: 0.72, green: 0.21, blue: 0.36)
+        return host
+    }
+
+    var localEdited: HostConfig {
+        var host = localOnly
+        host.notifications = .muted
+        return host
+    }
+
+    var initialState: SharedHostStoreState {
+        SharedHostStoreState(hosts: [conflict, receiverOnly, localOnly])
+    }
+
+    var receiverState: SharedHostStoreState {
+        SharedHostStoreState(
+            hosts: [receiverConflict, receiverEdited, localOnly],
+            primaryHostID: receiverOnly.id
+        )
+    }
+
+    var localState: SharedHostStoreState {
+        SharedHostStoreState(
+            hosts: [localConflict, receiverOnly, localEdited],
+            selectedHostID: localOnly.id
+        )
+    }
+
+    var receiverWinsHosts: [HostConfig] {
+        [receiverConflict, receiverEdited, localEdited]
+    }
+
+    var localWinsHosts: [HostConfig] {
+        [localConflict, receiverEdited, localEdited]
+    }
+}
+
+private actor SharedHostStoreOverlapGate {
+    private var isBlocked = false
+    private var isReleased = false
+    private var blockedWaiters: [CheckedContinuation<Void, Never>] = []
+    private var releaseWaiters: [CheckedContinuation<Void, Never>] = []
+
+    func blockAfterLoad() async {
+        isBlocked = true
+        blockedWaiters.forEach { $0.resume() }
+        blockedWaiters.removeAll()
+        while !isReleased {
+            await withCheckedContinuation { releaseWaiters.append($0) }
+        }
+    }
+
+    func waitUntilBlocked() async {
+        while !isBlocked {
+            await withCheckedContinuation { blockedWaiters.append($0) }
+        }
+    }
+
+    func release() {
+        isReleased = true
+        releaseWaiters.forEach { $0.resume() }
+        releaseWaiters.removeAll()
     }
 }

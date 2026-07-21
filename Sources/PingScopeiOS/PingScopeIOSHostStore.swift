@@ -114,10 +114,15 @@ public final class PingScopeIOSHostStore: @unchecked Sendable {
     /// app model. A concurrent local save may have advanced the shared state
     /// after the callback captured its argument.
     public func resolveAcceptedHostState(_ captured: SharedHostStoreState) -> SharedHostStoreState {
-        let resolved = sharedStore.load().state.map(Self.sanitizedSharedState)
+        sharedStore.load().state.map(Self.sanitizedSharedState)
             ?? Self.sanitizedSharedState(captured)
-        lastObservedSharedState = resolved
-        return resolved
+    }
+
+    /// Advances the local merge baseline only after the resolved state has
+    /// survived app/session reconciliation. Merely resolving must not make a
+    /// concurrent local save treat uncommitted remote fields as local edits.
+    public func commitAcceptedHostState(_ state: SharedHostStoreState) {
+        lastObservedSharedState = Self.sanitizedSharedState(state)
     }
 
     private func loadHostScope() -> PingScopeIOSHostScope {
