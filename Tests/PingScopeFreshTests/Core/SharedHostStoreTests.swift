@@ -165,6 +165,23 @@ final class SharedHostStoreTests: XCTestCase {
         XCTAssertEqual(decoded.hosts.map(\.id), [second.id, first.id])
     }
 
+    func testSharedHostStoreCodecRetainsHostWithMalformedDisplayColorAsAutomatic() throws {
+        let host = HostConfig(displayName: "DNS", address: "1.1.1.1")
+        var envelope = try XCTUnwrap(
+            JSONSerialization.jsonObject(
+                with: SharedHostStoreCodec.encode(SharedHostStoreState(hosts: [host]))
+            ) as? [String: Any]
+        )
+        var hosts = try XCTUnwrap(envelope["hosts"] as? [[String: Any]])
+        hosts[0]["displayColor"] = ["red": "not-a-number", "green": 0.4, "blue": 0.8]
+        envelope["hosts"] = hosts
+
+        let decoded = try SharedHostStoreCodec.decode(JSONSerialization.data(withJSONObject: envelope))
+
+        XCTAssertEqual(decoded.hosts, [host])
+        XCTAssertNil(decoded.hosts.first?.displayColor)
+    }
+
     func testSharedHostStoreCodecSkipsOnlyMalformedHostRecords() throws {
         let first = HostConfig(id: UUID(), displayName: "First", address: "1.1.1.1")
         let second = HostConfig(id: UUID(), displayName: "Second", address: "8.8.8.8")

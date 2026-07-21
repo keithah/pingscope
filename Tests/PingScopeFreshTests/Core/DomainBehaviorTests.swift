@@ -33,6 +33,24 @@ final class DomainBehaviorTests: XCTestCase {
         XCTAssertNil(decoded.displayColor?.validatedComponents)
     }
 
+    func testHostConfigDecodesMalformedDisplayColorAsAutomatic() throws {
+        let host = HostConfig(displayName: "DNS", address: "1.1.1.1")
+        let malformedColors: [[String: Any]] = [
+            ["red": "not-a-number", "green": 0.4, "blue": 0.8],
+            ["red": 0.2, "green": 0.4]
+        ]
+
+        for malformedColor in malformedColors {
+            var object = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(host)) as? [String: Any])
+            object["displayColor"] = malformedColor
+
+            let decoded = try JSONDecoder().decode(HostConfig.self, from: JSONSerialization.data(withJSONObject: object))
+
+            XCTAssertEqual(decoded, host)
+            XCTAssertNil(decoded.displayColor)
+        }
+    }
+
     func testAppendOnlySequenceFingerprintRetainsCountAndBoundaryIDs() throws {
         let hostID = UUID()
         let first = PingResult.success(hostID: hostID, latency: .milliseconds(10))

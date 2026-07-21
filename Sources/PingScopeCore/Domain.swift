@@ -98,6 +98,53 @@ public struct HostConfig: Identifiable, Codable, Equatable, Sendable {
         self.displayColor = displayColor
     }
 
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case displayName
+        case address
+        case tier
+        case method
+        case port
+        case interval
+        case timeout
+        case thresholds
+        case isEnabled
+        case notifications
+        case displayColor
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        displayName = try container.decode(String.self, forKey: .displayName)
+        address = try container.decode(String.self, forKey: .address)
+        tier = try container.decodeIfPresent(NetworkTier.self, forKey: .tier)
+        method = try container.decode(PingMethod.self, forKey: .method)
+        port = try container.decodeIfPresent(UInt16.self, forKey: .port)
+        interval = try container.decode(Duration.self, forKey: .interval)
+        timeout = try container.decode(Duration.self, forKey: .timeout)
+        thresholds = try container.decode(LatencyThresholds.self, forKey: .thresholds)
+        isEnabled = try container.decode(Bool.self, forKey: .isEnabled)
+        notifications = try container.decode(HostNotificationPolicy.self, forKey: .notifications)
+        displayColor = try? container.decodeIfPresent(HostDisplayColor.self, forKey: .displayColor)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(displayName, forKey: .displayName)
+        try container.encode(address, forKey: .address)
+        try container.encodeIfPresent(tier, forKey: .tier)
+        try container.encode(method, forKey: .method)
+        try container.encodeIfPresent(port, forKey: .port)
+        try container.encode(interval, forKey: .interval)
+        try container.encode(timeout, forKey: .timeout)
+        try container.encode(thresholds, forKey: .thresholds)
+        try container.encode(isEnabled, forKey: .isEnabled)
+        try container.encode(notifications, forKey: .notifications)
+        try container.encodeIfPresent(displayColor, forKey: .displayColor)
+    }
+
     public static let defaultInternet = HostConfig(displayName: "Cloudflare DNS", address: "1.1.1.1", method: .icmp, port: nil)
     public static let defaultGoogleDNS = HostConfig(displayName: "Google DNS", address: "8.8.8.8", method: .icmp, port: nil)
     public static let fallbackDefaultGatewayAddress = "192.168.1.1"

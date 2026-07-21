@@ -23,6 +23,20 @@ final class CloudSyncCoordinatorTests: XCTestCase {
         XCTAssertEqual(mapped.config.displayColor, config.displayColor)
     }
 
+    func testMonitoredHostRecordDecodesMalformedDisplayColorAsAutomaticWithoutDroppingHost() throws {
+        let config = HostConfig(id: UUID(), displayName: "DNS", address: "1.1.1.1")
+        let record = try MonitoredHostRecordMapper.record(from: config, modifiedAt: .now)
+        let configData = try XCTUnwrap(record[PingScopeCloudKitModel.MonitoredHostField.configJSON] as? Data)
+        var configObject = try XCTUnwrap(JSONSerialization.jsonObject(with: configData) as? [String: Any])
+        configObject["displayColor"] = ["red": 0.2, "green": 0.4]
+        record[PingScopeCloudKitModel.MonitoredHostField.configJSON] = try JSONSerialization.data(withJSONObject: configObject) as CKRecordValue
+
+        let mapped = try XCTUnwrap(MonitoredHostRecordMapper.monitoredHost(from: record))
+
+        XCTAssertEqual(mapped.config, config)
+        XCTAssertNil(mapped.config.displayColor)
+    }
+
     func testAccountAvailabilityFailureBecomesFailedStatusWithoutStartingEngine() async {
         let boundary = ThrowingAvailabilityCloudSyncBoundary()
         let coordinator = PingScopeCloudSyncCoordinator(boundary: boundary)
