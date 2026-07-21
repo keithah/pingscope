@@ -1448,7 +1448,7 @@ public struct PingScopeIOSRootView: View {
                         set: { onSetDynamicIslandDetailsEnabled($0) }
                     ))
                     .disabled(!lockScreenLiveActivityEnabled)
-                    Text("When off, Dynamic Island shows status only; the Lock Screen Live Activity is unchanged.")
+                    Text("Lock Screen Live Activity controls the Live Activity on both the Lock Screen and Dynamic Island. Dynamic Island Details only reduces the information shown on Dynamic Island; it cannot remove the system surface independently.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }

@@ -133,15 +133,19 @@ final class BuildGraphOptimizationTests: XCTestCase {
             encoding: .utf8
         )
 
-        XCTAssertTrue(appSource.contains("preferences: liveActivityPreferences"))
-        XCTAssertTrue(appSource.contains("await model.endLiveActivity()"))
+        XCTAssertTrue(appSource.contains("liveActivityOwnershipCoordinator.setMasterEnabled(isEnabled)"))
+        XCTAssertTrue(appSource.contains("liveActivityOwnershipCoordinator.pauseOwnedIfAllowed"))
         XCTAssertTrue(appSource.contains("showsDynamicIslandDetails: liveActivityPreferences.dynamicIslandDetailsEnabled"))
         XCTAssertTrue(shellSource.contains("Section(\"Live Activity\")"))
         XCTAssertTrue(shellSource.contains("Toggle(\"Lock Screen Live Activity\""))
         XCTAssertTrue(shellSource.contains("Toggle(\"Dynamic Island Details\""))
         XCTAssertTrue(shellSource.contains(".disabled(!lockScreenLiveActivityEnabled)"))
-        XCTAssertTrue(shellSource.contains("When off, Dynamic Island shows status only; the Lock Screen Live Activity is unchanged."))
-        XCTAssertTrue(extensionSource.contains("PingScopeLiveActivityPresentation.dynamicIslandContentStyle"))
+        XCTAssertTrue(shellSource.contains("controls the Live Activity on both the Lock Screen and Dynamic Island"))
+        XCTAssertTrue(shellSource.contains("cannot remove the system surface independently"))
+        XCTAssertTrue(extensionSource.contains("dynamicIslandRegionDecisions(contentState: context.state).expanded"))
+        XCTAssertTrue(extensionSource.contains("dynamicIslandRegionDecisions(contentState: context.state).compactLeading"))
+        XCTAssertTrue(extensionSource.contains("dynamicIslandRegionDecisions(contentState: context.state).compactTrailing"))
+        XCTAssertTrue(extensionSource.contains("dynamicIslandRegionDecisions(contentState: context.state).minimal"))
         XCTAssertTrue(extensionSource.contains("case .statusOnly:"))
         XCTAssertTrue(extensionSource.contains("identityColor(for: row.identityColor)"))
     }

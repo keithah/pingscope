@@ -351,8 +351,12 @@ private final class PingScopeIOSAppModel: ObservableObject {
     private let lifecycleHarness = PingScopeIOSLifecycleHarness(
         promptBackgroundProtectionClient: UIApplicationPromptBackgroundProtectionClient()
     )
-    private var liveActivity: Activity<PingScopeLiveActivityAttributes>?
-    private var liveActivityLease: PingScopeIOSActivityOwnershipLease?
+    private let liveActivityOwnershipCoordinator: PingScopeIOSLiveActivityOwnershipCoordinator<
+        Activity<PingScopeLiveActivityAttributes>
+    >
+    private var liveActivity: Activity<PingScopeLiveActivityAttributes>? {
+        liveActivityOwnershipCoordinator.ownedActivity
+    }
     private var liveActivityUpdatePolicy = PingScopeIOSLiveActivityUpdatePolicy()
     private var liveActivityPausedForBackgroundRuntime = false
     private var initialSessionCoordinator = PingScopeIOSInitialSessionCoordinator()
@@ -426,7 +430,11 @@ private final class PingScopeIOSAppModel: ObservableObject {
         self.backgroundKeepAliveEnabled = UserDefaults.standard.bool(forKey: Self.backgroundKeepAliveEnabledKey)
         self.displayMode = UserDefaults.standard.pingScopeIOSDisplayMode
         self.connectivityTipsEnabled = UserDefaults.standard.pingScopeIOSConnectivityTipsEnabled
-        self.liveActivityPreferences = PingScopeIOSLiveActivityPreferences(defaults: .standard)
+        let liveActivityPreferences = PingScopeIOSLiveActivityPreferences(defaults: .standard)
+        self.liveActivityPreferences = liveActivityPreferences
+        self.liveActivityOwnershipCoordinator = PingScopeIOSLiveActivityOwnershipCoordinator(
+            masterEnabled: liveActivityPreferences.lockScreenEnabled
+        )
         let loadedHistoryRange = UserDefaults.standard.pingScopeIOSHistoryRange
         self.historyRange = loadedHistoryRange
         self.historyLens = UserDefaults.standard.pingScopeIOSHistoryLens
@@ -907,12 +915,16 @@ private final class PingScopeIOSAppModel: ObservableObject {
         guard liveActivityPreferences.lockScreenEnabled != isEnabled else { return }
         liveActivityPreferences.lockScreenEnabled = isEnabled
         liveActivityPreferences.persist(to: .standard)
+        liveActivityOwnershipCoordinator.setMasterEnabled(isEnabled) { activity in
+            await activity.end(nil, dismissalPolicy: .immediate)
+        }
+        if !isEnabled {
+            liveActivityPausedForBackgroundRuntime = false
+            liveActivityUpdatePolicy.reset()
+            return
+        }
         runLifecycleTask { model, context in
-            if isEnabled {
-                await model.ensureLiveActivityForPresentedSession()
-            } else {
-                await model.endLiveActivity()
-            }
+            await model.ensureLiveActivityForPresentedSession()
             guard model.isCurrentLifecycle(context) else { return }
         }
     }
@@ -2043,33 +2055,36 @@ private final class PingScopeIOSAppModel: ObservableObject {
                 state: state,
                 scheduledEndAt: session.scheduledEndAt
             )
-            guard let requestedActivity = try await PingScopeIOSLiveActivityRuntimeOrchestrator.perform(
-                .requestOrUpdate,
+            let directory = ActivityKitLiveActivityDirectory()
+            guard try await liveActivityOwnershipCoordinator.requestIfAllowed(
                 systemAuthorizationEnabled: ActivityAuthorizationInfo().areActivitiesEnabled,
-                preferences: liveActivityPreferences,
-                hasOwnedActivity: liveActivity != nil,
-                request: {
-                    try await PingScopeIOSLiveActivityStartup.requestReplacingOrphans(
-                        in: ActivityKitLiveActivityDirectory()
-                    ) {
-                        try Activity.request(
-                            attributes: attributes,
-                            content: ActivityContent(
-                                state: initialContent.state,
-                                staleDate: initialContent.staleDate
-                            ),
-                            pushType: nil
-                        )
+                prepare: { [weak self] generation in
+                    guard let self else { return false }
+                    for orphan in directory.currentActivities {
+                        guard self.liveActivityOwnershipCoordinator.isCurrent(generation) else {
+                            return false
+                        }
+                        await directory.end(orphan)
+                        guard self.liveActivityOwnershipCoordinator.isCurrent(generation) else {
+                            return false
+                        }
                     }
+                    return true
                 },
-                update: { [weak self] in
-                    await self?.publishLiveActivityUpdate()
+                request: {
+                    try Activity.request(
+                        attributes: attributes,
+                        content: ActivityContent(
+                            state: initialContent.state,
+                            staleDate: initialContent.staleDate
+                        ),
+                        pushType: nil
+                    )
                 },
-                end: { [weak self] in await self?.endLiveActivity() }
-            ) else { return }
-            let lease = await lifecycleHarness.claimActivity()
-            liveActivity = requestedActivity
-            liveActivityLease = lease
+                end: { activity in
+                    await activity.end(nil, dismissalPolicy: .immediate)
+                }
+            ) != nil else { return }
             liveActivityPausedForBackgroundRuntime = false
             _ = liveActivityUpdatePolicy.shouldPublish(state)
         } catch {
@@ -2078,29 +2093,32 @@ private final class PingScopeIOSAppModel: ObservableObject {
     }
 
     private func updateLiveActivity(staleDateOverride: Date? = nil) async {
-        let _: Void? = await PingScopeIOSLiveActivityRuntimeOrchestrator.perform(
-            .update,
-            systemAuthorizationEnabled: ActivityAuthorizationInfo().areActivitiesEnabled,
-            preferences: liveActivityPreferences,
-            hasOwnedActivity: liveActivity != nil,
-            request: {},
-            update: { [weak self] in
-                await self?.publishLiveActivityUpdate(staleDateOverride: staleDateOverride)
-            },
-            end: { [weak self] in await self?.endLiveActivity() }
+        await releaseLiveActivityIfDefunct()
+        let didRemainCurrent = await liveActivityOwnershipCoordinator.updateOwnedIfAllowed(
+            update: { [weak self] activity in
+                await self?.publishLiveActivityUpdate(
+                    activity: activity,
+                    staleDateOverride: staleDateOverride
+                )
+            }
         )
+        if didRemainCurrent {
+            liveActivityPausedForBackgroundRuntime = false
+        }
     }
 
-    private func publishLiveActivityUpdate(staleDateOverride: Date? = nil) async {
-        await releaseLiveActivityIfDefunct()
-        guard let liveActivity, let session = presentedSession else { return }
+    private func publishLiveActivityUpdate(
+        activity: Activity<PingScopeLiveActivityAttributes>,
+        staleDateOverride: Date? = nil
+    ) async {
+        guard let session = presentedSession else { return }
         let state = liveActivityContentState(session: session)
         if staleDateOverride == nil {
             guard liveActivityUpdatePolicy.shouldPublish(state) else { return }
         } else {
             _ = liveActivityUpdatePolicy.shouldPublish(state)
         }
-        await liveActivity.update(
+        await activity.update(
             ActivityContent(
                 state: state,
                 staleDate: PingScopeIOSLiveActivityStaleness.updateStaleDate(
@@ -2109,22 +2127,27 @@ private final class PingScopeIOSAppModel: ObservableObject {
                 )
             )
         )
-        liveActivityPausedForBackgroundRuntime = false
     }
 
     private func pauseLiveActivityForBackgroundRuntime(at date: Date = Date()) async {
         await releaseLiveActivityIfDefunct()
-        guard let liveActivity, let session = presentedSession else { return }
-        let paused = PingScopeIOSPausedLiveActivityState.make(
-            from: liveActivityContentState(session: session, at: date),
-            at: date
+        let didRemainCurrent = await liveActivityOwnershipCoordinator.pauseOwnedIfAllowed(
+            update: { [weak self] activity in
+                guard let self, let session = self.presentedSession else { return }
+                let paused = PingScopeIOSPausedLiveActivityState.make(
+                    from: self.liveActivityContentState(session: session, at: date),
+                    at: date
+                )
+                self.liveActivityUpdatePolicy.reset()
+                _ = self.liveActivityUpdatePolicy.shouldPublish(paused.contentState, at: date)
+                await activity.update(
+                    ActivityContent(state: paused.contentState, staleDate: paused.staleDate)
+                )
+            }
         )
-        liveActivityUpdatePolicy.reset()
-        _ = liveActivityUpdatePolicy.shouldPublish(paused.contentState, at: date)
-        await liveActivity.update(
-            ActivityContent(state: paused.contentState, staleDate: paused.staleDate)
-        )
-        liveActivityPausedForBackgroundRuntime = true
+        if didRemainCurrent {
+            liveActivityPausedForBackgroundRuntime = true
+        }
     }
 
     /// A user-dismissed or system-ended activity never notifies us; holding its
@@ -2133,11 +2156,7 @@ private final class PingScopeIOSAppModel: ObservableObject {
     private func releaseLiveActivityIfDefunct() async {
         guard let activity = liveActivity,
               activity.activityState == .dismissed || activity.activityState == .ended else { return }
-        if let lease = liveActivityLease {
-            _ = await lifecycleHarness.clearActivity(ifCurrent: lease)
-        }
-        liveActivity = nil
-        liveActivityLease = nil
+        _ = liveActivityOwnershipCoordinator.discardOwned()
         liveActivityUpdatePolicy.reset()
     }
 
@@ -2210,28 +2229,23 @@ private final class PingScopeIOSAppModel: ObservableObject {
 
     private func endLiveActivity() async {
         liveActivityPausedForBackgroundRuntime = false
-        guard let endingActivity = liveActivity else { return }
-        let endingLease = liveActivityLease
+        liveActivityUpdatePolicy.reset()
+        await liveActivityOwnershipCoordinator.endOwned { [weak self] activity in
+            await self?.endLiveActivityHandle(activity)
+        }
+    }
+
+    private func endLiveActivityHandle(
+        _ activity: Activity<PingScopeLiveActivityAttributes>
+    ) async {
         if let session = presentedSession {
             let state = liveActivityContentState(session: session)
-            await endingActivity.end(
+            await activity.end(
                 ActivityContent(state: state, staleDate: nil),
                 dismissalPolicy: .immediate
             )
         } else {
-            await endingActivity.end(nil, dismissalPolicy: .immediate)
-        }
-        guard let endingLease else {
-            if liveActivity?.id == endingActivity.id {
-                liveActivity = nil
-                liveActivityUpdatePolicy.reset()
-            }
-            return
-        }
-        if await lifecycleHarness.clearActivity(ifCurrent: endingLease), liveActivityLease == endingLease {
-            liveActivity = nil
-            liveActivityLease = nil
-            liveActivityUpdatePolicy.reset()
+            await activity.end(nil, dismissalPolicy: .immediate)
         }
     }
 

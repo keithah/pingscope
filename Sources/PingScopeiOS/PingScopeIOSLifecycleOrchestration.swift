@@ -194,6 +194,111 @@ public enum PingScopeIOSLiveActivityRuntimeOrchestrator {
     }
 }
 
+/// Main-actor ownership boundary for ActivityKit handles. Preference and
+/// ownership generations prevent writes that suspend from installing or
+/// reviving a handle after settings or session state has invalidated it.
+@MainActor
+public final class PingScopeIOSLiveActivityOwnershipCoordinator<ActivityHandle> {
+    public struct OperationGeneration: Equatable, Sendable {
+        fileprivate let preference: UInt64
+        fileprivate let ownership: UInt64
+    }
+
+    public private(set) var ownedActivity: ActivityHandle?
+    public private(set) var masterEnabled: Bool
+    private var preferenceGeneration: UInt64 = 0
+    private var ownershipGeneration: UInt64 = 0
+
+    public init(masterEnabled: Bool) {
+        self.masterEnabled = masterEnabled
+    }
+
+    @discardableResult
+    public func setMasterEnabled(
+        _ isEnabled: Bool,
+        end: @escaping @MainActor (ActivityHandle) async -> Void
+    ) -> Task<Void, Never>? {
+        guard masterEnabled != isEnabled else { return nil }
+        preferenceGeneration &+= 1
+        masterEnabled = isEnabled
+        guard !isEnabled, let activity = ownedActivity else { return nil }
+        ownedActivity = nil
+        ownershipGeneration &+= 1
+        return Task { @MainActor in
+            await end(activity)
+        }
+    }
+
+    public func isCurrent(_ generation: OperationGeneration) -> Bool {
+        masterEnabled
+            && preferenceGeneration == generation.preference
+            && ownershipGeneration == generation.ownership
+    }
+
+    @discardableResult
+    public func requestIfAllowed(
+        systemAuthorizationEnabled: Bool,
+        prepare: @escaping @MainActor (OperationGeneration) async -> Bool = { _ in true },
+        request: @escaping @MainActor () async throws -> ActivityHandle,
+        end: @escaping @MainActor (ActivityHandle) async -> Void
+    ) async rethrows -> ActivityHandle? {
+        guard masterEnabled, systemAuthorizationEnabled, ownedActivity == nil else { return nil }
+        let generation = currentGeneration
+        guard isCurrent(generation), await prepare(generation), isCurrent(generation) else {
+            return nil
+        }
+        guard ownedActivity == nil else { return nil }
+        let activity = try await request()
+        guard isCurrent(generation), ownedActivity == nil else {
+            await end(activity)
+            return nil
+        }
+        ownedActivity = activity
+        return activity
+    }
+
+    @discardableResult
+    public func updateOwnedIfAllowed(
+        update: @escaping @MainActor (ActivityHandle) async -> Void
+    ) async -> Bool {
+        guard masterEnabled, let activity = ownedActivity else { return false }
+        let generation = currentGeneration
+        guard isCurrent(generation) else { return false }
+        await update(activity)
+        return isCurrent(generation) && ownedActivity != nil
+    }
+
+    @discardableResult
+    public func pauseOwnedIfAllowed(
+        update: @escaping @MainActor (ActivityHandle) async -> Void
+    ) async -> Bool {
+        await updateOwnedIfAllowed(update: update)
+    }
+
+    public func endOwned(
+        end: @escaping @MainActor (ActivityHandle) async -> Void
+    ) async {
+        ownershipGeneration &+= 1
+        guard let activity = ownedActivity else { return }
+        ownedActivity = nil
+        await end(activity)
+    }
+
+    @discardableResult
+    public func discardOwned() -> ActivityHandle? {
+        ownershipGeneration &+= 1
+        defer { ownedActivity = nil }
+        return ownedActivity
+    }
+
+    private var currentGeneration: OperationGeneration {
+        OperationGeneration(
+            preference: preferenceGeneration,
+            ownership: ownershipGeneration
+        )
+    }
+}
+
 public struct PingScopeIOSLiveActivityPreferences: Equatable, Sendable {
     public static let lockScreenEnabledKey = "PingScope.iOS.lockScreenLiveActivityEnabled"
     public static let dynamicIslandDetailsEnabledKey = "PingScope.iOS.dynamicIslandDetailsEnabled"

@@ -88,14 +88,17 @@ final class PingScopeLiveActivityTests: XCTestCase {
         let rich = makeContentState(showsDynamicIslandDetails: true)
         let statusOnly = makeContentState(showsDynamicIslandDetails: false)
 
-        XCTAssertEqual(
-            PingScopeLiveActivityPresentation.dynamicIslandContentStyle(contentState: rich),
-            .rich
-        )
-        XCTAssertEqual(
-            PingScopeLiveActivityPresentation.dynamicIslandContentStyle(contentState: statusOnly),
-            .statusOnly
-        )
+        let richRegions = PingScopeLiveActivityPresentation.dynamicIslandRegionDecisions(contentState: rich)
+        XCTAssertEqual(richRegions.expanded, .rich)
+        XCTAssertEqual(richRegions.compactLeading, .rich)
+        XCTAssertEqual(richRegions.compactTrailing, .rich)
+        XCTAssertEqual(richRegions.minimal, .rich)
+
+        let statusOnlyRegions = PingScopeLiveActivityPresentation.dynamicIslandRegionDecisions(contentState: statusOnly)
+        XCTAssertEqual(statusOnlyRegions.expanded, .statusOnly)
+        XCTAssertEqual(statusOnlyRegions.compactLeading, .statusOnly)
+        XCTAssertEqual(statusOnlyRegions.compactTrailing, .statusOnly)
+        XCTAssertEqual(statusOnlyRegions.minimal, .statusOnly)
         XCTAssertEqual(
             PingScopeLiveActivityPresentation.rows(attributes: attributes, contentState: rich),
             PingScopeLiveActivityPresentation.rows(attributes: attributes, contentState: statusOnly)

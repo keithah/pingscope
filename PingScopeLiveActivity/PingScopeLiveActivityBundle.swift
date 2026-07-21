@@ -20,7 +20,7 @@ struct PingScopeLiveActivityWidget: Widget {
         } dynamicIsland: { context in
             DynamicIsland {
                 DynamicIslandExpandedRegion(.bottom) {
-                    switch PingScopeLiveActivityPresentation.dynamicIslandContentStyle(contentState: context.state) {
+                    switch PingScopeLiveActivityPresentation.dynamicIslandRegionDecisions(contentState: context.state).expanded {
                     case .rich:
                         PingScopeLiveActivityRowsView(
                             rows: dynamicIslandRows(for: context),
@@ -35,10 +35,16 @@ struct PingScopeLiveActivityWidget: Widget {
                     }
                 }
             } compactLeading: {
-                statusDot(aggregateStatus(for: context), diameter: 7)
-                    .accessibilityLabel("\(aggregateStatusDescription(for: context)) status")
+                switch PingScopeLiveActivityPresentation.dynamicIslandRegionDecisions(contentState: context.state).compactLeading {
+                case .rich:
+                    statusDot(aggregateStatus(for: context), diameter: 7)
+                        .accessibilityLabel("\(aggregateStatusDescription(for: context)) status")
+                case .statusOnly:
+                    statusDot(aggregateStatus(for: context), diameter: 7)
+                        .accessibilityLabel("\(aggregateStatusDescription(for: context)) status")
+                }
             } compactTrailing: {
-                switch PingScopeLiveActivityPresentation.dynamicIslandContentStyle(contentState: context.state) {
+                switch PingScopeLiveActivityPresentation.dynamicIslandRegionDecisions(contentState: context.state).compactTrailing {
                 case .rich:
                     Text(latencyText(for: context))
                         .font(.caption2.monospacedDigit())
@@ -50,7 +56,7 @@ struct PingScopeLiveActivityWidget: Widget {
                     EmptyView()
                 }
             } minimal: {
-                switch PingScopeLiveActivityPresentation.dynamicIslandContentStyle(contentState: context.state) {
+                switch PingScopeLiveActivityPresentation.dynamicIslandRegionDecisions(contentState: context.state).minimal {
                 case .rich:
                     HStack(spacing: 2) {
                         statusDot(aggregateStatus(for: context), diameter: 6)

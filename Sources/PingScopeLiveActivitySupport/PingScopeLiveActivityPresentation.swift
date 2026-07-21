@@ -92,6 +92,25 @@ public enum PingScopeLiveActivityPresentation {
         case statusOnly
     }
 
+    public struct DynamicIslandRegionDecisions: Equatable, Sendable {
+        public let expanded: DynamicIslandContentStyle
+        public let compactLeading: DynamicIslandContentStyle
+        public let compactTrailing: DynamicIslandContentStyle
+        public let minimal: DynamicIslandContentStyle
+    }
+
+    public static func dynamicIslandRegionDecisions(
+        contentState: PingScopeLiveActivityAttributes.ContentState
+    ) -> DynamicIslandRegionDecisions {
+        let style = dynamicIslandContentStyle(contentState: contentState)
+        return DynamicIslandRegionDecisions(
+            expanded: style,
+            compactLeading: style,
+            compactTrailing: style,
+            minimal: style
+        )
+    }
+
     public static func dynamicIslandContentStyle(
         contentState: PingScopeLiveActivityAttributes.ContentState
     ) -> DynamicIslandContentStyle {

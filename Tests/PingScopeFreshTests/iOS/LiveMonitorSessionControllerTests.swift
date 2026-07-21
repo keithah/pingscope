@@ -728,6 +728,152 @@ final class LiveMonitorSessionControllerTests: XCTestCase {
         XCTAssertEqual(events, ["ended"])
     }
 
+    @MainActor
+    func testLiveActivityOwnershipCoordinatorEndsRequestCompletedAfterDisableAndDoesNotResurrectAfterReenable() async {
+        let coordinator = PingScopeIOSLiveActivityOwnershipCoordinator<String>(masterEnabled: true)
+        let requestGate = IOSLifecycleGate()
+        var endedActivities: [String] = []
+
+        let staleRequest = Task { @MainActor in
+            await coordinator.requestIfAllowed(
+                systemAuthorizationEnabled: true,
+                request: {
+                    await requestGate.block()
+                    return "stale-request"
+                },
+                end: { endedActivities.append($0) }
+            )
+        }
+        await requestGate.waitUntilBlocked()
+
+        coordinator.setMasterEnabled(false) { endedActivities.append($0) }
+        var blockedRequestRan = false
+        let blockedRequest = await coordinator.requestIfAllowed(
+            systemAuthorizationEnabled: true,
+            request: {
+                blockedRequestRan = true
+                return "blocked-request"
+            },
+            end: { endedActivities.append($0) }
+        )
+        XCTAssertNil(blockedRequest)
+        XCTAssertFalse(blockedRequestRan)
+        coordinator.setMasterEnabled(true) { endedActivities.append($0) }
+        await requestGate.release()
+
+        let staleResult = await staleRequest.value
+        XCTAssertNil(staleResult)
+        XCTAssertNil(coordinator.ownedActivity)
+        XCTAssertEqual(endedActivities, ["stale-request"])
+
+        let freshRequest = await coordinator.requestIfAllowed(
+            systemAuthorizationEnabled: true,
+            request: { "fresh-request" },
+            end: { endedActivities.append($0) }
+        )
+        XCTAssertEqual(freshRequest, "fresh-request")
+        XCTAssertEqual(coordinator.ownedActivity, "fresh-request")
+    }
+
+    @MainActor
+    func testLiveActivityOwnershipCoordinatorPromptlyEndsOwnedActivityDuringSuspendedUpdate() async {
+        let coordinator = PingScopeIOSLiveActivityOwnershipCoordinator<String>(masterEnabled: true)
+        let updateGate = IOSLifecycleGate()
+        var events: [String] = []
+        _ = await coordinator.requestIfAllowed(
+            systemAuthorizationEnabled: true,
+            request: { "owned" },
+            end: { events.append("end:\($0)") }
+        )
+
+        let updateTask = Task { @MainActor in
+            await coordinator.updateOwnedIfAllowed(
+                update: { activity in
+                    events.append("update-start:\(activity)")
+                    await updateGate.block()
+                    events.append("update-finish:\(activity)")
+                }
+            )
+        }
+        await updateGate.waitUntilBlocked()
+
+        let promptTeardown = coordinator.setMasterEnabled(false) {
+            events.append("end:\($0)")
+        }
+        await promptTeardown?.value
+
+        XCTAssertNil(coordinator.ownedActivity)
+        XCTAssertEqual(events, ["update-start:owned", "end:owned"])
+
+        await updateGate.release()
+        _ = await updateTask.value
+
+        XCTAssertNil(coordinator.ownedActivity)
+        XCTAssertEqual(events, ["update-start:owned", "end:owned", "update-finish:owned"])
+    }
+
+    @MainActor
+    func testLiveActivityOwnershipCoordinatorBlocksBackgroundPauseAndAllowsNextStartAfterReenable() async {
+        let coordinator = PingScopeIOSLiveActivityOwnershipCoordinator<String>(masterEnabled: true)
+        var events: [String] = []
+        _ = await coordinator.requestIfAllowed(
+            systemAuthorizationEnabled: true,
+            request: { "owned" },
+            end: { events.append("end:\($0)") }
+        )
+
+        let promptTeardown = coordinator.setMasterEnabled(false) {
+            events.append("end:\($0)")
+        }
+        await promptTeardown?.value
+        await coordinator.pauseOwnedIfAllowed(
+            update: { events.append("pause:\($0)") }
+        )
+
+        XCTAssertEqual(events, ["end:owned"])
+        XCTAssertNil(coordinator.ownedActivity)
+
+        coordinator.setMasterEnabled(true) { events.append("end:\($0)") }
+        let replacement = await coordinator.requestIfAllowed(
+            systemAuthorizationEnabled: true,
+            request: { "replacement" },
+            end: { events.append("end:\($0)") }
+        )
+
+        XCTAssertEqual(replacement, "replacement")
+        XCTAssertEqual(coordinator.ownedActivity, "replacement")
+    }
+
+    @MainActor
+    func testLiveActivityOwnershipCoordinatorDetachesBeforeSuspendingEnd() async {
+        let coordinator = PingScopeIOSLiveActivityOwnershipCoordinator<String>(masterEnabled: true)
+        let endGate = IOSLifecycleGate()
+        var events: [String] = []
+        _ = await coordinator.requestIfAllowed(
+            systemAuthorizationEnabled: true,
+            request: { "ending" },
+            end: { events.append("end:\($0)") }
+        )
+
+        let endTask = Task { @MainActor in
+            await coordinator.endOwned { activity in
+                events.append("end-start:\(activity)")
+                await endGate.block()
+                events.append("end-finish:\(activity)")
+            }
+        }
+        await endGate.waitUntilBlocked()
+
+        XCTAssertNil(coordinator.ownedActivity)
+        coordinator.setMasterEnabled(false) { events.append("end:\($0)") }
+        coordinator.setMasterEnabled(true) { events.append("end:\($0)") }
+        await endGate.release()
+        await endTask.value
+
+        XCTAssertNil(coordinator.ownedActivity)
+        XCTAssertEqual(events, ["end-start:ending", "end-finish:ending"])
+    }
+
     func testIOSDisplayModeDefaultsToSignalAndPersistsRing() {
         let suiteName = "PingScopeIOSDisplayModeTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
