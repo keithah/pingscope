@@ -219,6 +219,7 @@ final class BuildGraphOptimizationTests: XCTestCase {
         XCTAssertTrue(switcher.contains("ForEach(switcherPresentation.items)"))
         XCTAssertTrue(switcher.contains("let allHostsGraphPresentation = allHostsGraphPresentationMemo.resolve"))
         XCTAssertTrue(switcher.contains("allHostsRow("))
+        XCTAssertTrue(switcher.contains("allHostsGraphPresentation: switcherPresentation.allHostsGraphPresentation"))
         XCTAssertTrue(switcher.contains("isSelected: concreteItem.isSelected"))
         XCTAssertFalse(switcher.contains("showsSparkline: false"))
     }

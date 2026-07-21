@@ -453,7 +453,6 @@ public struct PingScopeIOSSwitchHostConcreteItem: Identifiable, Equatable, Senda
     public let hostID: UUID
     public let row: PingScopeIOSHostRowSnapshot
     public let rowPresentation: PingScopeIOSAllHostsRowPresentation
-    public let graphSamples: [PingResult]
     public let resolvedColor: ResolvedHostDisplayColor
     public let action: PingScopeIOSHostRowAction
     public let isSelected: Bool
@@ -477,6 +476,7 @@ public enum PingScopeIOSSwitchHostItem: Identifiable, Equatable, Sendable {
 
 public struct PingScopeIOSSwitchHostPresentation: Equatable, Sendable {
     public let items: [PingScopeIOSSwitchHostItem]
+    public let allHostsGraphPresentation: PingScopeIOSAllHostsGraphPresentation
 
     public init(
         hosts: [HostConfig],
@@ -485,8 +485,9 @@ public struct PingScopeIOSSwitchHostPresentation: Equatable, Sendable {
         selectedHealth: HostHealth?,
         selectedSamples: [PingResult],
         allHostRows: [PingScopeIOSHostRowSnapshot],
-        allHostGraphSeries: [PingScopeIOSHostGraphSeries]
+        allHostsGraphPresentation: PingScopeIOSAllHostsGraphPresentation
     ) {
+        self.allHostsGraphPresentation = allHostsGraphPresentation
         let rowsByHostID = allHostRows.reduce(into: [UUID: PingScopeIOSHostRowSnapshot]()) {
             $0[$1.hostID] = $1
         }
@@ -505,10 +506,6 @@ public struct PingScopeIOSSwitchHostPresentation: Equatable, Sendable {
                 hostID: host.id,
                 row: row,
                 rowPresentation: rowPresentation,
-                graphSamples: PingScopeIOSAllHostsMonitorPresentation.graphSamples(
-                    for: row,
-                    allHostGraphSeries: allHostGraphSeries
-                ),
                 resolvedColor: rowPresentation.resolvedColor,
                 action: .focus,
                 isSelected: isSelected
@@ -1323,6 +1320,11 @@ public struct PingScopeIOSRootView: View {
     }
 
     private var hostSwitcher: some View {
+        let allHostsGraphPresentation = allHostsGraphPresentationMemo.resolve(
+            series: allHostsMonitorGraphSeries,
+            range: selectedGraphRange,
+            endDate: allHostsPresentationEndDate
+        )
         let switcherPresentation = PingScopeIOSSwitchHostPresentation(
             hosts: hosts,
             hostScope: hostScope,
@@ -1330,12 +1332,7 @@ public struct PingScopeIOSRootView: View {
             selectedHealth: health,
             selectedSamples: samples,
             allHostRows: allHostsMonitorRows,
-            allHostGraphSeries: allHostsMonitorGraphSeries
-        )
-        let allHostsGraphPresentation = allHostsGraphPresentationMemo.resolve(
-            series: allHostsMonitorGraphSeries,
-            range: selectedGraphRange,
-            endDate: allHostsPresentationEndDate
+            allHostsGraphPresentation: allHostsGraphPresentation
         )
         return NavigationStack {
             List {
@@ -1357,7 +1354,7 @@ public struct PingScopeIOSRootView: View {
                             allHostsRow(
                                 concreteItem.row,
                                 presentation: concreteItem.rowPresentation,
-                                allHostsGraphPresentation: allHostsGraphPresentation,
+                                allHostsGraphPresentation: switcherPresentation.allHostsGraphPresentation,
                                 isSelected: concreteItem.isSelected
                             )
                         }

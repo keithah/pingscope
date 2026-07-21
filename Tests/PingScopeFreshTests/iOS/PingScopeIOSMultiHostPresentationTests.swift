@@ -804,6 +804,11 @@ final class PingScopeIOSMultiHostPresentationTests: XCTestCase {
                 emptyPeer.id: []
             ]
         )
+        let sharedGraphPresentation = PingScopeIOSAllHostsMonitorPresentation.graphPresentation(
+            from: peerPresentation.graphSeries,
+            range: .oneMinute,
+            endDate: Date(timeIntervalSince1970: 1_000)
+        )
 
         let switcher = PingScopeIOSSwitchHostPresentation(
             hosts: [selectedHost, cachedPeer, emptyPeer],
@@ -812,7 +817,7 @@ final class PingScopeIOSMultiHostPresentationTests: XCTestCase {
             selectedHealth: selectedHealth,
             selectedSamples: [selectedSample],
             allHostRows: peerPresentation.rows,
-            allHostGraphSeries: peerPresentation.graphSeries
+            allHostsGraphPresentation: sharedGraphPresentation
         )
         let concreteItems = switcher.items.compactMap { item -> PingScopeIOSSwitchHostConcreteItem? in
             guard case .host(let concreteItem) = item else { return nil }
@@ -826,6 +831,9 @@ final class PingScopeIOSMultiHostPresentationTests: XCTestCase {
         XCTAssertEqual(concreteItems.map(\.hostID), [selectedHost.id, cachedPeer.id, emptyPeer.id])
         XCTAssertEqual(concreteItems.filter(\.isSelected).map(\.hostID), [selectedHost.id])
         XCTAssertEqual(concreteItems.map(\.action), [.focus, .focus, .focus])
+        XCTAssertEqual(concreteItems.map(\.row.isCached), [false, true, false])
+        XCTAssertEqual(concreteItems.map(\.row.status), [.healthy, .noData, .noData])
+        XCTAssertEqual(concreteItems.map(\.rowPresentation.displayStatus), [.healthy, .noData, .noData])
         XCTAssertEqual(concreteItems.map(\.rowPresentation.latencyText), ["12ms", "34ms", "--ms"])
         XCTAssertEqual(concreteItems.map(\.rowPresentation.cacheLabel), [nil, "Cached", nil])
         XCTAssertEqual(
@@ -836,10 +844,11 @@ final class PingScopeIOSMultiHostPresentationTests: XCTestCase {
                 .custom(HostDisplayColor(red: 0.1, green: 0.7, blue: 0.8))
             ]
         )
-        XCTAssertEqual(concreteItems.map { $0.graphSamples.compactMap { $0.latency?.milliseconds } }, [[12], [31, 34], []])
-        XCTAssertTrue(concreteItems.allSatisfy { item in
-            item.graphSamples.allSatisfy { $0.hostID == item.hostID }
-        })
+        XCTAssertEqual(switcher.allHostsGraphPresentation.series.map(\.hostID), concreteItems.map(\.hostID))
+        XCTAssertEqual(
+            switcher.allHostsGraphPresentation.series.map { $0.renderData.points.map(\.latencyMilliseconds) },
+            [[12], [31, 34], []]
+        )
     }
 
     func testFocusedPeerTransitionNeutralizesNewSelectionAndCachesOnlyPeersWithRetainedSamples() throws {
