@@ -181,6 +181,26 @@ final class BuildGraphOptimizationTests: XCTestCase {
         XCTAssertFalse(decisionRoute.contains("detectedHost.address != lastGatewayAddress"))
     }
 
+    func testAllHostsGatewaySelectionUpdatesRememberedFocusBeforePersistence() throws {
+        let source = try String(
+            contentsOf: try repositoryRoot().appendingPathComponent("Sources/PingScopeiOSApp/PingScopeIOSApp.swift"),
+            encoding: .utf8
+        )
+        let decisionStart = try XCTUnwrap(source.range(of: "private func refreshDefaultGatewayHost("))
+        let decisionEnd = try XCTUnwrap(
+            source.range(of: "private var defaultGatewayHostIndex:", range: decisionStart.upperBound..<source.endIndex)
+        )
+        let decisionRoute = source[decisionStart.lowerBound..<decisionEnd.lowerBound]
+
+        XCTAssertEqual(
+            decisionRoute.components(separatedBy: "applyAllHostsGatewaySelection(update)").count - 1,
+            2,
+            "Both created and existing All Hosts branches must update remembered focus before saving."
+        )
+        XCTAssertTrue(decisionRoute.contains("persistHostSelection(selectedHostID: update.selectedHostID)"))
+        XCTAssertFalse(decisionRoute.contains("persistHostSelection()"))
+    }
+
     func testIOSFocusedLaunchHydratesAndMarksPeerRowsCachedWithinBoundedHistory() throws {
         let root = try repositoryRoot()
         let source = try String(

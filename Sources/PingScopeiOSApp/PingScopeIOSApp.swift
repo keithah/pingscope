@@ -1372,10 +1372,8 @@ private final class PingScopeIOSAppModel: ObservableObject {
         case let .updated(index, previousAddress):
             hosts = update.hosts
             let updatedHost = hosts[index]
-            if hostScope == .allHosts, update.selectedHostID == updatedHost.id {
-                replaceRememberedFocusedHost(updatedHost)
-            }
-            persistHostSelection()
+            applyAllHostsGatewaySelection(update)
+            persistHostSelection(selectedHostID: update.selectedHostID)
 
             if hostScope == .allHosts {
                 guard await reconcileAllHostsAndRestorePostconditions(context: context) else {
@@ -1397,7 +1395,8 @@ private final class PingScopeIOSAppModel: ObservableObject {
             hosts = update.hosts
             guard let createdHost = update.affectedHost else { return false }
             if hostScope == .allHosts {
-                persistHostSelection()
+                applyAllHostsGatewaySelection(update)
+                persistHostSelection(selectedHostID: update.selectedHostID)
                 guard await reconcileAllHostsAndRestorePostconditions(context: context) else {
                     return false
                 }
@@ -1422,6 +1421,16 @@ private final class PingScopeIOSAppModel: ObservableObject {
 
     private var hasDefaultGatewayHost: Bool {
         defaultGatewayHostIndex != nil
+    }
+
+    private func applyAllHostsGatewaySelection(_ update: PingScopeIOSGatewayHostUpdate) {
+        guard hostScope == .allHosts,
+              let selectedHostID = update.selectedHostID,
+              update.affectedHost?.id == selectedHostID,
+              let selectedHost = hosts.first(where: { $0.id == selectedHostID }) else {
+            return
+        }
+        replaceRememberedFocusedHost(selectedHost)
     }
 
     private func switchToHostAsync(
@@ -1554,8 +1563,12 @@ private final class PingScopeIOSAppModel: ObservableObject {
         applyBackgroundKeepAlive()
     }
 
-    private func persistHostSelection() {
-        hostStore.save(hosts: hosts, selectedHostID: snapshot.host.id, hostScope: hostScope)
+    private func persistHostSelection(selectedHostID: UUID? = nil) {
+        hostStore.save(
+            hosts: hosts,
+            selectedHostID: selectedHostID ?? snapshot.host.id,
+            hostScope: hostScope
+        )
     }
 
     private func replaceRememberedFocusedHost(_ host: HostConfig) {

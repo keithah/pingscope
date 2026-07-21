@@ -2436,6 +2436,95 @@ final class LiveMonitorSessionControllerTests: XCTestCase {
     }
 
     @MainActor
+    func testAllHostsGatewayCreateAndExistingSelectRememberedGatewayForLaterFocus() async throws {
+        enum FixtureKind: String, CaseIterable {
+            case create
+            case existing
+        }
+
+        for kind in FixtureKind.allCases {
+            let suite = "AllHostsGatewaySelection.\(kind.rawValue).\(UUID().uuidString)"
+            let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+            defer { defaults.removePersistentDomain(forName: suite) }
+            let previousSelection = HostConfig(
+                id: UUID(),
+                displayName: "DNS",
+                address: "1.1.1.1"
+            )
+            let savedGateway = HostConfig.defaultGatewayHost(address: "192.168.20.1")
+            let trailingHost = HostConfig(
+                id: UUID(),
+                displayName: "Peer",
+                address: "8.8.8.8"
+            )
+            let originalHosts: [HostConfig]
+            let detectedGateway = HostConfig.defaultGatewayHost(address: "192.168.88.1")
+            let expectedGatewayID: UUID
+            switch kind {
+            case .create:
+                originalHosts = [previousSelection, trailingHost]
+                expectedGatewayID = detectedGateway.id
+            case .existing:
+                originalHosts = [previousSelection, savedGateway, trailingHost]
+                expectedGatewayID = savedGateway.id
+            }
+            let coordinator = PingScopeIOSMultiHostSessionCoordinator()
+            let sessionModel = PingScopeIOSAppSessionModel(coordinator: coordinator)
+            let store = PingScopeIOSHostStore(defaults: defaults, defaultHosts: originalHosts)
+            store.save(
+                hosts: originalHosts,
+                selectedHostID: previousSelection.id,
+                hostScope: .allHosts
+            )
+
+            let update = sessionModel.gatewayHostUpdate(
+                hosts: originalHosts,
+                selectedHostID: previousSelection.id,
+                detectedHost: detectedGateway,
+                shouldCreateIfMissing: true,
+                shouldSelect: true
+            )
+            let selectedHostID = try XCTUnwrap(update.selectedHostID, kind.rawValue)
+            store.save(hosts: update.hosts, selectedHostID: selectedHostID, hostScope: .allHosts)
+            let reloaded = store.load()
+
+            XCTAssertEqual(selectedHostID, expectedGatewayID, kind.rawValue)
+            XCTAssertEqual(reloaded.selectedHost.id, expectedGatewayID, kind.rawValue)
+            XCTAssertEqual(
+                reloaded.hosts.map(\.id),
+                kind == .create
+                    ? [previousSelection.id, trailingHost.id, expectedGatewayID]
+                    : originalHosts.map(\.id),
+                "\(kind.rawValue) must preserve saved order"
+            )
+
+            let switchedToAllHosts = await sessionModel.switchToAllHosts(
+                restartDuration: nil,
+                hosts: reloaded.hosts
+            )
+            XCTAssertTrue(switchedToAllHosts, kind.rawValue)
+            var focusedHostID: UUID?
+            let switched = await sessionModel.performLiveActivityScopeSwitch(
+                isSessionActive: false,
+                previousScope: .allHosts,
+                newScope: .focused,
+                previousFocusedHostID: previousSelection.id,
+                newFocusedHostID: reloaded.selectedHost.id,
+                hasLiveActivity: false,
+                prepareScopeSwitch: { true },
+                endActivity: {},
+                completeScopeSwitch: {
+                    focusedHostID = reloaded.selectedHost.id
+                    return true
+                },
+                resumeActivity: {}
+            )
+            XCTAssertTrue(switched, kind.rawValue)
+            XCTAssertEqual(focusedHostID, expectedGatewayID, kind.rawValue)
+        }
+    }
+
+    @MainActor
     func testAppGatewayUpdateLeavesSavedGatewayUntouchedWhenDetectorRejectsLinkLocalCandidate() {
         let gateway = HostConfig.defaultGatewayHost(address: "192.168.20.1")
         let originalHosts = [

@@ -101,7 +101,7 @@ public final class PingScopeIOSAppSessionModel {
         updatedHosts[index].address = detectedHost.address
         return PingScopeIOSGatewayHostUpdate(
             hosts: updatedHosts,
-            selectedHostID: selectedHostID,
+            selectedHostID: shouldSelect ? updatedHosts[index].id : selectedHostID,
             change: .updated(index: index, previousAddress: previousAddress)
         )
     }
