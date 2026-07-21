@@ -5,6 +5,7 @@ import PingScopeHistoryKit
 public protocol PingScopeIOSMultiHostSessionControlling: Sendable {
     func start(duration: MonitorSessionDuration, at date: Date) async
     func stop(reason: MonitorSessionEndReason, at date: Date) async
+    func restoreAfterSupersededReconciliation(from snapshot: LiveMonitorSessionSnapshot) async
     func snapshot() async -> LiveMonitorSessionSnapshot
     func nextProbeInterval() async -> Duration
     func nextProbeDeadline() async -> Date
@@ -433,16 +434,18 @@ public actor PingScopeIOSMultiHostSessionCoordinator {
         let reconciledAt = now()
         let rollbackState: ReconciliationRollbackState?
         if let conditional {
-            let snapshots = await orderedSnapshots()
+            var snapshotsByHostID: [UUID: LiveMonitorSessionSnapshot] = [:]
+            snapshotsByHostID.reserveCapacity(orderedHostIDs.count)
+            for hostID in orderedHostIDs {
+                guard let entry = controllers[hostID] else { continue }
+                snapshotsByHostID[hostID] = await entry.controller.snapshot()
+            }
             rollbackState = ReconciliationRollbackState(
                 controllers: controllers,
                 orderedHostIDs: orderedHostIDs,
                 aggregateSession: aggregateSession,
                 preservedSeries: seriesPreservedForScopeRoundTrip,
-                snapshotsByHostID: Dictionary(
-                    snapshots.map { ($0.host.id, $0) },
-                    uniquingKeysWith: { first, _ in first }
-                )
+                snapshotsByHostID: snapshotsByHostID
             )
             await conditional.beforeDestructiveCommit()
             guard await conditional.isCurrent() else { return false }
@@ -525,17 +528,11 @@ public actor PingScopeIOSMultiHostSessionCoordinator {
         aggregateSession = state.aggregateSession
         seriesPreservedForScopeRoundTrip = state.preservedSeries
         for hostID in stoppedPreviousHostIDs {
-            guard let snapshot = state.snapshotsByHostID[hostID] else { continue }
-            if let preserved = seriesPreservedForScopeRoundTrip[hostID] {
-                seriesPreservedForScopeRoundTrip[hostID] = mergePreservedSeries(preserved, with: snapshot.series)
-            } else {
-                seriesPreservedForScopeRoundTrip[hostID] = snapshot.series
+            guard let entry = state.controllers[hostID],
+                  let snapshot = state.snapshotsByHostID[hostID] else {
+                continue
             }
-        }
-        guard let aggregateSession, aggregateSession.isActive(at: date) else { return }
-        for hostID in state.orderedHostIDs where stoppedPreviousHostIDs.contains(hostID) {
-            guard let entry = state.controllers[hostID] else { continue }
-            await entry.controller.start(duration: aggregateSession.duration, at: aggregateSession.startedAt)
+            await entry.controller.restoreAfterSupersededReconciliation(from: snapshot)
         }
     }
 

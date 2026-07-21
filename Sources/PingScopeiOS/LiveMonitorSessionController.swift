@@ -213,13 +213,13 @@ public actor LiveMonitorSessionController {
         LiveMonitorSessionSnapshot(host: host, session: session, health: health, series: series)
     }
 
-    /// Restores the exact observable controller state captured before a focused
-    /// host replacement that was superseded while `stop()` was awaiting its
-    /// history flush. Monitoring resumes on the preserved session without
-    /// resetting accumulated health or samples.
-    public func restoreAfterSupersededReplacement(
+    /// Restores the exact observable controller state captured before a
+    /// reconciliation that was superseded while `stop()` was awaiting its
+    /// history flush. Monitoring resumes on the preserved session without an
+    /// immediate extra probe or resetting accumulated health and samples.
+    public func restoreAfterSupersededReconciliation(
         from snapshot: LiveMonitorSessionSnapshot
-    ) {
+    ) async {
         cancelLoop()
         host = BuildFlavor.appStore.normalizedHost(snapshot.host)
         session = snapshot.session

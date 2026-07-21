@@ -840,6 +840,8 @@ private actor ResourceIntervalController: PingScopeIOSMultiHostSessionControllin
 
     func stop(reason: MonitorSessionEndReason, at date: Date) async {}
 
+    func restoreAfterSupersededReconciliation(from snapshot: LiveMonitorSessionSnapshot) async {}
+
     func snapshot() async -> LiveMonitorSessionSnapshot {
         LiveMonitorSessionSnapshot(
             host: host,

@@ -159,13 +159,15 @@ public final class PingScopeIOSAppSessionModel {
     }
 
     /// Shipping focused-save seam: returns false when the caller must replace
-    /// the controller because probe configuration changed.
+    /// the controller because its currently committed probe configuration
+    /// changed. Reading the controller at FIFO execution time prevents an
+    /// earlier accepted-state candidate from becoming a stale comparison base.
     @discardableResult
     public func reconcileFocusedHostEdit(
-        currentHost: HostConfig,
         updatedHost: HostConfig,
         controller: LiveMonitorSessionController
     ) async -> Bool {
+        let currentHost = await controller.snapshot().host
         guard currentHost.id == updatedHost.id,
               currentHost.isEnabled == updatedHost.isEnabled,
               currentHost.hasSameProbeConfiguration(as: updatedHost) else {
@@ -188,7 +190,7 @@ public final class PingScopeIOSAppSessionModel {
         guard isCurrentMutation() else { return false }
         await controller.stop(reason: .scopeSuspended)
         guard isCurrentMutation() else {
-            await controller.restoreAfterSupersededReplacement(from: rollbackSnapshot)
+            await controller.restoreAfterSupersededReconciliation(from: rollbackSnapshot)
             return false
         }
         return true
@@ -245,7 +247,6 @@ public final class PingScopeIOSAppSessionModel {
                 )
             }
             let preserved = await reconcileFocusedHostEdit(
-                currentHost: currentSnapshot.host,
                 updatedHost: selectedHost,
                 controller: focusedController
             )

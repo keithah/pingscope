@@ -87,6 +87,10 @@ final class BuildGraphOptimizationTests: XCTestCase {
             contentsOf: root.appendingPathComponent("Sources/PingScopeiOSApp/PingScopeIOSApp.swift"),
             encoding: .utf8
         )
+        let iosSessionModel = try String(
+            contentsOf: root.appendingPathComponent("Sources/PingScopeiOS/PingScopeIOSAppSessionModel.swift"),
+            encoding: .utf8
+        )
 
         XCTAssertTrue(iosDraft.contains("var displayColor: HostDisplayColor?"))
         XCTAssertTrue(iosDraft.contains("var usesAutomaticDisplayColor: Bool"))
@@ -100,6 +104,9 @@ final class BuildGraphOptimizationTests: XCTestCase {
         XCTAssertTrue(colorBinding.contains("struct HostDisplayColorEditorBinding"))
         XCTAssertTrue(colorBinding.contains("color.converted(to: colorSpace"))
         XCTAssertTrue(iosApp.contains("sessionModel.reconcileFocusedHostEdit"))
+        XCTAssertTrue(iosApp.contains("let wasExistingHost = hosts.contains"))
+        XCTAssertFalse(iosApp.contains("let previousHost = hosts.first { $0.id == normalizedHost.id }"))
+        XCTAssertTrue(iosSessionModel.contains("let currentHost = await controller.snapshot().host"))
     }
 
     func testIOSConnectivityTipsShippingWiring() throws {

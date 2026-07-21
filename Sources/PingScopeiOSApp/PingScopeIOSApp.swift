@@ -780,7 +780,7 @@ private final class PingScopeIOSAppModel: ObservableObject {
 
     func saveHost(_ host: HostConfig) {
         let normalizedHost = BuildFlavor.appStore.normalizedHost(host)
-        let previousHost = hosts.first { $0.id == normalizedHost.id }
+        let wasExistingHost = hosts.contains { $0.id == normalizedHost.id }
         if let index = hosts.firstIndex(where: { $0.id == normalizedHost.id }) {
             hosts[index] = normalizedHost
         } else {
@@ -798,13 +798,12 @@ private final class PingScopeIOSAppModel: ObservableObject {
             Task { await cloudSyncService.uploadHosts(hosts) }
         }
         guard hostScope == .allHosts else {
-            guard let previousHost, snapshot.host.id == savedHost.id else {
+            guard wasExistingHost, snapshot.host.id == savedHost.id else {
                 selectHost(savedHost.id)
                 return
             }
             runLifecycleTask { model, context in
                 let preserved = await model.sessionModel.reconcileFocusedHostEdit(
-                    currentHost: previousHost,
                     updatedHost: savedHost,
                     controller: model.controller
                 )
@@ -1505,7 +1504,7 @@ private final class PingScopeIOSAppModel: ObservableObject {
                 await self.controller.stop(reason: .scopeSuspended)
                 self.controller = outgoingController
             }
-            await outgoingController.restoreAfterSupersededReplacement(from: acceptedRollbackSnapshot)
+            await outgoingController.restoreAfterSupersededReconciliation(from: acceptedRollbackSnapshot)
             self.hostScope = previousScope
             self.snapshot = acceptedRollbackSnapshot
             self.monitorInsights = PingScopeIOSMonitorInsightsPresentation(
