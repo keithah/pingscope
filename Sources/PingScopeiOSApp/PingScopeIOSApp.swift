@@ -1653,7 +1653,7 @@ private final class PingScopeIOSAppModel: ObservableObject {
         guard let historyStore, hostScope == .focused else { return }
         let requestedHostID = snapshot.host.id
         let enabledHosts = PingScopeIOSHostScopePresentation.enabledHosts(from: hosts)
-        let cutoff = Date().addingTimeInterval(-TimeRange.tenMinutes.duration)
+        let cutoff = Date().addingTimeInterval(-24 * 60 * 60)
         let samplesByHost = await withTaskGroup(
             of: (UUID, [PingResult]).self,
             returning: [UUID: [PingResult]].self
@@ -1681,23 +1681,13 @@ private final class PingScopeIOSAppModel: ObservableObject {
         }
         resolvedSamples[requestedHostID] = selectedSamplesByID.values.sorted { $0.timestamp < $1.timestamp }
 
-        var healthByHost: [UUID: HostHealth] = [:]
-        for host in enabledHosts {
-            if host.id == requestedHostID {
-                healthByHost[host.id] = snapshot.health
-                continue
-            }
-            var health = HostHealth(hostID: host.id, thresholds: host.thresholds)
-            for sample in resolvedSamples[host.id] ?? [] {
-                health.ingest(sample)
-            }
-            healthByHost[host.id] = health
-        }
+        let healthByHost = [requestedHostID: snapshot.health]
 
         allHostRows = PingScopeIOSHostScopePresentation.rows(
             from: enabledHosts,
             healthByHost: healthByHost,
-            samplesByHost: resolvedSamples
+            samplesByHost: resolvedSamples,
+            cachedHostIDs: Set(enabledHosts.map(\.id).filter { $0 != requestedHostID })
         )
         allHostGraphSeries = enabledHosts.map {
             PingScopeIOSHostGraphSeries(hostID: $0.id, samples: resolvedSamples[$0.id] ?? [])

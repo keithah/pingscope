@@ -120,6 +120,7 @@ public struct PingScopeIOSAllHostsRowPresentation: Equatable, Sendable {
     public let displayName: String
     public let displayStatus: HealthStatus
     public let latencyText: String
+    public let cacheLabel: String?
     public let accessibilityLabel: String
     public let focusAccessibilityHint: String
 
@@ -127,12 +128,14 @@ public struct PingScopeIOSAllHostsRowPresentation: Equatable, Sendable {
         displayName: String,
         displayStatus: HealthStatus,
         latencyText: String,
+        cacheLabel: String? = nil,
         accessibilityLabel: String,
         focusAccessibilityHint: String
     ) {
         self.displayName = displayName
         self.displayStatus = displayStatus
         self.latencyText = latencyText
+        self.cacheLabel = cacheLabel
         self.accessibilityLabel = accessibilityLabel
         self.focusAccessibilityHint = focusAccessibilityHint
     }
@@ -298,7 +301,7 @@ public enum PingScopeIOSAllHostsMonitorPresentation {
         from rows: [PingScopeIOSHostRowSnapshot]
     ) -> Double? {
         let latencies = rows.compactMap { row in
-            row.isStale ? nil : row.latestLatencyMilliseconds
+            row.isStale || row.isCached ? nil : row.latestLatencyMilliseconds
         }
         guard !latencies.isEmpty else { return nil }
         return latencies.reduce(0, +) / Double(latencies.count)
@@ -308,8 +311,15 @@ public enum PingScopeIOSAllHostsMonitorPresentation {
         let displayName = row.displayName.isEmpty ? "Unnamed Host" : row.displayName
         let latencyText = row.isStale ? "--ms" : row.latencyText
         let isUnavailable = latencyText == "--ms"
-        let displayStatus: HealthStatus = row.isStale ? .noData : row.status
-        let statusText = row.isStale ? "Stale" : accessibilityStatusText(for: row.status)
+        let displayStatus: HealthStatus = row.isStale || row.isCached ? .noData : row.status
+        let statusText: String
+        if row.isStale {
+            statusText = "Stale"
+        } else if row.isCached {
+            statusText = "Cached data"
+        } else {
+            statusText = accessibilityStatusText(for: row.status)
+        }
         let latencyDescription = isUnavailable
             ? "unavailable"
             : "\(Int((row.latestLatencyMilliseconds ?? 0).rounded())) milliseconds"
@@ -317,6 +327,7 @@ public enum PingScopeIOSAllHostsMonitorPresentation {
             displayName: displayName,
             displayStatus: displayStatus,
             latencyText: latencyText,
+            cacheLabel: row.isCached ? "Cached" : nil,
             accessibilityLabel: "\(displayName), \(row.endpointCaption), \(statusText), \(latencyDescription)",
             focusAccessibilityHint: "Double-tap to focus \(displayName)."
         )
@@ -1373,11 +1384,20 @@ public struct PingScopeIOSRootView: View {
         let color = PingScopeIOSAllHostsMonitorPresentation
             .graphIdentityColor(for: row.hostID)
             .swiftUIColor
-        let graphData = allHostsGraphPresentation.graphData(for: row.hostID) ?? PingScopeIOSLatencyGraphData(
-            samples: row.samples,
-            range: selectedGraphRange,
-            endDate: allHostsPresentationEndDate
-        )
+        let graphData: PingScopeIOSLatencyGraphData
+        if hostScope == .focused, let firstSample = row.samples.first, let lastSample = row.samples.last {
+            graphData = PingScopeIOSLatencyGraphData(
+                samples: row.samples,
+                startDate: min(firstSample.timestamp, lastSample.timestamp.addingTimeInterval(-1)),
+                endDate: lastSample.timestamp
+            )
+        } else {
+            graphData = allHostsGraphPresentation.graphData(for: row.hostID) ?? PingScopeIOSLatencyGraphData(
+                samples: row.samples,
+                range: selectedGraphRange,
+                endDate: allHostsPresentationEndDate
+            )
+        }
         return HStack(spacing: 10) {
             Circle()
                 .fill(color)
@@ -1396,16 +1416,30 @@ public struct PingScopeIOSRootView: View {
             PingScopeIOSSparkline(renderData: graphData, color: color)
                 .frame(width: 64, height: 28)
                 .opacity(graphData.points.count > 1 ? 1 : 0.18)
-            Text(presentation.latencyText)
-                .font(.system(size: 15, weight: .semibold, design: .monospaced))
-                .foregroundStyle(color)
-                .lineLimit(1)
-                .minimumScaleFactor(0.75)
-                .frame(width: 56, alignment: .trailing)
+            VStack(alignment: .trailing, spacing: 2) {
+                if let cacheLabel = presentation.cacheLabel {
+                    Text(cacheLabel)
+                        .font(.system(size: 9, weight: .bold))
+                        .textCase(.uppercase)
+                        .tracking(0.4)
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 2)
+                        .background(Color.secondary.opacity(0.12), in: Capsule())
+                }
+                Text(presentation.latencyText)
+                    .font(.system(size: 15, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(color)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
+            }
+            .frame(width: 56, alignment: .trailing)
         }
         .frame(height: 54)
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
+        .accessibilityLabel(presentation.accessibilityLabel)
+        .accessibilityHint(presentation.focusAccessibilityHint)
     }
 
     private func sectionHeader(_ text: String) -> some View {

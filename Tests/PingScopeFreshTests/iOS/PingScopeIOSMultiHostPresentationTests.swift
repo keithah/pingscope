@@ -523,6 +523,121 @@ final class PingScopeIOSMultiHostPresentationTests: XCTestCase {
         XCTAssertEqual(rows.map(\.samples.count), [1, 1, 1])
     }
 
+    func testRecentHistoricalPeerIsCachedButSelectedHostStaysLiveAndPeerKeepsLastKnownLatencyGraph() throws {
+        let selectedHost = HostConfig(displayName: "Selected", address: "1.1.1.1")
+        let peerHost = HostConfig(displayName: "Peer", address: "8.8.8.8", method: .tcp)
+        let selectedResult = PingResult.success(
+            hostID: selectedHost.id,
+            latency: .milliseconds(12),
+            timestamp: Date(timeIntervalSince1970: 10_000)
+        )
+        let peerSamples = [
+            PingResult.success(
+                hostID: peerHost.id,
+                latency: .milliseconds(31),
+                timestamp: Date(timeIntervalSince1970: 9_980)
+            ),
+            PingResult.success(
+                hostID: peerHost.id,
+                latency: .milliseconds(34),
+                timestamp: Date(timeIntervalSince1970: 9_990)
+            ),
+            PingResult.failure(hostID: peerHost.id, reason: .timeout, timestamp: Date(timeIntervalSince1970: 9_995)),
+            PingResult.failure(hostID: peerHost.id, reason: .timeout, timestamp: Date(timeIntervalSince1970: 9_996)),
+            PingResult.failure(hostID: peerHost.id, reason: .timeout, timestamp: Date(timeIntervalSince1970: 9_997))
+        ]
+        var selectedHealth = HostHealth(hostID: selectedHost.id, thresholds: selectedHost.thresholds)
+        selectedHealth.ingest(selectedResult)
+        var peerHistoricalHealth = HostHealth(hostID: peerHost.id, thresholds: peerHost.thresholds)
+        peerSamples.forEach { peerHistoricalHealth.ingest($0) }
+
+        let rows = PingScopeIOSHostScopePresentation.rows(
+            from: [selectedHost, peerHost],
+            healthByHost: [selectedHost.id: selectedHealth, peerHost.id: peerHistoricalHealth],
+            samplesByHost: [selectedHost.id: [selectedResult], peerHost.id: peerSamples],
+            cachedHostIDs: [peerHost.id]
+        )
+        let selectedRow = try XCTUnwrap(rows.first { $0.hostID == selectedHost.id })
+        let peerRow = try XCTUnwrap(rows.first { $0.hostID == peerHost.id })
+        let peerPresentation = PingScopeIOSAllHostsMonitorPresentation.rowPresentation(for: peerRow)
+        let graphSamples = PingScopeIOSAllHostsMonitorPresentation.graphSamples(
+            for: peerRow,
+            allHostGraphSeries: [PingScopeIOSHostGraphSeries(hostID: peerHost.id, samples: peerSamples)]
+        )
+
+        XCTAssertFalse(selectedRow.isCached)
+        XCTAssertFalse(selectedRow.isStale)
+        XCTAssertTrue(peerRow.isCached)
+        XCTAssertFalse(peerRow.isStale)
+        XCTAssertEqual(peerRow.status, .down)
+        XCTAssertEqual(peerPresentation.displayStatus, .noData)
+        XCTAssertEqual(peerPresentation.latencyText, "34ms")
+        XCTAssertEqual(peerPresentation.cacheLabel, "Cached")
+        XCTAssertEqual(
+            peerPresentation.accessibilityLabel,
+            "Peer, TCP 8.8.8.8, Cached data, 34 milliseconds"
+        )
+        XCTAssertEqual(graphSamples.compactMap { $0.latency?.milliseconds }, [31, 34])
+        XCTAssertGreaterThan(peerRow.samples.count, 1, "The cached mini-graph must remain visible.")
+        XCTAssertEqual(PingScopeIOSHostScopePresentation.aggregateStatus(from: rows), .healthy)
+        XCTAssertEqual(
+            PingScopeIOSAllHostsMonitorPresentation.combinedLatencyMilliseconds(from: rows),
+            12
+        )
+    }
+
+    func testFocusedHistoricalFailureIsCachedUnavailableAndDoesNotBecomeLiveHealth() throws {
+        let peerHost = HostConfig(displayName: "Failed peer", address: "203.0.113.8")
+        let failures = (0..<3).map { index in
+            PingResult.failure(
+                hostID: peerHost.id,
+                reason: .timeout,
+                timestamp: Date(timeIntervalSince1970: Double(index))
+            )
+        }
+        var peerHistoricalHealth = HostHealth(hostID: peerHost.id, thresholds: peerHost.thresholds)
+        failures.forEach { peerHistoricalHealth.ingest($0) }
+
+        let row = try XCTUnwrap(PingScopeIOSHostScopePresentation.rows(
+            from: [peerHost],
+            healthByHost: [peerHost.id: peerHistoricalHealth],
+            samplesByHost: [peerHost.id: failures],
+            cachedHostIDs: [peerHost.id]
+        ).first)
+        let presentation = PingScopeIOSAllHostsMonitorPresentation.rowPresentation(for: row)
+
+        XCTAssertTrue(row.isCached)
+        XCTAssertFalse(row.isStale)
+        XCTAssertEqual(row.status, .down)
+        XCTAssertEqual(presentation.displayStatus, .noData)
+        XCTAssertEqual(presentation.latencyText, "--ms")
+        XCTAssertEqual(presentation.cacheLabel, "Cached")
+        XCTAssertEqual(
+            presentation.accessibilityLabel,
+            "Failed peer, TCP 203.0.113.8, Cached data, unavailable"
+        )
+        XCTAssertEqual(PingScopeIOSHostScopePresentation.aggregateStatus(from: [row]), .noData)
+        XCTAssertNil(PingScopeIOSAllHostsMonitorPresentation.combinedLatencyMilliseconds(from: [row]))
+    }
+
+    func testActiveAllHostsRowsRemainLiveWhenCacheStateIsNotRequested() {
+        let host = HostConfig(displayName: "Live host", address: "192.0.2.10")
+        var health = HostHealth(hostID: host.id, thresholds: host.thresholds)
+        health.ingest(.success(hostID: host.id, latency: .milliseconds(22)))
+
+        let rows = PingScopeIOSHostScopePresentation.rows(
+            from: [host],
+            healthByHost: [host.id: health]
+        )
+
+        XCTAssertEqual(rows.map(\.isCached), [false])
+        XCTAssertEqual(PingScopeIOSHostScopePresentation.aggregateStatus(from: rows), .healthy)
+        XCTAssertEqual(
+            PingScopeIOSAllHostsMonitorPresentation.rowPresentation(for: rows[0]).cacheLabel,
+            nil
+        )
+    }
+
     func testAllHostsMonitorPresentationUsesFullSeriesForCompactRowGraphs() {
         let host = HostConfig(displayName: "Router", address: "192.168.1.1")
         let fullSeries = makeSuccessfulResults(count: 3, hostID: host.id)

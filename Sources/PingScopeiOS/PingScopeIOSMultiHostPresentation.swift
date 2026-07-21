@@ -33,6 +33,7 @@ public struct PingScopeIOSHostRowSnapshot: Equatable, Sendable {
     public let latestLatencyMilliseconds: Double?
     public let samples: [PingResult]
     public let isStale: Bool
+    public let isCached: Bool
     public let isDefaultGateway: Bool
     public let degradedThresholdMilliseconds: Double
 
@@ -59,6 +60,7 @@ public struct PingScopeIOSHostRowSnapshot: Equatable, Sendable {
         latestLatencyMilliseconds: Double?,
         samples: [PingResult],
         isStale: Bool,
+        isCached: Bool = false,
         isDefaultGateway: Bool = false,
         degradedThresholdMilliseconds: Double = LatencyThresholds.defaults.degradedMilliseconds
     ) {
@@ -69,6 +71,7 @@ public struct PingScopeIOSHostRowSnapshot: Equatable, Sendable {
         self.latestLatencyMilliseconds = latestLatencyMilliseconds
         self.samples = samples
         self.isStale = isStale
+        self.isCached = isCached
         self.isDefaultGateway = isDefaultGateway
         self.degradedThresholdMilliseconds = degradedThresholdMilliseconds
     }
@@ -78,15 +81,25 @@ public struct PingScopeIOSHostRowSnapshot: Equatable, Sendable {
         health: HostHealth?,
         samples: [PingResult] = [],
         isStale: Bool = false,
+        isCached: Bool = false,
         sampleLimit: Int = PingScopeIOSLatencySampleReducer.defaultLimit
     ) {
         self.hostID = host.id
         self.displayName = host.displayName
         self.endpointCaption = "\(host.method.displayName) \(host.address)"
         self.status = health?.status ?? .noData
-        self.latestLatencyMilliseconds = health?.latestResult?.latency?.milliseconds
+        if isCached {
+            self.latestLatencyMilliseconds = samples
+                .filter(\.isSuccess)
+                .max { $0.timestamp < $1.timestamp }?
+                .latency?
+                .milliseconds
+        } else {
+            self.latestLatencyMilliseconds = health?.latestResult?.latency?.milliseconds
+        }
         self.samples = PingScopeIOSLatencySampleReducer.reduce(samples, limit: sampleLimit)
         self.isStale = isStale
+        self.isCached = isCached
         self.isDefaultGateway = host.isDefaultGateway
         self.degradedThresholdMilliseconds = host.thresholds.degradedMilliseconds
     }
@@ -100,6 +113,7 @@ public struct PingScopeIOSHostRowSnapshot: Equatable, Sendable {
             latestLatencyMilliseconds: latestLatencyMilliseconds,
             samples: PingScopeIOSLatencySampleReducer.reduce(samples, limit: PingScopeIOSLatencySampleReducer.defaultLimit),
             isStale: isStale,
+            isCached: isCached,
             isDefaultGateway: isDefaultGateway,
             degradedThresholdMilliseconds: degradedThresholdMilliseconds
         )
@@ -205,7 +219,7 @@ public enum PingScopeIOSAllHostsRingGridPresentation {
     public static func cells(from rows: [PingScopeIOSHostRowSnapshot]) -> [PingScopeIOSAllHostsRingCell] {
         rows.enumerated().map { ringIndex, row in
             let presentation = PingScopeIOSAllHostsMonitorPresentation.rowPresentation(for: row)
-            let latency = row.isStale ? nil : row.latestLatencyMilliseconds
+            let latency = row.isStale || row.isCached ? nil : row.latestLatencyMilliseconds
             let threshold = max(row.degradedThresholdMilliseconds, 1)
             return PingScopeIOSAllHostsRingCell(
                 hostID: row.hostID,
@@ -263,6 +277,7 @@ struct PingScopeIOSAllHostsRingRowsFingerprint: Hashable {
         let status: String
         let latencyBitPattern: UInt64?
         let isStale: Bool
+        let isCached: Bool
         let degradedThresholdBitPattern: UInt64
     }
 
@@ -276,6 +291,7 @@ struct PingScopeIOSAllHostsRingRowsFingerprint: Hashable {
                 status: row.status.rawValue,
                 latencyBitPattern: row.latestLatencyMilliseconds?.bitPattern,
                 isStale: row.isStale,
+                isCached: row.isCached,
                 degradedThresholdBitPattern: row.degradedThresholdMilliseconds.bitPattern
             )
         }
@@ -305,7 +321,7 @@ public enum PingScopeIOSHostScopePresentation {
     public static let activityHostLimit = 3
 
     public static func aggregateStatus(from rows: [PingScopeIOSHostRowSnapshot]) -> HealthStatus {
-        let statuses = rows.map { $0.isStale ? HealthStatus.noData : $0.status }
+        let statuses = rows.map { $0.isStale || $0.isCached ? HealthStatus.noData : $0.status }
         if statuses.contains(.down) { return .down }
         if statuses.contains(.degraded) { return .degraded }
         if statuses.contains(.healthy) { return .healthy }
@@ -324,14 +340,16 @@ public enum PingScopeIOSHostScopePresentation {
         from hosts: [HostConfig],
         healthByHost: [UUID: HostHealth] = [:],
         samplesByHost: [UUID: [PingResult]] = [:],
-        staleHostIDs: Set<UUID> = []
+        staleHostIDs: Set<UUID> = [],
+        cachedHostIDs: Set<UUID> = []
     ) -> [PingScopeIOSHostRowSnapshot] {
         enabledHosts(from: hosts).map { host in
             PingScopeIOSHostRowSnapshot(
                 host: host,
                 health: healthByHost[host.id],
                 samples: samplesByHost[host.id] ?? [],
-                isStale: staleHostIDs.contains(host.id)
+                isStale: staleHostIDs.contains(host.id),
+                isCached: cachedHostIDs.contains(host.id)
             )
         }
     }
@@ -344,13 +362,15 @@ public enum PingScopeIOSHostScopePresentation {
         from hosts: [HostConfig],
         healthByHost: [UUID: HostHealth] = [:],
         samplesByHost: [UUID: [PingResult]] = [:],
-        staleHostIDs: Set<UUID> = []
+        staleHostIDs: Set<UUID> = [],
+        cachedHostIDs: Set<UUID> = []
     ) -> [PingScopeIOSHostRowSnapshot] {
         activityRows(from: rows(
             from: hosts,
             healthByHost: healthByHost,
             samplesByHost: samplesByHost,
-            staleHostIDs: staleHostIDs
+            staleHostIDs: staleHostIDs,
+            cachedHostIDs: cachedHostIDs
         ))
     }
 }
