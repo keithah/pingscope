@@ -90,7 +90,7 @@ public struct PingScopeIOSAllHostPresentationCache {
                         isStale: isStale
                     ),
                     series: PingScopeIOSHostGraphSeries(
-                        hostID: snapshot.host.id,
+                        host: snapshot.host,
                         samples: snapshot.series.samples
                     ),
                     latestResult: snapshot.series.samples.max { $0.timestamp < $1.timestamp }

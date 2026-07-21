@@ -66,11 +66,11 @@ struct PingScopeIOSAllHostsConcentricRingHero: View {
             ForEach(rings) { ring in
                 let diameter = innerDiameter + CGFloat(ring.ringIndex) * ringSpacing
                 Circle()
-                    .stroke(identityColor(ring.colorIndex).opacity(0.16), lineWidth: ringLineWidth)
+                    .stroke(ring.resolvedColor.swiftUIColor.opacity(0.16), lineWidth: ringLineWidth)
                     .frame(width: diameter, height: diameter)
                 Circle()
                     .trim(from: 0, to: ring.ringProgress)
-                    .stroke(identityColor(ring.colorIndex), style: StrokeStyle(lineWidth: ringLineWidth, lineCap: .round))
+                    .stroke(ring.resolvedColor.swiftUIColor, style: StrokeStyle(lineWidth: ringLineWidth, lineCap: .round))
                     .rotationEffect(.degrees(-90))
                     .frame(width: diameter, height: diameter)
                 if ring.status == .down {
@@ -102,7 +102,7 @@ struct PingScopeIOSAllHostsConcentricRingHero: View {
         } label: {
             HStack(spacing: 10) {
                 Circle()
-                    .fill(identityColor(row.colorIndex))
+                    .fill(row.resolvedColor.swiftUIColor)
                     .frame(width: 10, height: 10)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(row.displayName)
@@ -116,7 +116,7 @@ struct PingScopeIOSAllHostsConcentricRingHero: View {
                 Spacer(minLength: 8)
                 Text(row.latencyText)
                     .font(.caption.monospacedDigit().weight(.semibold))
-                    .foregroundStyle(.primary)
+                    .foregroundStyle(row.resolvedColor.swiftUIColor)
             }
             .padding(.horizontal, 8)
             .padding(.vertical, 6)
@@ -127,19 +127,17 @@ struct PingScopeIOSAllHostsConcentricRingHero: View {
         .accessibilityHint("Focus \(row.displayName)")
     }
 
-    private func identityColor(_ index: Int) -> Color {
-        PingScopeIOSHostIdentityPalette.color(at: index).swiftUIColor
-    }
 }
 
-extension PingScopeIOSHostIdentityPalette.ColorToken {
+extension ResolvedHostDisplayColor {
     var swiftUIColor: Color {
         Color(uiColor: UIColor { traits in
-            let rgb = traits.userInterfaceStyle == .dark ? darkRGB : lightRGB
+            let appearance: HostDisplayColorAppearance = traits.userInterfaceStyle == .dark ? .dark : .light
+            let components = components(for: appearance)
             return UIColor(
-                red: CGFloat(rgb.red) / 255,
-                green: CGFloat(rgb.green) / 255,
-                blue: CGFloat(rgb.blue) / 255,
+                red: CGFloat(components.red),
+                green: CGFloat(components.green),
+                blue: CGFloat(components.blue),
                 alpha: 1
             )
         })

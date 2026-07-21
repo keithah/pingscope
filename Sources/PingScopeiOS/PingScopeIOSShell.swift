@@ -37,12 +37,20 @@ public enum PingScopeIOSLiveActivityDecision: Equatable, Sendable {
 public struct PingScopeIOSHostGraphSeries: Identifiable, Equatable, Sendable {
     public let hostID: UUID
     public let samples: [PingResult]
+    public let resolvedColor: ResolvedHostDisplayColor
 
     public var id: UUID { hostID }
 
     public init(hostID: UUID, samples: [PingResult]) {
         self.hostID = hostID
         self.samples = samples
+        self.resolvedColor = ResolvedHostDisplayColor(hostID: hostID, displayColor: nil)
+    }
+
+    public init(host: HostConfig, samples: [PingResult]) {
+        self.hostID = host.id
+        self.samples = samples
+        self.resolvedColor = ResolvedHostDisplayColor(hostID: host.id, displayColor: host.displayColor)
     }
 }
 
@@ -70,7 +78,7 @@ public struct PingScopeIOSFocusedPeerPresentation: Equatable, Sendable {
             cachedHostIDs: cachedHostIDs
         )
         graphSeries = enabledHosts.map {
-            PingScopeIOSHostGraphSeries(hostID: $0.id, samples: samplesByHost[$0.id] ?? [])
+            PingScopeIOSHostGraphSeries(host: $0, samples: samplesByHost[$0.id] ?? [])
         }
     }
 
@@ -111,30 +119,38 @@ public struct PingScopeIOSAllHostsGraphRenderSeries: Equatable, Sendable {
     public let startDate: Date
     public let endDate: Date
     public let samples: [PingResult]
+    public let resolvedColor: ResolvedHostDisplayColor
 
-    public init(hostID: UUID, startDate: Date, endDate: Date, samples: [PingResult]) {
+    public init(
+        hostID: UUID,
+        startDate: Date,
+        endDate: Date,
+        samples: [PingResult],
+        resolvedColor: ResolvedHostDisplayColor
+    ) {
         self.hostID = hostID
         self.startDate = startDate
         self.endDate = endDate
         self.samples = samples
+        self.resolvedColor = resolvedColor
     }
 }
 
 public struct PingScopeIOSAllHostsPreparedGraphSeries: Equatable, Sendable, Identifiable {
     public let hostID: UUID
     public let renderData: PingScopeIOSLatencyGraphData
-    public let identityColor: PingScopeIOSHostIdentityPalette.ColorToken
+    public let resolvedColor: ResolvedHostDisplayColor
 
     public var id: UUID { hostID }
 
     public init(
         hostID: UUID,
         renderData: PingScopeIOSLatencyGraphData,
-        identityColor: PingScopeIOSHostIdentityPalette.ColorToken
+        resolvedColor: ResolvedHostDisplayColor
     ) {
         self.hostID = hostID
         self.renderData = renderData
-        self.identityColor = identityColor
+        self.resolvedColor = resolvedColor
     }
 }
 
@@ -183,6 +199,7 @@ public struct PingScopeIOSAllHostsRowPresentation: Equatable, Sendable {
     public let cacheLabel: String?
     public let accessibilityLabel: String
     public let actionAccessibilityHint: String
+    public let resolvedColor: ResolvedHostDisplayColor
 
     public var focusAccessibilityHint: String { actionAccessibilityHint }
 
@@ -192,7 +209,8 @@ public struct PingScopeIOSAllHostsRowPresentation: Equatable, Sendable {
         latencyText: String,
         cacheLabel: String? = nil,
         accessibilityLabel: String,
-        actionAccessibilityHint: String
+        actionAccessibilityHint: String,
+        resolvedColor: ResolvedHostDisplayColor
     ) {
         self.displayName = displayName
         self.displayStatus = displayStatus
@@ -200,6 +218,7 @@ public struct PingScopeIOSAllHostsRowPresentation: Equatable, Sendable {
         self.cacheLabel = cacheLabel
         self.accessibilityLabel = accessibilityLabel
         self.actionAccessibilityHint = actionAccessibilityHint
+        self.resolvedColor = resolvedColor
     }
 }
 
@@ -307,9 +326,9 @@ public enum PingScopeIOSAllHostsMonitorPresentation {
     }
 
     public static func graphIdentityColor(
-        for hostID: UUID
-    ) -> PingScopeIOSHostIdentityPalette.ColorToken {
-        PingScopeIOSHostIdentityPalette.color(for: hostID)
+        for host: HostConfig
+    ) -> ResolvedHostDisplayColor {
+        ResolvedHostDisplayColor(hostID: host.id, displayColor: host.displayColor)
     }
 
     public static func graphRenderSeries(
@@ -323,7 +342,8 @@ public enum PingScopeIOSAllHostsMonitorPresentation {
                 hostID: source.hostID,
                 startDate: startDate,
                 endDate: endDate,
-                samples: samples(in: range, endingAt: endDate, from: source.samples)
+                samples: samples(in: range, endingAt: endDate, from: source.samples),
+                resolvedColor: source.resolvedColor
             )
         }
     }
@@ -345,7 +365,7 @@ public enum PingScopeIOSAllHostsMonitorPresentation {
                     startDate: source.startDate,
                     endDate: source.endDate
                 ),
-                identityColor: graphIdentityColor(for: source.hostID)
+                resolvedColor: source.resolvedColor
             )
         }
         return PingScopeIOSAllHostsGraphPresentation(
@@ -403,22 +423,13 @@ public enum PingScopeIOSAllHostsMonitorPresentation {
             latencyText: latencyText,
             cacheLabel: row.isCached ? "Cached" : nil,
             accessibilityLabel: "\(displayName), \(row.endpointCaption), \(statusText), \(latencyDescription)",
-            actionAccessibilityHint: actionAccessibilityHint
+            actionAccessibilityHint: actionAccessibilityHint,
+            resolvedColor: row.resolvedColor
         )
     }
 
     public static func stableColorIndex(for hostID: UUID, paletteCount: Int) -> Int {
-        guard paletteCount > 0 else { return 0 }
-        let bytes = hostID.uuid
-        let value = [
-            bytes.0, bytes.1, bytes.2, bytes.3,
-            bytes.4, bytes.5, bytes.6, bytes.7,
-            bytes.8, bytes.9, bytes.10, bytes.11,
-            bytes.12, bytes.13, bytes.14, bytes.15
-        ].reduce(UInt64.zero) { partialResult, byte in
-            (partialResult &* 31) &+ UInt64(byte)
-        }
-        return Int(value % UInt64(paletteCount))
+        HostDisplayColorAutomaticPalette.stableIndex(for: hostID, paletteCount: paletteCount)
     }
 
     private static func samples(in range: TimeRange, endingAt endDate: Date, from samples: [PingResult]) -> [PingResult] {
@@ -938,7 +949,7 @@ public struct PingScopeIOSRootView: View {
                     renderData: graphPresentation.renderData,
                     range: selectedGraphRange,
                     color: PingScopeIOSAllHostsMonitorPresentation
-                        .graphIdentityColor(for: host.id)
+                        .graphIdentityColor(for: host)
                         .swiftUIColor,
                     scrubbedLatencyMilliseconds: scrubbedLatencyMilliseconds,
                     onStepRange: stepRange,
@@ -1418,7 +1429,7 @@ public struct PingScopeIOSRootView: View {
 
     private func hostRow(_ listedHost: HostConfig, isActive: Bool, showsSparkline: Bool) -> some View {
         let color = PingScopeIOSAllHostsMonitorPresentation
-            .graphIdentityColor(for: listedHost.id)
+            .graphIdentityColor(for: listedHost)
             .swiftUIColor
         return HStack(spacing: 10) {
             Circle()
@@ -1464,9 +1475,7 @@ public struct PingScopeIOSRootView: View {
         presentation: PingScopeIOSAllHostsRowPresentation,
         allHostsGraphPresentation: PingScopeIOSAllHostsGraphPresentation
     ) -> some View {
-        let color = PingScopeIOSAllHostsMonitorPresentation
-            .graphIdentityColor(for: row.hostID)
-            .swiftUIColor
+        let color = presentation.resolvedColor.swiftUIColor
         let graphData: PingScopeIOSLatencyGraphData
         if hostScope == .focused, let firstSample = row.samples.first, let lastSample = row.samples.last {
             graphData = PingScopeIOSLatencyGraphData(

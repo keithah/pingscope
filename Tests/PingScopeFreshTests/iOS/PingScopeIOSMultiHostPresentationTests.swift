@@ -3,6 +3,52 @@ import XCTest
 @testable import PingScopeiOS
 
 final class PingScopeIOSMultiHostPresentationTests: XCTestCase {
+    func testCustomAndAutomaticIdentityColorsReachGraphRingAndRowPresentations() throws {
+        let custom = HostDisplayColor(red: 0.95, green: 0.2, blue: 0.55)
+        let customHost = try decodedHost(
+            id: UUID(uuidString: "00000000-0000-0000-0000-000000000041")!,
+            displayName: "Custom",
+            displayColor: custom
+        )
+        let invalidHost = try decodedHost(
+            id: UUID(uuidString: "00000000-0000-0000-0000-000000000042")!,
+            displayName: "Invalid",
+            displayColor: HostDisplayColor(red: 1.2, green: 0.3, blue: 0.4)
+        )
+        let automaticHost = try decodedHost(
+            id: UUID(uuidString: "00000000-0000-0000-0000-000000000043")!,
+            displayName: "Automatic",
+            displayColor: nil
+        )
+        let hosts = [customHost, invalidHost, automaticHost]
+        let focused = PingScopeIOSFocusedPeerPresentation(
+            hosts: hosts,
+            selectedHostID: customHost.id,
+            selectedHealth: nil,
+            samplesByHost: [:]
+        )
+        let graph = PingScopeIOSAllHostsMonitorPresentation.graphPresentation(
+            from: focused.graphSeries,
+            range: .oneMinute,
+            endDate: Date(timeIntervalSince1970: 1_000)
+        )
+        let rings = PingScopeIOSAllHostsRingGridPresentation.cells(from: focused.rows)
+        let rows = focused.rows.map {
+            PingScopeIOSAllHostsMonitorPresentation.rowPresentation(for: $0)
+        }
+
+        XCTAssertEqual(graph.series[0].resolvedColor, .custom(custom))
+        XCTAssertEqual(rings[0].resolvedColor, .custom(custom))
+        XCTAssertEqual(rows[0].resolvedColor, .custom(custom))
+
+        XCTAssertEqual(graph.series[1].resolvedColor, .automatic(.seaGreen))
+        XCTAssertEqual(rings[1].resolvedColor, .automatic(.seaGreen))
+        XCTAssertEqual(rows[1].resolvedColor, .automatic(.seaGreen))
+        XCTAssertEqual(graph.series[2].resolvedColor, .automatic(.purple))
+        XCTAssertEqual(rings[2].resolvedColor, .automatic(.purple))
+        XCTAssertEqual(rows[2].resolvedColor, .automatic(.purple))
+    }
+
     @MainActor
     func testPathMemoCacheHitSkipsProjectionBuild() {
         let memo = PingScopeIOSPathProjectionMemo<String, Int>()
@@ -277,11 +323,8 @@ final class PingScopeIOSMultiHostPresentationTests: XCTestCase {
         XCTAssertEqual(presentation.overflowLabel, "+2 more")
         XCTAssertEqual(presentation.overflowAccessibilityLabel, "Show 2 more hosts")
         XCTAssertEqual(presentation.firstOverflowHostID, hosts[4].id)
-        XCTAssertEqual(presentation.rings.map(\.colorIndex), hosts.prefix(4).map {
-            PingScopeIOSAllHostsMonitorPresentation.stableColorIndex(
-                for: $0.id,
-                paletteCount: PingScopeIOSAllHostsConcentricRingPresentation.paletteCount
-            )
+        XCTAssertEqual(presentation.rings.map(\.resolvedColor), hosts.prefix(4).map {
+            ResolvedHostDisplayColor(hostID: $0.id, displayColor: nil)
         })
         XCTAssertEqual(presentation.rings.map(\.ringIndex), [0, 1, 2, 3])
         XCTAssertEqual(presentation.legendRows.map(\.status), [.healthy, .healthy, .healthy, .healthy])
@@ -308,7 +351,7 @@ final class PingScopeIOSMultiHostPresentationTests: XCTestCase {
             PingScopeIOSAllHostsConcentricRingPresentation.paletteCount,
             PingScopeIOSHostIdentityPalette.count
         )
-        XCTAssertEqual(rings.rings[0].identityColor, preparedSeries.identityColor)
+        XCTAssertEqual(rings.rings[0].resolvedColor, preparedSeries.resolvedColor)
     }
 
     func testHostIdentityPaletteNormalizesAllIntegerIndexes() {
@@ -375,8 +418,8 @@ final class PingScopeIOSMultiHostPresentationTests: XCTestCase {
         let cells = PingScopeIOSAllHostsRingGridPresentation.cells(from: rows)
 
         XCTAssertEqual(
-            cells.map(\.identityColor),
-            hosts.map { PingScopeIOSHostIdentityPalette.color(for: $0.id) }
+            cells.map(\.resolvedColor),
+            hosts.map { ResolvedHostDisplayColor(hostID: $0.id, displayColor: nil) }
         )
     }
 
@@ -922,6 +965,20 @@ final class PingScopeIOSMultiHostPresentationTests: XCTestCase {
                 timestamp: Date(timeIntervalSince1970: Double(index))
             )
         }
+    }
+
+    private func decodedHost(
+        id: UUID,
+        displayName: String,
+        displayColor: HostDisplayColor?
+    ) throws -> HostConfig {
+        let encoded = try JSONEncoder().encode(HostConfig(
+            id: id,
+            displayName: displayName,
+            address: "192.0.2.1",
+            displayColor: displayColor
+        ))
+        return try JSONDecoder().decode(HostConfig.self, from: encoded)
     }
 
     private func makeStatusRow(

@@ -10,7 +10,7 @@ struct AllHostStatusRow: View {
         let graphData = LatencyGraphData(samples: graphSeries?.samples ?? [])
         return HStack(spacing: 10) {
             Circle()
-                .fill(Color(statusColor: summary.color))
+                .fill(identityColor)
                 .frame(width: 8, height: 8)
             VStack(alignment: .leading, spacing: 1) {
                 Text(summary.name)
@@ -28,7 +28,7 @@ struct AllHostStatusRow: View {
             VStack(alignment: .trailing, spacing: 1) {
                 Text(summary.latencyText)
                     .font(.system(size: 15, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(Color(statusColor: summary.color))
+                    .foregroundStyle(identityColor)
                     .lineLimit(1)
             }
             .frame(width: 50, alignment: .trailing)
@@ -41,7 +41,12 @@ struct AllHostStatusRow: View {
     }
 
     private var sparklineColor: Color {
-        graphSeries?.color ?? Color(statusColor: summary.color)
+        identityColor
+    }
+
+    private var identityColor: Color {
+        graphSeries?.color
+            ?? ResolvedHostDisplayColor(hostID: summary.id, displayColor: nil).swiftUIColor
     }
 }
 

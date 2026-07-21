@@ -3,6 +3,45 @@ import XCTest
 @testable import PingScopeCore
 
 final class LatencyGraphPresentationTests: XCTestCase {
+    func testAllHostGraphSeriesResolveDecodedCustomAndAutomaticColors() throws {
+        let custom = HostDisplayColor(red: 0.95, green: 0.2, blue: 0.55)
+        let customHost = try decodedHost(
+            id: UUID(uuidString: "00000000-0000-0000-0000-000000000041")!,
+            displayName: "Custom",
+            displayColor: custom
+        )
+        let invalidHost = try decodedHost(
+            id: UUID(uuidString: "00000000-0000-0000-0000-000000000042")!,
+            displayName: "Invalid",
+            displayColor: HostDisplayColor(red: -0.1, green: 0.3, blue: 0.4)
+        )
+        let automaticHost = try decodedHost(
+            id: UUID(uuidString: "00000000-0000-0000-0000-000000000043")!,
+            displayName: "Automatic",
+            displayColor: nil
+        )
+        let hosts = [customHost, invalidHost, automaticHost]
+        let snapshot = RuntimeSnapshot(
+            hosts: hosts,
+            primaryHostID: customHost.id,
+            healthByHost: [:],
+            samplesByHost: [:]
+        )
+
+        let preparation = PingScopeDisplayPreparation(
+            snapshot: snapshot,
+            selectedRange: .oneMinute,
+            visibleHistorySamples: [],
+            includesAllHosts: true,
+            presenter: DisplayStatePresenter(),
+            now: Date(timeIntervalSince1970: 1_000)
+        )
+
+        XCTAssertEqual(preparation.allHostGraphSeries[0].resolvedColor, .custom(custom))
+        XCTAssertEqual(preparation.allHostGraphSeries[1].resolvedColor, .automatic(.seaGreen))
+        XCTAssertEqual(preparation.allHostGraphSeries[2].resolvedColor, .automatic(.purple))
+    }
+
     func testLatencyGraphDataCachesRenderPointsByPixelWidth() {
         let data = LatencyGraphData(samples: makeSamples(count: 200))
 
@@ -41,7 +80,7 @@ final class LatencyGraphPresentationTests: XCTestCase {
 
     func testDrawableHostSeriesCachesRenderPointsByPixelWidth() throws {
         let host = HostConfig(displayName: "Gateway", address: "192.168.1.1")
-        let source = HostLatencyGraphSeries(host: host, samples: makeSamples(count: 200), color: .blue, isPrimary: true)
+        let source = HostLatencyGraphSeries(host: host, samples: makeSamples(count: 200), isPrimary: true)
         let graphData = MultiHostLatencyGraphData(series: [source])
         let series = try XCTUnwrap(graphData.drawableSeries.first)
 
@@ -60,5 +99,19 @@ final class LatencyGraphPresentationTests: XCTestCase {
                 timestamp: Date(timeIntervalSince1970: Double(index))
             )
         }
+    }
+
+    private func decodedHost(
+        id: UUID,
+        displayName: String,
+        displayColor: HostDisplayColor?
+    ) throws -> HostConfig {
+        let encoded = try JSONEncoder().encode(HostConfig(
+            id: id,
+            displayName: displayName,
+            address: "192.0.2.1",
+            displayColor: displayColor
+        ))
+        return try JSONDecoder().decode(HostConfig.self, from: encoded)
     }
 }

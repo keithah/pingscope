@@ -1,3 +1,4 @@
+import AppKit
 import CoreGraphics
 import Foundation
 import PingScopeCore
@@ -6,19 +7,34 @@ import SwiftUI
 struct HostLatencyGraphSeries: Identifiable {
     let host: HostConfig
     let samples: [PingResult]
-    let color: Color
     let isPrimary: Bool
+    let resolvedColor: ResolvedHostDisplayColor
 
     var id: UUID { host.id }
+    var color: Color { resolvedColor.swiftUIColor }
 
-    static let palette: [Color] = [
-        .blue,
-        .green,
-        .orange,
-        .purple,
-        .pink,
-        .cyan
-    ]
+    init(host: HostConfig, samples: [PingResult], isPrimary: Bool) {
+        self.host = host
+        self.samples = samples
+        self.isPrimary = isPrimary
+        self.resolvedColor = ResolvedHostDisplayColor(hostID: host.id, displayColor: host.displayColor)
+    }
+}
+
+extension ResolvedHostDisplayColor {
+    var swiftUIColor: Color {
+        Color(nsColor: NSColor(name: nil) { appearance in
+            let displayAppearance: HostDisplayColorAppearance =
+                appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? .dark : .light
+            let components = components(for: displayAppearance)
+            return NSColor(
+                srgbRed: components.red,
+                green: components.green,
+                blue: components.blue,
+                alpha: 1
+            )
+        })
+    }
 }
 
 struct LatencyGraphPoint {

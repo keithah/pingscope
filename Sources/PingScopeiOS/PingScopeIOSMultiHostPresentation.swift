@@ -36,6 +36,7 @@ public struct PingScopeIOSHostRowSnapshot: Equatable, Sendable {
     public let isCached: Bool
     public let isDefaultGateway: Bool
     public let degradedThresholdMilliseconds: Double
+    public let resolvedColor: ResolvedHostDisplayColor
 
     public var reducedSamples: [PingResult] { samples }
 
@@ -62,7 +63,8 @@ public struct PingScopeIOSHostRowSnapshot: Equatable, Sendable {
         isStale: Bool,
         isCached: Bool = false,
         isDefaultGateway: Bool = false,
-        degradedThresholdMilliseconds: Double = LatencyThresholds.defaults.degradedMilliseconds
+        degradedThresholdMilliseconds: Double = LatencyThresholds.defaults.degradedMilliseconds,
+        resolvedColor: ResolvedHostDisplayColor
     ) {
         self.hostID = hostID
         self.displayName = displayName
@@ -74,6 +76,7 @@ public struct PingScopeIOSHostRowSnapshot: Equatable, Sendable {
         self.isCached = isCached
         self.isDefaultGateway = isDefaultGateway
         self.degradedThresholdMilliseconds = degradedThresholdMilliseconds
+        self.resolvedColor = resolvedColor
     }
 
     public init(
@@ -102,6 +105,7 @@ public struct PingScopeIOSHostRowSnapshot: Equatable, Sendable {
         self.isCached = isCached
         self.isDefaultGateway = host.isDefaultGateway
         self.degradedThresholdMilliseconds = host.thresholds.degradedMilliseconds
+        self.resolvedColor = ResolvedHostDisplayColor(hostID: host.id, displayColor: host.displayColor)
     }
 
     fileprivate func cappedForActivity() -> Self {
@@ -115,7 +119,8 @@ public struct PingScopeIOSHostRowSnapshot: Equatable, Sendable {
             isStale: isStale,
             isCached: isCached,
             isDefaultGateway: isDefaultGateway,
-            degradedThresholdMilliseconds: degradedThresholdMilliseconds
+            degradedThresholdMilliseconds: degradedThresholdMilliseconds,
+            resolvedColor: resolvedColor
         )
     }
 }
@@ -126,92 +131,13 @@ public struct PingScopeIOSAllHostsRingCell: Identifiable, Equatable, Sendable {
     public let latencyText: String
     public let ringProgress: Double
     public let status: HealthStatus
-    public let colorIndex: Int
+    public let resolvedColor: ResolvedHostDisplayColor
     public let ringIndex: Int
 
     public var id: UUID { hostID }
-
-    public var identityColor: PingScopeIOSHostIdentityPalette.ColorToken {
-        PingScopeIOSHostIdentityPalette.color(at: colorIndex)
-    }
 }
 
-public enum PingScopeIOSHostIdentityPalette {
-    public struct RGB: Equatable, Hashable, Sendable {
-        public let red: UInt8
-        public let green: UInt8
-        public let blue: UInt8
-
-        public init(red: UInt8, green: UInt8, blue: UInt8) {
-            self.red = red
-            self.green = green
-            self.blue = blue
-        }
-    }
-
-    public enum ColorToken: Int, CaseIterable, Equatable, Sendable {
-        case cobalt
-        case magenta
-        case teal
-        case violet
-        case gold
-        case orange
-        case seaGreen
-        case purple
-        case azure
-        case crimson
-        case olive
-        case bronze
-
-        public var lightRGB: RGB {
-            switch self {
-            case .cobalt: RGB(red: 0x00, green: 0x68, blue: 0xD9)
-            case .magenta: RGB(red: 0xD9, green: 0x1D, blue: 0x5B)
-            case .teal: RGB(red: 0x00, green: 0x8C, blue: 0x78)
-            case .violet: RGB(red: 0x6D, green: 0x28, blue: 0xD9)
-            case .gold: RGB(red: 0xB7, green: 0x79, blue: 0x00)
-            case .orange: RGB(red: 0xD9, green: 0x5F, blue: 0x00)
-            case .seaGreen: RGB(red: 0x00, green: 0x83, blue: 0x5D)
-            case .purple: RGB(red: 0x8C, green: 0x22, blue: 0xC7)
-            case .azure: RGB(red: 0x00, green: 0x77, blue: 0xB6)
-            case .crimson: RGB(red: 0xC9, green: 0x1E, blue: 0x3A)
-            case .olive: RGB(red: 0x56, green: 0x8A, blue: 0x00)
-            case .bronze: RGB(red: 0xA8, green: 0x5D, blue: 0x00)
-            }
-        }
-
-        public var darkRGB: RGB {
-            switch self {
-            case .cobalt: RGB(red: 0x27, green: 0x8D, blue: 0xFF)
-            case .magenta: RGB(red: 0xFF, green: 0x3D, blue: 0x7F)
-            case .teal: RGB(red: 0x00, green: 0xD1, blue: 0xB2)
-            case .violet: RGB(red: 0x9B, green: 0x6C, blue: 0xFF)
-            case .gold: RGB(red: 0xFF, green: 0xC4, blue: 0x00)
-            case .orange: RGB(red: 0xFF, green: 0x8A, blue: 0x00)
-            case .seaGreen: RGB(red: 0x00, green: 0xC8, blue: 0x96)
-            case .purple: RGB(red: 0xC5, green: 0x4C, blue: 0xFF)
-            case .azure: RGB(red: 0x00, green: 0xB8, blue: 0xF5)
-            case .crimson: RGB(red: 0xFF, green: 0x45, blue: 0x60)
-            case .olive: RGB(red: 0x8F, green: 0xD4, blue: 0x00)
-            case .bronze: RGB(red: 0xEF, green: 0xA3, blue: 0x3A)
-            }
-        }
-    }
-
-    public static let count = ColorToken.allCases.count
-
-    public static func color(at index: Int) -> ColorToken {
-        let normalized = ((index % count) + count) % count
-        return ColorToken.allCases[normalized]
-    }
-
-    public static func color(for hostID: UUID) -> ColorToken {
-        color(at: PingScopeIOSAllHostsMonitorPresentation.stableColorIndex(
-            for: hostID,
-            paletteCount: count
-        ))
-    }
-}
+public typealias PingScopeIOSHostIdentityPalette = HostDisplayColorAutomaticPalette
 
 public enum PingScopeIOSAllHostsRingGridPresentation {
     public static let paletteCount = PingScopeIOSHostIdentityPalette.count
@@ -227,10 +153,7 @@ public enum PingScopeIOSAllHostsRingGridPresentation {
                 latencyText: presentation.latencyText,
                 ringProgress: latency.map { min(max($0 / threshold, 0), 1) } ?? 0,
                 status: presentation.displayStatus,
-                colorIndex: PingScopeIOSAllHostsMonitorPresentation.stableColorIndex(
-                    for: row.hostID,
-                    paletteCount: paletteCount
-                ),
+                resolvedColor: row.resolvedColor,
                 ringIndex: ringIndex
             )
         }

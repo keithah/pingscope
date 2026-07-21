@@ -227,7 +227,7 @@ struct PingScopeIOSAllHostsSignalHeroGraphCard: View {
             return RenderSeries(
                 hostID: source.hostID,
                 renderData: source.renderData,
-                color: source.identityColor.swiftUIColor
+                color: source.resolvedColor.swiftUIColor
             )
         }
     }
