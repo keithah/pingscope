@@ -204,6 +204,27 @@ final class BuildGraphOptimizationTests: XCTestCase {
         XCTAssertTrue(shippingRow.contains(".accessibilityLabel(presentation.accessibilityLabel)"))
     }
 
+    func testIOSHostSwitcherUsesStandardTelemetryRowsInSavedOrder() throws {
+        let source = try String(
+            contentsOf: try repositoryRoot().appendingPathComponent("Sources/PingScopeiOS/PingScopeIOSShell.swift"),
+            encoding: .utf8
+        )
+        let switcherStart = try XCTUnwrap(source.range(of: "private var hostSwitcher: some View"))
+        let allHostsRowStart = try XCTUnwrap(
+            source.range(of: "private var allHostsSwitcherRow: some View", range: switcherStart.upperBound..<source.endIndex)
+        )
+        let switcher = source[switcherStart.lowerBound..<allHostsRowStart.lowerBound]
+
+        XCTAssertTrue(switcher.contains("allHostsSwitcherRow"))
+        XCTAssertTrue(switcher.contains("ForEach(hosts)"))
+        XCTAssertTrue(switcher.contains("let cachedRows = allHostsMonitorRows.reduce"))
+        XCTAssertTrue(switcher.contains("let allHostsGraphPresentation = allHostsGraphPresentationMemo.resolve"))
+        XCTAssertTrue(switcher.contains("allHostsRow("))
+        XCTAssertTrue(switcher.contains("action: .focus"))
+        XCTAssertTrue(switcher.contains("isSelected:"))
+        XCTAssertFalse(switcher.contains("showsSparkline: false"))
+    }
+
     func testIOSMonitorSettingsOmitsSessionStatusButKeepsRunControl() throws {
         let source = try String(
             contentsOf: try repositoryRoot().appendingPathComponent("Sources/PingScopeiOS/PingScopeIOSShell.swift"),

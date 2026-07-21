@@ -1254,7 +1254,15 @@ public struct PingScopeIOSRootView: View {
     }
 
     private var hostSwitcher: some View {
-        NavigationStack {
+        let cachedRows = allHostsMonitorRows.reduce(into: [UUID: PingScopeIOSHostRowSnapshot]()) {
+            $0[$1.hostID] = $1
+        }
+        let allHostsGraphPresentation = allHostsGraphPresentationMemo.resolve(
+            series: allHostsMonitorGraphSeries,
+            range: selectedGraphRange,
+            endDate: allHostsPresentationEndDate
+        )
+        return NavigationStack {
             List {
                 Button {
                     onSelectAllHosts()
@@ -1265,16 +1273,29 @@ public struct PingScopeIOSRootView: View {
                 .buttonStyle(.plain)
 
                 ForEach(hosts) { listedHost in
+                    let isSelected = hostScope == .focused && listedHost.id == selectedHostID
+                    let row = cachedRows[listedHost.id] ?? PingScopeIOSHostRowSnapshot(
+                        host: listedHost,
+                        health: isSelected ? health : nil,
+                        samples: isSelected ? samples : []
+                    )
+                    let presentation = PingScopeIOSAllHostsMonitorPresentation.rowPresentation(
+                        for: row,
+                        action: .focus
+                    )
                     Button {
                         onSelectHost(listedHost.id)
                         isHostSwitcherPresented = false
                     } label: {
-                        hostRow(
-                            listedHost,
-                            isActive: hostScope == .focused && listedHost.id == selectedHostID,
-                            showsSparkline: false
+                        allHostsRow(
+                            row,
+                            presentation: presentation,
+                            allHostsGraphPresentation: allHostsGraphPresentation,
+                            isSelected: isSelected
                         )
                     }
+                    .accessibilityLabel(presentation.accessibilityLabel)
+                    .accessibilityHint(presentation.actionAccessibilityHint)
                 }
             }
             .navigationTitle("Switch Host")
@@ -1475,7 +1496,8 @@ public struct PingScopeIOSRootView: View {
     private func allHostsRow(
         _ row: PingScopeIOSHostRowSnapshot,
         presentation: PingScopeIOSAllHostsRowPresentation,
-        allHostsGraphPresentation: PingScopeIOSAllHostsGraphPresentation
+        allHostsGraphPresentation: PingScopeIOSAllHostsGraphPresentation,
+        isSelected: Bool = false
     ) -> some View {
         let color = presentation.resolvedColor.swiftUIColor
         let graphData: PingScopeIOSLatencyGraphData
@@ -1528,6 +1550,12 @@ public struct PingScopeIOSRootView: View {
                     .minimumScaleFactor(0.75)
             }
             .frame(width: 56, alignment: .trailing)
+            if isSelected {
+                Image(systemName: "checkmark")
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundStyle(.blue)
+                    .accessibilityHidden(true)
+            }
         }
         .frame(height: 54)
         .contentShape(Rectangle())

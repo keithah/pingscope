@@ -693,6 +693,76 @@ final class PingScopeIOSMultiHostPresentationTests: XCTestCase {
         )
     }
 
+    func testSwitchHostPresentationKeepsSavedOrderAndLiveCachedUnavailableTelemetry() throws {
+        let selectedHost = HostConfig(
+            displayName: "Zulu",
+            address: "selected.example",
+            displayColor: HostDisplayColor(red: 0.9, green: 0.2, blue: 0.1)
+        )
+        let cachedPeer = HostConfig(
+            displayName: "Alpha",
+            address: "cached.example",
+            displayColor: HostDisplayColor(red: 0.1, green: 0.7, blue: 0.8)
+        )
+        let emptyPeer = HostConfig(displayName: "Middle", address: "empty.example")
+        let selectedSample = PingResult.success(
+            hostID: selectedHost.id,
+            latency: .milliseconds(12),
+            timestamp: Date(timeIntervalSince1970: 1_000)
+        )
+        let cachedSamples = [
+            PingResult.success(
+                hostID: cachedPeer.id,
+                latency: .milliseconds(31),
+                timestamp: Date(timeIntervalSince1970: 990)
+            ),
+            PingResult.success(
+                hostID: cachedPeer.id,
+                latency: .milliseconds(34),
+                timestamp: Date(timeIntervalSince1970: 995)
+            )
+        ]
+        var selectedHealth = HostHealth(hostID: selectedHost.id, thresholds: selectedHost.thresholds)
+        selectedHealth.ingest(selectedSample)
+
+        let focusedPresentation = PingScopeIOSFocusedPeerPresentation(
+            hosts: [selectedHost, cachedPeer, emptyPeer],
+            selectedHostID: selectedHost.id,
+            selectedHealth: selectedHealth,
+            samplesByHost: [
+                selectedHost.id: [selectedSample],
+                cachedPeer.id: cachedSamples,
+                emptyPeer.id: []
+            ]
+        )
+        let rowPresentations = focusedPresentation.rows.map {
+            PingScopeIOSAllHostsMonitorPresentation.rowPresentation(for: $0, action: .focus)
+        }
+        let graph = PingScopeIOSAllHostsMonitorPresentation.graphPresentation(
+            from: focusedPresentation.graphSeries,
+            range: .oneMinute,
+            endDate: Date(timeIntervalSince1970: 1_000)
+        )
+
+        XCTAssertEqual(focusedPresentation.rows.map(\.hostID), [selectedHost.id, cachedPeer.id, emptyPeer.id])
+        XCTAssertEqual(rowPresentations.map(\.latencyText), ["12ms", "34ms", "--ms"])
+        XCTAssertEqual(rowPresentations.map(\.cacheLabel), [nil, "Cached", nil])
+        XCTAssertEqual(
+            rowPresentations.map(\.resolvedColor),
+            [
+                .custom(HostDisplayColor(red: 0.9, green: 0.2, blue: 0.1)),
+                .custom(HostDisplayColor(red: 0.1, green: 0.7, blue: 0.8)),
+                ResolvedHostDisplayColor(hostID: emptyPeer.id, displayColor: nil)
+            ]
+        )
+        XCTAssertEqual(graph.series.map(\.hostID), [selectedHost.id, cachedPeer.id, emptyPeer.id])
+        XCTAssertEqual(
+            graph.graphData(for: cachedPeer.id)?.points.map(\.latencyMilliseconds),
+            [31, 34]
+        )
+        XCTAssertTrue(graph.graphData(for: emptyPeer.id)?.points.isEmpty ?? false)
+    }
+
     func testFocusedPeerTransitionNeutralizesNewSelectionAndCachesOnlyPeersWithRetainedSamples() throws {
         let hostA = HostConfig(displayName: "Host A", address: "a.example")
         let hostB = HostConfig(displayName: "Host B", address: "b.example")
