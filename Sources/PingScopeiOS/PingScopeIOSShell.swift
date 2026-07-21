@@ -464,6 +464,7 @@ public struct PingScopeIOSRootView: View {
     public var allHostRows: [PingScopeIOSHostRowSnapshot]
     public var allHostGraphSeries: [PingScopeIOSHostGraphSeries]
     public var monitorInsights: PingScopeIOSMonitorInsightsPresentation
+    public var connectivityTipsEnabled: Bool
     public var allHostsPresentationEndDate: Date
     public var selectedHostID: UUID
     public var onboardingPresentation: PingScopeIOSOnboardingPresentation
@@ -520,6 +521,7 @@ public struct PingScopeIOSRootView: View {
         allHostRows: [PingScopeIOSHostRowSnapshot] = [],
         allHostGraphSeries: [PingScopeIOSHostGraphSeries] = [],
         monitorInsights: PingScopeIOSMonitorInsightsPresentation = .init(snapshots: []),
+        connectivityTipsEnabled: Bool = false,
         allHostsPresentationEndDate: Date? = nil,
         selectedHostID: UUID? = nil,
         onboardingPresentation: PingScopeIOSOnboardingPresentation = .init(
@@ -588,6 +590,7 @@ public struct PingScopeIOSRootView: View {
         self.allHostRows = allHostRows
         self.allHostGraphSeries = allHostGraphSeries
         self.monitorInsights = monitorInsights
+        self.connectivityTipsEnabled = connectivityTipsEnabled
         self.allHostsPresentationEndDate = allHostsPresentationEndDate ?? resolvedGraphPresentation.renderData.endDate
         self.selectedHostID = resolvedSelectedHostID
         self.onboardingPresentation = onboardingPresentation
@@ -897,12 +900,16 @@ public struct PingScopeIOSRootView: View {
 
     @ViewBuilder
     private var monitorInsightsSection: some View {
-        if monitorInsights.hasContent {
+        let visibility = PingScopeIOSMonitorInsightsVisibility(
+            presentation: monitorInsights,
+            connectivityTipsEnabled: connectivityTipsEnabled
+        )
+        if visibility.hasContent {
             VStack(alignment: .leading, spacing: 10) {
-                if let diagnosis = monitorInsights.diagnosis {
+                if let diagnosis = visibility.diagnosis {
                     PingScopeIOSDiagnosisCard(presentation: diagnosis)
                 }
-                ForEach(monitorInsights.starlink) { presentation in
+                ForEach(visibility.starlink) { presentation in
                     PingScopeIOSStarlinkCard(presentation: presentation)
                 }
             }

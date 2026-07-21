@@ -4,6 +4,31 @@ import PingScopeiOS
 import XCTest
 
 final class IOSNetworkDiagnosisPresentationTests: XCTestCase {
+    func testMonitorInsightsVisibilityHidesDiagnosisButKeepsStarlinkWhenConnectivityTipsAreOff() {
+        let presentation = makeMonitorInsightsWithDiagnosisAndStarlink()
+
+        let visibility = PingScopeIOSMonitorInsightsVisibility(
+            presentation: presentation,
+            connectivityTipsEnabled: false
+        )
+
+        XCTAssertNil(visibility.diagnosis)
+        XCTAssertEqual(visibility.starlink, presentation.starlink)
+        XCTAssertTrue(visibility.hasContent)
+    }
+
+    func testMonitorInsightsVisibilityShowsDiagnosisWhenConnectivityTipsAreOn() {
+        let presentation = makeMonitorInsightsWithDiagnosisAndStarlink()
+
+        let visibility = PingScopeIOSMonitorInsightsVisibility(
+            presentation: presentation,
+            connectivityTipsEnabled: true
+        )
+
+        XCTAssertEqual(visibility.diagnosis, presentation.diagnosis)
+        XCTAssertEqual(visibility.starlink, presentation.starlink)
+    }
+
     func testSharedDiagnosisPresentationDefinesMacAndIOSSemanticsForEveryScope() {
         let cases: [(NetworkPerspectiveDiagnosis, String, NetworkDiagnosisPresentation.Tone, Bool)] = [
             (
@@ -446,5 +471,30 @@ final class IOSNetworkDiagnosisPresentationTests: XCTestCase {
         XCTAssertEqual(diagnosis.verdict, .noData)
         XCTAssertEqual(diagnosis.title, "No cellular-path checks configured")
         XCTAssertEqual(diagnosis.affectedHostIDs, [])
+    }
+
+    private func makeMonitorInsightsWithDiagnosisAndStarlink() -> PingScopeIOSMonitorInsightsPresentation {
+        let host = HostConfig.defaultStarlinkDish
+        let sample = PingResult.success(
+            hostID: host.id,
+            latency: .milliseconds(30),
+            metadata: ProbeMetadata(starlink: StarlinkTelemetry(state: "CONNECTED"))
+        )
+        var health = HostHealth(hostID: host.id, thresholds: host.thresholds)
+        health.ingest(sample)
+        var series = SampleSeries(hostID: host.id)
+        series.append(sample)
+
+        return PingScopeIOSMonitorInsightsPresentation(
+            snapshots: [LiveMonitorSessionSnapshot(host: host, session: nil, health: health, series: series)],
+            diagnose: { _, _, _, _ in
+                NetworkPerspectiveDiagnosis(
+                    scope: .upstream,
+                    title: "Upstream path down",
+                    detail: "Internet checks are unreachable.",
+                    verdict: .upstreamDown
+                )
+            }
+        )
     }
 }

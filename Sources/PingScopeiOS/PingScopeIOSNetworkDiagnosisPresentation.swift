@@ -108,3 +108,20 @@ public struct PingScopeIOSMonitorInsightsPresentation: Equatable, Sendable {
         }
     }
 }
+
+public struct PingScopeIOSMonitorInsightsVisibility: Equatable, Sendable {
+    public let diagnosis: PingScopeIOSDiagnosisPresentation?
+    public let starlink: [PingScopeIOSStarlinkPresentation]
+
+    public init(
+        presentation: PingScopeIOSMonitorInsightsPresentation,
+        connectivityTipsEnabled: Bool
+    ) {
+        diagnosis = connectivityTipsEnabled ? presentation.diagnosis : nil
+        starlink = presentation.starlink
+    }
+
+    public var hasContent: Bool {
+        diagnosis != nil || !starlink.isEmpty
+    }
+}
