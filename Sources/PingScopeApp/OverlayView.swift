@@ -84,20 +84,20 @@ struct OverlayView: View {
     private var ringCompact: some View {
         let presentation = viewModel.presentation
         return HStack(spacing: 10) {
-            PulseHealthRing(progress: ringProgress, color: Color(statusColor: presentation.menuBarState.color), lineWidth: 6)
+            PulseHealthRing(progress: ringProgress, color: focusedRingColor, lineWidth: 6)
                 .frame(width: 58, height: 58)
             VStack(alignment: .leading, spacing: 2) {
                 HStack(alignment: .firstTextBaseline, spacing: 2) {
                     Text(latencyNumberText)
                         .font(.system(size: 24, weight: .semibold, design: .monospaced))
-                        .foregroundStyle(Color(statusColor: presentation.menuBarState.color))
+                        .foregroundStyle(focusedRingColor)
                     Text("ms")
                         .font(.system(size: 11, weight: .semibold, design: .monospaced))
                         .foregroundStyle(.secondary)
                 }
                 Text(presentation.showsAllHosts ? "All Hosts" : presentation.primaryHostName)
                     .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(presentation.showsAllHosts ? Color.secondary : focusedIdentityColor)
                     .lineLimit(1)
             }
             Spacer(minLength: 0)
@@ -114,13 +114,13 @@ struct OverlayView: View {
     private var ringExpanded: some View {
         let presentation = viewModel.presentation
         return HStack(spacing: 12) {
-            PulseHealthRing(progress: ringProgress, color: Color(statusColor: presentation.menuBarState.color), lineWidth: 8)
+            PulseHealthRing(progress: ringProgress, color: focusedRingColor, lineWidth: 8)
                 .frame(width: 76, height: 76)
             VStack(alignment: .leading, spacing: 5) {
                 HStack(alignment: .firstTextBaseline, spacing: 2) {
                     Text(latencyNumberText)
                         .font(.system(size: 28, weight: .semibold, design: .monospaced))
-                        .foregroundStyle(Color(statusColor: presentation.menuBarState.color))
+                        .foregroundStyle(focusedRingColor)
                     if presentation.menuBarState.text.hasSuffix("ms") {
                         Text("ms")
                             .font(.system(size: 12, weight: .semibold, design: .monospaced))
@@ -129,7 +129,7 @@ struct OverlayView: View {
                 }
                 Text(presentation.showsAllHosts ? "All Hosts" : presentation.primaryHostName)
                     .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(presentation.showsAllHosts ? Color.secondary : focusedIdentityColor)
                     .lineLimit(1)
                 HStack(spacing: 10) {
                     Text("avg \(presentation.displayPresentation.primaryStats.averageMilliseconds.map { "\(Int($0.rounded()))ms" } ?? "--")")
@@ -159,7 +159,10 @@ struct OverlayView: View {
                 showsLegend: presentation.showsLegend
             )
         } else {
-            LatencyGraph(graphData: presentation.displayPresentation.primaryGraphData)
+            LatencyGraph(
+                graphData: presentation.displayPresentation.primaryGraphData,
+                color: presentation.displayPresentation.focusedGraphColor?.swiftUIColor ?? .accentColor
+            )
         }
     }
 
@@ -173,7 +176,10 @@ struct OverlayView: View {
                 showsLegend: false
             )
         } else {
-            LatencyGraph(graphData: presentation.displayPresentation.primaryGraphData)
+            LatencyGraph(
+                graphData: presentation.displayPresentation.primaryGraphData,
+                color: presentation.displayPresentation.focusedGraphColor?.swiftUIColor ?? .accentColor
+            )
         }
     }
 
@@ -201,14 +207,14 @@ struct OverlayView: View {
                         .foregroundStyle(.tertiary)
                 }
                 .font(.system(size: 10.5, weight: .medium))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(presentation.showsAllHosts ? Color.secondary : focusedIdentityColor)
             }
             .buttonStyle(.plain)
             .fixedSize(horizontal: false, vertical: true)
         } else {
             Text(presentation.primaryHostName)
                 .font(.system(size: 10.5, weight: .medium))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(focusedIdentityColor)
                 .lineLimit(1)
                 .truncationMode(.tail)
         }
@@ -229,6 +235,19 @@ struct OverlayView: View {
         }
         let threshold = max(presentation.primaryDegradedThresholdMilliseconds, 1)
         return min(max(latest / threshold, 0), 1)
+    }
+
+    private var focusedIdentityColor: Color {
+        viewModel.presentation.displayPresentation.focusedIdentityColor?.swiftUIColor ?? .accentColor
+    }
+
+    private var focusedRingColor: Color {
+        let presentation = viewModel.presentation
+        guard !presentation.showsAllHosts else {
+            return Color(statusColor: presentation.menuBarState.color)
+        }
+        return presentation.displayPresentation.focusedRingColor?.swiftUIColor
+            ?? Color(statusColor: presentation.menuBarState.color)
     }
 
     private var overlayStatus: HealthStatus {

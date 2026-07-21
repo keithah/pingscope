@@ -101,14 +101,16 @@ struct WidgetHostKey: View {
         HStack(alignment: .top, spacing: 6) {
             ForEach(presentation.legend, id: \.hostID) { entry in
                 let health = healthByHostID[entry.hostID]
+                let identityColor = (entry.displayColor ?? .automatic(for: entry.hostID)).swiftUIColor
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 4) {
                         Circle()
-                            .fill((entry.displayColor ?? .automatic(for: entry.hostID)).swiftUIColor)
+                            .fill(identityColor)
                             .frame(width: 7, height: 7)
 
                         Text(entry.displayName)
                             .font(.caption.weight(.medium))
+                            .foregroundStyle(identityColor)
                             .lineLimit(1)
                             .minimumScaleFactor(0.58)
                             .truncationMode(.tail)
@@ -116,7 +118,9 @@ struct WidgetHostKey: View {
 
                     Text(WidgetStatusStyle.latencyText(for: health))
                         .font(.caption2.monospacedDigit())
-                        .foregroundColor(.secondary)
+                        .foregroundStyle(
+                            (entry.latencyIdentityColor ?? entry.displayColor ?? .automatic(for: entry.hostID)).swiftUIColor
+                        )
                         .lineLimit(1)
                         .minimumScaleFactor(0.7)
                 }

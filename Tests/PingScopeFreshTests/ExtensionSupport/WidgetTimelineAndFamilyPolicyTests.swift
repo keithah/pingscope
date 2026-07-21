@@ -132,6 +132,11 @@ final class WidgetTimelineAndFamilyPolicyTests: XCTestCase {
 
         XCTAssertEqual(presentation.legend.map(\.displayColor), [custom, expectedAutomatic])
         XCTAssertEqual(presentation.series.map(\.displayColor), [custom, expectedAutomatic])
+        XCTAssertEqual(presentation.legend.map(\.latencyIdentityColor), [custom, expectedAutomatic])
+        XCTAssertEqual(presentation.legend[0].latencyIdentityColor?.light, custom.light)
+        XCTAssertEqual(presentation.legend[0].latencyIdentityColor?.dark, custom.dark)
+        XCTAssertEqual(presentation.legend[1].latencyIdentityColor?.light, expectedAutomatic.light)
+        XCTAssertEqual(presentation.legend[1].latencyIdentityColor?.dark, expectedAutomatic.dark)
     }
 
     func testWidgetAutomaticColorsMatchEverySharedAdaptivePaletteToken() {

@@ -44,14 +44,16 @@ struct RecentSamplesView: View {
 struct LatencyGraph: View {
     let graphData: LatencyGraphData
     var showsAxes = false
+    var color: Color = .accentColor
 
-    init(samples: [PingResult], showsAxes: Bool = false) {
-        self.init(graphData: LatencyGraphData(samples: samples), showsAxes: showsAxes)
+    init(samples: [PingResult], showsAxes: Bool = false, color: Color = .accentColor) {
+        self.init(graphData: LatencyGraphData(samples: samples), showsAxes: showsAxes, color: color)
     }
 
-    init(graphData: LatencyGraphData, showsAxes: Bool = false) {
+    init(graphData: LatencyGraphData, showsAxes: Bool = false, color: Color = .accentColor) {
         self.graphData = graphData
         self.showsAxes = showsAxes
+        self.color = color
     }
 
     var body: some View {
@@ -112,7 +114,7 @@ struct LatencyGraph: View {
                     fillPath.addLine(to: CGPoint(x: segment.points[0].x, y: plotTop + plotHeight))
                     fillPath.closeSubpath()
                     context.fill(fillPath, with: .linearGradient(
-                        Gradient(colors: [Color.accentColor.opacity(0.28), Color.accentColor.opacity(0)]),
+                        Gradient(colors: [color.opacity(0.28), color.opacity(0)]),
                         startPoint: CGPoint(x: 0, y: plotTop),
                         endPoint: CGPoint(x: 0, y: plotTop + plotHeight)
                     ))
@@ -132,7 +134,7 @@ struct LatencyGraph: View {
                 for segment in lineSegments {
                     context.stroke(
                         Path(segment.path),
-                        with: .color(.accentColor),
+                        with: .color(color),
                         style: StrokeStyle(lineWidth: 2.2, lineCap: .round, lineJoin: .round)
                     )
                 }

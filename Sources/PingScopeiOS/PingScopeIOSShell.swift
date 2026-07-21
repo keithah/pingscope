@@ -13,6 +13,16 @@ public enum PingScopeIOSRunControlAction: Equatable, Sendable {
     }
 }
 
+public struct PingScopeIOSFocusedSurfaceColors: Equatable, Sendable {
+    public let identityColor: ResolvedHostDisplayColor
+    public let ringColor: ResolvedHostDisplayColor?
+
+    public init(host: HostConfig) {
+        identityColor = ResolvedHostDisplayColor(hostID: host.id, displayColor: host.displayColor)
+        ringColor = identityColor
+    }
+}
+
 public enum PingScopeIOSLiveActivityDecision: Equatable, Sendable {
     case none
     case update
@@ -944,7 +954,8 @@ public struct PingScopeIOSRootView: View {
     }
 
     private func focusedHostReadingRow(scrubbedLatencyMilliseconds: Double?) -> some View {
-        HStack(alignment: .top, spacing: 12) {
+        let identityColor = PingScopeIOSFocusedSurfaceColors(host: host).identityColor.swiftUIColor
+        return HStack(alignment: .top, spacing: 12) {
             Button {
                 isHostSwitcherPresented = true
             } label: {
@@ -952,11 +963,11 @@ public struct PingScopeIOSRootView: View {
                     HStack(spacing: 5) {
                         Text(host.displayName)
                             .font(.system(size: 19, weight: .semibold))
-                            .foregroundStyle(.blue)
+                            .foregroundStyle(identityColor)
                             .lineLimit(1)
                         Image(systemName: "chevron.up.chevron.down")
                             .font(.system(size: 11, weight: .bold))
-                            .foregroundStyle(.blue.opacity(0.72))
+                            .foregroundStyle(identityColor.opacity(0.72))
                     }
                     Text(endpointText(host))
                         .font(.system(size: 12, weight: .medium, design: .monospaced))
@@ -971,7 +982,8 @@ public struct PingScopeIOSRootView: View {
             VStack(alignment: .trailing, spacing: 7) {
                 latencyReading(
                     milliseconds: scrubbedLatencyMilliseconds ?? health.latestResult?.latency?.milliseconds,
-                    size: 34
+                    size: 34,
+                    identityColor: identityColor
                 )
                 PingScopeIOSStatusPill(status: health.status)
             }
@@ -1047,6 +1059,8 @@ public struct PingScopeIOSRootView: View {
                     progress: ringProgress(
                         for: scrubbedLatencyMilliseconds.wrappedValue ?? health.latestResult?.latency?.milliseconds
                     ),
+                    identityColor: PingScopeIOSFocusedSurfaceColors(host: host).ringColor?.swiftUIColor
+                        ?? Color(iosStatusColor: health.status.iosStatusColor),
                     onHostSwitch: {
                         isHostSwitcherPresented = true
                     }
@@ -1662,10 +1676,15 @@ public struct PingScopeIOSRootView: View {
             .foregroundStyle(.secondary)
     }
 
-    private func latencyReading(milliseconds: Double?, size: CGFloat) -> some View {
+    private func latencyReading(
+        milliseconds: Double?,
+        size: CGFloat,
+        identityColor: Color = .primary
+    ) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 3) {
             Text(milliseconds.map { "\(Int($0.rounded()))" } ?? "--")
                 .font(.system(size: size, weight: .semibold, design: .monospaced))
+                .foregroundStyle(identityColor)
             Text("ms")
                 .font(.system(size: size * 0.42, weight: .semibold, design: .monospaced))
                 .foregroundStyle(.secondary)
@@ -1766,6 +1785,7 @@ private struct PingScopeIOSRingHero: View {
     let status: HealthStatus
     let statusLabel: String
     let progress: Double
+    let identityColor: Color
     let onHostSwitch: () -> Void
 
     var body: some View {
@@ -1774,12 +1794,13 @@ private struct PingScopeIOSRingHero: View {
                 .stroke(Color.primary.opacity(0.10), lineWidth: 16)
             Circle()
                 .trim(from: 0, to: min(max(progress, 0), 1))
-                .stroke(ringColor, style: StrokeStyle(lineWidth: 16, lineCap: .round, lineJoin: .round))
+                .stroke(identityColor, style: StrokeStyle(lineWidth: 16, lineCap: .round, lineJoin: .round))
                 .rotationEffect(.degrees(-90))
             VStack(spacing: 4) {
                 HStack(alignment: .firstTextBaseline, spacing: 3) {
                     Text(latencyMilliseconds.map { "\(Int($0.rounded()))" } ?? "--")
                         .font(.system(size: 46, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(identityColor)
                         .minimumScaleFactor(0.7)
                     Text("ms")
                         .font(.system(size: 17, weight: .semibold, design: .monospaced))
@@ -1787,7 +1808,7 @@ private struct PingScopeIOSRingHero: View {
                 }
                 Text(statusLabel)
                     .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(ringColor)
+                    .foregroundStyle(healthColor)
                     .lineLimit(1)
             }
         }
@@ -1801,7 +1822,7 @@ private struct PingScopeIOSRingHero: View {
         .accessibilityLabel("\(statusLabel), \(latencyMilliseconds.map { "\(Int($0.rounded())) milliseconds" } ?? "no latency")")
     }
 
-    private var ringColor: Color {
+    private var healthColor: Color {
         Color(iosStatusColor: status.iosStatusColor)
     }
 }

@@ -84,6 +84,8 @@ public struct PingScopeLiveActivityRowPresentation: Equatable, Sendable {
         let latencyDescription = latencyMilliseconds.map { "\($0) milliseconds" } ?? "Latency unavailable"
         return "\(displayName), \(endpointCaption), \(statusAccessibilityDescription), \(latencyDescription)"
     }
+
+    public var latencyIdentityColor: WidgetGraphDisplayColor? { identityColor }
 }
 
 public enum PingScopeLiveActivityPresentation {

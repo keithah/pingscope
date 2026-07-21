@@ -3,6 +3,42 @@ import XCTest
 @testable import PingScopeCore
 
 final class LatencyGraphPresentationTests: XCTestCase {
+    func testFocusedMacGraphAndRingUseCustomAndAutomaticIdentityColorsInBothAppearances() {
+        let hosts = [
+            HostConfig(
+                id: UUID(uuidString: "00000000-0000-0000-0000-000000000081")!,
+                displayName: "Custom",
+                address: "custom.example",
+                displayColor: HostDisplayColor(red: 0.21, green: 0.43, blue: 0.76)
+            ),
+            HostConfig(
+                id: UUID(uuidString: "00000000-0000-0000-0000-000000000082")!,
+                displayName: "Automatic",
+                address: "automatic.example"
+            ),
+        ]
+
+        for host in hosts {
+            let presentation = PingScopeDisplayPresentation(
+                snapshot: RuntimeSnapshot(hosts: [host], primaryHostID: host.id, healthByHost: [:], samplesByHost: [:]),
+                selectedRange: .oneMinute,
+                visibleHistorySamples: [],
+                includesAllHosts: false,
+                presenter: DisplayStatePresenter(),
+                now: Date(timeIntervalSince1970: 1_000)
+            )
+            let expected = ResolvedHostDisplayColor(hostID: host.id, displayColor: host.displayColor)
+
+            XCTAssertEqual(presentation.focusedIdentityColor, expected)
+            XCTAssertEqual(presentation.focusedGraphColor, expected)
+            XCTAssertEqual(presentation.focusedRingColor, expected)
+            for appearance in [HostDisplayColorAppearance.light, .dark] {
+                XCTAssertEqual(presentation.focusedGraphColor?.components(for: appearance), expected.components(for: appearance))
+                XCTAssertEqual(presentation.focusedRingColor?.components(for: appearance), expected.components(for: appearance))
+            }
+        }
+    }
+
     @MainActor
     func testDisabledCustomColorReachesAllHostStatusRowWithoutGraphSeries() {
         let custom = HostDisplayColor(red: 0.75, green: 0.15, blue: 0.65)

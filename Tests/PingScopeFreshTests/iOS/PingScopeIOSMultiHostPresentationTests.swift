@@ -3,6 +3,33 @@ import XCTest
 @testable import PingScopeiOS
 
 final class PingScopeIOSMultiHostPresentationTests: XCTestCase {
+    func testFocusedIOSRingUsesCustomAndAutomaticIdentityColorsInBothAppearances() {
+        let hosts = [
+            HostConfig(
+                id: UUID(uuidString: "00000000-0000-0000-0000-000000000091")!,
+                displayName: "Custom",
+                address: "custom.example",
+                displayColor: HostDisplayColor(red: 0.18, green: 0.47, blue: 0.79)
+            ),
+            HostConfig(
+                id: UUID(uuidString: "00000000-0000-0000-0000-000000000092")!,
+                displayName: "Automatic",
+                address: "automatic.example"
+            ),
+        ]
+
+        for host in hosts {
+            let colors = PingScopeIOSFocusedSurfaceColors(host: host)
+            let expected = ResolvedHostDisplayColor(hostID: host.id, displayColor: host.displayColor)
+
+            XCTAssertEqual(colors.identityColor, expected)
+            XCTAssertEqual(colors.ringColor, expected)
+            for appearance in [HostDisplayColorAppearance.light, .dark] {
+                XCTAssertEqual(colors.ringColor?.components(for: appearance), expected.components(for: appearance))
+            }
+        }
+    }
+
     @MainActor
     func testGraphMemoInvalidatesWhenOnlyResolvedColorChanges() {
         let hostID = UUID(uuidString: "00000000-0000-0000-0000-000000000051")!

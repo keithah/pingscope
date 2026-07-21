@@ -21,6 +21,12 @@ public struct WidgetGraphDisplayColor: Codable, Equatable, Sendable {
         self.dark = dark
     }
 
+    // The widget and Live Activity extensions deliberately depend only on this
+    // small support target. Depending on PingScopeCore here would also pull the
+    // app runtime/storage graph (including SQLite) into both extensions. Keep
+    // this platform-neutral resolver byte-for-byte aligned with
+    // HostDisplayColorAutomaticPalette; the cross-target parity test covers
+    // every bucket in both light and dark appearances.
     public static func automatic(for hostID: UUID) -> WidgetGraphDisplayColor {
         let light: [(UInt8, UInt8, UInt8)] = [
             (0x00, 0x68, 0xD9), (0xD9, 0x1D, 0x5B), (0x00, 0x8C, 0x78),
@@ -90,6 +96,8 @@ public struct WidgetMultiHostGraphPresentation: Equatable, Sendable {
         public let hostID: UUID
         public let displayName: String
         public let displayColor: WidgetGraphDisplayColor?
+
+        public var latencyIdentityColor: WidgetGraphDisplayColor? { displayColor }
     }
 
     public struct Series: Equatable, Sendable {

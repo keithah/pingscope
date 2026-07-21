@@ -144,9 +144,17 @@ final class PingScopeLiveActivityTests: XCTestCase {
             let attributes = PingScopeLiveActivityAttributes(host: host, duration: .continuous)
             let snapshot = PingScopeIOSHostRowSnapshot(host: host, health: nil)
             let row = PingScopeLiveActivityHostRow(snapshot: snapshot)
+            let state = makeContentState(hostRows: [row])
+            let presentation = PingScopeLiveActivityPresentation.rows(
+                attributes: attributes,
+                contentState: state
+            ).first
 
             assertIdentityColor(attributes.identityColor, equals: expected)
             assertIdentityColor(row.identityColor, equals: expected)
+            XCTAssertEqual(presentation?.latencyIdentityColor, row.identityColor)
+            XCTAssertEqual(presentation?.latencyIdentityColor?.light, row.identityColor.light)
+            XCTAssertEqual(presentation?.latencyIdentityColor?.dark, row.identityColor.dark)
         }
     }
 

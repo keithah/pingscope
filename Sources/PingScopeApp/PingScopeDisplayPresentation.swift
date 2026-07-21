@@ -74,6 +74,9 @@ struct PingScopeDisplayPresentation {
     let primaryStats: SampleStats
     let latestStarlinkTelemetry: StarlinkTelemetry?
     let recentVisibleSamples: [PingResult]
+    let focusedIdentityColor: ResolvedHostDisplayColor?
+    let focusedGraphColor: ResolvedHostDisplayColor?
+    let focusedRingColor: ResolvedHostDisplayColor?
 
     init() {
         self.visibleHistorySamples = []
@@ -85,6 +88,9 @@ struct PingScopeDisplayPresentation {
         self.primaryStats = SampleStats(samples: [])
         self.latestStarlinkTelemetry = nil
         self.recentVisibleSamples = []
+        self.focusedIdentityColor = nil
+        self.focusedGraphColor = nil
+        self.focusedRingColor = nil
     }
 
     init(
@@ -146,6 +152,12 @@ struct PingScopeDisplayPresentation {
             includesAllHosts: includesAllHosts
         )
         self.recentVisibleSamples = Array(preparation.visibleSamples.suffix(8).reversed())
+        let focusedIdentityColor = snapshot.primaryHost.map {
+            ResolvedHostDisplayColor(hostID: $0.id, displayColor: $0.displayColor)
+        }
+        self.focusedIdentityColor = focusedIdentityColor
+        self.focusedGraphColor = focusedIdentityColor
+        self.focusedRingColor = focusedIdentityColor
     }
 
     private static func latestStarlinkTelemetry(

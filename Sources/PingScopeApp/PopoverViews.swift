@@ -124,6 +124,7 @@ struct StatusPopoverView: View {
                 VStack(alignment: .leading, spacing: 1) {
                     Text(presentation.popoverShowsAllHosts ? "All Hosts" : (presentation.primaryHost?.displayName ?? "No Host"))
                         .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(presentation.popoverShowsAllHosts ? Color.primary : identityColor)
                         .lineLimit(1)
                     if !presentation.popoverShowsAllHosts, presentation.displayMode == .ring {
                         Text(hostSubtitle)
@@ -242,10 +243,11 @@ struct StatusPopoverView: View {
                     VStack(spacing: 2) {
                         Text(latencyNumberText)
                             .font(.system(size: 44, weight: .semibold, design: .monospaced))
+                            .foregroundStyle(ringColor)
                             .minimumScaleFactor(0.7)
                         Text(presentation.selectedRangeStatusLabel)
                             .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(ringColor)
+                            .foregroundStyle(healthColor)
                             .lineLimit(1)
                     }
                 }
@@ -304,7 +306,11 @@ struct StatusPopoverView: View {
                 showsLegend: false
             )
         } else {
-            LatencyGraph(graphData: presentation.displayPresentation.primaryGraphData, showsAxes: true)
+            LatencyGraph(
+                graphData: presentation.displayPresentation.primaryGraphData,
+                showsAxes: true,
+                color: presentation.displayPresentation.focusedGraphColor?.swiftUIColor ?? .accentColor
+            )
         }
     }
 
@@ -358,16 +364,16 @@ struct StatusPopoverView: View {
     private var latencyStatusBadge: some View {
         HStack(alignment: .firstTextBaseline, spacing: 5) {
             Circle()
-                .fill(ringColor)
+                .fill(healthColor)
                 .frame(width: 8, height: 8)
             Text(viewModel.presentation.selectedRangeState.text)
                 .font(.system(size: 14, weight: .semibold, design: .monospaced))
-                .foregroundStyle(ringColor)
+                .foregroundStyle(healthColor)
                 .lineLimit(1)
         }
         .padding(.horizontal, 11)
         .padding(.vertical, 7)
-        .background(ringColor.opacity(0.16), in: Capsule())
+        .background(healthColor.opacity(0.16), in: Capsule())
         .accessibilityLabel(viewModel.presentation.selectedRangeState.accessibilityLabel)
     }
 
@@ -432,6 +438,7 @@ struct StatusPopoverView: View {
         HStack(alignment: .firstTextBaseline, spacing: 3) {
             Text(latencyNumberText)
                 .font(.system(size: size, weight: .semibold, design: .monospaced))
+                .foregroundStyle(identityColor)
                 .minimumScaleFactor(0.75)
             if viewModel.presentation.selectedRangeState.text.hasSuffix("ms") {
                 Text("ms")
@@ -443,6 +450,14 @@ struct StatusPopoverView: View {
     }
 
     private var ringColor: Color {
+        viewModel.presentation.displayPresentation.focusedRingColor?.swiftUIColor ?? healthColor
+    }
+
+    private var identityColor: Color {
+        viewModel.presentation.displayPresentation.focusedIdentityColor?.swiftUIColor ?? .accentColor
+    }
+
+    private var healthColor: Color {
         Color(statusColor: viewModel.presentation.selectedRangeState.color)
     }
 
