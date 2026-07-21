@@ -150,6 +150,30 @@ final class BuildGraphOptimizationTests: XCTestCase {
         XCTAssertTrue(extensionSource.contains("identityColor(for: row.identityColor)"))
     }
 
+    func testEverySatisfiedIOSPathUpdateUsesGatewayHostUpdateDecision() throws {
+        let source = try String(
+            contentsOf: try repositoryRoot().appendingPathComponent("Sources/PingScopeiOSApp/PingScopeIOSApp.swift"),
+            encoding: .utf8
+        )
+        XCTAssertEqual(source.components(separatedBy: "pathMonitor.pathUpdateHandler =").count - 1, 1)
+
+        let handlerStart = try XCTUnwrap(source.range(of: "pathMonitor.pathUpdateHandler ="))
+        let handlerEnd = try XCTUnwrap(
+            source.range(of: "pathMonitor.start(queue:", range: handlerStart.upperBound..<source.endIndex)
+        )
+        let handler = source[handlerStart.lowerBound..<handlerEnd.lowerBound]
+        let satisfiedGuard = try XCTUnwrap(handler.range(of: "guard path.status == .satisfied else { return }"))
+        let refresh = try XCTUnwrap(handler.range(of: "model.refreshDefaultGatewayHost(", range: satisfiedGuard.upperBound..<handler.endIndex))
+        XCTAssertLessThan(satisfiedGuard.lowerBound, refresh.lowerBound)
+
+        let decisionStart = try XCTUnwrap(source.range(of: "private func refreshDefaultGatewayHost("))
+        let decisionEnd = try XCTUnwrap(
+            source.range(of: "private var defaultGatewayHostIndex:", range: decisionStart.upperBound..<source.endIndex)
+        )
+        let decisionRoute = source[decisionStart.lowerBound..<decisionEnd.lowerBound]
+        XCTAssertTrue(decisionRoute.contains("sessionModel.gatewayHostUpdate("))
+    }
+
     func testIOSFocusedLaunchHydratesAndMarksPeerRowsCachedWithinBoundedHistory() throws {
         let root = try repositoryRoot()
         let source = try String(

@@ -2183,6 +2183,90 @@ final class LiveMonitorSessionControllerTests: XCTestCase {
         XCTAssertNil(PingScopeIOSGatewayDetector.likelyGatewayAddress(fromIPv4Address: "not-an-ip"))
     }
 
+    @MainActor
+    func testAppGatewayUpdatePreservesSavedHostIdentitySettingsOrderAndPrimarySelection() throws {
+        let gatewayID = UUID()
+        let displayColor = HostDisplayColor(red: 0.17, green: 0.42, blue: 0.73)
+        let leadingHost = HostConfig(id: UUID(), displayName: "First", address: "1.1.1.1")
+        let savedGateway = HostConfig(
+            id: gatewayID,
+            displayName: "Default Gateway",
+            address: "192.168.20.1",
+            tier: .localGateway,
+            method: .udp,
+            port: 5353,
+            interval: .milliseconds(1_250),
+            timeout: .milliseconds(750),
+            thresholds: LatencyThresholds(degradedMilliseconds: 37, downAfterFailures: 5),
+            isEnabled: false,
+            notifications: .muted,
+            displayColor: displayColor
+        )
+        let trailingHost = HostConfig(id: UUID(), displayName: "Last", address: "8.8.8.8")
+        let originalHosts = [leadingHost, savedGateway, trailingHost]
+        let detectedAddress = try XCTUnwrap(
+            PingScopeIOSGatewayDetector.likelyGatewayAddress(fromIPv4Address: "192.168.88.42")
+        )
+        let sessionModel = PingScopeIOSAppSessionModel(coordinator: PingScopeIOSMultiHostSessionCoordinator())
+
+        let update = sessionModel.gatewayHostUpdate(
+            hosts: originalHosts,
+            selectedHostID: gatewayID,
+            detectedHost: HostConfig.defaultGatewayHost(address: detectedAddress),
+            shouldCreateIfMissing: false,
+            shouldSelect: false
+        )
+
+        XCTAssertEqual(update.change, .updated(index: 1, previousAddress: "192.168.20.1"))
+        XCTAssertEqual(update.selectedHostID, gatewayID, "The selected/primary gateway must remain primary.")
+        XCTAssertEqual(update.hosts.map(\.id), originalHosts.map(\.id), "Saved order and identities must be exact.")
+        XCTAssertEqual(update.hosts[0], leadingHost)
+        XCTAssertEqual(update.hosts[2], trailingHost)
+
+        let updatedGateway = update.hosts[1]
+        XCTAssertEqual(updatedGateway.address, "192.168.88.1")
+        XCTAssertEqual(updatedGateway.id, savedGateway.id)
+        XCTAssertEqual(updatedGateway.displayName, savedGateway.displayName)
+        XCTAssertEqual(updatedGateway.tier, savedGateway.tier)
+        XCTAssertEqual(updatedGateway.displayColor, displayColor)
+        XCTAssertEqual(updatedGateway.notifications, .muted)
+        XCTAssertFalse(updatedGateway.isEnabled)
+        XCTAssertEqual(updatedGateway.method, .udp)
+        XCTAssertEqual(updatedGateway.port, 5353)
+        XCTAssertEqual(updatedGateway.interval, .milliseconds(1_250))
+        XCTAssertEqual(updatedGateway.timeout, .milliseconds(750))
+        XCTAssertEqual(updatedGateway.thresholds, savedGateway.thresholds)
+    }
+
+    @MainActor
+    func testAppGatewayUpdateLeavesSavedGatewayUntouchedWhenDetectorRejectsLinkLocalCandidate() {
+        let gateway = HostConfig.defaultGatewayHost(address: "192.168.20.1")
+        let originalHosts = [
+            HostConfig(id: UUID(), displayName: "First", address: "1.1.1.1"),
+            gateway,
+            HostConfig(id: UUID(), displayName: "Last", address: "8.8.8.8")
+        ]
+        let rejectedAddress = PingScopeIOSGatewayDetector.likelyGatewayAddress(
+            fromIPv4Address: "169.254.44.9"
+        )
+        let detectedHost = rejectedAddress.map(HostConfig.defaultGatewayHost(address:))
+        let sessionModel = PingScopeIOSAppSessionModel(coordinator: PingScopeIOSMultiHostSessionCoordinator())
+
+        let update = sessionModel.gatewayHostUpdate(
+            hosts: originalHosts,
+            selectedHostID: gateway.id,
+            detectedHost: detectedHost,
+            shouldCreateIfMissing: false,
+            shouldSelect: false
+        )
+
+        XCTAssertNil(rejectedAddress)
+        XCTAssertEqual(update.change, .unavailable)
+        XCTAssertEqual(update.hosts, originalHosts)
+        XCTAssertEqual(update.hosts[1].address, "192.168.20.1")
+        XCTAssertEqual(update.selectedHostID, gateway.id)
+    }
+
     func testBackgroundRuntimeEndsPreviousTaskWhenBeginningAgain() async {
         let client = RecordingBackgroundTaskClient()
         let runtime = LiveMonitorBackgroundRuntime(client: client)

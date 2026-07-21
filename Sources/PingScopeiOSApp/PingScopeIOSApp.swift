@@ -1302,29 +1302,36 @@ private final class PingScopeIOSAppModel: ObservableObject {
         statusVerb: String,
         context: LifecycleContext? = nil
     ) async -> Bool {
-        guard var detectedHost = await gatewayDetector.detect() else {
-            guard isCurrentLifecycle(context) else { return false }
+        let detectedHost = await gatewayDetector.detect()
+        guard isCurrentLifecycle(context) else { return false }
+
+        if let detectedHost {
+            guard detectedHost.address != lastGatewayAddress || shouldCreateIfMissing else {
+                return true
+            }
+            lastGatewayAddress = detectedHost.address
+        }
+
+        let normalizedDetectedHost = detectedHost.map(BuildFlavor.appStore.normalizedHost)
+        let update = sessionModel.gatewayHostUpdate(
+            hosts: hosts,
+            selectedHostID: snapshot.host.id,
+            detectedHost: normalizedDetectedHost,
+            shouldCreateIfMissing: shouldCreateIfMissing,
+            shouldSelect: shouldSelect
+        )
+        switch update.change {
+        case .unavailable:
             if shouldCreateIfMissing || hasDefaultGatewayHost {
                 gatewayDetectionText = "No default gateway exposed by iOS"
             }
             return true
-        }
-        guard isCurrentLifecycle(context) else { return false }
-
-        guard detectedHost.address != lastGatewayAddress || shouldCreateIfMissing else {
+        case .unchanged:
             return true
-        }
-        lastGatewayAddress = detectedHost.address
-
-        if let index = defaultGatewayHostIndex {
-            var updatedHost = hosts[index]
-            guard updatedHost.address != detectedHost.address || shouldSelect else {
-                return true
-            }
-            let previousAddress = updatedHost.address
-            updatedHost.address = detectedHost.address
-            hosts[index] = updatedHost
-            if hostScope == .allHosts, snapshot.host.id == updatedHost.id {
+        case let .updated(index, previousAddress):
+            hosts = update.hosts
+            let updatedHost = hosts[index]
+            if hostScope == .allHosts, update.selectedHostID == updatedHost.id {
                 replaceRememberedFocusedHost(updatedHost)
             }
             persistHostSelection()
@@ -1333,7 +1340,7 @@ private final class PingScopeIOSAppModel: ObservableObject {
                 guard await reconcileAllHostsAndRestorePostconditions(context: context) else {
                     return false
                 }
-            } else if snapshot.host.id == updatedHost.id || shouldSelect {
+            } else if update.selectedHostID == updatedHost.id || shouldSelect {
                 await switchToHostAsync(
                     updatedHost,
                     restartDuration: activeRestartDuration,
@@ -1345,23 +1352,27 @@ private final class PingScopeIOSAppModel: ObservableObject {
 
             gatewayDetectionText = "Default gateway \(statusVerb): \(previousAddress) -> \(updatedHost.address)"
             return true
-        }
-
-        guard shouldCreateIfMissing else { return true }
-        detectedHost = BuildFlavor.appStore.normalizedHost(detectedHost)
-        hosts.append(detectedHost)
-        if hostScope == .allHosts {
-            persistHostSelection()
-            guard await reconcileAllHostsAndRestorePostconditions(context: context) else {
-                return false
+        case .created:
+            hosts = update.hosts
+            guard let createdHost = update.affectedHost else { return false }
+            if hostScope == .allHosts {
+                persistHostSelection()
+                guard await reconcileAllHostsAndRestorePostconditions(context: context) else {
+                    return false
+                }
+            } else {
+                hostStore.save(hosts: hosts, selectedHostID: createdHost.id, hostScope: .focused)
+                await switchToHostAsync(
+                    createdHost,
+                    restartDuration: activeRestartDuration,
+                    saveSelection: true,
+                    context: context
+                )
+                guard isCurrentLifecycle(context) else { return false }
             }
-        } else {
-            hostStore.save(hosts: hosts, selectedHostID: detectedHost.id, hostScope: .focused)
-            await switchToHostAsync(detectedHost, restartDuration: activeRestartDuration, saveSelection: true, context: context)
-            guard isCurrentLifecycle(context) else { return false }
+            gatewayDetectionText = "\(createdHost.address) \(statusVerb)"
+            return true
         }
-        gatewayDetectionText = "\(detectedHost.address) \(statusVerb)"
-        return true
     }
 
     private var defaultGatewayHostIndex: Array<HostConfig>.Index? {

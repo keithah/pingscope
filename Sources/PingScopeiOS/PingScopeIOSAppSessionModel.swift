@@ -1,6 +1,28 @@
 import Foundation
 import PingScopeCore
 
+public enum PingScopeIOSGatewayHostUpdateChange: Equatable, Sendable {
+    case unavailable
+    case unchanged
+    case updated(index: Int, previousAddress: String)
+    case created(index: Int)
+}
+
+public struct PingScopeIOSGatewayHostUpdate: Equatable, Sendable {
+    public let hosts: [HostConfig]
+    public let selectedHostID: UUID?
+    public let change: PingScopeIOSGatewayHostUpdateChange
+
+    public var affectedHost: HostConfig? {
+        let index: Int? = switch change {
+        case let .updated(index, _), let .created(index): index
+        case .unavailable, .unchanged: nil
+        }
+        guard let index, hosts.indices.contains(index) else { return nil }
+        return hosts[index]
+    }
+}
+
 /// The session-owning portion of the iOS app model. UIKit presentation state
 /// passes through to this type so tests exercise the shipping lifecycle path.
 @MainActor
@@ -9,6 +31,56 @@ public final class PingScopeIOSAppSessionModel {
 
     public init(coordinator: PingScopeIOSMultiHostSessionCoordinator) {
         self.coordinator = coordinator
+    }
+
+    /// Decides the persisted host-list mutation for a gateway detection while
+    /// retaining the saved host identity, settings, order, and selection.
+    public func gatewayHostUpdate(
+        hosts: [HostConfig],
+        selectedHostID: UUID?,
+        detectedHost: HostConfig?,
+        shouldCreateIfMissing: Bool,
+        shouldSelect: Bool
+    ) -> PingScopeIOSGatewayHostUpdate {
+        guard let detectedHost else {
+            return PingScopeIOSGatewayHostUpdate(
+                hosts: hosts,
+                selectedHostID: selectedHostID,
+                change: .unavailable
+            )
+        }
+
+        guard let index = hosts.firstIndex(where: \.isDefaultGateway) else {
+            guard shouldCreateIfMissing else {
+                return PingScopeIOSGatewayHostUpdate(
+                    hosts: hosts,
+                    selectedHostID: selectedHostID,
+                    change: .unchanged
+                )
+            }
+            return PingScopeIOSGatewayHostUpdate(
+                hosts: hosts + [detectedHost],
+                selectedHostID: shouldSelect ? detectedHost.id : selectedHostID,
+                change: .created(index: hosts.endIndex)
+            )
+        }
+
+        let previousAddress = hosts[index].address
+        guard previousAddress != detectedHost.address || shouldSelect else {
+            return PingScopeIOSGatewayHostUpdate(
+                hosts: hosts,
+                selectedHostID: selectedHostID,
+                change: .unchanged
+            )
+        }
+
+        var updatedHosts = hosts
+        updatedHosts[index].address = detectedHost.address
+        return PingScopeIOSGatewayHostUpdate(
+            hosts: updatedHosts,
+            selectedHostID: selectedHostID,
+            change: .updated(index: index, previousAddress: previousAddress)
+        )
     }
 
     @discardableResult
