@@ -220,6 +220,7 @@ struct PingScopeIOSApp: App {
                 }
             )
             .onAppear {
+                model.activateHistoryLocation()
                 model.handlePendingIntentAction()
                 model.startInitialSessionIfNeeded()
             }
@@ -893,6 +894,10 @@ private final class PingScopeIOSAppModel: ObservableObject {
             guard model.isCurrentLifecycle(context) else { return }
             model.initialSessionCoordinator.markInitialSessionStarted()
         }
+    }
+
+    func activateHistoryLocation() {
+        historyLocationService.activate()
     }
 
     func handlePendingIntentAction() {

@@ -9,26 +9,64 @@ final class HistoryLocationService {
 
     let snapshotStore: PingScopeIOSHistoryLocationSnapshotStore
     private(set) var authorization: PingScopeIOSHistoryLocationAuthorization
-    private let controller: HistoryLocationController
+    private var controller: HistoryLocationController?
     private var stateMachine: PingScopeIOSHistoryLocationStateMachine
+    private var activationTask: Task<Void, Never>?
     private var keepAliveEnabled = false
     private var taggingEnabled = false
     private var monitoringActive = false
 
     init(snapshotStore: PingScopeIOSHistoryLocationSnapshotStore = .init()) {
         self.snapshotStore = snapshotStore
-        let controller = HistoryLocationController(snapshotStore: snapshotStore)
-        self.controller = controller
-        let authorization = controller.authorization
+        let authorization = PingScopeIOSHistoryLocationAuthorization.undetermined
         self.authorization = authorization
         self.stateMachine = PingScopeIOSHistoryLocationStateMachine(authorization: authorization)
+        self.controller = nil
+        handle(.authorizationChanged(authorization))
+    }
+
+    func activate() {
+        guard activationTask == nil, controller == nil else { return }
+        activationTask = Task { [weak self] in
+            // Core Location may synchronously wait on locationd here. Keep that
+            // XPC wait off the main actor so scene creation cannot hit the watchdog.
+            let status = await Task.detached {
+                CLLocationManager.authorizationStatus()
+            }.value
+            guard !Task.isCancelled else { return }
+            self?.applyDiscoveredAuthorization(status)
+        }
+    }
+
+    private func ensureController() {
+        guard controller == nil else { return }
+        let controller = HistoryLocationController(snapshotStore: snapshotStore)
         controller.onAuthorizationChange = { [weak self] authorization in
             self?.handle(.authorizationChanged(authorization))
         }
         controller.onError = { [weak self] message in
             self?.onStatusChange?(message)
         }
-        handle(.authorizationChanged(controller.authorization))
+        self.controller = controller
+    }
+
+    private func applyDiscoveredAuthorization(_ status: CLAuthorizationStatus) {
+        let authorization = Self.authorization(from: status)
+        if authorization == .whenInUse || authorization == .always {
+            ensureController()
+        }
+        handle(.authorizationChanged(authorization))
+    }
+
+    private static func authorization(from status: CLAuthorizationStatus) -> PingScopeIOSHistoryLocationAuthorization {
+        switch status {
+        case .notDetermined: .undetermined
+        case .restricted: .restricted
+        case .denied: .denied
+        case .authorizedWhenInUse: .whenInUse
+        case .authorizedAlways: .always
+        @unknown default: .denied
+        }
     }
 
     func setState(keepAliveEnabled: Bool, taggingEnabled: Bool, monitoringActive: Bool) {
@@ -43,17 +81,27 @@ final class HistoryLocationService {
     }
 
     func requestAlwaysAuthorization() {
+        ensureController()
         handle(.requestKeepAliveAuthorization)
     }
 
     func requestWhenInUseAuthorization() {
+        ensureController()
         handle(.requestTaggingAuthorization)
     }
 
     func statusText() -> String {
         guard keepAliveEnabled else { return "Disabled" }
-        guard controller.authorization == .always else { return controller.authorizationStatusText }
-        return monitoringActive && controller.isRunning
+        if authorization != .always {
+            switch authorization {
+            case .undetermined: return "Location permission not requested"
+            case .denied: return "Location permission denied"
+            case .restricted: return "Location access restricted"
+            case .whenInUse: return "Allow Always Location in Settings"
+            case .always: return "Allowed; starts while monitoring"
+            }
+        }
+        return monitoringActive && controller?.isRunning == true
             ? "Running while monitoring"
             : "Allowed; starts while monitoring"
     }
@@ -67,7 +115,7 @@ final class HistoryLocationService {
             enabled: taggingEnabled,
             authorized: authorization == .whenInUse || authorization == .always
         )
-        controller.perform(commands)
+        controller?.perform(commands)
         onStatusChange?(statusText())
         if authorization != previousAuthorization {
             onAuthorizationChange?(authorization)
@@ -80,6 +128,7 @@ private final class HistoryLocationController: NSObject, CLLocationManagerDelega
     var onAuthorizationChange: ((PingScopeIOSHistoryLocationAuthorization) -> Void)?
     var onError: ((String) -> Void)?
     private(set) var isRunning = false
+    private(set) var authorization = PingScopeIOSHistoryLocationAuthorization.undetermined
 
     private let manager = CLLocationManager()
     private let snapshotStore: PingScopeIOSHistoryLocationSnapshotStore
@@ -92,24 +141,14 @@ private final class HistoryLocationController: NSObject, CLLocationManagerDelega
         manager.pausesLocationUpdatesAutomatically = false
     }
 
-    var authorization: PingScopeIOSHistoryLocationAuthorization {
-        switch manager.authorizationStatus {
+    private static func authorization(from status: CLAuthorizationStatus) -> PingScopeIOSHistoryLocationAuthorization {
+        switch status {
         case .notDetermined: .undetermined
         case .restricted: .restricted
         case .denied: .denied
         case .authorizedWhenInUse: .whenInUse
         case .authorizedAlways: .always
         @unknown default: .denied
-        }
-    }
-
-    var authorizationStatusText: String {
-        switch authorization {
-        case .undetermined: "Location permission not requested"
-        case .denied: "Location permission denied"
-        case .restricted: "Location access restricted"
-        case .whenInUse: "Allow Always Location in Settings"
-        case .always: isRunning ? "Running while monitoring" : "Allowed; starts while monitoring"
         }
     }
 
@@ -143,8 +182,10 @@ private final class HistoryLocationController: NSObject, CLLocationManagerDelega
     }
 
     nonisolated func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
+        let status = manager.authorizationStatus
         Task { @MainActor [weak self] in
             guard let self else { return }
+            authorization = Self.authorization(from: status)
             onAuthorizationChange?(authorization)
         }
     }
