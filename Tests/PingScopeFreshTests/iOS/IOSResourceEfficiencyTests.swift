@@ -16,10 +16,11 @@ final class IOSResourceEfficiencyTests: XCTestCase {
         }
         let snapshots = hosts.map { monitorSnapshot(host: $0, samples: []) }
 
-        let widgetSnapshot = PingScopeIOSAllHostsWidgetSnapshotBuilder.make(
-            snapshots: snapshots,
+        let widgetSnapshot = PingScopeIOSWidgetSnapshotBuilder.make(
+            savedHosts: hosts,
+            liveSnapshots: snapshots,
             rememberedPrimaryHostID: UUID(),
-            recentSamples: [],
+            scope: .allHosts,
             generatedAt: Date(timeIntervalSince1970: 10_000),
             isMonitoringActive: true
         )
@@ -29,24 +30,131 @@ final class IOSResourceEfficiencyTests: XCTestCase {
         XCTAssertEqual(widgetSnapshot.hosts.filter(\.isPrimary).map(\.id), [hosts[0].id])
     }
 
-    func testIOSWidgetPublisherKeepsAllSourceHostsAndResolvesTheirColors() throws {
+    func testIOSWidgetBuilderFocusedScopePublishesSavedOrderLiveCachedAndUnavailableHosts() throws {
+        var hosts = (0..<6).map { index in
+            HostConfig(
+                id: UUID(),
+                displayName: "Host \(index + 1)",
+                address: "host-\(index + 1).example"
+            )
+        }
+        hosts[1].isEnabled = false
+        let selected = hosts[2]
+        let selectedSamples = [sample(hostID: selected.id, seconds: 50), sample(hostID: selected.id, seconds: 55)]
+        let cachedFirstSamples = [sample(hostID: hosts[0].id, seconds: 20)]
+        let cachedFourthSamples = [sample(hostID: hosts[3].id, seconds: 25), sample(hostID: hosts[3].id, seconds: 30)]
+        let cachedRows = [
+            PingScopeIOSHostRowSnapshot(host: hosts[0], health: nil, samples: cachedFirstSamples, isCached: true, sampleLimit: 60),
+            PingScopeIOSHostRowSnapshot(host: hosts[3], health: nil, samples: cachedFourthSamples, isCached: true, sampleLimit: 60),
+            PingScopeIOSHostRowSnapshot(host: hosts[4], health: nil, samples: [], isCached: false, sampleLimit: 60),
+            PingScopeIOSHostRowSnapshot(host: hosts[5], health: nil, samples: [], isCached: false, sampleLimit: 60),
+        ]
+
+        let widgetSnapshot = PingScopeIOSWidgetSnapshotBuilder.make(
+            savedHosts: hosts,
+            liveSnapshots: [monitorSnapshot(host: selected, samples: selectedSamples)],
+            cachedRows: cachedRows,
+            cachedSeries: [
+                PingScopeIOSHostGraphSeries(host: hosts[0], samples: cachedFirstSamples),
+                PingScopeIOSHostGraphSeries(host: hosts[3], samples: cachedFourthSamples),
+            ],
+            rememberedPrimaryHostID: selected.id,
+            scope: .focused,
+            generatedAt: Date(timeIntervalSince1970: 100),
+            isMonitoringActive: true
+        )
+
+        let expectedHosts = [hosts[0], hosts[2], hosts[3], hosts[4], hosts[5]]
+        XCTAssertEqual(widgetSnapshot.hosts.map(\.id), expectedHosts.map(\.id))
+        XCTAssertEqual(widgetSnapshot.primaryHostID, selected.id)
+        XCTAssertEqual(widgetSnapshot.monitoring, WidgetMonitoringContext(isActive: true, scope: .focused))
+        XCTAssertEqual(widgetSnapshot.health.map(\.hostID), expectedHosts.map(\.id))
+        XCTAssertEqual(widgetSnapshot.health.first { $0.hostID == selected.id }?.status, .healthy)
+        XCTAssertEqual(widgetSnapshot.health.first { $0.hostID == selected.id }?.latencyMilliseconds, 55)
+        XCTAssertEqual(widgetSnapshot.health.first { $0.hostID == hosts[0].id }?.status, .noData)
+        XCTAssertEqual(widgetSnapshot.health.first { $0.hostID == hosts[0].id }?.latencyMilliseconds, 20)
+        XCTAssertNil(widgetSnapshot.health.first { $0.hostID == hosts[4].id }?.latencyMilliseconds)
+        XCTAssertEqual(Set(widgetSnapshot.recentSamples.map(\.hostID)), Set([hosts[0].id, selected.id, hosts[3].id]))
+        XCTAssertTrue(widgetSnapshot.recentSamples.allSatisfy { sample in
+            sample.hostID == selected.id || sample.hostID == hosts[0].id || sample.hostID == hosts[3].id
+        })
+    }
+
+    func testIOSWidgetBuilderFairlyCapsMixedCadenceAllHostSamplesAtSixty() {
+        let hosts = (0..<6).map { index in
+            HostConfig(id: UUID(), displayName: "Host \(index + 1)", address: "host-\(index + 1).example")
+        }
+        let samplesByHost: [[PingResult]] = [
+            (0..<100).map { sample(hostID: hosts[0].id, seconds: TimeInterval(1_000 + $0)) },
+            [sample(hostID: hosts[1].id, seconds: 1)],
+            (0..<3).map { sample(hostID: hosts[2].id, seconds: TimeInterval(10 + $0)) },
+            (0..<80).map { sample(hostID: hosts[3].id, seconds: TimeInterval(2_000 + $0)) },
+            [],
+            (0..<2).map { sample(hostID: hosts[5].id, seconds: TimeInterval(30 + $0)) },
+        ]
+
+        let widgetSnapshot = PingScopeIOSWidgetSnapshotBuilder.make(
+            savedHosts: hosts,
+            liveSnapshots: zip(hosts, samplesByHost).map { monitorSnapshot(host: $0.0, samples: $0.1) },
+            rememberedPrimaryHostID: hosts[0].id,
+            scope: .allHosts,
+            generatedAt: Date(timeIntervalSince1970: 3_000),
+            isMonitoringActive: true
+        )
+
+        XCTAssertEqual(widgetSnapshot.hosts.map(\.id), hosts.map(\.id), "the transport retains all six saved hosts")
+        XCTAssertEqual(Array(widgetSnapshot.hosts.prefix(5)).map(\.id), Array(hosts.prefix(5)).map(\.id))
+        XCTAssertEqual(widgetSnapshot.recentSamples.count, PingScopeIOSWidgetSnapshotBuilder.transportSampleLimit)
+        XCTAssertEqual(
+            Set(widgetSnapshot.recentSamples.map(\.hostID)),
+            Set([hosts[0].id, hosts[1].id, hosts[2].id, hosts[3].id, hosts[5].id]),
+            "every host with usable data must survive fair allocation"
+        )
+        XCTAssertTrue(widgetSnapshot.recentSamples.allSatisfy { sample in
+            samplesByHost.flatMap { $0 }.contains { $0.id == sample.id && $0.hostID == sample.hostID }
+        })
+    }
+
+    func testIOSWidgetBuilderFiltersDisabledRememberedSelectionForTwoThroughSixHosts() {
+        for count in 2...6 {
+            var hosts = (0..<count).map { index in
+                HostConfig(id: UUID(), displayName: "Host \(index + 1)", address: "host-\(index + 1).example")
+            }
+            hosts[count - 1].isEnabled = false
+            let snapshots = hosts.map { monitorSnapshot(host: $0, samples: [sample(hostID: $0.id, seconds: TimeInterval(count))]) }
+
+            let widgetSnapshot = PingScopeIOSWidgetSnapshotBuilder.make(
+                savedHosts: hosts,
+                liveSnapshots: snapshots,
+                rememberedPrimaryHostID: hosts[count - 1].id,
+                scope: .focused,
+                generatedAt: Date(timeIntervalSince1970: 100),
+                isMonitoringActive: true
+            )
+
+            XCTAssertEqual(widgetSnapshot.hosts.map(\.id), hosts.dropLast().map(\.id), "count \(count)")
+            XCTAssertEqual(widgetSnapshot.primaryHostID, hosts[0].id, "count \(count)")
+            XCTAssertFalse(widgetSnapshot.recentSamples.contains { $0.hostID == hosts[count - 1].id }, "count \(count)")
+        }
+    }
+
+    func testIOSWidgetPublisherSupplementallyWiresBothScopesThroughPureBuilder() throws {
         let appSource = try sourceFile("Sources/PingScopeiOSApp/PingScopeIOSApp.swift")
-        let builderSource = try sourceFile("Sources/PingScopeiOS/PingScopeIOSWidgetSnapshotBuilder.swift")
-        let snapshotStart = try XCTUnwrap(appSource.range(of: "private func makeAllHostsWidgetSnapshot("))
-        let samplesStart = try XCTUnwrap(
+        let publisherStart = try XCTUnwrap(appSource.range(of: "private func publishWidgetSnapshot("))
+        let publisherEnd = try XCTUnwrap(
             appSource.range(
-                of: "private func makeAllHostsWidgetSamples(",
-                range: snapshotStart.upperBound..<appSource.endIndex
+                of: "private func beginBackgroundRuntimeIfNeeded(",
+                range: publisherStart.upperBound..<appSource.endIndex
             )
         )
-        let publisher = appSource[snapshotStart.lowerBound..<samplesStart.lowerBound]
+        let publisher = appSource[publisherStart.lowerBound..<publisherEnd.lowerBound]
 
-        XCTAssertTrue(publisher.contains("PingScopeIOSAllHostsWidgetSnapshotBuilder.make("))
-        XCTAssertFalse(publisher.contains("prefix(5)"))
-        XCTAssertFalse(publisher.contains("suffix(5)"))
-        XCTAssertTrue(builderSource.contains("let hosts = snapshots.map"))
-        XCTAssertTrue(builderSource.contains("ResolvedHostDisplayColor("))
-        XCTAssertTrue(builderSource.contains("displayColor: entry.host.displayColor"))
+        XCTAssertTrue(publisher.contains("liveSnapshots = await multiHostCoordinator.orderedSnapshots()"))
+        XCTAssertTrue(publisher.contains("liveSnapshots = [snapshot]"))
+        XCTAssertTrue(publisher.contains("PingScopeIOSWidgetSnapshotBuilder.make("))
+        XCTAssertTrue(publisher.contains("savedHosts: hosts"))
+        XCTAssertTrue(publisher.contains("cachedRows: isFocused ? allHostRows : []"))
+        XCTAssertTrue(publisher.contains("cachedSeries: isFocused ? allHostGraphSeries : []"))
     }
 
     func testLatestSampleSelectionPreservesTrueMaxForOutOfOrderSeries() throws {

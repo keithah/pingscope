@@ -1916,26 +1916,21 @@ private final class PingScopeIOSAppModel: ObservableObject {
 
     private func publishWidgetSnapshot(allHostsSnapshots: [LiveMonitorSessionSnapshot]? = nil) async {
         let generatedAt = Date()
-        var widgetSnapshot: WidgetSnapshot
-        let snapshots: [LiveMonitorSessionSnapshot]?
+        let liveSnapshots: [LiveMonitorSessionSnapshot]
         if hostScope == .allHosts {
             if let allHostsSnapshots {
-                snapshots = allHostsSnapshots
+                liveSnapshots = allHostsSnapshots
             } else {
-                snapshots = await multiHostCoordinator.orderedSnapshots()
+                liveSnapshots = await multiHostCoordinator.orderedSnapshots()
             }
-            widgetSnapshot = makeAllHostsWidgetSnapshot(
-                snapshots: snapshots ?? [],
-                includeRecentSamples: false,
-                generatedAt: generatedAt
-            )
         } else {
-            snapshots = nil
-            widgetSnapshot = makeFocusedWidgetSnapshot(
-                includeRecentSamples: false,
-                generatedAt: generatedAt
-            )
+            liveSnapshots = [snapshot]
         }
+        var widgetSnapshot = makeWidgetSnapshot(
+            liveSnapshots: liveSnapshots,
+            includeRecentSamples: false,
+            generatedAt: generatedAt
+        )
         if PingScopeIOSWidgetCheapPublishGate.canSkipSampleConstruction(
             candidateWithoutSamples: widgetSnapshot,
             previousSnapshot: lastPublishedWidgetSnapshot,
@@ -1944,11 +1939,11 @@ private final class PingScopeIOSAppModel: ObservableObject {
         ) {
             return
         }
-        if let snapshots {
-            widgetSnapshot.recentSamples = makeAllHostsWidgetSamples(snapshots: snapshots)
-        } else {
-            widgetSnapshot.recentSamples = makeFocusedWidgetSamples()
-        }
+        widgetSnapshot = makeWidgetSnapshot(
+            liveSnapshots: liveSnapshots,
+            includeRecentSamples: true,
+            generatedAt: generatedAt
+        )
         let publishDecision = widgetPublishPolicy.decision(
             for: widgetSnapshot,
             previousSnapshot: lastPublishedWidgetSnapshot,
@@ -1967,75 +1962,23 @@ private final class PingScopeIOSAppModel: ObservableObject {
         }
     }
 
-    private func makeFocusedWidgetSnapshot(
+    private func makeWidgetSnapshot(
+        liveSnapshots: [LiveMonitorSessionSnapshot],
         includeRecentSamples: Bool = true,
         generatedAt: Date = Date()
     ) -> WidgetSnapshot {
-        let host = snapshot.host
-        let recentSamples = includeRecentSamples ? makeFocusedWidgetSamples() : []
-
-        return WidgetSnapshot(
-            primaryHostID: host.id,
-            hosts: [
-                WidgetHost(
-                    id: host.id,
-                    displayName: host.displayName,
-                    address: host.address,
-                    method: host.method,
-                    port: host.port,
-                    isPrimary: true,
-                    displayColor: WidgetHostDisplayColor(
-                        resolvedColor: ResolvedHostDisplayColor(hostID: host.id, displayColor: host.displayColor)
-                    )
-                )
-            ],
-            health: [
-                WidgetHostHealth(
-                    hostID: host.id,
-                    status: snapshot.health.status,
-                    latencyMilliseconds: snapshot.health.latestResult?.latency?.milliseconds,
-                    consecutiveFailureCount: snapshot.health.consecutiveFailureCount,
-                    failureReason: snapshot.health.latestResult?.failureReason,
-                    latestResultAt: snapshot.health.latestResult?.timestamp
-                )
-            ],
-            recentSamples: recentSamples,
-            networkStatus: .connected,
-            generatedAt: generatedAt,
-            monitoring: WidgetMonitoringContext(isActive: isMonitoringActive, scope: .focused)
-        )
-    }
-
-    private func makeFocusedWidgetSamples() -> [WidgetSample] {
-        presenter.mergedSamples(
-            history: historySamples,
-            live: snapshot.series.samples,
-            range: .tenMinutes
-        )
-        .suffix(60)
-        .map(WidgetSample.init(result:))
-    }
-
-    private func makeAllHostsWidgetSnapshot(
-        snapshots: [LiveMonitorSessionSnapshot],
-        includeRecentSamples: Bool = true,
-        generatedAt: Date = Date()
-    ) -> WidgetSnapshot {
-        PingScopeIOSAllHostsWidgetSnapshotBuilder.make(
-            snapshots: snapshots,
+        let isFocused = hostScope == .focused
+        return PingScopeIOSWidgetSnapshotBuilder.make(
+            savedHosts: hosts,
+            liveSnapshots: liveSnapshots,
+            cachedRows: isFocused ? allHostRows : [],
+            cachedSeries: isFocused ? allHostGraphSeries : [],
             rememberedPrimaryHostID: snapshot.host.id,
-            recentSamples: includeRecentSamples ? makeAllHostsWidgetSamples(snapshots: snapshots) : [],
+            scope: isFocused ? .focused : .allHosts,
             generatedAt: generatedAt,
-            isMonitoringActive: isMonitoringActive
+            isMonitoringActive: isMonitoringActive,
+            includeRecentSamples: includeRecentSamples
         )
-    }
-
-    private func makeAllHostsWidgetSamples(snapshots: [LiveMonitorSessionSnapshot]) -> [WidgetSample] {
-        snapshots
-            .flatMap { $0.series.samples.suffix(60) }
-            .sorted { $0.timestamp < $1.timestamp }
-            .suffix(60)
-            .map(WidgetSample.init(result:))
     }
 
     private func beginBackgroundRuntimeIfNeeded(originatingAt sceneEpoch: PingScopeIOSLifecycleSceneEpoch) async {

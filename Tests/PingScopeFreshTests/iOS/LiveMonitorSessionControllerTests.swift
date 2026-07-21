@@ -2203,10 +2203,11 @@ final class LiveMonitorSessionControllerTests: XCTestCase {
             PingScopeIOSHostGraphSeries(host: acceptedSnapshot.host, samples: acceptedSnapshot.series.samples).resolvedColor,
             expectedColor
         )
-        let widgetSnapshot = PingScopeIOSAllHostsWidgetSnapshotBuilder.make(
-            snapshots: [acceptedSnapshot],
+        let widgetSnapshot = PingScopeIOSWidgetSnapshotBuilder.make(
+            savedHosts: [acceptedSnapshot.host],
+            liveSnapshots: [acceptedSnapshot],
             rememberedPrimaryHostID: host.id,
-            recentSamples: acceptedSnapshot.series.samples.map(WidgetSample.init(result:)),
+            scope: .focused,
             generatedAt: clock.currentDate,
             isMonitoringActive: true
         )
