@@ -193,13 +193,18 @@ final class HostConfigPersistenceTests: XCTestCase {
 
     @MainActor
     func testMacModelReconcilesAcceptedRemoteColorThroughRuntimePresentationAndWidgetState() async throws {
+        let suite = "MacAcceptedRemoteColor.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
         let host = HostConfig(id: UUID(), displayName: "Edge", address: "edge.example")
+        let sharedStore = UserDefaultsSharedHostStore(defaults: defaults, legacyPlatform: .macOS)
+        try sharedStore.save(SharedHostStoreState(hosts: [host], primaryHostID: host.id))
         let tracker = MacProbeCancellationTracker()
         let runtime = PingRuntime(
             hostStore: HostStore(defaultHosts: [host], primaryHostID: host.id),
             scheduler: MeasurementScheduler(probeFactory: MacCancellationTrackingProbeFactory(tracker: tracker))
         )
-        let model = PingScopeModel(runtimeForTesting: runtime)
+        let model = PingScopeModel(cloudSyncDefaultsSuiteName: suite, runtimeOverride: runtime)
         model.overlayShowsAllHosts = true
         let retainedSample = PingResult.success(
             hostID: host.id,
@@ -211,10 +216,10 @@ final class HostConfigPersistenceTests: XCTestCase {
         try await tracker.waitUntilMeasurementStarts()
         var remote = host
         remote.displayColor = HostDisplayColor(red: 0.18, green: 0.46, blue: 0.79)
+        let acceptedState = SharedHostStoreState(hosts: [remote], primaryHostID: host.id)
+        try sharedStore.save(acceptedState)
 
-        await model.reconcileAcceptedCloudHostState(
-            SharedHostStoreState(hosts: [remote], primaryHostID: host.id)
-        )
+        await model.reconcileAcceptedCloudHostState(acceptedState)
 
         XCTAssertEqual(model.snapshot.primaryHost, remote)
         XCTAssertEqual(model.snapshot.primarySeries?.samples, [retainedSample])
@@ -240,6 +245,98 @@ final class HostConfigPersistenceTests: XCTestCase {
         XCTAssertEqual(cancellationsAfterLocalEdit, 0)
         await runtime.stop()
     }
+
+    @MainActor
+    func testMacBlockedAcceptedDeliveryKeepsRemoteColorAndConcurrentUnrelatedLocalEdit() async throws {
+        let suite = "MacAcceptedDeliveryRace.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let host = HostConfig(id: UUID(), displayName: "Edge", address: "edge.example")
+        let peer = HostConfig(id: UUID(), displayName: "Peer", address: "peer.example")
+        let sharedStore = UserDefaultsSharedHostStore(defaults: defaults, legacyPlatform: .macOS)
+        try sharedStore.save(SharedHostStoreState(hosts: [host, peer], primaryHostID: host.id))
+        let localPersistence = HostConfigPersistence(defaults: defaults)
+        _ = localPersistence.loadInitialConfiguration { _ in }
+        let tracker = MacProbeCancellationTracker()
+        let runtime = PingRuntime(
+            hostStore: HostStore(defaultHosts: [host, peer], primaryHostID: host.id),
+            scheduler: MeasurementScheduler(probeFactory: MacCancellationTrackingProbeFactory(tracker: tracker))
+        )
+        let model = PingScopeModel(cloudSyncDefaultsSuiteName: suite, runtimeOverride: runtime)
+        let retainedSample = PingResult.success(
+            hostID: host.id,
+            latency: .milliseconds(21),
+            timestamp: Date()
+        )
+        await runtime.ingest(retainedSample)
+        await runtime.start()
+        try await tracker.waitUntilMeasurementStarts()
+        var remoteHost = host
+        remoteHost.displayColor = HostDisplayColor(red: 0.18, green: 0.46, blue: 0.79)
+        let capturedRemoteState = SharedHostStoreState(
+            hosts: [remoteHost, peer],
+            primaryHostID: host.id
+        )
+        try sharedStore.save(capturedRemoteState)
+        let deliveryGate = MacAcceptedHostDeliveryGate()
+        let delivery = Task { @MainActor in
+            await deliveryGate.block()
+            await model.reconcileAcceptedCloudHostState(capturedRemoteState)
+        }
+        await deliveryGate.waitUntilBlocked()
+
+        var locallyEditedPeer = peer
+        locallyEditedPeer.notifications = .muted
+        localPersistence.persist(
+            RuntimeSnapshot(
+                hosts: [host, locallyEditedPeer],
+                primaryHostID: host.id,
+                healthByHost: [:],
+                samplesByHost: [:]
+            ),
+            logger: { _ in }
+        )
+        await runtime.upsertHost(locallyEditedPeer)
+        await deliveryGate.release()
+        await delivery.value
+
+        let snapshot = model.snapshot
+        XCTAssertEqual(snapshot.hosts.first { $0.id == host.id }?.displayColor, remoteHost.displayColor)
+        XCTAssertEqual(snapshot.hosts.first { $0.id == peer.id }?.notifications, .muted)
+        XCTAssertEqual(snapshot.samplesByHost[host.id]?.samples, [retainedSample])
+        let cancellationCount = await tracker.cancellations()
+        XCTAssertEqual(cancellationCount, 0)
+        await runtime.stop()
+    }
+
+    func testMacSharedHostStoreSameHostLaterLocalEditWinsWholeHostConflict() throws {
+        let suite = "MacAcceptedDeliverySameHost.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let host = HostConfig(id: UUID(), displayName: "Edge", address: "edge.example")
+        let sharedStore = UserDefaultsSharedHostStore(defaults: defaults, legacyPlatform: .macOS)
+        try sharedStore.save(SharedHostStoreState(hosts: [host], primaryHostID: host.id))
+        let persistence = HostConfigPersistence(defaults: defaults)
+        _ = persistence.loadInitialConfiguration { _ in }
+        var remote = host
+        remote.displayColor = HostDisplayColor(red: 0.18, green: 0.46, blue: 0.79)
+        try sharedStore.save(SharedHostStoreState(hosts: [remote], primaryHostID: host.id))
+        var laterLocal = host
+        laterLocal.displayName = "Locally Renamed"
+        laterLocal.notifications = .muted
+
+        persistence.persist(
+            RuntimeSnapshot(
+                hosts: [laterLocal],
+                primaryHostID: host.id,
+                healthByHost: [:],
+                samplesByHost: [:]
+            ),
+            logger: { _ in }
+        )
+
+        XCTAssertEqual(sharedStore.load().state?.hosts, [laterLocal])
+    }
 }
 
 private func currentSnapshot(_ runtime: PingRuntime) async throws -> RuntimeSnapshot {
@@ -264,6 +361,34 @@ private func waitUntilRuntimeHost(
 }
 
 private struct MacRuntimeTestTimeout: Error {}
+
+private actor MacAcceptedHostDeliveryGate {
+    private var isBlocked = false
+    private var isReleased = false
+    private var blockedWaiters: [CheckedContinuation<Void, Never>] = []
+    private var releaseWaiters: [CheckedContinuation<Void, Never>] = []
+
+    func block() async {
+        isBlocked = true
+        blockedWaiters.forEach { $0.resume() }
+        blockedWaiters.removeAll()
+        while !isReleased {
+            await withCheckedContinuation { releaseWaiters.append($0) }
+        }
+    }
+
+    func waitUntilBlocked() async {
+        while !isBlocked {
+            await withCheckedContinuation { blockedWaiters.append($0) }
+        }
+    }
+
+    func release() {
+        isReleased = true
+        releaseWaiters.forEach { $0.resume() }
+        releaseWaiters.removeAll()
+    }
+}
 
 private actor MacProbeCancellationTracker {
     private var started = false

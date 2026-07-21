@@ -201,6 +201,21 @@ final class BuildGraphOptimizationTests: XCTestCase {
         XCTAssertFalse(decisionRoute.contains("persistHostSelection()"))
     }
 
+    func testAcceptedHostDeliveryReloadsLatestSharedStateOnBothApps() throws {
+        let root = try repositoryRoot()
+        let iosApp = try String(
+            contentsOf: root.appendingPathComponent("Sources/PingScopeiOSApp/PingScopeIOSApp.swift"),
+            encoding: .utf8
+        )
+        let macApp = try String(
+            contentsOf: root.appendingPathComponent("Sources/PingScopeApp/PingScopeModel.swift"),
+            encoding: .utf8
+        )
+
+        XCTAssertTrue(iosApp.contains("hostStore.resolveAcceptedHostState(state)"))
+        XCTAssertTrue(macApp.contains("hostConfigPersistence.resolveAcceptedHostState(state)"))
+    }
+
     func testIOSFocusedLaunchHydratesAndMarksPeerRowsCachedWithinBoundedHistory() throws {
         let root = try repositoryRoot()
         let source = try String(

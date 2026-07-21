@@ -21,6 +21,7 @@ final class HostConfigPersistence {
     private let defaults: UserDefaults
     private let sharedStore: UserDefaultsSharedHostStore
     private var lastPersistedHostState: PersistedHostState?
+    private var lastObservedSharedState: SharedHostStoreState?
     private var preservedSelectedHostID: UUID?
     private var preservesUndecodableData = false
     private let seededDefaultsKey = "didSeedDefaultHosts"
@@ -68,33 +69,66 @@ final class HostConfigPersistence {
             logger("host config sanitized dropped=\(savedHosts.count - sanitizedHosts.count)")
         }
         let hosts = sanitizedHosts
+        lastObservedSharedState = sharedStore.load().state.map(Self.sanitizedSharedState)
         return LoadedHostConfiguration(hosts: hosts, primaryHostID: primaryHostID)
     }
 
-    func persist(_ snapshot: RuntimeSnapshot, logger: (String) -> Void) {
-        guard !preservesUndecodableData else { return }
+    @discardableResult
+    func persist(_ snapshot: RuntimeSnapshot, logger: (String) -> Void) -> SharedHostStoreState? {
+        guard !preservesUndecodableData else { return nil }
         let hosts = HostConfig.sanitizedHosts(snapshot.hosts)
         let primaryHostID = hosts.contains { $0.id == snapshot.primaryHostID } ? snapshot.primaryHostID : hosts.first?.id
         let hostState = PersistedHostState(hosts: hosts, primaryHostID: primaryHostID)
-        guard hostState != lastPersistedHostState else { return }
-        do {
-            try sharedStore.save(
-                SharedHostStoreState(
-                    hosts: hosts,
-                    primaryHostID: primaryHostID,
-                    selectedHostID: preservedSelectedHostID
-                )
+        let latest = sharedStore.load().state.map(Self.sanitizedSharedState)
+        let desired = SharedHostStoreState(
+            hosts: hosts,
+            primaryHostID: primaryHostID,
+            selectedHostID: preservedSelectedHostID
+        )
+        guard hostState != lastPersistedHostState else {
+            return latest ?? lastObservedSharedState ?? desired
+        }
+        let baseline = lastObservedSharedState ?? latest ?? desired
+        let resolved = latest.map {
+            SharedHostStoreReconciliation.mergingLocalChanges(
+                from: baseline,
+                desired: desired,
+                into: $0
             )
+        } ?? desired
+        do {
+            try sharedStore.save(resolved)
         } catch {
             logger("host config encode failed; leaving previous persisted state error=\(error.localizedDescription)")
-            return
+            return nil
         }
         lastPersistedHostState = hostState
+        lastObservedSharedState = resolved
+        preservedSelectedHostID = resolved.selectedHostID
+        return resolved
+    }
+
+    func resolveAcceptedHostState(_ captured: SharedHostStoreState) -> SharedHostStoreState {
+        let resolved = sharedStore.load().state.map(Self.sanitizedSharedState)
+            ?? Self.sanitizedSharedState(captured)
+        lastObservedSharedState = resolved
+        preservedSelectedHostID = resolved.selectedHostID
+        return resolved
     }
 
     func allowUserManagedPersistence() {
         preservesUndecodableData = false
         lastPersistedHostState = nil
+    }
+
+    private nonisolated static func sanitizedSharedState(_ state: SharedHostStoreState) -> SharedHostStoreState {
+        let hosts = HostConfig.sanitizedHosts(state.hosts)
+        let ids = Set(hosts.map(\.id))
+        return SharedHostStoreState(
+            hosts: hosts,
+            primaryHostID: state.primaryHostID.flatMap { ids.contains($0) ? $0 : nil },
+            selectedHostID: state.selectedHostID.flatMap { ids.contains($0) ? $0 : nil }
+        )
     }
 
     private func migrateExistingHosts(_ hosts: [HostConfig], logger: (String) -> Void) -> [HostConfig] {

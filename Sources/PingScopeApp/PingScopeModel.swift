@@ -319,7 +319,7 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
 
     init(cloudSyncDefaultsSuiteName: String?, runtimeOverride: PingRuntime? = nil) {
         let cloudSyncDefaults = cloudSyncDefaultsSuiteName.flatMap(UserDefaults.init(suiteName:)) ?? .standard
-        let hostConfigPersistence = HostConfigPersistence()
+        let hostConfigPersistence = HostConfigPersistence(defaults: cloudSyncDefaults)
         let loadedHosts = hostConfigPersistence.loadInitialConfiguration { message in
             DebugLog.write(message)
         }
@@ -1099,16 +1099,17 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
     }
 
     private func persistHostState(_ snapshot: RuntimeSnapshot) {
-        hostConfigPersistence.persist(snapshot, logger: DebugLog.write)
+        guard let persistedState = hostConfigPersistence.persist(snapshot, logger: DebugLog.write) else { return }
         guard let cloudSyncService else { return }
-        let hostsByID = Dictionary(uniqueKeysWithValues: snapshot.hosts.map { ($0.id, $0) })
+        let persistedHosts = persistedState.hosts
+        let hostsByID = Dictionary(uniqueKeysWithValues: persistedHosts.map { ($0.id, $0) })
         guard hostsByID != lastCloudSyncHostsByID else { return }
-        let currentIDs = Set(snapshot.hosts.map(\.id))
+        let currentIDs = Set(persistedHosts.map(\.id))
         let deletedIDs = lastCloudSyncHostIDs.subtracting(currentIDs)
         lastCloudSyncHostIDs = currentIDs
         lastCloudSyncHostsByID = hostsByID
         Task {
-            await cloudSyncService.uploadHosts(snapshot.hosts)
+            await cloudSyncService.uploadHosts(persistedHosts)
             for id in deletedIDs { await cloudSyncService.deleteHost(id: id) }
         }
     }
@@ -1143,14 +1144,15 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
     }
 
     func reconcileAcceptedCloudHostState(_ state: SharedHostStoreState) async {
-        let acceptedHosts = HostConfig.sanitizedHosts(state.hosts)
+        let resolvedState = hostConfigPersistence.resolveAcceptedHostState(state)
+        let acceptedHosts = HostConfig.sanitizedHosts(resolvedState.hosts)
         lastCloudSyncHostIDs = Set(acceptedHosts.map(\.id))
         lastCloudSyncHostsByID = Dictionary(uniqueKeysWithValues: acceptedHosts.map { ($0.id, $0) })
         let acceptedSnapshot = await runtime.reconcileAcceptedHostState(
             SharedHostStoreState(
                 hosts: acceptedHosts,
-                primaryHostID: state.primaryHostID,
-                selectedHostID: state.selectedHostID
+                primaryHostID: resolvedState.primaryHostID,
+                selectedHostID: resolvedState.selectedHostID
             )
         )
         processRuntimeSnapshot(acceptedSnapshot)

@@ -16,6 +16,63 @@ public struct SharedHostStoreState: Equatable, Sendable {
     }
 }
 
+public enum SharedHostStoreReconciliation {
+    /// Applies only the host-list changes made by the local app since its last
+    /// observed state onto the newest shared state. CloudKit writes can land in
+    /// the shared store while an accepted-state callback is queued; treating a
+    /// stale app snapshot as a whole-state replacement would erase those writes.
+    /// Host records remain whole-value last-writer-wins: a later local edit to
+    /// the same host replaces the accepted remote host exactly.
+    public static func mergingLocalChanges(
+        from baseline: SharedHostStoreState,
+        desired local: SharedHostStoreState,
+        into latest: SharedHostStoreState
+    ) -> SharedHostStoreState {
+        let baselineHosts = HostConfig.sanitizedHosts(baseline.hosts)
+        let localHosts = HostConfig.sanitizedHosts(local.hosts)
+        let latestHosts = HostConfig.sanitizedHosts(latest.hosts)
+        let baselineByID = Dictionary(uniqueKeysWithValues: baselineHosts.map { ($0.id, $0) })
+        let localByID = Dictionary(uniqueKeysWithValues: localHosts.map { ($0.id, $0) })
+        var mergedByID = Dictionary(uniqueKeysWithValues: latestHosts.map { ($0.id, $0) })
+        var mergedOrder = latestHosts.map(\.id)
+
+        let deletedIDs = Set(baselineByID.keys).subtracting(localByID.keys)
+        for id in deletedIDs {
+            mergedByID[id] = nil
+        }
+        mergedOrder.removeAll { deletedIDs.contains($0) }
+
+        for host in localHosts where baselineByID[host.id] != host {
+            if mergedByID.updateValue(host, forKey: host.id) == nil {
+                mergedOrder.append(host.id)
+            }
+        }
+
+        let baselineOrder = baselineHosts.map(\.id)
+        let localOrder = localHosts.map(\.id)
+        if baselineOrder != localOrder {
+            let localIDs = Set(localOrder)
+            let remotelyAddedIDs = mergedOrder.filter { !localIDs.contains($0) && mergedByID[$0] != nil }
+            mergedOrder = localOrder.filter { mergedByID[$0] != nil } + remotelyAddedIDs
+        }
+
+        let finalIDs = Array(mergedOrder.filter { mergedByID[$0] != nil }.prefix(64))
+        let finalIDSet = Set(finalIDs)
+        let hosts = finalIDs.compactMap { mergedByID[$0] }
+        let primaryCandidate = baseline.primaryHostID != local.primaryHostID
+            ? local.primaryHostID
+            : latest.primaryHostID
+        let selectedCandidate = baseline.selectedHostID != local.selectedHostID
+            ? local.selectedHostID
+            : latest.selectedHostID
+        return SharedHostStoreState(
+            hosts: hosts,
+            primaryHostID: primaryCandidate.flatMap { finalIDSet.contains($0) ? $0 : nil },
+            selectedHostID: selectedCandidate.flatMap { finalIDSet.contains($0) ? $0 : nil }
+        )
+    }
+}
+
 public enum SharedHostStoreCodecError: Error, Equatable {
     case unsupportedSchemaVersion(Int)
 }

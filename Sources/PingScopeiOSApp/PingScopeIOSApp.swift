@@ -785,26 +785,32 @@ private final class PingScopeIOSAppModel: ObservableObject {
         } else {
             hosts.append(normalizedHost)
         }
+        let persisted = hostStore.save(
+            hosts: hosts,
+            selectedHostID: hostScope == .focused ? normalizedHost.id : snapshot.host.id,
+            hostScope: hostScope
+        )
+        hosts = persisted.hosts
+        guard let savedHost = hosts.first(where: { $0.id == normalizedHost.id }) else { return }
         if let cloudSyncService {
             let hosts = hosts
             Task { await cloudSyncService.uploadHosts(hosts) }
         }
         guard hostScope == .allHosts else {
-            hostStore.save(hosts: hosts, selectedHostID: normalizedHost.id, hostScope: .focused)
-            guard let previousHost, snapshot.host.id == normalizedHost.id else {
-                selectHost(normalizedHost.id)
+            guard let previousHost, snapshot.host.id == savedHost.id else {
+                selectHost(savedHost.id)
                 return
             }
             runLifecycleTask { model, context in
                 let preserved = await model.sessionModel.reconcileFocusedHostEdit(
                     currentHost: previousHost,
-                    updatedHost: normalizedHost,
+                    updatedHost: savedHost,
                     controller: model.controller
                 )
                 guard model.isCurrentLifecycle(context) else { return }
                 guard preserved else {
                     await model.switchToHostAsync(
-                        normalizedHost,
+                        savedHost,
                         restartDuration: model.activeRestartDuration,
                         saveSelection: false,
                         context: context
@@ -820,10 +826,9 @@ private final class PingScopeIOSAppModel: ObservableObject {
             return
         }
 
-        if snapshot.host.id == normalizedHost.id {
-            replaceRememberedFocusedHost(normalizedHost)
+        if snapshot.host.id == savedHost.id {
+            replaceRememberedFocusedHost(savedHost)
         }
-        persistHostSelection()
         reconcileAllHostsAfterMutation()
     }
 
@@ -896,8 +901,9 @@ private final class PingScopeIOSAppModel: ObservableObject {
         await lifecycleHarness.enqueue { @MainActor [weak self] in
             guard let self else { return }
             let context = LifecycleContext()
+            let resolvedState = self.hostStore.resolveAcceptedHostState(state)
             let reconciliation = await self.sessionModel.reconcileAcceptedHostState(
-                state,
+                resolvedState,
                 currentHosts: self.hosts,
                 currentFocusedHostID: self.snapshot.host.id,
                 scope: self.hostScope,

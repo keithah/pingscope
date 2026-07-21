@@ -1950,6 +1950,23 @@ final class LiveMonitorSessionControllerTests: XCTestCase {
         XCTAssertEqual(state.selectedHost.id, hosts[0].id)
     }
 
+    func testIOSHostStoreSaveFallsBackWhenRemoteDeletionLeavesNoResolvedHosts() throws {
+        let suiteName = "PingScopeIOSHostStoreTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let host = HostConfig(id: UUID(), displayName: "Cloudflare", address: "1.1.1.1")
+        let store = PingScopeIOSHostStore(defaults: defaults, defaultHosts: [host])
+        store.save(hosts: [host], selectedHostID: host.id, hostScope: .focused)
+        let sharedStore = UserDefaultsSharedHostStore(defaults: defaults, legacyPlatform: .iOS)
+        try sharedStore.save(SharedHostStoreState(hosts: []))
+
+        let state = store.save(hosts: [host], selectedHostID: host.id, hostScope: .allHosts)
+
+        XCTAssertEqual(state.hosts, [host])
+        XCTAssertEqual(state.selectedHost, host)
+        XCTAssertEqual(state.hostScope, .allHosts)
+    }
+
     func testIOSHostStoreFallsBackToDefaultsWhenSavedHostsAreInvalid() {
         let suiteName = "PingScopeIOSHostStoreTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
@@ -2244,6 +2261,100 @@ final class LiveMonitorSessionControllerTests: XCTestCase {
         XCTAssertEqual(afterLocalEdit.series.samples, before.series.samples)
         let measurementCount = await probe.measurementCount
         XCTAssertEqual(measurementCount, 1)
+    }
+
+    @MainActor
+    func testIOSBlockedAcceptedDeliveryKeepsRemoteColorAndConcurrentUnrelatedLocalEdit() async throws {
+        let suite = "IOSAcceptedDeliveryRace.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let host = HostConfig(id: UUID(), displayName: "Edge", address: "edge.example")
+        let peer = HostConfig(id: UUID(), displayName: "Peer", address: "peer.example")
+        var remoteHost = host
+        remoteHost.displayColor = HostDisplayColor(red: 0.18, green: 0.46, blue: 0.79)
+        var locallyEditedPeer = peer
+        locallyEditedPeer.notifications = .muted
+        let capturedRemoteState = SharedHostStoreState(
+            hosts: [remoteHost, peer],
+            selectedHostID: host.id
+        )
+        let store = PingScopeIOSHostStore(defaults: defaults, defaultHosts: [host, peer])
+        store.save(hosts: [host, peer], selectedHostID: host.id, hostScope: .focused)
+        _ = store.load()
+        let sharedStore = UserDefaultsSharedHostStore(defaults: defaults, legacyPlatform: .iOS)
+        try sharedStore.save(capturedRemoteState)
+
+        let probe = RecordingProbe(results: [.success(hostID: host.id, latency: .milliseconds(18))])
+        let clock = ManualClock()
+        let controller = LiveMonitorSessionController(
+            host: host,
+            probeFactory: StaticProbeFactory(probe: probe),
+            policy: MonitorSessionPolicy(probeInterval: .seconds(60)),
+            clock: clock,
+            now: { clock.currentDate }
+        )
+        let sessionModel = PingScopeIOSAppSessionModel(coordinator: PingScopeIOSMultiHostSessionCoordinator())
+        await controller.start(duration: .continuous, at: clock.baseDate)
+        try await clock.waitForSleepers(atLeast: 1)
+        let before = await controller.snapshot()
+        let deliveryGate = IOSLifecycleGate()
+        let delivery = Task { @MainActor in
+            await deliveryGate.block()
+            let latest = store.load()
+            return await sessionModel.reconcileAcceptedHostState(
+                SharedHostStoreState(
+                    hosts: latest.hosts,
+                    selectedHostID: latest.selectedHost.id
+                ),
+                currentHosts: [host, locallyEditedPeer],
+                currentFocusedHostID: host.id,
+                scope: .focused,
+                focusedController: controller
+            )
+        }
+        await deliveryGate.waitUntilBlocked()
+
+        store.save(
+            hosts: [host, locallyEditedPeer],
+            selectedHostID: host.id,
+            hostScope: .focused
+        )
+        await deliveryGate.release()
+        let reconciliation = await delivery.value
+
+        XCTAssertEqual(reconciliation.hosts.first { $0.id == host.id }?.displayColor, remoteHost.displayColor)
+        XCTAssertEqual(reconciliation.hosts.first { $0.id == peer.id }?.notifications, .muted)
+        guard case let .focusedPreserved(acceptedSnapshot) = reconciliation.disposition else {
+            await controller.stop(reason: .completed)
+            return XCTFail("A remote color plus unrelated local edit must preserve the focused controller.")
+        }
+        XCTAssertEqual(acceptedSnapshot.host.displayColor, remoteHost.displayColor)
+        XCTAssertEqual(acceptedSnapshot.session, before.session)
+        XCTAssertEqual(acceptedSnapshot.series.samples, before.series.samples)
+        let measurementCount = await probe.measurementCount
+        XCTAssertEqual(measurementCount, 1)
+        await controller.stop(reason: .completed)
+    }
+
+    func testIOSSharedHostStoreSameHostLaterLocalEditWinsWholeHostConflict() throws {
+        let suite = "IOSAcceptedDeliverySameHost.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let host = HostConfig(id: UUID(), displayName: "Edge", address: "edge.example")
+        let store = PingScopeIOSHostStore(defaults: defaults, defaultHosts: [host])
+        store.save(hosts: [host], selectedHostID: host.id, hostScope: .focused)
+        _ = store.load()
+        var remote = host
+        remote.displayColor = HostDisplayColor(red: 0.18, green: 0.46, blue: 0.79)
+        let sharedStore = UserDefaultsSharedHostStore(defaults: defaults, legacyPlatform: .iOS)
+        try sharedStore.save(SharedHostStoreState(hosts: [remote], selectedHostID: host.id))
+        var laterLocal = host
+        laterLocal.displayName = "Locally Renamed"
+        laterLocal.notifications = .muted
+
+        store.save(hosts: [laterLocal], selectedHostID: host.id, hostScope: .focused)
+
+        XCTAssertEqual(store.load().selectedHost, laterLocal)
     }
 
     @MainActor
