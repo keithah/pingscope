@@ -20,6 +20,10 @@ final class BuildGraphOptimizationTests: XCTestCase {
             contentsOf: root.appendingPathComponent("PingScopeWidget/WidgetData.swift"),
             encoding: .utf8
         )
+        let widgetSnapshotData = try String(
+            contentsOf: root.appendingPathComponent("Sources/PingScopeExtensionSupport/WidgetSnapshotData.swift"),
+            encoding: .utf8
+        )
         let keyStart = try XCTUnwrap(components.range(of: "struct WidgetHostKey"))
         let graphStart = try XCTUnwrap(
             components.range(
@@ -52,7 +56,9 @@ final class BuildGraphOptimizationTests: XCTestCase {
         XCTAssertTrue(keySource.contains(".accessibilityLabel(\"\\(entry.displayName),"))
         XCTAssertFalse(keySource.contains(".accessibilityLabel(presentation.accessibilityLabel)"))
         XCTAssertTrue(graphSource.contains(".accessibilityLabel(presentation.accessibilityLabel)"))
-        XCTAssertTrue(widgetData.contains("displayColor: $0.displayColor.map"))
+        XCTAssertFalse(widgetData.contains("struct WidgetSnapshotData"))
+        XCTAssertTrue(widgetSnapshotData.contains("displayColor: $0.displayColor?.validated.map"))
+        XCTAssertTrue(components.contains("entry.latencyIdentityColor"))
     }
 
     func testHostEditorsShipCustomAndAutomaticColorControls() throws {
