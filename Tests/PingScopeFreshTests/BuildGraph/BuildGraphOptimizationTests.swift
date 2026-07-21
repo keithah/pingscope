@@ -51,6 +51,23 @@ final class BuildGraphOptimizationTests: XCTestCase {
         XCTAssertTrue(hostsTab.contains("allHostsRow("))
     }
 
+    func testIOSMonitorSettingsOmitsSessionStatusButKeepsRunControl() throws {
+        let source = try String(
+            contentsOf: try repositoryRoot().appendingPathComponent("Sources/PingScopeiOS/PingScopeIOSShell.swift"),
+            encoding: .utf8
+        )
+        let settingsStart = try XCTUnwrap(source.range(of: "private var monitorSettings: some View"))
+        let tabBarStart = try XCTUnwrap(
+            source.range(of: "private var floatingTabBar: some View", range: settingsStart.upperBound..<source.endIndex)
+        )
+        let settings = source[settingsStart.lowerBound..<tabBarStart.lowerBound]
+
+        XCTAssertFalse(settings.contains("Section(\"Session\")"))
+        XCTAssertFalse(source.contains("private var remainingText: String"))
+        XCTAssertTrue(source.contains("private var runControl: some View"))
+        XCTAssertTrue(source.contains("Text(\"Live\").tag(Optional(MonitorSessionDuration.continuous))"))
+    }
+
     func testAppStoreSchemeDoesNotBuildDeveloperIDApp() throws {
         let root = try repositoryRoot()
         let scheme = try String(contentsOf: root.appendingPathComponent("PingScope.xcodeproj/xcshareddata/xcschemes/PingScope-AppStore.xcscheme"), encoding: .utf8)

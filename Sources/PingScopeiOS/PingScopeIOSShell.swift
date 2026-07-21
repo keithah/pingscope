@@ -1244,11 +1244,6 @@ public struct PingScopeIOSRootView: View {
                         .font(.caption.weight(.semibold))
                     Button("Request Always Permission", action: onRequestBackgroundKeepAlivePermission)
                 }
-                Section("Session") {
-                    Text(session?.phase().rawValue.capitalized ?? "Ready")
-                    Text(remainingText)
-                        .font(.system(.body, design: .monospaced))
-                }
                 Section("Setup") {
                     Button {
                         isOnboardingPresented = true
@@ -1445,13 +1440,6 @@ public struct PingScopeIOSRootView: View {
 
     private var allHostsCombinedLatencyMilliseconds: Double? {
         PingScopeIOSAllHostsMonitorPresentation.combinedLatencyMilliseconds(from: allHostsMonitorRows)
-    }
-
-    private var remainingText: String {
-        guard let session else { return "Starting..." }
-        if session.phase() == .ended { return "Ended" }
-        if session.duration == .continuous { return "App open" }
-        return "\(Int(ceil(session.remainingDuration().seconds)))s left"
     }
 
     private func latencyValue(_ milliseconds: Double?) -> String {
