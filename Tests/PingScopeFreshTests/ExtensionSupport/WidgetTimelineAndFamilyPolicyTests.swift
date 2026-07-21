@@ -3,6 +3,13 @@ import XCTest
 @testable import PingScopeExtensionSupport
 
 final class WidgetTimelineAndFamilyPolicyTests: XCTestCase {
+    func testLargeWidgetLayoutKeepsDetailRowsOnlyWhenTheyFitAlongsideKeyAndGraph() {
+        XCTAssertEqual(WidgetLargeFamilyLayout(hostCount: 2).detailRowCount, 2)
+        XCTAssertEqual(WidgetLargeFamilyLayout(hostCount: 3).detailRowCount, 3)
+        XCTAssertEqual(WidgetLargeFamilyLayout(hostCount: 4).detailRowCount, 0)
+        XCTAssertEqual(WidgetLargeFamilyLayout(hostCount: 5).detailRowCount, 0)
+    }
+
     func testWidgetPresentationUsesFirstFiveSnapshotHostsInSavedOrderWithIndependentSeries() throws {
         let hosts = (0..<6).map { index in
             HostConfig(
@@ -84,6 +91,23 @@ final class WidgetTimelineAndFamilyPolicyTests: XCTestCase {
             XCTAssertEqual(presentation.legend.map(\.hostID), Array(hosts.prefix(count)).map(\.id))
             XCTAssertEqual(presentation.series.map(\.hostID), Array(hosts.prefix(count)).map(\.id))
         }
+    }
+
+    func testWidgetPresentationAccessibilityLabelNamesVisibleHostsInOrder() {
+        let hosts = (0..<6).map { index in
+            WidgetGraphHost(id: UUID(), displayName: "Host \(index + 1)")
+        }
+
+        let presentation = WidgetMultiHostGraphPresentation(hosts: hosts, samples: [])
+
+        XCTAssertEqual(
+            presentation.accessibilityLabel,
+            "Latency history for Host 1, Host 2, Host 3, Host 4, Host 5"
+        )
+        XCTAssertEqual(
+            WidgetMultiHostGraphPresentation(hosts: [], samples: []).accessibilityLabel,
+            "No latency history"
+        )
     }
 
     func testWidgetPresentationCarriesCustomAndAutomaticAdaptiveColorsIntoMatchingSeries() {

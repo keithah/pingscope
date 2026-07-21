@@ -20,6 +20,21 @@ final class BuildGraphOptimizationTests: XCTestCase {
             contentsOf: root.appendingPathComponent("PingScopeWidget/WidgetData.swift"),
             encoding: .utf8
         )
+        let keyStart = try XCTUnwrap(components.range(of: "struct WidgetHostKey"))
+        let graphStart = try XCTUnwrap(
+            components.range(
+                of: "struct WidgetMultiHostLatencyGraph",
+                range: keyStart.upperBound..<components.endIndex
+            )
+        )
+        let colorExtensionStart = try XCTUnwrap(
+            components.range(
+                of: "private extension WidgetGraphDisplayColor",
+                range: graphStart.upperBound..<components.endIndex
+            )
+        )
+        let keySource = components[keyStart.lowerBound..<graphStart.lowerBound]
+        let graphSource = components[graphStart.lowerBound..<colorExtensionStart.lowerBound]
 
         XCTAssertTrue(components.contains("struct WidgetHostKey"))
         XCTAssertTrue(components.contains("struct WidgetMultiHostLatencyGraph"))
@@ -32,6 +47,11 @@ final class BuildGraphOptimizationTests: XCTestCase {
         XCTAssertFalse(medium.contains("snapshot.hosts.prefix(3)"))
         XCTAssertTrue(large.contains("WidgetHostKey(presentation:"))
         XCTAssertTrue(large.contains("WidgetMultiHostLatencyGraph(presentation:"))
+        XCTAssertTrue(large.contains("WidgetLargeFamilyLayout(hostCount:"))
+        XCTAssertTrue(large.contains("presentation.legend.prefix(layout.detailRowCount)"))
+        XCTAssertTrue(keySource.contains(".accessibilityLabel(\"\\(entry.displayName),"))
+        XCTAssertFalse(keySource.contains(".accessibilityLabel(presentation.accessibilityLabel)"))
+        XCTAssertTrue(graphSource.contains(".accessibilityLabel(presentation.accessibilityLabel)"))
         XCTAssertTrue(widgetData.contains("displayColor: $0.displayColor.map"))
     }
 

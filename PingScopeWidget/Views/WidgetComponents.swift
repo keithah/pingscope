@@ -121,6 +121,8 @@ struct WidgetHostKey: View {
                         .minimumScaleFactor(0.7)
                 }
                 .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("\(entry.displayName), \(WidgetStatusStyle.latencyText(for: health))")
             }
         }
     }
@@ -165,6 +167,8 @@ struct WidgetMultiHostLatencyGraph: View {
                 }
             }
         }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(presentation.accessibilityLabel)
     }
 }
 

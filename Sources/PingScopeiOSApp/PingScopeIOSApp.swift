@@ -1921,40 +1921,12 @@ private final class PingScopeIOSAppModel: ObservableObject {
         includeRecentSamples: Bool = true,
         generatedAt: Date = Date()
     ) -> WidgetSnapshot {
-        let hosts = snapshots.map { entry in
-            WidgetHost(
-                id: entry.host.id,
-                displayName: entry.host.displayName,
-                address: entry.host.address,
-                method: entry.host.method,
-                port: entry.host.port,
-                isPrimary: entry.host.id == snapshot.host.id,
-                displayColor: WidgetHostDisplayColor(
-                    resolvedColor: ResolvedHostDisplayColor(
-                        hostID: entry.host.id,
-                        displayColor: entry.host.displayColor
-                    )
-                )
-            )
-        }
-        let health = snapshots.map { entry in
-            WidgetHostHealth(
-                hostID: entry.host.id,
-                status: entry.health.status,
-                latencyMilliseconds: entry.health.latestResult?.latency?.milliseconds,
-                consecutiveFailureCount: entry.health.consecutiveFailureCount,
-                failureReason: entry.health.latestResult?.failureReason,
-                latestResultAt: entry.health.latestResult?.timestamp
-            )
-        }
-        return WidgetSnapshot(
-            primaryHostID: snapshot.host.id,
-            hosts: hosts,
-            health: health,
+        PingScopeIOSAllHostsWidgetSnapshotBuilder.make(
+            snapshots: snapshots,
+            rememberedPrimaryHostID: snapshot.host.id,
             recentSamples: includeRecentSamples ? makeAllHostsWidgetSamples(snapshots: snapshots) : [],
-            networkStatus: .connected,
             generatedAt: generatedAt,
-            monitoring: WidgetMonitoringContext(isActive: isMonitoringActive, scope: .allHosts)
+            isMonitoringActive: isMonitoringActive
         )
     }
 

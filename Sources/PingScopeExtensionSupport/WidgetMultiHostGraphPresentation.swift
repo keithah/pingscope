@@ -114,6 +114,11 @@ public struct WidgetMultiHostGraphPresentation: Equatable, Sendable {
     public let timeWindow: TimeWindow?
     public let latencyScale: LatencyScale?
 
+    public var accessibilityLabel: String {
+        let names = legend.map(\.displayName).joined(separator: ", ")
+        return names.isEmpty ? "No latency history" : "Latency history for \(names)"
+    }
+
     public init(hosts: [WidgetGraphHost], samples: [WidgetGraphSample]) {
         let visibleHosts = WidgetHostSelection(hosts: hosts).visibleHosts(maximum: 5)
         let visibleHostIDs = Set(visibleHosts.map(\.id))
@@ -153,5 +158,14 @@ public struct WidgetHostSelection: Equatable, Sendable {
 
     public func visibleHosts(maximum: Int = 5) -> [WidgetGraphHost] {
         Array(hosts.prefix(max(maximum, 0)))
+    }
+}
+
+public struct WidgetLargeFamilyLayout: Equatable, Sendable {
+    public let detailRowCount: Int
+
+    public init(hostCount: Int) {
+        let normalizedCount = max(hostCount, 0)
+        detailRowCount = normalizedCount <= 3 ? normalizedCount : 0
     }
 }

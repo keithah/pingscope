@@ -6,22 +6,47 @@ import CoreGraphics
 import XCTest
 
 final class IOSResourceEfficiencyTests: XCTestCase {
-    func testIOSWidgetPublisherKeepsAllSourceHostsAndResolvesTheirColors() throws {
-        let source = try String(
-            contentsOf: repositoryRoot().appendingPathComponent("Sources/PingScopeiOSApp/PingScopeIOSApp.swift"),
-            encoding: .utf8
-        )
-        let snapshotStart = try XCTUnwrap(source.range(of: "private func makeAllHostsWidgetSnapshot("))
-        let samplesStart = try XCTUnwrap(
-            source.range(of: "private func makeAllHostsWidgetSamples(", range: snapshotStart.upperBound..<source.endIndex)
-        )
-        let publisher = source[snapshotStart.lowerBound..<samplesStart.lowerBound]
+    func testIOSAllHostsWidgetBuilderFallsBackToFirstEnabledHostWhenRememberedPrimaryIsAbsent() {
+        let hosts = (0..<3).map { index in
+            HostConfig(
+                id: UUID(),
+                displayName: "Host \(index + 1)",
+                address: "host-\(index + 1).example"
+            )
+        }
+        let snapshots = hosts.map { monitorSnapshot(host: $0, samples: []) }
 
-        XCTAssertTrue(publisher.contains("let hosts = snapshots.map"))
+        let widgetSnapshot = PingScopeIOSAllHostsWidgetSnapshotBuilder.make(
+            snapshots: snapshots,
+            rememberedPrimaryHostID: UUID(),
+            recentSamples: [],
+            generatedAt: Date(timeIntervalSince1970: 10_000),
+            isMonitoringActive: true
+        )
+
+        XCTAssertEqual(widgetSnapshot.hosts.map(\.id), hosts.map(\.id))
+        XCTAssertEqual(widgetSnapshot.primaryHostID, hosts[0].id)
+        XCTAssertEqual(widgetSnapshot.hosts.filter(\.isPrimary).map(\.id), [hosts[0].id])
+    }
+
+    func testIOSWidgetPublisherKeepsAllSourceHostsAndResolvesTheirColors() throws {
+        let appSource = try sourceFile("Sources/PingScopeiOSApp/PingScopeIOSApp.swift")
+        let builderSource = try sourceFile("Sources/PingScopeiOS/PingScopeIOSWidgetSnapshotBuilder.swift")
+        let snapshotStart = try XCTUnwrap(appSource.range(of: "private func makeAllHostsWidgetSnapshot("))
+        let samplesStart = try XCTUnwrap(
+            appSource.range(
+                of: "private func makeAllHostsWidgetSamples(",
+                range: snapshotStart.upperBound..<appSource.endIndex
+            )
+        )
+        let publisher = appSource[snapshotStart.lowerBound..<samplesStart.lowerBound]
+
+        XCTAssertTrue(publisher.contains("PingScopeIOSAllHostsWidgetSnapshotBuilder.make("))
         XCTAssertFalse(publisher.contains("prefix(5)"))
         XCTAssertFalse(publisher.contains("suffix(5)"))
-        XCTAssertTrue(publisher.contains("ResolvedHostDisplayColor("))
-        XCTAssertTrue(publisher.contains("displayColor: entry.host.displayColor"))
+        XCTAssertTrue(builderSource.contains("let hosts = snapshots.map"))
+        XCTAssertTrue(builderSource.contains("ResolvedHostDisplayColor("))
+        XCTAssertTrue(builderSource.contains("displayColor: entry.host.displayColor"))
     }
 
     func testLatestSampleSelectionPreservesTrueMaxForOutOfOrderSeries() throws {

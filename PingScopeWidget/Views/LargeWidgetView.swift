@@ -23,6 +23,7 @@ struct LargeWidgetView: View {
             if let snapshot = entry.snapshot {
                 let healthByHostID = snapshot.healthByHostID
                 let presentation = snapshot.graphPresentation
+                let layout = WidgetLargeFamilyLayout(hostCount: presentation.legend.count)
                 WidgetHostKey(presentation: presentation, healthByHostID: healthByHostID)
 
                 if WidgetFamilyRenderPolicy.forFamily(.large).showsSparkline {
@@ -31,7 +32,7 @@ struct LargeWidgetView: View {
                         .padding(.vertical, 2)
                 }
 
-                ForEach(presentation.legend, id: \.hostID) { entry in
+                ForEach(presentation.legend.prefix(layout.detailRowCount), id: \.hostID) { entry in
                     if let host = snapshot.hosts.first(where: { $0.id == entry.hostID }) {
                         let health = healthByHostID[host.id]
                         HStack {
