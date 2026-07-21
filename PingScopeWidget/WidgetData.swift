@@ -78,6 +78,18 @@ struct WidgetSnapshotData: Codable, Equatable, Sendable {
         var method: String
         var port: UInt16?
         var isPrimary: Bool
+        var displayColor: DisplayColor?
+    }
+
+    struct DisplayColor: Codable, Equatable, Sendable {
+        var light: RGB
+        var dark: RGB
+    }
+
+    struct RGB: Codable, Equatable, Sendable {
+        var red: Double
+        var green: Double
+        var blue: Double
     }
 
     struct HostHealth: Codable, Equatable, Sendable {
@@ -131,6 +143,31 @@ struct WidgetSnapshotData: Codable, Equatable, Sendable {
 
     var healthByHostID: [UUID: HostHealth] {
         cachedHealthByHostID
+    }
+
+    var graphPresentation: WidgetMultiHostGraphPresentation {
+        WidgetMultiHostGraphPresentation(
+            hosts: hosts.map {
+                WidgetGraphHost(
+                    id: $0.id,
+                    displayName: $0.displayName,
+                    displayColor: $0.displayColor.map {
+                        WidgetGraphDisplayColor(
+                            light: WidgetGraphRGB(red: $0.light.red, green: $0.light.green, blue: $0.light.blue),
+                            dark: WidgetGraphRGB(red: $0.dark.red, green: $0.dark.green, blue: $0.dark.blue)
+                        )
+                    }
+                )
+            },
+            samples: recentSamples.map {
+                WidgetGraphSample(
+                    id: $0.id,
+                    hostID: $0.hostID,
+                    timestamp: $0.timestamp,
+                    latencyMilliseconds: $0.latencyMilliseconds
+                )
+            }
+        )
     }
 
     var isStale: Bool {

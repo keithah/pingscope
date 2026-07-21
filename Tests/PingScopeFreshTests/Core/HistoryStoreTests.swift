@@ -1153,6 +1153,83 @@ final class HistoryStoreTests: XCTestCase {
         XCTAssertEqual(widgetSnapshot.networkStatus, .noInternet)
     }
 
+    func testWidgetSnapshotEncodesResolvedAdaptiveColorsForCustomAndAutomaticHosts() throws {
+        let custom = HostConfig(
+            id: UUID(uuidString: "00000000-0000-0000-0000-000000000001")!,
+            displayName: "Custom",
+            address: "custom.example",
+            displayColor: HostDisplayColor(red: 0.2, green: 0.4, blue: 0.8)
+        )
+        let automatic = HostConfig(
+            id: UUID(uuidString: "00000000-0000-0000-0000-000000000002")!,
+            displayName: "Automatic",
+            address: "automatic.example"
+        )
+        let snapshot = WidgetSnapshot.make(from: RuntimeSnapshot(
+            hosts: [custom, automatic],
+            primaryHostID: custom.id,
+            healthByHost: [:],
+            samplesByHost: [:]
+        ))
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(snapshot)) as? [String: Any])
+        let encodedHosts = try XCTUnwrap(object["hosts"] as? [[String: Any]])
+
+        XCTAssertEqual(encodedHosts.count, 2)
+        for (host, encodedHost) in zip([custom, automatic], encodedHosts) {
+            let encodedColor = try XCTUnwrap(encodedHost["displayColor"] as? [String: Any])
+            let expected = ResolvedHostDisplayColor(hostID: host.id, displayColor: host.displayColor)
+            assertEncodedRGB(encodedColor["light"], equals: expected.components(for: .light))
+            assertEncodedRGB(encodedColor["dark"], equals: expected.components(for: .dark))
+        }
+    }
+
+    func testWidgetSnapshotKeepsEveryEnabledHostInSavedOrderWithoutPresentationCap() {
+        var hosts = (0..<7).map { index in
+            HostConfig(
+                id: UUID(),
+                displayName: "Host \(index + 1)",
+                address: "host-\(index + 1).example"
+            )
+        }
+        hosts[2].isEnabled = false
+        let enabledHosts = hosts.filter(\.isEnabled)
+        let snapshot = WidgetSnapshot.make(from: RuntimeSnapshot(
+            hosts: hosts,
+            primaryHostID: hosts[2].id,
+            healthByHost: [:],
+            samplesByHost: [:]
+        ))
+
+        XCTAssertEqual(snapshot.hosts.map(\.id), enabledHosts.map(\.id))
+        XCTAssertEqual(snapshot.hosts.count, 6, "transport must not apply the five-host presentation cap")
+        XCTAssertEqual(snapshot.primaryHostID, enabledHosts.first?.id)
+        XCTAssertEqual(snapshot.hosts.filter(\.isPrimary).map(\.id), [enabledHosts[0].id])
+    }
+
+    func testWidgetSnapshotDecodesHostsWithoutDisplayColor() throws {
+        let host = HostConfig(displayName: "Legacy", address: "legacy.example")
+        let snapshot = WidgetSnapshot.make(from: RuntimeSnapshot(
+            hosts: [host],
+            primaryHostID: host.id,
+            healthByHost: [:],
+            samplesByHost: [:]
+        ))
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let encoded = try encoder.encode(snapshot)
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        var hosts = try XCTUnwrap(object["hosts"] as? [[String: Any]])
+        hosts[0].removeValue(forKey: "displayColor")
+        object["hosts"] = hosts
+        let legacyData = try JSONSerialization.data(withJSONObject: object)
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+
+        let decoded = try decoder.decode(WidgetSnapshot.self, from: legacyData)
+
+        XCTAssertEqual(decoded.hosts.map(\.id), [host.id])
+    }
+
     func testWidgetSnapshotUsesDefaultHealthForHostWithoutRecordedHealth() {
         let host = HostConfig(displayName: "Edge", address: "9.9.9.9")
         let runtimeSnapshot = RuntimeSnapshot(
@@ -1172,6 +1249,24 @@ final class HistoryStoreTests: XCTestCase {
         XCTAssertNil(health?.latencyMilliseconds)
         XCTAssertEqual(health?.consecutiveFailureCount, 0)
         XCTAssertNil(health?.latestResultAt)
+    }
+
+    private func assertEncodedRGB(
+        _ encodedValue: Any?,
+        equals expected: HostDisplayColor,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        guard let encoded = encodedValue as? [String: Any],
+              let red = encoded["red"] as? Double,
+              let green = encoded["green"] as? Double,
+              let blue = encoded["blue"] as? Double else {
+            XCTFail("Expected encoded RGB object", file: file, line: line)
+            return
+        }
+        XCTAssertEqual(red, expected.red, accuracy: 0.000_001, file: file, line: line)
+        XCTAssertEqual(green, expected.green, accuracy: 0.000_001, file: file, line: line)
+        XCTAssertEqual(blue, expected.blue, accuracy: 0.000_001, file: file, line: line)
     }
 
     func testWidgetSnapshotLimitsSamplesPerHostAndSortsByTimestamp() {

@@ -22,36 +22,41 @@ struct LargeWidgetView: View {
 
             if let snapshot = entry.snapshot {
                 let healthByHostID = snapshot.healthByHostID
+                let presentation = snapshot.graphPresentation
+                WidgetHostKey(presentation: presentation, healthByHostID: healthByHostID)
+
                 if WidgetFamilyRenderPolicy.forFamily(.large).showsSparkline {
-                    WidgetLatencySparkline(samples: snapshot.recentSamples, color: .blue)
+                    WidgetMultiHostLatencyGraph(presentation: presentation)
                         .frame(height: 42)
                         .padding(.vertical, 2)
                 }
 
-                ForEach(snapshot.hosts, id: \.id) { host in
-                    let health = healthByHostID[host.id]
-                    HStack {
-                        Circle()
-                            .fill(WidgetStatusStyle.color(for: health))
-                            .frame(width: 8, height: 8)
+                ForEach(presentation.legend, id: \.hostID) { entry in
+                    if let host = snapshot.hosts.first(where: { $0.id == entry.hostID }) {
+                        let health = healthByHostID[host.id]
+                        HStack {
+                            Circle()
+                                .fill(WidgetStatusStyle.color(for: health))
+                                .frame(width: 8, height: 8)
 
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text(host.displayName)
-                                .font(.subheadline.weight(host.isPrimary ? .semibold : .regular))
-                                .lineLimit(1)
-                            Text("\(host.method.uppercased()) \(host.address)")
-                                .font(.caption2)
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(host.displayName)
+                                    .font(.subheadline.weight(host.isPrimary ? .semibold : .regular))
+                                    .lineLimit(1)
+                                Text("\(host.method.uppercased()) \(host.address)")
+                                    .font(.caption2)
+                                    .foregroundColor(.secondary)
+                                    .lineLimit(1)
+                            }
+
+                            Spacer()
+
+                            Text(WidgetStatusStyle.latencyText(for: health))
+                                .font(.caption.monospacedDigit().weight(.medium))
                                 .foregroundColor(.secondary)
-                                .lineLimit(1)
                         }
-
-                        Spacer()
-
-                        Text(WidgetStatusStyle.latencyText(for: health))
-                            .font(.caption.monospacedDigit().weight(.medium))
-                            .foregroundColor(.secondary)
+                        .padding(.vertical, 1)
                     }
-                    .padding(.vertical, 1)
                 }
             } else if let data = entry.data {
                 ForEach(Array(zip(data.hosts, data.results)), id: \.0.id) { host, result in

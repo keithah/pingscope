@@ -9,31 +9,12 @@ struct MediumWidgetView: View {
         VStack(alignment: .leading, spacing: 8) {
             if let snapshot = entry.snapshot {
                 let healthByHostID = snapshot.healthByHostID
-                HStack(alignment: .top, spacing: 10) {
-                    ForEach(snapshot.hosts.prefix(3), id: \.id) { host in
-                        let health = healthByHostID[host.id]
-                        VStack(alignment: .leading, spacing: 4) {
-                            HStack(spacing: 5) {
-                                Circle()
-                                    .fill(WidgetStatusStyle.color(for: health))
-                                    .frame(width: 7, height: 7)
-
-                                Text(host.displayName)
-                                    .font(.caption.weight(.medium))
-                                    .lineLimit(1)
-                            }
-
-                            Text(WidgetStatusStyle.latencyText(for: health))
-                                .font(.caption2.monospacedDigit())
-                                .foregroundColor(.secondary)
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                }
+                let presentation = snapshot.graphPresentation
+                WidgetHostKey(presentation: presentation, healthByHostID: healthByHostID)
 
                 HStack(spacing: 8) {
                     if WidgetFamilyRenderPolicy.forFamily(.medium).showsSparkline {
-                        WidgetLatencySparkline(samples: snapshot.recentSamples, color: .blue)
+                        WidgetMultiHostLatencyGraph(presentation: presentation)
                             .frame(height: 28)
                     }
                     WidgetStaleBadge(isStale: entry.isStale, label: entry.statusLabel)

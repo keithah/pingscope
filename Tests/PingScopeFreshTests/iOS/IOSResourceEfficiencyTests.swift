@@ -6,6 +6,24 @@ import CoreGraphics
 import XCTest
 
 final class IOSResourceEfficiencyTests: XCTestCase {
+    func testIOSWidgetPublisherKeepsAllSourceHostsAndResolvesTheirColors() throws {
+        let source = try String(
+            contentsOf: repositoryRoot().appendingPathComponent("Sources/PingScopeiOSApp/PingScopeIOSApp.swift"),
+            encoding: .utf8
+        )
+        let snapshotStart = try XCTUnwrap(source.range(of: "private func makeAllHostsWidgetSnapshot("))
+        let samplesStart = try XCTUnwrap(
+            source.range(of: "private func makeAllHostsWidgetSamples(", range: snapshotStart.upperBound..<source.endIndex)
+        )
+        let publisher = source[snapshotStart.lowerBound..<samplesStart.lowerBound]
+
+        XCTAssertTrue(publisher.contains("let hosts = snapshots.map"))
+        XCTAssertFalse(publisher.contains("prefix(5)"))
+        XCTAssertFalse(publisher.contains("suffix(5)"))
+        XCTAssertTrue(publisher.contains("ResolvedHostDisplayColor("))
+        XCTAssertTrue(publisher.contains("displayColor: entry.host.displayColor"))
+    }
+
     func testLatestSampleSelectionPreservesTrueMaxForOutOfOrderSeries() throws {
         let hostA = UUID()
         let hostB = UUID()
@@ -501,6 +519,14 @@ final class IOSResourceEfficiencyTests: XCTestCase {
         XCTAssertFalse(function.contains("flatMap(\\.samples)"))
         XCTAssertTrue(function.contains("allHostLatestResult?.timestamp"))
     }
+}
+
+private func repositoryRoot() -> URL {
+    URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
 }
 
 private extension IOSResourceEfficiencyTests {

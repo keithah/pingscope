@@ -36,18 +36,25 @@ public struct WidgetSnapshot: Codable, Equatable, Sendable {
         sampleLimitPerHost: Int = 60,
         generatedAt: Date = Date()
     ) -> WidgetSnapshot {
-        let hosts = snapshot.hosts.map {
+        let enabledHosts = snapshot.hosts.filter(\.isEnabled)
+        let primaryHostID = snapshot.primaryHostID.flatMap { id in
+            enabledHosts.contains { $0.id == id } ? id : nil
+        } ?? enabledHosts.first?.id
+        let hosts = enabledHosts.map {
             WidgetHost(
                 id: $0.id,
                 displayName: $0.displayName,
                 address: $0.address,
                 method: $0.method,
                 port: $0.port,
-                isPrimary: $0.id == snapshot.primaryHostID
+                isPrimary: $0.id == primaryHostID,
+                displayColor: WidgetHostDisplayColor(
+                    resolvedColor: ResolvedHostDisplayColor(hostID: $0.id, displayColor: $0.displayColor)
+                )
             )
         }
 
-        let health = snapshot.hosts.map { host in
+        let health = enabledHosts.map { host in
             let hostHealth = snapshot.healthByHost[host.id] ?? HostHealth(hostID: host.id, thresholds: host.thresholds)
             return WidgetHostHealth(
                 hostID: host.id,
@@ -60,8 +67,8 @@ public struct WidgetSnapshot: Codable, Equatable, Sendable {
         }
 
         let limit = max(1, sampleLimitPerHost)
-        let samples = snapshot.samplesByHost.values.flatMap { series in
-            series.recentSamples(limit: limit).map(WidgetSample.init(result:))
+        let samples = enabledHosts.flatMap { host in
+            snapshot.samplesByHost[host.id]?.recentSamples(limit: limit).map(WidgetSample.init(result:)) ?? []
         }
         .sorted { lhs, rhs in
             if lhs.timestamp == rhs.timestamp {
@@ -71,7 +78,7 @@ public struct WidgetSnapshot: Codable, Equatable, Sendable {
         }
 
         return WidgetSnapshot(
-            primaryHostID: snapshot.primaryHostID,
+            primaryHostID: primaryHostID,
             hosts: hosts,
             health: health,
             recentSamples: samples,
@@ -132,6 +139,7 @@ public struct WidgetHost: Codable, Equatable, Sendable {
     public var method: PingMethod
     public var port: UInt16?
     public var isPrimary: Bool
+    public var displayColor: WidgetHostDisplayColor?
 
     public init(
         id: UUID,
@@ -139,7 +147,8 @@ public struct WidgetHost: Codable, Equatable, Sendable {
         address: String,
         method: PingMethod,
         port: UInt16?,
-        isPrimary: Bool
+        isPrimary: Bool,
+        displayColor: WidgetHostDisplayColor? = nil
     ) {
         self.id = id
         self.displayName = displayName
@@ -147,6 +156,22 @@ public struct WidgetHost: Codable, Equatable, Sendable {
         self.method = method
         self.port = port
         self.isPrimary = isPrimary
+        self.displayColor = displayColor
+    }
+}
+
+public struct WidgetHostDisplayColor: Codable, Equatable, Sendable {
+    public var light: HostDisplayColor
+    public var dark: HostDisplayColor
+
+    public init(light: HostDisplayColor, dark: HostDisplayColor) {
+        self.light = light
+        self.dark = dark
+    }
+
+    public init(resolvedColor: ResolvedHostDisplayColor) {
+        light = resolvedColor.components(for: .light)
+        dark = resolvedColor.components(for: .dark)
     }
 }
 

@@ -2,6 +2,39 @@ import Foundation
 import XCTest
 
 final class BuildGraphOptimizationTests: XCTestCase {
+    func testMediumAndLargeWidgetsShipFiveHostKeyAndIndependentIdentityColoredSeries() throws {
+        let root = try repositoryRoot()
+        let components = try String(
+            contentsOf: root.appendingPathComponent("PingScopeWidget/Views/WidgetComponents.swift"),
+            encoding: .utf8
+        )
+        let medium = try String(
+            contentsOf: root.appendingPathComponent("PingScopeWidget/Views/MediumWidgetView.swift"),
+            encoding: .utf8
+        )
+        let large = try String(
+            contentsOf: root.appendingPathComponent("PingScopeWidget/Views/LargeWidgetView.swift"),
+            encoding: .utf8
+        )
+        let widgetData = try String(
+            contentsOf: root.appendingPathComponent("PingScopeWidget/WidgetData.swift"),
+            encoding: .utf8
+        )
+
+        XCTAssertTrue(components.contains("struct WidgetHostKey"))
+        XCTAssertTrue(components.contains("struct WidgetMultiHostLatencyGraph"))
+        XCTAssertTrue(components.contains("ForEach(presentation.series"))
+        XCTAssertTrue(components.contains("series.displayColor"))
+        XCTAssertTrue(components.contains("presentation.timeWindow"))
+        XCTAssertTrue(components.contains("presentation.latencyScale"))
+        XCTAssertTrue(medium.contains("WidgetHostKey(presentation:"))
+        XCTAssertTrue(medium.contains("WidgetMultiHostLatencyGraph(presentation:"))
+        XCTAssertFalse(medium.contains("snapshot.hosts.prefix(3)"))
+        XCTAssertTrue(large.contains("WidgetHostKey(presentation:"))
+        XCTAssertTrue(large.contains("WidgetMultiHostLatencyGraph(presentation:"))
+        XCTAssertTrue(widgetData.contains("displayColor: $0.displayColor.map"))
+    }
+
     func testHostEditorsShipCustomAndAutomaticColorControls() throws {
         let root = try repositoryRoot()
         let iosDraft = try String(

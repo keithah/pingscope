@@ -1883,7 +1883,10 @@ private final class PingScopeIOSAppModel: ObservableObject {
                     address: host.address,
                     method: host.method,
                     port: host.port,
-                    isPrimary: true
+                    isPrimary: true,
+                    displayColor: WidgetHostDisplayColor(
+                        resolvedColor: ResolvedHostDisplayColor(hostID: host.id, displayColor: host.displayColor)
+                    )
                 )
             ],
             health: [
@@ -1925,7 +1928,13 @@ private final class PingScopeIOSAppModel: ObservableObject {
                 address: entry.host.address,
                 method: entry.host.method,
                 port: entry.host.port,
-                isPrimary: entry.host.id == snapshot.host.id
+                isPrimary: entry.host.id == snapshot.host.id,
+                displayColor: WidgetHostDisplayColor(
+                    resolvedColor: ResolvedHostDisplayColor(
+                        hostID: entry.host.id,
+                        displayColor: entry.host.displayColor
+                    )
+                )
             )
         }
         let health = snapshots.map { entry in

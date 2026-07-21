@@ -2,6 +2,8 @@ import SwiftUI
 import PingScopeExtensionSupport
 #if os(iOS)
 import UIKit
+#elseif os(macOS)
+import AppKit
 #endif
 
 enum WidgetStatusStyle {
@@ -91,35 +93,105 @@ struct WidgetStaleBadge: View {
     }
 }
 
-struct WidgetLatencySparkline: View {
-    let samples: [WidgetSnapshotData.Sample]
-    var color: Color = .blue
+struct WidgetHostKey: View {
+    let presentation: WidgetMultiHostGraphPresentation
+    let healthByHostID: [UUID: WidgetSnapshotData.HostHealth]
 
     var body: some View {
-        let latencies = samples.compactMap(\.latencyMilliseconds)
+        HStack(alignment: .top, spacing: 6) {
+            ForEach(presentation.legend, id: \.hostID) { entry in
+                let health = healthByHostID[entry.hostID]
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 4) {
+                        Circle()
+                            .fill((entry.displayColor ?? .automatic(for: entry.hostID)).swiftUIColor)
+                            .frame(width: 7, height: 7)
 
-        Canvas { context, size in
-            guard latencies.count > 1 else {
+                        Text(entry.displayName)
+                            .font(.caption.weight(.medium))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.58)
+                            .truncationMode(.tail)
+                    }
+
+                    Text(WidgetStatusStyle.latencyText(for: health))
+                        .font(.caption2.monospacedDigit())
+                        .foregroundColor(.secondary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                }
+                .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+            }
+        }
+    }
+}
+
+struct WidgetMultiHostLatencyGraph: View {
+    let presentation: WidgetMultiHostGraphPresentation
+
+    var body: some View {
+        ZStack {
+            Canvas { context, size in
                 let baselineY = size.height * 0.72
                 var baseline = Path()
                 baseline.move(to: CGPoint(x: 0, y: baselineY))
                 baseline.addLine(to: CGPoint(x: size.width, y: baselineY))
                 context.stroke(baseline, with: .color(.secondary.opacity(0.18)), lineWidth: 1)
-                return
             }
 
-            let maximum = max(latencies.max() ?? 1, 1)
-            let minimum = latencies.min() ?? 0
-            let span = max(maximum - minimum, 1)
-            let points = latencies.enumerated().map { index, latency in
-                let x = size.width * CGFloat(index) / CGFloat(max(latencies.count - 1, 1))
-                let normalized = (latency - minimum) / span
-                let y = size.height - (size.height * CGFloat(normalized))
-                return CGPoint(x: x, y: min(max(y, 1), size.height - 1))
+            ForEach(presentation.series, id: \.hostID) { series in
+                Canvas { context, size in
+                    guard series.pathPoints.count > 1,
+                          let timeWindow = presentation.timeWindow,
+                          let latencyScale = presentation.latencyScale else {
+                        return
+                    }
+                    let timeSpan = max(timeWindow.end.timeIntervalSince(timeWindow.start), 1)
+                    let latencySpan = max(
+                        latencyScale.maximumMilliseconds - latencyScale.minimumMilliseconds,
+                        1
+                    )
+                    let points = series.pathPoints.map { sample in
+                        let elapsed = sample.timestamp.timeIntervalSince(timeWindow.start)
+                        let x = size.width * CGFloat(elapsed / timeSpan)
+                        let latency = sample.latencyMilliseconds ?? latencyScale.minimumMilliseconds
+                        let normalized = (latency - latencyScale.minimumMilliseconds) / latencySpan
+                        let y = size.height - (size.height * CGFloat(normalized))
+                        return CGPoint(x: x, y: min(max(y, 1), size.height - 1))
+                    }
+                    let path = Path(ExtensionLatencyCurve.smoothedPath(points: points, closed: false))
+                    let color = (series.displayColor ?? .automatic(for: series.hostID)).swiftUIColor
+                    context.stroke(path, with: .color(color), lineWidth: 1.6)
+                }
             }
-            let path = Path(ExtensionLatencyCurve.smoothedPath(points: points, closed: false))
-
-            context.stroke(path, with: .color(color), lineWidth: 1.6)
         }
+    }
+}
+
+private extension WidgetGraphDisplayColor {
+    var swiftUIColor: Color {
+        #if os(macOS)
+        Color(nsColor: NSColor(name: nil) { appearance in
+            let components = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? dark : light
+            return NSColor(
+                srgbRed: components.red,
+                green: components.green,
+                blue: components.blue,
+                alpha: 1
+            )
+        })
+        #elseif os(iOS)
+        Color(uiColor: UIColor { traits in
+            let components = traits.userInterfaceStyle == .dark ? dark : light
+            return UIColor(
+                red: components.red,
+                green: components.green,
+                blue: components.blue,
+                alpha: 1
+            )
+        })
+        #else
+        Color(red: light.red, green: light.green, blue: light.blue)
+        #endif
     }
 }
