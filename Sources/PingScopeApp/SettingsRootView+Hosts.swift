@@ -110,7 +110,9 @@ extension SettingsRootView {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                         Button("Use Automatic Color") {
-                            model.draftDisplayColor = nil
+                            var editor = displayColorEditor
+                            editor.useAutomatic()
+                            model.draftDisplayColor = editor.displayColor
                         }
                         .disabled(model.draftDisplayColor == nil)
                     }
@@ -192,13 +194,18 @@ extension SettingsRootView {
                 .disabled(!model.canAddDraftHost || model.isTestingDraftHost)
                 Button {
                     NSApp.keyWindow?.makeFirstResponder(nil)
-                    model.addDraftHost()
+                    displayColorEditor.save { displayColor in
+                        model.draftDisplayColor = displayColor
+                        model.addDraftHost()
+                    }
                 } label: {
                     Label(model.draftActionTitle, systemImage: model.editingHostID == nil ? "plus" : "checkmark")
                 }
                 .disabled(!model.canAddDraftHost)
                 Button {
-                    model.clearDraftHost()
+                    displayColorEditor.cancel {
+                        model.clearDraftHost()
+                    }
                 } label: {
                     Label("Cancel", systemImage: "xmark")
                 }
@@ -213,31 +220,25 @@ extension SettingsRootView {
         Binding(
             get: { resolvedDraftDisplayColor },
             set: { color in
-                if let displayColor = color.opaqueSRGBHostDisplayColor {
-                    model.draftDisplayColor = displayColor
+                var editor = displayColorEditor
+                if editor.selectOpaqueSRGB(NSColor(color).cgColor) {
+                    model.draftDisplayColor = editor.displayColor
                 }
             }
         )
     }
 
     private var resolvedDraftDisplayColor: Color {
-        ResolvedHostDisplayColor(
+        displayColorEditor.preview.swiftUIColor
+    }
+
+    private var displayColorEditor: HostDisplayColorEditorBinding {
+        HostDisplayColorEditorBinding(
             hostID: model.draftHostID,
             displayColor: model.draftDisplayColor
-        ).swiftUIColor
-    }
-
-}
-
-private extension Color {
-    var opaqueSRGBHostDisplayColor: HostDisplayColor? {
-        guard let converted = NSColor(self).usingColorSpace(.sRGB) else { return nil }
-        return HostDisplayColor(
-            red: min(max(Double(converted.redComponent), 0), 1),
-            green: min(max(Double(converted.greenComponent), 0), 1),
-            blue: min(max(Double(converted.blueComponent), 0), 1)
         )
     }
+
 }
 
 private struct LiveHostSettingsList: View {

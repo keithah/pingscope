@@ -138,4 +138,116 @@ final class HostConfigPersistenceTests: XCTestCase {
         XCTAssertEqual(automatic.interval, host.interval)
         XCTAssertEqual(automatic.timeout, host.timeout)
     }
+
+    @MainActor
+    func testMacHostDraftTreatsInvalidDecodableColorsAsAutomaticAndClearsThemOnSave() throws {
+        for invalidColor in [
+            HostDisplayColor(red: -0.1, green: 0.4, blue: 0.8),
+            HostDisplayColor(red: .nan, green: 0.4, blue: 0.8),
+        ] {
+            let host = HostConfig(id: UUID(), displayName: "Invalid", address: "invalid.example", displayColor: invalidColor)
+            let model = PingScopeModel()
+
+            model.loadDraft(from: host)
+
+            XCTAssertNil(model.draftDisplayColor)
+            model.addDraftHost()
+            XCTAssertNil(try XCTUnwrap(model.snapshot.hosts.first { $0.id == host.id }).displayColor)
+        }
+    }
+
+    @MainActor
+    func testMacModelColorSavePreservesRuntimeGenerationAndSamplesButProbeEditRestarts() async throws {
+        let host = HostConfig.defaultInternet
+        let tracker = MacProbeCancellationTracker()
+        let runtime = PingRuntime(
+            hostStore: HostStore(defaultHosts: [host]),
+            scheduler: MeasurementScheduler(probeFactory: MacCancellationTrackingProbeFactory(tracker: tracker))
+        )
+        let model = PingScopeModel(runtimeForTesting: runtime)
+        await runtime.start()
+        try await tracker.waitUntilMeasurementStarts()
+        let sample = PingResult.success(hostID: host.id, latency: .milliseconds(12))
+        await runtime.ingest(sample)
+
+        model.loadDraft(from: host)
+        model.draftDisplayColor = HostDisplayColor(red: 0.2, green: 0.4, blue: 0.8)
+        model.addDraftHost()
+        try await waitUntilRuntimeHost(runtime, hostID: host.id) { $0.displayColor != nil }
+
+        var snapshot = try await currentSnapshot(runtime)
+        let cancellationCount = await tracker.cancellations()
+        XCTAssertEqual(cancellationCount, 0)
+        XCTAssertEqual(snapshot.samplesByHost[host.id]?.samples, [sample])
+
+        let recolored = try XCTUnwrap(snapshot.hosts.first { $0.id == host.id })
+        model.loadDraft(from: recolored)
+        model.draftTimeoutMilliseconds = 3_000
+        model.addDraftHost()
+        try await tracker.waitForCancellations(atLeast: 1)
+
+        snapshot = try await currentSnapshot(runtime)
+        XCTAssertEqual(snapshot.primaryHost?.timeout, .milliseconds(3_000))
+        await runtime.stop()
+    }
+}
+
+private func currentSnapshot(_ runtime: PingRuntime) async throws -> RuntimeSnapshot {
+    let stream = await runtime.snapshots()
+    var iterator = stream.makeAsyncIterator()
+    guard let snapshot = await iterator.next() else { throw MacRuntimeTestTimeout() }
+    return snapshot
+}
+
+@MainActor
+private func waitUntilRuntimeHost(
+    _ runtime: PingRuntime,
+    hostID: UUID,
+    matches: (HostConfig) -> Bool
+) async throws {
+    for _ in 0..<100 {
+        let snapshot = try await currentSnapshot(runtime)
+        if let host = snapshot.hosts.first(where: { $0.id == hostID }), matches(host) { return }
+        try await Task.sleep(for: .milliseconds(10))
+    }
+    throw MacRuntimeTestTimeout()
+}
+
+private struct MacRuntimeTestTimeout: Error {}
+
+private actor MacProbeCancellationTracker {
+    private var started = false
+    private var cancellationCount = 0
+
+    func markStarted() { started = true }
+    func markCancelled() { cancellationCount += 1 }
+    func cancellations() -> Int { cancellationCount }
+
+    func waitUntilMeasurementStarts() async throws {
+        for _ in 0..<100 where !started { try await Task.sleep(for: .milliseconds(10)) }
+        if !started { throw MacRuntimeTestTimeout() }
+    }
+
+    func waitForCancellations(atLeast count: Int) async throws {
+        for _ in 0..<100 where cancellationCount < count { try await Task.sleep(for: .milliseconds(10)) }
+        if cancellationCount < count { throw MacRuntimeTestTimeout() }
+    }
+}
+
+private struct MacCancellationTrackingProbeFactory: ProbeFactory {
+    let tracker: MacProbeCancellationTracker
+    func makeProbe(for method: PingMethod) async -> any PingProbe { MacCancellationTrackingProbe(tracker: tracker) }
+}
+
+private struct MacCancellationTrackingProbe: PingProbe {
+    let tracker: MacProbeCancellationTracker
+    func measure(_ host: HostConfig) async -> PingResult {
+        await tracker.markStarted()
+        return await withTaskCancellationHandler {
+            try? await Task.sleep(for: .seconds(60))
+            return .failure(hostID: host.id, reason: .timeout)
+        } onCancel: {
+            Task { await tracker.markCancelled() }
+        }
+    }
 }

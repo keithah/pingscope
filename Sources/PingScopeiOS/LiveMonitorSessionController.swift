@@ -128,7 +128,7 @@ public struct LiveMonitorSessionSnapshot: Equatable, Sendable {
 }
 
 public actor LiveMonitorSessionController {
-    private let host: HostConfig
+    private var host: HostConfig
     private let probeFactory: any ProbeFactory
     private let policy: MonitorSessionPolicy
     private let backgroundRuntimeLimit: Duration?
@@ -211,6 +211,19 @@ public actor LiveMonitorSessionController {
 
     public func snapshot() -> LiveMonitorSessionSnapshot {
         LiveMonitorSessionSnapshot(host: host, session: session, health: health, series: series)
+    }
+
+    /// Applies presentation-only metadata without disturbing the active probe
+    /// loop, session accounting, health, or accumulated samples.
+    @discardableResult
+    public func updatePresentationHost(_ updatedHost: HostConfig) -> Bool {
+        guard host.id == updatedHost.id,
+              host.isEnabled == updatedHost.isEnabled,
+              host.hasSameProbeConfiguration(as: updatedHost) else {
+            return false
+        }
+        host = host.applyingPresentationMetadata(from: updatedHost)
+        return true
     }
 
     public func nextProbeInterval() async -> Duration {

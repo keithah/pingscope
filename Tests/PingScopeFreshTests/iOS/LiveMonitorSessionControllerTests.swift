@@ -1796,6 +1796,73 @@ final class LiveMonitorSessionControllerTests: XCTestCase {
         XCTAssertNil(draft.finalizedHost.displayColor)
     }
 
+    func testIOSHostDraftTreatsInvalidDecodableColorsAsAutomaticAndClearsThemOnSave() {
+        for invalidColor in [
+            HostDisplayColor(red: 1.1, green: 0.4, blue: 0.8),
+            HostDisplayColor(red: 0.2, green: .infinity, blue: 0.8),
+        ] {
+            let host = HostConfig(id: UUID(), displayName: "Invalid", address: "invalid.example", displayColor: invalidColor)
+            let draft = PingScopeIOSHostDraft(host: host)
+
+            XCTAssertTrue(draft.usesAutomaticDisplayColor)
+            XCTAssertNil(draft.displayColor)
+            XCTAssertNil(draft.finalizedHost.displayColor)
+        }
+    }
+
+    @MainActor
+    func testAppSessionModelFocusedColorSavePreservesControllerSessionAndSamples() async throws {
+        let host = HostConfig(id: UUID(), displayName: "Edge", address: "edge.example")
+        let probe = RecordingProbe(results: [.success(hostID: host.id, latency: .milliseconds(18))])
+        let clock = ManualClock()
+        let controller = LiveMonitorSessionController(
+            host: host,
+            probeFactory: StaticProbeFactory(probe: probe),
+            policy: MonitorSessionPolicy(probeInterval: .seconds(60)),
+            clock: clock,
+            now: { clock.currentDate }
+        )
+        let sessionModel = PingScopeIOSAppSessionModel(coordinator: PingScopeIOSMultiHostSessionCoordinator())
+        await controller.start(duration: .continuous, at: clock.baseDate)
+        try await clock.waitForSleepers(atLeast: 1)
+        let sessionBefore = await controller.snapshot().session
+        var recolored = host
+        recolored.displayColor = HostDisplayColor(red: 0.2, green: 0.4, blue: 0.8)
+
+        let preserved = await sessionModel.reconcileFocusedHostEdit(
+            currentHost: host,
+            updatedHost: recolored,
+            controller: controller
+        )
+        let snapshot = await controller.snapshot()
+
+        XCTAssertTrue(preserved)
+        XCTAssertEqual(snapshot.host.displayColor, recolored.displayColor)
+        XCTAssertEqual(snapshot.session, sessionBefore)
+        XCTAssertEqual(snapshot.series.samples.count, 1)
+        let measurementCount = await probe.measurementCount
+        XCTAssertEqual(measurementCount, 1)
+    }
+
+    @MainActor
+    func testAppSessionModelFocusedProbeSaveRequestsControllerReplacement() async {
+        let host = HostConfig(id: UUID(), displayName: "Edge", address: "edge.example")
+        let controller = LiveMonitorSessionController(host: host)
+        let sessionModel = PingScopeIOSAppSessionModel(coordinator: PingScopeIOSMultiHostSessionCoordinator())
+        var edited = host
+        edited.interval = .seconds(5)
+
+        let preserved = await sessionModel.reconcileFocusedHostEdit(
+            currentHost: host,
+            updatedHost: edited,
+            controller: controller
+        )
+
+        XCTAssertFalse(preserved)
+        let snapshot = await controller.snapshot()
+        XCTAssertEqual(snapshot.host.interval, host.interval)
+    }
+
     func testIOSHostDraftAppliesMethodAwarePortAndRejectsInvalidInput() {
         var draft = PingScopeIOSHostDraft(host: HostConfig(displayName: "Cloudflare", address: "1.1.1.1"))
 

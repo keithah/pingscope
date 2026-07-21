@@ -259,6 +259,26 @@ public struct HostConfig: Identifiable, Codable, Equatable, Sendable {
         NetworkTierClassifier().tier(for: self)
     }
 
+    /// Probe-affecting fields only. Presentation metadata intentionally does
+    /// not participate so a cosmetic edit can update a running session in place.
+    public func hasSameProbeConfiguration(as other: HostConfig) -> Bool {
+        address == other.address
+            && method == other.method
+            && port == other.port
+            && interval == other.interval
+            && timeout == other.timeout
+            && thresholds == other.thresholds
+    }
+
+    public func applyingPresentationMetadata(from other: HostConfig) -> HostConfig {
+        var copy = self
+        copy.displayName = other.displayName
+        copy.tier = other.tier
+        copy.notifications = other.notifications
+        copy.displayColor = other.displayColor?.validatedComponents
+        return copy
+    }
+
     public func sanitizedForStorage() -> HostConfig? {
         var host = self
         host.displayName = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -267,6 +287,7 @@ public struct HostConfig: Identifiable, Codable, Equatable, Sendable {
         host.timeout = min(max(timeout, .milliseconds(250)), .seconds(60))
         host.thresholds.degradedMilliseconds = max(1, thresholds.degradedMilliseconds)
         host.thresholds.downAfterFailures = max(1, thresholds.downAfterFailures)
+        host.displayColor = displayColor?.validatedComponents
         return host.validationErrors.isEmpty ? host : nil
     }
 

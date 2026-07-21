@@ -744,7 +744,13 @@ public actor PingRuntime {
         } else {
             healthByHost[host.id, default: HostHealth(hostID: host.id, thresholds: host.thresholds)].thresholds = host.thresholds
         }
-        await restartScheduler(refreshCache: false)
+        if let previous,
+           previous.isEnabled == host.isEnabled,
+           previous.hasSameProbeConfiguration(as: host) {
+            publishSnapshot()
+        } else {
+            await restartScheduler(refreshCache: false)
+        }
     }
 
     public func deleteHost(_ id: UUID) async {

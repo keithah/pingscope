@@ -439,23 +439,3 @@ public actor PingScopeIOSMultiHostSessionCoordinator {
         return merged
     }
 }
-
-private extension HostConfig {
-    func applyingPresentationMetadata(from other: HostConfig) -> HostConfig {
-        var copy = self
-        copy.displayName = other.displayName
-        copy.tier = other.tier
-        copy.notifications = other.notifications
-        copy.displayColor = other.displayColor
-        return copy
-    }
-
-    func hasSameProbeConfiguration(as other: HostConfig) -> Bool {
-        address == other.address
-            && method == other.method
-            && port == other.port
-            && interval == other.interval
-            && timeout == other.timeout
-            && thresholds == other.thresholds
-    }
-}

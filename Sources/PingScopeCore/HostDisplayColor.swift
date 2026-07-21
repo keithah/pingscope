@@ -1,4 +1,5 @@
 import Foundation
+import CoreGraphics
 
 public struct HostDisplayColor: Codable, Equatable, Hashable, Sendable {
     public var red: Double
@@ -17,6 +18,57 @@ public struct HostDisplayColor: Codable, Equatable, Hashable, Sendable {
             return nil
         }
         return self
+    }
+}
+
+/// Shared, testable state behind the macOS and iOS color-picker bindings.
+/// SwiftUI/AppKit/UIKit only supply a `CGColor`; normalization and editor
+/// semantics live here so both shipping editors behave identically.
+public struct HostDisplayColorEditorBinding {
+    public let hostID: UUID
+    public private(set) var displayColor: HostDisplayColor?
+
+    public init(hostID: UUID, displayColor: HostDisplayColor?) {
+        self.hostID = hostID
+        self.displayColor = displayColor?.validatedComponents
+    }
+
+    public var preview: ResolvedHostDisplayColor {
+        ResolvedHostDisplayColor(hostID: hostID, displayColor: displayColor)
+    }
+
+    @discardableResult
+    public mutating func selectOpaqueSRGB(_ color: CGColor) -> Bool {
+        guard let colorSpace = CGColorSpace(name: CGColorSpace.sRGB),
+              let converted = color.converted(to: colorSpace, intent: .defaultIntent, options: nil),
+              let components = converted.components,
+              components.count >= 3 else {
+            return false
+        }
+        let candidate = HostDisplayColor(
+            red: Self.clamp(components[0]),
+            green: Self.clamp(components[1]),
+            blue: Self.clamp(components[2])
+        )
+        guard let validated = candidate.validatedComponents else { return false }
+        displayColor = validated
+        return true
+    }
+
+    public mutating func useAutomatic() {
+        displayColor = nil
+    }
+
+    public func save(_ action: (HostDisplayColor?) -> Void) {
+        action(displayColor)
+    }
+
+    public func cancel(_ action: () -> Void) {
+        action()
+    }
+
+    private static func clamp(_ value: CGFloat) -> Double {
+        min(max(Double(value), 0), 1)
     }
 }
 

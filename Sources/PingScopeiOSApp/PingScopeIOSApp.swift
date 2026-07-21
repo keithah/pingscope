@@ -762,6 +762,7 @@ private final class PingScopeIOSAppModel: ObservableObject {
 
     func saveHost(_ host: HostConfig) {
         let normalizedHost = BuildFlavor.appStore.normalizedHost(host)
+        let previousHost = hosts.first { $0.id == normalizedHost.id }
         if let index = hosts.firstIndex(where: { $0.id == normalizedHost.id }) {
             hosts[index] = normalizedHost
         } else {
@@ -773,7 +774,30 @@ private final class PingScopeIOSAppModel: ObservableObject {
         }
         guard hostScope == .allHosts else {
             hostStore.save(hosts: hosts, selectedHostID: normalizedHost.id, hostScope: .focused)
-            selectHost(normalizedHost.id)
+            guard let previousHost, snapshot.host.id == normalizedHost.id else {
+                selectHost(normalizedHost.id)
+                return
+            }
+            runLifecycleTask { model, context in
+                let preserved = await model.sessionModel.reconcileFocusedHostEdit(
+                    currentHost: previousHost,
+                    updatedHost: normalizedHost,
+                    controller: model.controller
+                )
+                guard model.isCurrentLifecycle(context) else { return }
+                guard preserved else {
+                    await model.switchToHostAsync(
+                        normalizedHost,
+                        restartDuration: model.activeRestartDuration,
+                        saveSelection: false,
+                        context: context
+                    )
+                    return
+                }
+                await model.configureNotificationScope()
+                guard model.isCurrentLifecycle(context) else { return }
+                await model.refreshSnapshot()
+            }
             return
         }
 

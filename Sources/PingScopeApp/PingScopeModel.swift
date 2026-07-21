@@ -317,7 +317,7 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
         self.init(cloudSyncDefaultsSuiteName: nil)
     }
 
-    init(cloudSyncDefaultsSuiteName: String?) {
+    init(cloudSyncDefaultsSuiteName: String?, runtimeOverride: PingRuntime? = nil) {
         let cloudSyncDefaults = cloudSyncDefaultsSuiteName.flatMap(UserDefaults.init(suiteName:)) ?? .standard
         let hostConfigPersistence = HostConfigPersistence()
         let loadedHosts = hostConfigPersistence.loadInitialConfiguration { message in
@@ -354,7 +354,7 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
         let allowsLocalNetworkProbes = UserDefaults.standard.allowsLocalNetworkProbes
         UserDefaults.standard.migrateNoisyNetworkStatusAlertDefaults()
         let notificationRules = UserDefaults.standard.notificationRules ?? NotificationRuleSet()
-        self.runtime = PingRuntime(
+        self.runtime = runtimeOverride ?? PingRuntime(
             hostStore: hostStore,
             scheduler: MeasurementScheduler(probeFactory: probeFactory, logger: { message in
                 DebugLog.write(message)
@@ -402,6 +402,10 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
         self.overlayFrame = UserDefaults.standard.overlayFrame ?? NSRect(x: 80, y: 620, width: 240, height: 96)
         super.init()
         configureCloudSync(isAutomaticLaunch: true)
+    }
+
+    convenience init(runtimeForTesting runtime: PingRuntime) {
+        self.init(cloudSyncDefaultsSuiteName: nil, runtimeOverride: runtime)
     }
 
     convenience init(

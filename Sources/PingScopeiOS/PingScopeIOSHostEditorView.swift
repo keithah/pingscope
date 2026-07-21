@@ -6,6 +6,7 @@ import UIKit
 
 struct PingScopeIOSHostEditor: View {
     @State private var draft: PingScopeIOSHostDraft
+    @State private var colorEditor: HostDisplayColorEditorBinding
 
     let canDelete: Bool
     let onSave: (HostConfig) -> Void
@@ -20,6 +21,10 @@ struct PingScopeIOSHostEditor: View {
         onCancel: @escaping () -> Void
     ) {
         self._draft = State(initialValue: PingScopeIOSHostDraft(host: host))
+        self._colorEditor = State(initialValue: HostDisplayColorEditorBinding(
+            hostID: host.id,
+            displayColor: host.displayColor
+        ))
         self.canDelete = canDelete
         self.onSave = onSave
         self.onDelete = onDelete
@@ -49,7 +54,8 @@ struct PingScopeIOSHostEditor: View {
                     }
 
                     Button("Use Automatic Color") {
-                        draft.displayColor = nil
+                        colorEditor.useAutomatic()
+                        draft.displayColor = colorEditor.displayColor
                     }
                     .disabled(draft.usesAutomaticDisplayColor)
                 }
@@ -95,11 +101,16 @@ struct PingScopeIOSHostEditor: View {
             .navigationTitle(draft.displayName.isEmpty ? "New Host" : "Edit Host")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel", action: onCancel)
+                    Button("Cancel") {
+                        colorEditor.cancel(onCancel)
+                    }
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
-                        onSave(draft.finalizedHost)
+                        colorEditor.save { displayColor in
+                            draft.displayColor = displayColor
+                            onSave(draft.finalizedHost)
+                        }
                     }
                     .disabled(!canSave)
                 }
@@ -127,39 +138,19 @@ struct PingScopeIOSHostEditor: View {
         Binding(
             get: { resolvedDisplayColor },
             set: { color in
-                if let displayColor = color.opaqueSRGBHostDisplayColor {
-                    draft.displayColor = displayColor
+                if colorEditor.selectOpaqueSRGB(UIColor(color).cgColor) {
+                    draft.displayColor = colorEditor.displayColor
                 }
             }
         )
     }
 
     private var resolvedDisplayColor: Color {
-        ResolvedHostDisplayColor(hostID: draft.id, displayColor: draft.displayColor).swiftUIColor
+        colorEditor.preview.swiftUIColor
     }
 
     private var canSave: Bool {
         draft.canSave
-    }
-}
-
-private extension Color {
-    var opaqueSRGBHostDisplayColor: HostDisplayColor? {
-        guard let colorSpace = CGColorSpace(name: CGColorSpace.sRGB),
-              let converted = UIColor(self).cgColor.converted(
-                to: colorSpace,
-                intent: .defaultIntent,
-                options: nil
-              ),
-              let components = converted.components,
-              components.count >= 3 else {
-            return nil
-        }
-        return HostDisplayColor(
-            red: min(max(Double(components[0]), 0), 1),
-            green: min(max(Double(components[1]), 0), 1),
-            blue: min(max(Double(components[2]), 0), 1)
-        )
     }
 }
 #endif

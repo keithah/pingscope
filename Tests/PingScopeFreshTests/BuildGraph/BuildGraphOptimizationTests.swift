@@ -20,16 +20,27 @@ final class BuildGraphOptimizationTests: XCTestCase {
             contentsOf: root.appendingPathComponent("Sources/PingScopeApp/SettingsRootView+Hosts.swift"),
             encoding: .utf8
         )
+        let colorBinding = try String(
+            contentsOf: root.appendingPathComponent("Sources/PingScopeCore/HostDisplayColor.swift"),
+            encoding: .utf8
+        )
+        let iosApp = try String(
+            contentsOf: root.appendingPathComponent("Sources/PingScopeiOSApp/PingScopeIOSApp.swift"),
+            encoding: .utf8
+        )
 
         XCTAssertTrue(iosDraft.contains("var displayColor: HostDisplayColor?"))
         XCTAssertTrue(iosDraft.contains("var usesAutomaticDisplayColor: Bool"))
         XCTAssertTrue(iosEditor.contains("ColorPicker(\"Host Color\", selection:"))
         XCTAssertTrue(iosEditor.contains("Button(\"Use Automatic Color\")"))
-        XCTAssertTrue(iosEditor.contains("opaqueSRGBHostDisplayColor"))
+        XCTAssertTrue(iosEditor.contains("colorEditor.selectOpaqueSRGB"))
         XCTAssertTrue(macModel.contains("var draftDisplayColor: HostDisplayColor?"))
         XCTAssertTrue(macEditor.contains("ColorPicker(\"Host Color\", selection:"))
         XCTAssertTrue(macEditor.contains("Button(\"Use Automatic Color\")"))
-        XCTAssertTrue(macEditor.contains("opaqueSRGBHostDisplayColor"))
+        XCTAssertTrue(macEditor.contains("editor.selectOpaqueSRGB"))
+        XCTAssertTrue(colorBinding.contains("struct HostDisplayColorEditorBinding"))
+        XCTAssertTrue(colorBinding.contains("color.converted(to: colorSpace"))
+        XCTAssertTrue(iosApp.contains("sessionModel.reconcileFocusedHostEdit"))
     }
 
     func testIOSConnectivityTipsShippingWiring() throws {

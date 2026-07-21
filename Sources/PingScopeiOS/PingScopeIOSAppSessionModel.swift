@@ -62,6 +62,22 @@ public final class PingScopeIOSAppSessionModel {
         }
     }
 
+    /// Shipping focused-save seam: returns false when the caller must replace
+    /// the controller because probe configuration changed.
+    @discardableResult
+    public func reconcileFocusedHostEdit(
+        currentHost: HostConfig,
+        updatedHost: HostConfig,
+        controller: LiveMonitorSessionController
+    ) async -> Bool {
+        guard currentHost.id == updatedHost.id,
+              currentHost.isEnabled == updatedHost.isEnabled,
+              currentHost.hasSameProbeConfiguration(as: updatedHost) else {
+            return false
+        }
+        return await controller.updatePresentationHost(updatedHost)
+    }
+
     @discardableResult
     public func performLiveActivityScopeSwitch(
         isSessionActive: Bool,

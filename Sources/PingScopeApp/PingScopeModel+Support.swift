@@ -54,7 +54,7 @@ extension PingScopeModel {
         draftDownAfterFailures = host.thresholds.downAfterFailures
         draftIsEnabled = host.isEnabled
         draftNotificationPolicy = host.notifications
-        draftDisplayColor = host.displayColor
+        draftDisplayColor = host.displayColor?.validatedComponents
         draftTestResultText = nil
     }
 }

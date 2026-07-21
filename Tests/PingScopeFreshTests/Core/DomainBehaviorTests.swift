@@ -1,4 +1,5 @@
 import XCTest
+import CoreGraphics
 @testable import PingScopeCore
 
 final class DomainBehaviorTests: XCTestCase {
@@ -49,6 +50,38 @@ final class DomainBehaviorTests: XCTestCase {
             XCTAssertEqual(decoded, host)
             XCTAssertNil(decoded.displayColor)
         }
+    }
+
+    func testHostDisplayColorEditorBindingConvertsToOpaqueClippedSRGBAndPreservesIdentity() throws {
+        let hostID = UUID()
+        var editor = HostDisplayColorEditorBinding(hostID: hostID, displayColor: nil)
+        let extendedSRGB = try XCTUnwrap(CGColorSpace(name: CGColorSpace.extendedSRGB))
+        let translucentWideValue = try XCTUnwrap(CGColor(
+            colorSpace: extendedSRGB,
+            components: [1.25, -0.2, 0.5, 0.15]
+        ))
+
+        XCTAssertTrue(editor.selectOpaqueSRGB(translucentWideValue))
+
+        XCTAssertEqual(editor.hostID, hostID)
+        XCTAssertEqual(editor.displayColor, HostDisplayColor(red: 1, green: 0, blue: 0.5))
+        XCTAssertEqual(editor.preview, .custom(HostDisplayColor(red: 1, green: 0, blue: 0.5)))
+    }
+
+    func testHostDisplayColorEditorBindingAutomaticResetAndCallbacks() {
+        let original = HostDisplayColor(red: 0.1, green: 0.2, blue: 0.3)
+        var editor = HostDisplayColorEditorBinding(hostID: UUID(), displayColor: original)
+        var savedColor: HostDisplayColor?
+        var didCancel = false
+
+        editor.useAutomatic()
+        editor.save { savedColor = $0 }
+        editor.cancel { didCancel = true }
+
+        XCTAssertNil(editor.displayColor)
+        XCTAssertNil(savedColor)
+        XCTAssertTrue(didCancel)
+        if case .automatic = editor.preview {} else { XCTFail("automatic reset must use stable-ID preview") }
     }
 
     func testAppendOnlySequenceFingerprintRetainsCountAndBoundaryIDs() throws {

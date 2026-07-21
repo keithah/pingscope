@@ -659,6 +659,60 @@ final class RuntimeBehaviorTests: XCTestCase {
         await runtime.stop()
     }
 
+    func testRuntimeColorOnlyEditDoesNotRestartActiveProbeGeneration() async throws {
+        let host = HostConfig(displayName: "Edge", address: "edge.example")
+        let tracker = ProbeCancellationTracker()
+        let runtime = PingRuntime(
+            hostStore: HostStore(defaultHosts: [host]),
+            scheduler: MeasurementScheduler(probeFactory: CancellationTrackingProbeFactory(tracker: tracker))
+        )
+        await runtime.start()
+        try await tracker.waitUntilMeasurementStarts()
+
+        var recolored = host
+        recolored.displayColor = HostDisplayColor(red: 0.2, green: 0.4, blue: 0.8)
+        await runtime.upsertHost(recolored)
+
+        let cancellationCount = await tracker.cancellationCount
+        XCTAssertEqual(cancellationCount, 0)
+        let stream = await runtime.snapshots()
+        var iterator = stream.makeAsyncIterator()
+        let emittedSnapshot = await iterator.next()
+        let snapshot = try XCTUnwrap(emittedSnapshot)
+        XCTAssertEqual(snapshot.primaryHost?.displayColor, recolored.displayColor)
+        await runtime.stop()
+    }
+
+    func testRuntimeEveryProbeEditRestartsActiveProbeGeneration() async throws {
+        let edits: [(String, (inout HostConfig) -> Void)] = [
+            ("address", { $0.address = "other.example" }),
+            ("method", { $0.method = .udp }),
+            ("port", { $0.port = 8443 }),
+            ("interval", { $0.interval = .seconds(5) }),
+            ("timeout", { $0.timeout = .seconds(3) }),
+            ("thresholds", { $0.thresholds = LatencyThresholds(degradedMilliseconds: 250, downAfterFailures: 4) }),
+        ]
+
+        for (field, edit) in edits {
+            let host = HostConfig(displayName: "Edge", address: "edge.example")
+            let tracker = ProbeCancellationTracker()
+            let runtime = PingRuntime(
+                hostStore: HostStore(defaultHosts: [host]),
+                scheduler: MeasurementScheduler(probeFactory: CancellationTrackingProbeFactory(tracker: tracker))
+            )
+            await runtime.start()
+            try await tracker.waitUntilMeasurementStarts()
+
+            var edited = host
+            edit(&edited)
+            await runtime.upsertHost(edited)
+
+            let cancellationCount = await tracker.cancellationCount
+            XCTAssertEqual(cancellationCount, 1, "\(field) must restart the probe generation")
+            await runtime.stop()
+        }
+    }
+
     func testRuntimeDeletingPrimaryHostSelectsFallbackAndClearsSamples() async throws {
         let gateway = HostConfig(displayName: "Default Gateway", address: "192.168.101.1", method: .tcp, port: 80)
         let starlink = HostConfig.defaultStarlinkDish
@@ -978,6 +1032,43 @@ private actor CountingProbeFactory: ProbeFactory {
     func makeProbe(for method: PingMethod) async -> any PingProbe {
         createdProbeCount += 1
         return StaticProbe(result: result)
+    }
+}
+
+private actor ProbeCancellationTracker {
+    private(set) var cancellationCount = 0
+    private var started = false
+
+    func markStarted() { started = true }
+    func markCancelled() { cancellationCount += 1 }
+
+    func waitUntilMeasurementStarts() async throws {
+        for _ in 0..<100 where !started {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        if !started { throw TestTimeout() }
+    }
+}
+
+private struct CancellationTrackingProbeFactory: ProbeFactory {
+    let tracker: ProbeCancellationTracker
+
+    func makeProbe(for method: PingMethod) async -> any PingProbe {
+        CancellationTrackingProbe(tracker: tracker)
+    }
+}
+
+private struct CancellationTrackingProbe: PingProbe {
+    let tracker: ProbeCancellationTracker
+
+    func measure(_ host: HostConfig) async -> PingResult {
+        await tracker.markStarted()
+        return await withTaskCancellationHandler {
+            try? await Task.sleep(for: .seconds(60))
+            return .failure(hostID: host.id, reason: .timeout)
+        } onCancel: {
+            Task { await tracker.markCancelled() }
+        }
     }
 }
 

@@ -27,7 +27,7 @@ public struct PingScopeIOSHostDraft: Equatable, Sendable {
         self.downAfterFailures = host.thresholds.downAfterFailures
         self.isEnabled = host.isEnabled
         self.notifications = host.notifications
-        self.displayColor = host.displayColor
+        self.displayColor = host.displayColor?.validatedComponents
     }
 
     public var finalizedHost: HostConfig {
@@ -45,7 +45,7 @@ public struct PingScopeIOSHostDraft: Equatable, Sendable {
             ),
             isEnabled: isEnabled,
             notifications: notifications,
-            displayColor: displayColor
+            displayColor: displayColor?.validatedComponents
         )
     }
 
