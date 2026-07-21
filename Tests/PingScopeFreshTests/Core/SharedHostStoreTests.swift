@@ -138,7 +138,8 @@ final class SharedHostStoreTests: XCTestCase {
             timeout: .milliseconds(1_250),
             thresholds: LatencyThresholds(degradedMilliseconds: 187.5, downAfterFailures: 7),
             isEnabled: false,
-            notifications: .enabled
+            notifications: .enabled,
+            displayColor: HostDisplayColor(red: 0.2, green: 0.4, blue: 0.8)
         )
         let second = HostConfig(
             id: UUID(),

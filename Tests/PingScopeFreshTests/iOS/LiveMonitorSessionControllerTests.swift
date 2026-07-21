@@ -2482,6 +2482,30 @@ final class LiveMonitorSessionControllerTests: XCTestCase {
         XCTAssertEqual(orderedSnapshots.first?.host.displayName, renamedHost.displayName)
     }
 
+    func testIOSAllHostsCoordinatorColorOnlyEditPreservesControllerAndSamplesWhileUpdatingSnapshot() async {
+        let host = HostConfig(id: UUID(), displayName: "Cloudflare", address: "1.1.1.1")
+        var recoloredHost = host
+        recoloredHost.displayColor = HostDisplayColor(red: 0.2, green: 0.4, blue: 0.8)
+        let sample = PingResult.success(hostID: host.id, latency: .milliseconds(12))
+        let factory = RecordingIOSAllHostsControllerFactory()
+        let coordinator = PingScopeIOSMultiHostSessionCoordinator(controllerFactory: factory)
+
+        await coordinator.reconcile(hosts: [host])
+        await coordinator.start(duration: .continuous)
+        await factory.setSnapshotSamples([sample], for: host.id)
+        await coordinator.reconcile(hosts: [recoloredHost])
+
+        let createdControllerTokens = await factory.createdControllerTokens
+        let stoppedControllerTokens = await factory.stoppedControllerTokens
+        let isRunning = await factory.isRunning(controllerToken: 1)
+        let snapshot = await coordinator.orderedSnapshots().first
+        XCTAssertEqual(createdControllerTokens, [1])
+        XCTAssertTrue(stoppedControllerTokens.isEmpty)
+        XCTAssertTrue(isRunning)
+        XCTAssertEqual(snapshot?.host.displayColor, recoloredHost.displayColor)
+        XCTAssertEqual(snapshot?.series.samples, [sample])
+    }
+
     func testIOSAllHostsCoordinatorCosmeticEditPreservesNormalizedProbeMetadata() async {
         let host = HostConfig(
             id: UUID(),

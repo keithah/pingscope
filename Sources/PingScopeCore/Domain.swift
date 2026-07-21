@@ -68,6 +68,7 @@ public struct HostConfig: Identifiable, Codable, Equatable, Sendable {
     public var thresholds: LatencyThresholds
     public var isEnabled: Bool
     public var notifications: HostNotificationPolicy
+    public var displayColor: HostDisplayColor?
 
     public init(
         id: UUID = UUID(),
@@ -80,7 +81,8 @@ public struct HostConfig: Identifiable, Codable, Equatable, Sendable {
         timeout: Duration = .seconds(2),
         thresholds: LatencyThresholds = .defaults,
         isEnabled: Bool = true,
-        notifications: HostNotificationPolicy = .inherit
+        notifications: HostNotificationPolicy = .inherit,
+        displayColor: HostDisplayColor? = nil
     ) {
         self.id = id
         self.displayName = displayName
@@ -93,6 +95,7 @@ public struct HostConfig: Identifiable, Codable, Equatable, Sendable {
         self.thresholds = thresholds
         self.isEnabled = isEnabled
         self.notifications = notifications
+        self.displayColor = displayColor
     }
 
     public static let defaultInternet = HostConfig(displayName: "Cloudflare DNS", address: "1.1.1.1", method: .icmp, port: nil)

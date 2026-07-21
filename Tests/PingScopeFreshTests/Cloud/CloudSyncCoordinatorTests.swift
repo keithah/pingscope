@@ -9,6 +9,20 @@ import PingScopeObjCExceptionBoundary
 // live send/fetch, and subscription deletion require an on-device/Xcode smoke.
 
 final class CloudSyncCoordinatorTests: XCTestCase {
+    func testMonitoredHostRecordRoundTripPreservesDisplayColorInsideConfigJSON() throws {
+        let config = HostConfig(
+            id: UUID(),
+            displayName: "DNS",
+            address: "1.1.1.1",
+            displayColor: HostDisplayColor(red: 0.2, green: 0.4, blue: 0.8)
+        )
+
+        let record = try MonitoredHostRecordMapper.record(from: config, modifiedAt: .now)
+        let mapped = try XCTUnwrap(MonitoredHostRecordMapper.monitoredHost(from: record))
+
+        XCTAssertEqual(mapped.config.displayColor, config.displayColor)
+    }
+
     func testAccountAvailabilityFailureBecomesFailedStatusWithoutStartingEngine() async {
         let boundary = ThrowingAvailabilityCloudSyncBoundary()
         let coordinator = PingScopeCloudSyncCoordinator(boundary: boundary)

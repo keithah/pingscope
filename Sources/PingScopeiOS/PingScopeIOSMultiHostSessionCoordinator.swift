@@ -446,6 +446,7 @@ private extension HostConfig {
         copy.displayName = other.displayName
         copy.tier = other.tier
         copy.notifications = other.notifications
+        copy.displayColor = other.displayColor
         return copy
     }
 

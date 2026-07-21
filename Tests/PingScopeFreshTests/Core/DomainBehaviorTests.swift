@@ -2,6 +2,37 @@ import XCTest
 @testable import PingScopeCore
 
 final class DomainBehaviorTests: XCTestCase {
+    func testHostConfigRoundTripPreservesOptionalDisplayColorAndLegacyDefaultsAutomatic() throws {
+        let legacyHost = HostConfig(
+            id: UUID(uuidString: "00000000-0000-0000-0000-000000000001")!,
+            displayName: "DNS",
+            address: "1.1.1.1"
+        )
+        var coloredObject = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(legacyHost)) as? [String: Any])
+        coloredObject["displayColor"] = ["red": 0.2, "green": 0.4, "blue": 0.8]
+        let coloredJSON = try JSONSerialization.data(withJSONObject: coloredObject)
+        let coloredHost = try JSONDecoder().decode(HostConfig.self, from: coloredJSON)
+        let reencodedColoredObject = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(coloredHost)) as? [String: Any])
+
+        XCTAssertNotNil(reencodedColoredObject["displayColor"])
+
+        let decodedLegacyHost = try JSONDecoder().decode(HostConfig.self, from: JSONEncoder().encode(legacyHost))
+        let legacyObject = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(decodedLegacyHost)) as? [String: Any])
+
+        XCTAssertNil(legacyObject["displayColor"])
+    }
+
+    func testHostConfigRetainsInvalidDisplayColorWithoutTreatingItAsUsable() throws {
+        let host = HostConfig(displayName: "DNS", address: "1.1.1.1")
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(host)) as? [String: Any])
+        object["displayColor"] = ["red": -0.1, "green": 0.4, "blue": 1.2]
+
+        let decoded = try JSONDecoder().decode(HostConfig.self, from: JSONSerialization.data(withJSONObject: object))
+
+        XCTAssertEqual(decoded.displayColor, HostDisplayColor(red: -0.1, green: 0.4, blue: 1.2))
+        XCTAssertNil(decoded.displayColor?.validatedComponents)
+    }
+
     func testAppendOnlySequenceFingerprintRetainsCountAndBoundaryIDs() throws {
         let hostID = UUID()
         let first = PingResult.success(hostID: hostID, latency: .milliseconds(10))
