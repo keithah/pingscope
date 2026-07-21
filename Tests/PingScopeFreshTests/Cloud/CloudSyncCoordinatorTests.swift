@@ -1920,6 +1920,49 @@ final class CloudSyncCoordinatorTests: XCTestCase {
         XCTAssertEqual(uploadCount, 0)
     }
 
+    func testAcceptedRemoteHostColorPublishesExactPersistedHostState() async throws {
+        let host = HostConfig(displayName: "Host", address: "old.example")
+        let peer = HostConfig(displayName: "Peer", address: "peer.example")
+        var remote = host
+        remote.displayColor = HostDisplayColor(red: 0.18, green: 0.46, blue: 0.79)
+        let fixture = makeServiceFixture(hosts: [host, peer])
+        let recorder = AcceptedHostStateRecorder()
+        defer { fixture.cleanup() }
+        await fixture.service.setEnabled(true, hosts: [host, peer])
+        await fixture.boundary.resetUploads()
+        await fixture.service.setAcceptedHostStateHandler { state in
+            await recorder.record(state)
+        }
+        let remoteRecord = try MonitoredHostRecordMapper.record(
+            from: remote,
+            modifiedAt: Date().addingTimeInterval(1_000)
+        )
+
+        await fixture.service.applyRemoteChanges(records: [remoteRecord])
+
+        let persistedState = try XCTUnwrap(fixture.hostStore.load().state)
+        let acceptedStates = await recorder.values()
+        XCTAssertEqual(persistedState.hosts, [remote, peer])
+        XCTAssertEqual(
+            acceptedStates,
+            [persistedState],
+            "The live app boundary must receive the exact accepted post-save host state."
+        )
+
+        var unrelatedPeerEdit = peer
+        unrelatedPeerEdit.notifications = .muted
+        let locallyEditedState = SharedHostStoreState(hosts: [remote, unrelatedPeerEdit])
+        try fixture.hostStore.save(locallyEditedState)
+        await fixture.service.uploadHosts(
+            locallyEditedState.hosts,
+            modifiedAt: Date().addingTimeInterval(2_000)
+        )
+
+        let uploadedVersions = await fixture.boundary.uploadedHostVersions()
+        XCTAssertEqual(uploadedVersions.map(\.config), [unrelatedPeerEdit])
+        XCTAssertEqual(fixture.hostStore.load().state?.hosts.first?.displayColor, remote.displayColor)
+    }
+
     func testTransientBacklogFailureIsRetriedAfterLaterSuccessfulAppend() async throws {
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("CloudSyncBacklogRetryTests-\(UUID().uuidString).sqlite")
@@ -2195,6 +2238,18 @@ private final class LockedSharedHostStore: SharedHostStoring, @unchecked Sendabl
     }
 
     func saveCount() -> Int { lock.withLock { saves } }
+}
+
+private actor AcceptedHostStateRecorder {
+    private var states: [SharedHostStoreState] = []
+
+    func record(_ state: SharedHostStoreState) {
+        states.append(state)
+    }
+
+    func values() -> [SharedHostStoreState] {
+        states
+    }
 }
 
 private enum FailingSharedHostStoreError: Error {

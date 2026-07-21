@@ -313,6 +313,18 @@ public actor HostStore {
         coalesceManagedDefaultGatewayHosts()
     }
 
+    public func reconcile(hosts: [HostConfig], primaryHostID: UUID?) {
+        let requestedPrimaryID = primaryHostID ?? primaryID
+        let normalized = Self.coalescingManagedDefaultGatewayHosts(
+            hosts,
+            primaryID: requestedPrimaryID
+        )
+        orderedHosts = normalized.hosts
+        primaryID = normalized.primaryID.flatMap { candidate in
+            orderedHosts.contains { $0.id == candidate } ? candidate : nil
+        } ?? orderedHosts.first?.id
+    }
+
     private static func isManagedDefaultGateway(_ host: HostConfig) -> Bool {
         host.isManagedDefaultGateway
     }
@@ -753,6 +765,47 @@ public actor PingRuntime {
         }
     }
 
+    @discardableResult
+    public func reconcileAcceptedHostState(_ state: SharedHostStoreState) async -> RuntimeSnapshot {
+        await refreshHostCache()
+        let previousHostsByID = hostByID
+        let acceptedHosts = HostConfig.sanitizedHosts(state.hosts)
+        let acceptedHostsByID = Dictionary(uniqueKeysWithValues: acceptedHosts.map { ($0.id, $0) })
+        let previousEnabledHostsByID = previousHostsByID.filter { $0.value.isEnabled }
+        let acceptedEnabledHostsByID = acceptedHostsByID.filter { $0.value.isEnabled }
+        let requiresProbeRestart = previousEnabledHostsByID.keys != acceptedEnabledHostsByID.keys
+            || acceptedEnabledHostsByID.contains { id, host in
+                guard let previous = previousEnabledHostsByID[id] else { return true }
+                return !previous.hasSameProbeConfiguration(as: host)
+            }
+
+        await hostStore.reconcile(
+            hosts: acceptedHosts,
+            primaryHostID: state.primaryHostID ?? state.selectedHostID ?? cachedPrimaryHostID
+        )
+        await refreshHostCache()
+
+        let acceptedHostIDs = Set(acceptedHostsByID.keys)
+        healthByHost = healthByHost.filter { acceptedHostIDs.contains($0.key) }
+        samplesByHost = samplesByHost.filter { acceptedHostIDs.contains($0.key) }
+        for host in acceptedHosts {
+            if let previous = previousHostsByID[host.id],
+               previous.measurementEndpoint != host.measurementEndpoint {
+                healthByHost[host.id] = HostHealth(hostID: host.id, thresholds: host.thresholds)
+                samplesByHost[host.id] = SampleSeries(hostID: host.id)
+            } else if healthByHost[host.id] != nil {
+                healthByHost[host.id]?.thresholds = host.thresholds
+            }
+        }
+
+        if requiresProbeRestart {
+            await restartScheduler(refreshCache: false)
+        } else {
+            publishSnapshot()
+        }
+        return makeSnapshot()
+    }
+
     public func deleteHost(_ id: UUID) async {
         await hostStore.delete(id)
         await refreshHostCache()
@@ -830,12 +883,16 @@ public actor PingRuntime {
     }
 
     private func publishSnapshot() {
-        continuation?.yield(RuntimeSnapshot(
+        continuation?.yield(makeSnapshot())
+    }
+
+    private func makeSnapshot() -> RuntimeSnapshot {
+        RuntimeSnapshot(
             hosts: cachedHosts,
             primaryHostID: cachedPrimaryHostID,
             healthByHost: healthByHost,
             samplesByHost: samplesByHost
-        ))
+        )
     }
 
     private func publishAlerts(_ decisions: [AlertDecision]) {

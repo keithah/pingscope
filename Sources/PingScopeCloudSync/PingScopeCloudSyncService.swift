@@ -11,6 +11,10 @@ public enum PingScopeCloudSyncPreference {
     }
 }
 
+public typealias PingScopeCloudSyncAcceptedHostStateHandler = @Sendable (
+    SharedHostStoreState
+) async -> Void
+
 private actor CloudSyncHostVersionRegistry {
     private static let defaultsKey = "PingScope.CloudSync.HostModifiedAt"
     private static let configDefaultsKey = "PingScope.CloudSync.HostConfig"
@@ -139,6 +143,7 @@ private actor CloudSyncRemoteReceiver {
     private let historyStore: any PingHistoryStore
     private let hostStore: any SharedHostStoring
     private let versions: CloudSyncHostVersionRegistry
+    private var acceptedHostStateHandler: PingScopeCloudSyncAcceptedHostStateHandler?
 
     init(
         historyStore: any PingHistoryStore,
@@ -148,6 +153,10 @@ private actor CloudSyncRemoteReceiver {
         self.historyStore = historyStore
         self.hostStore = hostStore
         self.versions = versions
+    }
+
+    func setAcceptedHostStateHandler(_ handler: PingScopeCloudSyncAcceptedHostStateHandler?) {
+        acceptedHostStateHandler = handler
     }
 
     func apply(records: [CKRecord], deletions: [CloudSyncRemoteDeletion]) async {
@@ -213,7 +222,8 @@ private actor CloudSyncRemoteReceiver {
         }
         let acceptedVersions = finalHostIDs.compactMap { acceptedVersionsByID[$0] }
 
-        if hostState != originalHostState {
+        let didChangeHostState = hostState != originalHostState
+        if didChangeHostState {
             do {
                 try hostStore.save(hostState)
             } catch {
@@ -221,6 +231,9 @@ private actor CloudSyncRemoteReceiver {
             }
         }
         await versions.applyBatch(acceptedVersions, confirmingDeletions: confirmedDeletionIDs)
+        if didChangeHostState {
+            await acceptedHostStateHandler?(hostState)
+        }
     }
 }
 
@@ -314,6 +327,12 @@ public actor PingScopeCloudSyncService {
 
     func applyRemoteChanges(records: [CKRecord], deletions: [CloudSyncRemoteDeletion] = []) async {
         await receiver.apply(records: records, deletions: deletions)
+    }
+
+    public func setAcceptedHostStateHandler(
+        _ handler: PingScopeCloudSyncAcceptedHostStateHandler?
+    ) async {
+        await receiver.setAcceptedHostStateHandler(handler)
     }
 
     public func setEnabled(_ enabled: Bool, hosts: [HostConfig]) async {

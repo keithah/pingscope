@@ -876,6 +876,11 @@ private final class PingScopeIOSAppModel: ObservableObject {
         let generation = cloudSyncConfigurationGeneration
         cloudSyncStatusText = enabled ? "Checking iCloud account…" : "Off"
         Task { @MainActor [weak self] in
+            if let cloudSyncService = self?.cloudSyncService {
+                await cloudSyncService.setAcceptedHostStateHandler { [weak self] state in
+                    await self?.reconcileAcceptedCloudHostState(state)
+                }
+            }
             let state = if isAutomaticLaunch {
                 await cloudSyncActivation.activatePersisted(hosts: hosts)
             } else {
@@ -885,6 +890,50 @@ private final class PingScopeIOSAppModel: ObservableObject {
             isCloudSyncEnabled = state.isEnabled
             cloudSyncStatusText = state.statusText
         }
+    }
+
+    private func reconcileAcceptedCloudHostState(_ state: SharedHostStoreState) async {
+        await lifecycleHarness.enqueue { @MainActor [weak self] in
+            guard let self else { return }
+            let context = LifecycleContext()
+            let reconciliation = await self.sessionModel.reconcileAcceptedHostState(
+                state,
+                currentHosts: self.hosts,
+                currentFocusedHostID: self.snapshot.host.id,
+                scope: self.hostScope,
+                focusedController: self.controller
+            )
+            guard self.isCurrentLifecycle(context) else { return }
+            self.hosts = reconciliation.hosts
+            switch reconciliation.disposition {
+            case .unavailable:
+                return
+            case let .focusedPreserved(acceptedSnapshot):
+                self.snapshot = acceptedSnapshot
+                self.monitorInsights = PingScopeIOSMonitorInsightsPresentation(
+                    snapshots: [acceptedSnapshot],
+                    activeNetworkInterface: self.historyLocationService.snapshotStore.snapshot().networkInterface
+                )
+                await self.configureNotificationScope()
+                guard self.isCurrentLifecycle(context) else { return }
+                await self.refreshHistory(force: true)
+                guard self.isCurrentLifecycle(context) else { return }
+                await self.ensureLiveActivityForPresentedSession()
+            case let .focusedRequiresReplacement(host):
+                await self.switchToHostAsync(
+                    host,
+                    restartDuration: self.activeRestartDuration,
+                    saveSelection: false,
+                    context: context
+                )
+            case .allHosts:
+                await self.configureNotificationScope()
+                guard self.isCurrentLifecycle(context) else { return }
+                await self.refreshSnapshot()
+                guard self.isCurrentLifecycle(context) else { return }
+                await self.ensureLiveActivityForPresentedSession()
+            }
+        }.value
     }
 
     func addDefaultGatewayHost() {

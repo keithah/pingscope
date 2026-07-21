@@ -557,33 +557,7 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
             let snapshots = await self.runtime.snapshots()
             for await snapshot in snapshots {
                 await MainActor.run {
-                    #if DEBUG
-                    let signpostID = OSSignpostID(log: snapshotPointsOfInterestLog)
-                    os_signpost(
-                        .begin,
-                        log: snapshotPointsOfInterestLog,
-                        name: "PingScopeModel.processSnapshot",
-                        signpostID: signpostID
-                    )
-                    defer {
-                        os_signpost(
-                            .end,
-                            log: snapshotPointsOfInterestLog,
-                            name: "PingScopeModel.processSnapshot",
-                            signpostID: signpostID
-                        )
-                    }
-                    #endif
-                    self.liveDisplay.updateSnapshot(snapshot)
-                    self.updateConfiguredHostsIfNeeded(snapshot)
-                    self.scheduleDisplayPresentationRecompute()
-                    self.persistHostState(snapshot)
-                    self.onMenuStateChanged?(self.menuBarState)
-                    self.ensureLocalNetworkProbesForSelectedLocalHost(snapshot)
-                    self.refreshVisibleHistoryIfNeeded()
-                    if self.widgetsEnabled == true {
-                        self.publishWidgetSnapshot(snapshot)
-                    }
+                    self.processRuntimeSnapshot(snapshot)
                 }
             }
         }
@@ -604,6 +578,36 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
         startNetworkMonitoring()
         startNetworkPathMonitoring()
         refreshNotificationPermission()
+    }
+
+    private func processRuntimeSnapshot(_ snapshot: RuntimeSnapshot) {
+        #if DEBUG
+        let signpostID = OSSignpostID(log: snapshotPointsOfInterestLog)
+        os_signpost(
+            .begin,
+            log: snapshotPointsOfInterestLog,
+            name: "PingScopeModel.processSnapshot",
+            signpostID: signpostID
+        )
+        defer {
+            os_signpost(
+                .end,
+                log: snapshotPointsOfInterestLog,
+                name: "PingScopeModel.processSnapshot",
+                signpostID: signpostID
+            )
+        }
+        #endif
+        liveDisplay.updateSnapshot(snapshot)
+        updateConfiguredHostsIfNeeded(snapshot)
+        scheduleDisplayPresentationRecompute()
+        persistHostState(snapshot)
+        onMenuStateChanged?(menuBarState)
+        ensureLocalNetworkProbesForSelectedLocalHost(snapshot)
+        refreshVisibleHistoryIfNeeded()
+        if widgetsEnabled == true {
+            publishWidgetSnapshot(snapshot)
+        }
     }
 
     func stop() {
@@ -1120,6 +1124,11 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
         let generation = cloudSyncConfigurationGeneration
         cloudSyncStatusText = enabled ? "Checking iCloud account…" : "Off"
         Task { @MainActor [weak self] in
+            if let cloudSyncService = self?.cloudSyncService {
+                await cloudSyncService.setAcceptedHostStateHandler { [weak self] state in
+                    await self?.reconcileAcceptedCloudHostState(state)
+                }
+            }
             let state = if isAutomaticLaunch {
                 await cloudSyncActivation.activatePersisted(hosts: hosts)
             } else {
@@ -1131,6 +1140,20 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
             isApplyingCloudSyncActivationState = false
             cloudSyncStatusText = state.statusText
         }
+    }
+
+    func reconcileAcceptedCloudHostState(_ state: SharedHostStoreState) async {
+        let acceptedHosts = HostConfig.sanitizedHosts(state.hosts)
+        lastCloudSyncHostIDs = Set(acceptedHosts.map(\.id))
+        lastCloudSyncHostsByID = Dictionary(uniqueKeysWithValues: acceptedHosts.map { ($0.id, $0) })
+        let acceptedSnapshot = await runtime.reconcileAcceptedHostState(
+            SharedHostStoreState(
+                hosts: acceptedHosts,
+                primaryHostID: state.primaryHostID,
+                selectedHostID: state.selectedHostID
+            )
+        )
+        processRuntimeSnapshot(acceptedSnapshot)
     }
 
     private static func cloudSyncStatusText(for status: PingScopeCloudSyncStatus) -> String {

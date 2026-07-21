@@ -23,6 +23,29 @@ public struct PingScopeIOSGatewayHostUpdate: Equatable, Sendable {
     }
 }
 
+public enum PingScopeIOSAcceptedHostStateDisposition: Equatable, Sendable {
+    case unavailable
+    case focusedPreserved(LiveMonitorSessionSnapshot)
+    case focusedRequiresReplacement(HostConfig)
+    case allHosts([LiveMonitorSessionSnapshot])
+}
+
+public struct PingScopeIOSAcceptedHostStateReconciliation: Equatable, Sendable {
+    public let hosts: [HostConfig]
+    public let selectedHostID: UUID?
+    public let disposition: PingScopeIOSAcceptedHostStateDisposition
+
+    public init(
+        hosts: [HostConfig],
+        selectedHostID: UUID?,
+        disposition: PingScopeIOSAcceptedHostStateDisposition
+    ) {
+        self.hosts = hosts
+        self.selectedHostID = selectedHostID
+        self.disposition = disposition
+    }
+}
+
 /// The session-owning portion of the iOS app model. UIKit presentation state
 /// passes through to this type so tests exercise the shipping lifecycle path.
 @MainActor
@@ -148,6 +171,62 @@ public final class PingScopeIOSAppSessionModel {
             return false
         }
         return await controller.updatePresentationHost(updatedHost)
+    }
+
+    public func reconcileAcceptedHostState(
+        _ state: SharedHostStoreState,
+        currentHosts: [HostConfig],
+        currentFocusedHostID: UUID,
+        scope: PingScopeIOSHostScope,
+        focusedController: LiveMonitorSessionController
+    ) async -> PingScopeIOSAcceptedHostStateReconciliation {
+        let acceptedHosts = HostConfig.sanitizedHosts(state.hosts)
+        guard !acceptedHosts.isEmpty else {
+            return PingScopeIOSAcceptedHostStateReconciliation(
+                hosts: currentHosts,
+                selectedHostID: currentFocusedHostID,
+                disposition: .unavailable
+            )
+        }
+        let selectedHost = acceptedHosts.first { $0.id == currentFocusedHostID }
+            ?? state.selectedHostID.flatMap { selectedID in
+                acceptedHosts.first { $0.id == selectedID }
+            }
+            ?? state.primaryHostID.flatMap { primaryID in
+                acceptedHosts.first { $0.id == primaryID }
+            }
+            ?? acceptedHosts.first(where: \.isEnabled)
+            ?? acceptedHosts[0]
+        switch scope {
+        case .focused:
+            let currentSnapshot = await focusedController.snapshot()
+            guard currentSnapshot.host.id == selectedHost.id,
+                  currentSnapshot.host.isEnabled == selectedHost.isEnabled,
+                  currentSnapshot.host.hasSameProbeConfiguration(as: selectedHost) else {
+                return PingScopeIOSAcceptedHostStateReconciliation(
+                    hosts: acceptedHosts,
+                    selectedHostID: selectedHost.id,
+                    disposition: .focusedRequiresReplacement(selectedHost)
+                )
+            }
+            _ = await reconcileFocusedHostEdit(
+                currentHost: currentSnapshot.host,
+                updatedHost: selectedHost,
+                controller: focusedController
+            )
+            return PingScopeIOSAcceptedHostStateReconciliation(
+                hosts: acceptedHosts,
+                selectedHostID: selectedHost.id,
+                disposition: .focusedPreserved(await focusedController.snapshot())
+            )
+        case .allHosts:
+            await coordinator.reconcile(hosts: acceptedHosts)
+            return PingScopeIOSAcceptedHostStateReconciliation(
+                hosts: acceptedHosts,
+                selectedHostID: selectedHost.id,
+                disposition: .allHosts(await coordinator.orderedSnapshots())
+            )
+        }
     }
 
     @discardableResult

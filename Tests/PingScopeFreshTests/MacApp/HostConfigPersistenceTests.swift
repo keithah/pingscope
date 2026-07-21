@@ -190,6 +190,56 @@ final class HostConfigPersistenceTests: XCTestCase {
         XCTAssertEqual(snapshot.primaryHost?.timeout, .milliseconds(3_000))
         await runtime.stop()
     }
+
+    @MainActor
+    func testMacModelReconcilesAcceptedRemoteColorThroughRuntimePresentationAndWidgetState() async throws {
+        let host = HostConfig(id: UUID(), displayName: "Edge", address: "edge.example")
+        let tracker = MacProbeCancellationTracker()
+        let runtime = PingRuntime(
+            hostStore: HostStore(defaultHosts: [host], primaryHostID: host.id),
+            scheduler: MeasurementScheduler(probeFactory: MacCancellationTrackingProbeFactory(tracker: tracker))
+        )
+        let model = PingScopeModel(runtimeForTesting: runtime)
+        model.overlayShowsAllHosts = true
+        let retainedSample = PingResult.success(
+            hostID: host.id,
+            latency: .milliseconds(21),
+            timestamp: Date()
+        )
+        await runtime.ingest(retainedSample)
+        await runtime.start()
+        try await tracker.waitUntilMeasurementStarts()
+        var remote = host
+        remote.displayColor = HostDisplayColor(red: 0.18, green: 0.46, blue: 0.79)
+
+        await model.reconcileAcceptedCloudHostState(
+            SharedHostStoreState(hosts: [remote], primaryHostID: host.id)
+        )
+
+        XCTAssertEqual(model.snapshot.primaryHost, remote)
+        XCTAssertEqual(model.snapshot.primarySeries?.samples, [retainedSample])
+        let widgetSnapshot = WidgetSnapshot.make(from: model.snapshot)
+        XCTAssertEqual(
+            widgetSnapshot.hosts.first?.displayColor,
+            WidgetHostDisplayColor(resolvedColor: ResolvedHostDisplayColor(hostID: host.id, displayColor: remote.displayColor))
+        )
+        try await Task.sleep(for: .milliseconds(250))
+        let remoteColor = try XCTUnwrap(remote.displayColor)
+        XCTAssertEqual(model.displayPresentation.allHostGraphSeries.first?.resolvedColor, .custom(remoteColor))
+        let cancellationsAfterRemoteEdit = await tracker.cancellations()
+        XCTAssertEqual(cancellationsAfterRemoteEdit, 0)
+
+        model.loadDraft(from: try XCTUnwrap(model.snapshot.primaryHost))
+        model.draftNotificationPolicy = .muted
+        model.addDraftHost()
+        try await waitUntilRuntimeHost(runtime, hostID: host.id) { $0.notifications == .muted }
+        let afterLocalEdit = try await currentSnapshot(runtime)
+        XCTAssertEqual(afterLocalEdit.primaryHost?.displayColor, remote.displayColor)
+        XCTAssertEqual(afterLocalEdit.primarySeries?.samples, [retainedSample])
+        let cancellationsAfterLocalEdit = await tracker.cancellations()
+        XCTAssertEqual(cancellationsAfterLocalEdit, 0)
+        await runtime.stop()
+    }
 }
 
 private func currentSnapshot(_ runtime: PingRuntime) async throws -> RuntimeSnapshot {

@@ -683,6 +683,52 @@ final class RuntimeBehaviorTests: XCTestCase {
         await runtime.stop()
     }
 
+    func testRuntimeReconcilesAcceptedRemoteColorWithoutProbeRestartOrSampleLoss() async throws {
+        let host = HostConfig(displayName: "Edge", address: "edge.example")
+        let tracker = ProbeCancellationTracker()
+        let runtime = PingRuntime(
+            hostStore: HostStore(defaultHosts: [host], primaryHostID: host.id),
+            scheduler: MeasurementScheduler(probeFactory: CancellationTrackingProbeFactory(tracker: tracker))
+        )
+        let retainedSample = PingResult.success(
+            hostID: host.id,
+            latency: .milliseconds(17),
+            timestamp: Date(timeIntervalSince1970: 1_000)
+        )
+        await runtime.ingest(retainedSample)
+        await runtime.start()
+        try await tracker.waitUntilMeasurementStarts()
+        var remote = host
+        remote.displayColor = HostDisplayColor(red: 0.18, green: 0.46, blue: 0.79)
+
+        await runtime.reconcileAcceptedHostState(
+            SharedHostStoreState(hosts: [remote], primaryHostID: host.id)
+        )
+
+        let reconciledStream = await runtime.snapshots()
+        var iterator = reconciledStream.makeAsyncIterator()
+        let maybeReconciled = await iterator.next()
+        let reconciled = try XCTUnwrap(maybeReconciled)
+        XCTAssertEqual(reconciled.primaryHost, remote)
+        XCTAssertEqual(reconciled.primarySeries?.samples, [retainedSample])
+        let cancellationCountAfterRemoteEdit = await tracker.cancellationCount
+        XCTAssertEqual(cancellationCountAfterRemoteEdit, 0)
+
+        var unrelatedLocalEdit = try XCTUnwrap(reconciled.primaryHost)
+        unrelatedLocalEdit.notifications = .muted
+        await runtime.upsertHost(unrelatedLocalEdit)
+        let editedStream = await runtime.snapshots()
+        var editedIterator = editedStream.makeAsyncIterator()
+        let maybeAfterLocalEdit = await editedIterator.next()
+        let afterLocalEdit = try XCTUnwrap(maybeAfterLocalEdit)
+        XCTAssertEqual(afterLocalEdit.primaryHost?.displayColor, remote.displayColor)
+        XCTAssertEqual(afterLocalEdit.primaryHost?.notifications, .muted)
+        XCTAssertEqual(afterLocalEdit.primarySeries?.samples, [retainedSample])
+        let cancellationCountAfterLocalEdit = await tracker.cancellationCount
+        XCTAssertEqual(cancellationCountAfterLocalEdit, 0)
+        await runtime.stop()
+    }
+
     func testRuntimeEveryProbeEditRestartsActiveProbeGeneration() async throws {
         let edits: [(String, (inout HostConfig) -> Void)] = [
             ("address", { $0.address = "other.example" }),

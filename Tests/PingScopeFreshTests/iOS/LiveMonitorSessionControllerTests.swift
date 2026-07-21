@@ -2119,6 +2119,88 @@ final class LiveMonitorSessionControllerTests: XCTestCase {
     }
 
     @MainActor
+    func testAppSessionModelReconcilesAcceptedRemoteColorIntoActiveIOSSurfaces() async throws {
+        let host = HostConfig(id: UUID(), displayName: "Edge", address: "edge.example")
+        let probe = RecordingProbe(results: [.success(hostID: host.id, latency: .milliseconds(18))])
+        let clock = ManualClock()
+        let controller = LiveMonitorSessionController(
+            host: host,
+            probeFactory: StaticProbeFactory(probe: probe),
+            policy: MonitorSessionPolicy(probeInterval: .seconds(60)),
+            clock: clock,
+            now: { clock.currentDate }
+        )
+        let sessionModel = PingScopeIOSAppSessionModel(coordinator: PingScopeIOSMultiHostSessionCoordinator())
+        await controller.start(duration: .continuous, at: clock.baseDate)
+        try await clock.waitForSleepers(atLeast: 1)
+        let before = await controller.snapshot()
+        var remote = host
+        remote.displayColor = HostDisplayColor(red: 0.18, green: 0.46, blue: 0.79)
+
+        let reconciliation = await sessionModel.reconcileAcceptedHostState(
+            SharedHostStoreState(hosts: [remote], selectedHostID: host.id),
+            currentHosts: [host],
+            currentFocusedHostID: host.id,
+            scope: .focused,
+            focusedController: controller
+        )
+
+        guard case let .focusedPreserved(acceptedSnapshot) = reconciliation.disposition else {
+            return XCTFail("A color-only remote edit must preserve the focused controller.")
+        }
+        XCTAssertEqual(reconciliation.hosts, [remote])
+        XCTAssertEqual(reconciliation.selectedHostID, host.id)
+        XCTAssertEqual(acceptedSnapshot.host, remote)
+        XCTAssertEqual(acceptedSnapshot.session, before.session)
+        XCTAssertEqual(acceptedSnapshot.series.samples, before.series.samples)
+        let expectedColor = ResolvedHostDisplayColor(hostID: host.id, displayColor: remote.displayColor)
+        XCTAssertEqual(
+            PingScopeIOSHostGraphSeries(host: acceptedSnapshot.host, samples: acceptedSnapshot.series.samples).resolvedColor,
+            expectedColor
+        )
+        let widgetSnapshot = PingScopeIOSAllHostsWidgetSnapshotBuilder.make(
+            snapshots: [acceptedSnapshot],
+            rememberedPrimaryHostID: host.id,
+            recentSamples: acceptedSnapshot.series.samples.map(WidgetSample.init(result:)),
+            generatedAt: clock.currentDate,
+            isMonitoringActive: true
+        )
+        XCTAssertEqual(
+            widgetSnapshot.hosts.first?.displayColor,
+            WidgetHostDisplayColor(resolvedColor: expectedColor)
+        )
+        let session = try XCTUnwrap(acceptedSnapshot.session)
+        let activityState = PingScopeIOSLiveActivityContentStateBuilder.focused(
+            host: acceptedSnapshot.host,
+            session: session,
+            health: acceptedSnapshot.health,
+            samples: acceptedSnapshot.series.samples,
+            at: clock.currentDate
+        )
+        let activityLightColor = try XCTUnwrap(activityState.hostRows.first?.identityColor).light
+        let expectedLightColor = expectedColor.components(for: .light)
+        XCTAssertEqual(activityLightColor.red, expectedLightColor.red, accuracy: 0.000_001)
+        XCTAssertEqual(activityLightColor.green, expectedLightColor.green, accuracy: 0.000_001)
+        XCTAssertEqual(activityLightColor.blue, expectedLightColor.blue, accuracy: 0.000_001)
+
+        var unrelatedLocalEdit = remote
+        unrelatedLocalEdit.notifications = .muted
+        let preserved = await sessionModel.reconcileFocusedHostEdit(
+            currentHost: remote,
+            updatedHost: unrelatedLocalEdit,
+            controller: controller
+        )
+        let afterLocalEdit = await controller.snapshot()
+        XCTAssertTrue(preserved)
+        XCTAssertEqual(afterLocalEdit.host.displayColor, remote.displayColor)
+        XCTAssertEqual(afterLocalEdit.host.notifications, .muted)
+        XCTAssertEqual(afterLocalEdit.session, before.session)
+        XCTAssertEqual(afterLocalEdit.series.samples, before.series.samples)
+        let measurementCount = await probe.measurementCount
+        XCTAssertEqual(measurementCount, 1)
+    }
+
+    @MainActor
     func testAppSessionModelFocusedProbeSaveRequestsControllerReplacement() async {
         let host = HostConfig(id: UUID(), displayName: "Edge", address: "edge.example")
         let controller = LiveMonitorSessionController(host: host)
