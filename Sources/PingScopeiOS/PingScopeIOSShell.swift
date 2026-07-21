@@ -449,6 +449,75 @@ public enum PingScopeIOSAllHostsMonitorPresentation {
     }
 }
 
+public struct PingScopeIOSSwitchHostConcreteItem: Identifiable, Equatable, Sendable {
+    public let hostID: UUID
+    public let row: PingScopeIOSHostRowSnapshot
+    public let rowPresentation: PingScopeIOSAllHostsRowPresentation
+    public let graphSamples: [PingResult]
+    public let resolvedColor: ResolvedHostDisplayColor
+    public let action: PingScopeIOSHostRowAction
+    public let isSelected: Bool
+
+    public var id: UUID { hostID }
+}
+
+public enum PingScopeIOSSwitchHostItem: Identifiable, Equatable, Sendable {
+    case allHosts(isSelected: Bool)
+    case host(PingScopeIOSSwitchHostConcreteItem)
+
+    public var id: String {
+        switch self {
+        case .allHosts:
+            "all-hosts"
+        case .host(let item):
+            item.hostID.uuidString
+        }
+    }
+}
+
+public struct PingScopeIOSSwitchHostPresentation: Equatable, Sendable {
+    public let items: [PingScopeIOSSwitchHostItem]
+
+    public init(
+        hosts: [HostConfig],
+        hostScope: PingScopeIOSHostScope,
+        selectedHostID: UUID,
+        selectedHealth: HostHealth?,
+        selectedSamples: [PingResult],
+        allHostRows: [PingScopeIOSHostRowSnapshot],
+        allHostGraphSeries: [PingScopeIOSHostGraphSeries]
+    ) {
+        let rowsByHostID = allHostRows.reduce(into: [UUID: PingScopeIOSHostRowSnapshot]()) {
+            $0[$1.hostID] = $1
+        }
+        let concreteItems = hosts.map { host in
+            let isSelected = hostScope == .focused && host.id == selectedHostID
+            let row = rowsByHostID[host.id] ?? PingScopeIOSHostRowSnapshot(
+                host: host,
+                health: isSelected ? selectedHealth : nil,
+                samples: isSelected ? selectedSamples : []
+            )
+            let rowPresentation = PingScopeIOSAllHostsMonitorPresentation.rowPresentation(
+                for: row,
+                action: .focus
+            )
+            return PingScopeIOSSwitchHostConcreteItem(
+                hostID: host.id,
+                row: row,
+                rowPresentation: rowPresentation,
+                graphSamples: PingScopeIOSAllHostsMonitorPresentation.graphSamples(
+                    for: row,
+                    allHostGraphSeries: allHostGraphSeries
+                ),
+                resolvedColor: rowPresentation.resolvedColor,
+                action: .focus,
+                isSelected: isSelected
+            )
+        }
+        items = [.allHosts(isSelected: hostScope == .allHosts)] + concreteItems.map(PingScopeIOSSwitchHostItem.host)
+    }
+}
+
 public enum PingScopeIOSRootTab: String, CaseIterable, Identifiable, Sendable {
     case monitor = "Monitor"
     case hosts = "Hosts"
@@ -1254,9 +1323,15 @@ public struct PingScopeIOSRootView: View {
     }
 
     private var hostSwitcher: some View {
-        let cachedRows = allHostsMonitorRows.reduce(into: [UUID: PingScopeIOSHostRowSnapshot]()) {
-            $0[$1.hostID] = $1
-        }
+        let switcherPresentation = PingScopeIOSSwitchHostPresentation(
+            hosts: hosts,
+            hostScope: hostScope,
+            selectedHostID: selectedHostID,
+            selectedHealth: health,
+            selectedSamples: samples,
+            allHostRows: allHostsMonitorRows,
+            allHostGraphSeries: allHostsMonitorGraphSeries
+        )
         let allHostsGraphPresentation = allHostsGraphPresentationMemo.resolve(
             series: allHostsMonitorGraphSeries,
             range: selectedGraphRange,
@@ -1264,38 +1339,31 @@ public struct PingScopeIOSRootView: View {
         )
         return NavigationStack {
             List {
-                Button {
-                    onSelectAllHosts()
-                    isHostSwitcherPresented = false
-                } label: {
-                    allHostsSwitcherRow
-                }
-                .buttonStyle(.plain)
-
-                ForEach(hosts) { listedHost in
-                    let isSelected = hostScope == .focused && listedHost.id == selectedHostID
-                    let row = cachedRows[listedHost.id] ?? PingScopeIOSHostRowSnapshot(
-                        host: listedHost,
-                        health: isSelected ? health : nil,
-                        samples: isSelected ? samples : []
-                    )
-                    let presentation = PingScopeIOSAllHostsMonitorPresentation.rowPresentation(
-                        for: row,
-                        action: .focus
-                    )
-                    Button {
-                        onSelectHost(listedHost.id)
-                        isHostSwitcherPresented = false
-                    } label: {
-                        allHostsRow(
-                            row,
-                            presentation: presentation,
-                            allHostsGraphPresentation: allHostsGraphPresentation,
-                            isSelected: isSelected
-                        )
+                ForEach(switcherPresentation.items) { item in
+                    switch item {
+                    case .allHosts(let isSelected):
+                        Button {
+                            onSelectAllHosts()
+                            isHostSwitcherPresented = false
+                        } label: {
+                            allHostsSwitcherRow(isSelected: isSelected)
+                        }
+                        .buttonStyle(.plain)
+                    case .host(let concreteItem):
+                        Button {
+                            onSelectHost(concreteItem.hostID)
+                            isHostSwitcherPresented = false
+                        } label: {
+                            allHostsRow(
+                                concreteItem.row,
+                                presentation: concreteItem.rowPresentation,
+                                allHostsGraphPresentation: allHostsGraphPresentation,
+                                isSelected: concreteItem.isSelected
+                            )
+                        }
+                        .accessibilityLabel(concreteItem.rowPresentation.accessibilityLabel)
+                        .accessibilityHint(concreteItem.rowPresentation.actionAccessibilityHint)
                     }
-                    .accessibilityLabel(presentation.accessibilityLabel)
-                    .accessibilityHint(presentation.actionAccessibilityHint)
                 }
             }
             .navigationTitle("Switch Host")
@@ -1309,7 +1377,7 @@ public struct PingScopeIOSRootView: View {
         }
     }
 
-    private var allHostsSwitcherRow: some View {
+    private func allHostsSwitcherRow(isSelected: Bool) -> some View {
         HStack(spacing: 10) {
             Image(systemName: "rectangle.3.group")
                 .font(.system(size: 16, weight: .semibold))
@@ -1324,7 +1392,7 @@ public struct PingScopeIOSRootView: View {
                     .foregroundStyle(.secondary)
             }
             Spacer(minLength: 8)
-            if hostScope == .allHosts {
+            if isSelected {
                 Image(systemName: "checkmark")
                     .font(.system(size: 14, weight: .bold))
                     .foregroundStyle(.blue)

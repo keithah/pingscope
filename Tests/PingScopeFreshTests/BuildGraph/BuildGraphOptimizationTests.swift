@@ -211,17 +211,15 @@ final class BuildGraphOptimizationTests: XCTestCase {
         )
         let switcherStart = try XCTUnwrap(source.range(of: "private var hostSwitcher: some View"))
         let allHostsRowStart = try XCTUnwrap(
-            source.range(of: "private var allHostsSwitcherRow: some View", range: switcherStart.upperBound..<source.endIndex)
+            source.range(of: "private func allHostsSwitcherRow(", range: switcherStart.upperBound..<source.endIndex)
         )
         let switcher = source[switcherStart.lowerBound..<allHostsRowStart.lowerBound]
 
-        XCTAssertTrue(switcher.contains("allHostsSwitcherRow"))
-        XCTAssertTrue(switcher.contains("ForEach(hosts)"))
-        XCTAssertTrue(switcher.contains("let cachedRows = allHostsMonitorRows.reduce"))
+        XCTAssertTrue(switcher.contains("PingScopeIOSSwitchHostPresentation("))
+        XCTAssertTrue(switcher.contains("ForEach(switcherPresentation.items)"))
         XCTAssertTrue(switcher.contains("let allHostsGraphPresentation = allHostsGraphPresentationMemo.resolve"))
         XCTAssertTrue(switcher.contains("allHostsRow("))
-        XCTAssertTrue(switcher.contains("action: .focus"))
-        XCTAssertTrue(switcher.contains("isSelected:"))
+        XCTAssertTrue(switcher.contains("isSelected: concreteItem.isSelected"))
         XCTAssertFalse(switcher.contains("showsSparkline: false"))
     }
 
