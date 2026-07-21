@@ -2,6 +2,32 @@ import Foundation
 import XCTest
 
 final class BuildGraphOptimizationTests: XCTestCase {
+    func testIOSFocusedLaunchHydratesPeerRowsFromRecentHistory() throws {
+        let source = try String(
+            contentsOf: try repositoryRoot().appendingPathComponent("Sources/PingScopeiOSApp/PingScopeIOSApp.swift"),
+            encoding: .utf8
+        )
+
+        XCTAssertTrue(source.contains("await refreshFocusedPeerPresentation()"))
+        XCTAssertTrue(source.contains("TimeRange.tenMinutes.duration"))
+        XCTAssertTrue(source.contains("allHostRows = PingScopeIOSHostScopePresentation.rows"))
+    }
+
+    func testIOSHostsTabRendersCachedPeerRows() throws {
+        let source = try String(
+            contentsOf: try repositoryRoot().appendingPathComponent("Sources/PingScopeiOS/PingScopeIOSShell.swift"),
+            encoding: .utf8
+        )
+        let hostsTabStart = try XCTUnwrap(source.range(of: "private var hostsTab: some View"))
+        let historyTabStart = try XCTUnwrap(
+            source.range(of: "private var historyTab: some View", range: hostsTabStart.upperBound..<source.endIndex)
+        )
+        let hostsTab = source[hostsTabStart.lowerBound..<historyTabStart.lowerBound]
+
+        XCTAssertTrue(hostsTab.contains("cachedRows[listedHost.id]"))
+        XCTAssertTrue(hostsTab.contains("allHostsRow("))
+    }
+
     func testAppStoreSchemeDoesNotBuildDeveloperIDApp() throws {
         let root = try repositoryRoot()
         let scheme = try String(contentsOf: root.appendingPathComponent("PingScope.xcodeproj/xcshareddata/xcschemes/PingScope-AppStore.xcscheme"), encoding: .utf8)

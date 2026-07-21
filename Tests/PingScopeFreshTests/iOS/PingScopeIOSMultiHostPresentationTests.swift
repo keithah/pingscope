@@ -470,6 +470,37 @@ final class PingScopeIOSMultiHostPresentationTests: XCTestCase {
         )
     }
 
+    func testRecentHistoryBuildsLatencyAndGraphRowsForEveryEnabledHost() {
+        let hosts = [
+            HostConfig(displayName: "Cloudflare", address: "1.1.1.1"),
+            HostConfig(displayName: "Google", address: "8.8.8.8"),
+            HostConfig(displayName: "Gateway", address: "192.168.1.1")
+        ]
+        var healthByHost: [UUID: HostHealth] = [:]
+        var samplesByHost: [UUID: [PingResult]] = [:]
+
+        for (index, host) in hosts.enumerated() {
+            let result = PingResult.success(
+                hostID: host.id,
+                latency: .milliseconds(Double((index + 1) * 10))
+            )
+            var health = HostHealth(hostID: host.id, thresholds: host.thresholds)
+            health.ingest(result)
+            healthByHost[host.id] = health
+            samplesByHost[host.id] = [result]
+        }
+
+        let rows = PingScopeIOSHostScopePresentation.rows(
+            from: hosts,
+            healthByHost: healthByHost,
+            samplesByHost: samplesByHost
+        )
+
+        XCTAssertEqual(rows.map(\.hostID), hosts.map(\.id))
+        XCTAssertEqual(rows.map(\.latencyText), ["10ms", "20ms", "30ms"])
+        XCTAssertEqual(rows.map(\.samples.count), [1, 1, 1])
+    }
+
     func testAllHostsMonitorPresentationUsesFullSeriesForCompactRowGraphs() {
         let host = HostConfig(displayName: "Router", address: "192.168.1.1")
         let fullSeries = makeSuccessfulResults(count: 3, hostID: host.id)

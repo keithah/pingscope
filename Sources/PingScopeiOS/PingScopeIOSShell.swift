@@ -1034,13 +1034,29 @@ public struct PingScopeIOSRootView: View {
     }
 
     private var hostsTab: some View {
-        List {
+        let cachedRows = allHostsMonitorRows.reduce(into: [UUID: PingScopeIOSHostRowSnapshot]()) {
+            $0[$1.hostID] = $1
+        }
+        let allHostsGraphPresentation = allHostsGraphPresentationMemo.resolve(
+            series: allHostsMonitorGraphSeries,
+            range: selectedGraphRange,
+            endDate: allHostsPresentationEndDate
+        )
+        return List {
             Section {
                 ForEach(hosts) { listedHost in
                     Button {
                         editingHost = listedHost
                     } label: {
-                        hostRow(listedHost, isActive: listedHost.id == host.id, showsSparkline: true)
+                        if listedHost.id != host.id, let row = cachedRows[listedHost.id] {
+                            allHostsRow(
+                                row,
+                                presentation: PingScopeIOSAllHostsMonitorPresentation.rowPresentation(for: row),
+                                allHostsGraphPresentation: allHostsGraphPresentation
+                            )
+                        } else {
+                            hostRow(listedHost, isActive: listedHost.id == host.id, showsSparkline: true)
+                        }
                     }
                     .buttonStyle(.plain)
                     .swipeActions(edge: .leading) {
@@ -1293,9 +1309,12 @@ public struct PingScopeIOSRootView: View {
     }
 
     private func hostRow(_ listedHost: HostConfig, isActive: Bool, showsSparkline: Bool) -> some View {
-        HStack(spacing: 10) {
+        let color = PingScopeIOSAllHostsMonitorPresentation
+            .graphIdentityColor(for: listedHost.id)
+            .swiftUIColor
+        return HStack(spacing: 10) {
             Circle()
-                .fill(isActive ? Color(iosStatusColor: health.status.iosStatusColor) : .gray.opacity(0.45))
+                .fill(color)
                 .frame(width: 9, height: 9)
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {
@@ -1316,12 +1335,17 @@ public struct PingScopeIOSRootView: View {
             }
             Spacer(minLength: 8)
             if showsSparkline {
-                PingScopeIOSSparkline(renderData: isActive ? graphPresentation.renderData : PingScopeIOSLatencyGraphData(samples: [], range: selectedGraphRange), color: isActive ? .blue : .secondary)
+                PingScopeIOSSparkline(
+                    renderData: isActive
+                        ? graphPresentation.renderData
+                        : PingScopeIOSLatencyGraphData(samples: [], range: selectedGraphRange),
+                    color: color
+                )
                     .frame(width: 58, height: 28)
             }
             Text(isActive ? latencyValue(health.latestResult?.latency?.milliseconds) : "--")
                 .font(.system(size: 14, weight: .semibold, design: .monospaced))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(color)
         }
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)

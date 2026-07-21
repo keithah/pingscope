@@ -1631,8 +1631,68 @@ private final class PingScopeIOSAppModel: ObservableObject {
         // the 30s throttle would otherwise pin the wrong host's history.
         guard snapshot.host.id == requestedHostID else { return }
         historySamples = samples
+        if hostScope == .focused {
+            await refreshFocusedPeerPresentation()
+            guard snapshot.host.id == requestedHostID, hostScope == .focused else { return }
+        }
         rebuildGraphSamples()
         await publishWidgetSnapshot()
+    }
+
+    private func refreshFocusedPeerPresentation() async {
+        guard let historyStore, hostScope == .focused else { return }
+        let requestedHostID = snapshot.host.id
+        let enabledHosts = PingScopeIOSHostScopePresentation.enabledHosts(from: hosts)
+        let cutoff = Date().addingTimeInterval(-TimeRange.tenMinutes.duration)
+        let samplesByHost = await withTaskGroup(
+            of: (UUID, [PingResult]).self,
+            returning: [UUID: [PingResult]].self
+        ) { group in
+            for host in enabledHosts {
+                group.addTask {
+                    let samples = await historyStore.latestSamples(hostID: host.id, since: cutoff, limit: 100)
+                    return (host.id, samples.sorted { $0.timestamp < $1.timestamp })
+                }
+            }
+            var samplesByHost: [UUID: [PingResult]] = [:]
+            for await (hostID, samples) in group {
+                samplesByHost[hostID] = samples
+            }
+            return samplesByHost
+        }
+        guard snapshot.host.id == requestedHostID, hostScope == .focused else { return }
+
+        var resolvedSamples = samplesByHost
+        var selectedSamplesByID = Dictionary(
+            uniqueKeysWithValues: (resolvedSamples[requestedHostID] ?? []).map { ($0.id, $0) }
+        )
+        for sample in snapshot.series.samples {
+            selectedSamplesByID[sample.id] = sample
+        }
+        resolvedSamples[requestedHostID] = selectedSamplesByID.values.sorted { $0.timestamp < $1.timestamp }
+
+        var healthByHost: [UUID: HostHealth] = [:]
+        for host in enabledHosts {
+            if host.id == requestedHostID {
+                healthByHost[host.id] = snapshot.health
+                continue
+            }
+            var health = HostHealth(hostID: host.id, thresholds: host.thresholds)
+            for sample in resolvedSamples[host.id] ?? [] {
+                health.ingest(sample)
+            }
+            healthByHost[host.id] = health
+        }
+
+        allHostRows = PingScopeIOSHostScopePresentation.rows(
+            from: enabledHosts,
+            healthByHost: healthByHost,
+            samplesByHost: resolvedSamples
+        )
+        allHostGraphSeries = enabledHosts.map {
+            PingScopeIOSHostGraphSeries(hostID: $0.id, samples: resolvedSamples[$0.id] ?? [])
+        }
+        allHostsPresentationEndDate = Date()
     }
 
     private func refreshRangedHistory(
