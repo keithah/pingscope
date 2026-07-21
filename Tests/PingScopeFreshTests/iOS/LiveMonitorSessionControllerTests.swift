@@ -79,6 +79,54 @@ final class LiveMonitorSessionControllerTests: XCTestCase {
 
         policy.reset()
         XCTAssertTrue(policy.shouldPublish(changed, at: start.addingTimeInterval(12)))
+
+        var detailPolicy = PingScopeIOSLiveActivityUpdatePolicy(minimumUpdateInterval: 10)
+        XCTAssertTrue(detailPolicy.shouldPublish(initial, at: start))
+        var statusOnly = initial
+        statusOnly.showsDynamicIslandDetails = false
+        XCTAssertTrue(detailPolicy.shouldPublish(statusOnly, at: start.addingTimeInterval(1)))
+
+        let hostID = UUID()
+        let initialRow = PingScopeLiveActivityHostRow(
+            hostID: hostID,
+            displayName: "Host",
+            endpointCaption: "TCP host.example",
+            status: .healthy,
+            latestLatencyMilliseconds: 12,
+            samples: [12],
+            isStale: false
+        )
+        let initialColorState = PingScopeLiveActivityAttributes.ContentState(
+            latencyMilliseconds: initial.latencyMilliseconds,
+            status: initial.status,
+            lastUpdatedAt: initial.lastUpdatedAt,
+            remainingSeconds: initial.remainingSeconds,
+            isStale: initial.isStale,
+            hostRows: [initialRow]
+        )
+        let updatedColorState = PingScopeLiveActivityAttributes.ContentState(
+            latencyMilliseconds: initial.latencyMilliseconds,
+            status: initial.status,
+            lastUpdatedAt: initial.lastUpdatedAt,
+            remainingSeconds: initial.remainingSeconds,
+            isStale: initial.isStale,
+            hostRows: [PingScopeLiveActivityHostRow(
+                hostID: hostID,
+                displayName: "Host",
+                endpointCaption: "TCP host.example",
+                status: .healthy,
+                latestLatencyMilliseconds: 12,
+                samples: [12],
+                isStale: false,
+                identityColor: WidgetGraphDisplayColor(
+                    light: WidgetGraphRGB(red: 0.2, green: 0.4, blue: 0.8),
+                    dark: WidgetGraphRGB(red: 0.2, green: 0.4, blue: 0.8)
+                )
+            )]
+        )
+        var colorPolicy = PingScopeIOSLiveActivityUpdatePolicy(minimumUpdateInterval: 10)
+        XCTAssertTrue(colorPolicy.shouldPublish(initialColorState, at: start))
+        XCTAssertTrue(colorPolicy.shouldPublish(updatedColorState, at: start.addingTimeInterval(1)))
     }
 
     func testIOSRunControlSelectionMapsDurationsAndStop() {
@@ -598,6 +646,86 @@ final class LiveMonitorSessionControllerTests: XCTestCase {
         XCTAssertFalse(promptClient.isActive)
         XCTAssertEqual(survivingSession.duration, .continuous)
         XCTAssertNil(survivingSession.endReason)
+    }
+
+    func testIOSLiveActivityPreferencesDefaultOnAndPersistExactKeys() {
+        let suiteName = "PingScopeIOSLiveActivityPreferencesTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let defaultsState = PingScopeIOSLiveActivityPreferences(defaults: defaults)
+        XCTAssertTrue(defaultsState.lockScreenEnabled)
+        XCTAssertTrue(defaultsState.dynamicIslandDetailsEnabled)
+
+        PingScopeIOSLiveActivityPreferences(
+            lockScreenEnabled: false,
+            dynamicIslandDetailsEnabled: false
+        ).persist(to: defaults)
+
+        XCTAssertEqual(
+            defaults.object(forKey: "PingScope.iOS.lockScreenLiveActivityEnabled") as? Bool,
+            false
+        )
+        XCTAssertEqual(
+            defaults.object(forKey: "PingScope.iOS.dynamicIslandDetailsEnabled") as? Bool,
+            false
+        )
+    }
+
+    @MainActor
+    func testIOSLiveActivityMasterOffBlocksRequestAndReenablePermitsNextRequest() async {
+        var events: [String] = []
+
+        let blocked: String? = await PingScopeIOSLiveActivityRuntimeOrchestrator.perform(
+            .requestOrUpdate,
+            systemAuthorizationEnabled: true,
+            preferences: .init(lockScreenEnabled: false),
+            hasOwnedActivity: false,
+            request: {
+                events.append("requested")
+                return "activity"
+            },
+            update: { events.append("updated") },
+            end: { events.append("ended") }
+        )
+        XCTAssertNil(blocked)
+        XCTAssertEqual(events, [])
+
+        let requested: String? = await PingScopeIOSLiveActivityRuntimeOrchestrator.perform(
+            .requestOrUpdate,
+            systemAuthorizationEnabled: true,
+            preferences: .init(lockScreenEnabled: true),
+            hasOwnedActivity: false,
+            request: {
+                events.append("requested")
+                return "activity"
+            },
+            update: { events.append("updated") },
+            end: { events.append("ended") }
+        )
+        XCTAssertEqual(requested, "activity")
+        XCTAssertEqual(events, ["requested"])
+    }
+
+    @MainActor
+    func testIOSLiveActivityMasterOffBlocksUpdateAndEndsOwnedActivity() async {
+        var events: [String] = []
+
+        let result: String? = await PingScopeIOSLiveActivityRuntimeOrchestrator.perform(
+            .update,
+            systemAuthorizationEnabled: true,
+            preferences: .init(lockScreenEnabled: false),
+            hasOwnedActivity: true,
+            request: {
+                events.append("requested")
+                return "activity"
+            },
+            update: { events.append("updated") },
+            end: { events.append("ended") }
+        )
+
+        XCTAssertNil(result)
+        XCTAssertEqual(events, ["ended"])
     }
 
     func testIOSDisplayModeDefaultsToSignalAndPersistsRing() {

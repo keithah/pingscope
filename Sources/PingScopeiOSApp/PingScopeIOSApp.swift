@@ -139,6 +139,8 @@ struct PingScopeIOSApp: App {
                 allHostGraphSeries: model.allHostGraphSeries,
                 monitorInsights: model.monitorInsights,
                 connectivityTipsEnabled: model.connectivityTipsEnabled,
+                lockScreenLiveActivityEnabled: model.liveActivityPreferences.lockScreenEnabled,
+                dynamicIslandDetailsEnabled: model.liveActivityPreferences.dynamicIslandDetailsEnabled,
                 allHostsPresentationEndDate: model.allHostsPresentationEndDate,
                 selectedHostID: model.snapshot.host.id,
                 onboardingPresentation: model.onboardingPresentation,
@@ -151,6 +153,12 @@ struct PingScopeIOSApp: App {
                 },
                 onSetConnectivityTipsEnabled: { isEnabled in
                     model.connectivityTipsEnabled = isEnabled
+                },
+                onSetLockScreenLiveActivityEnabled: { isEnabled in
+                    model.setLockScreenLiveActivityEnabled(isEnabled)
+                },
+                onSetDynamicIslandDetailsEnabled: { isEnabled in
+                    model.setDynamicIslandDetailsEnabled(isEnabled)
                 },
                 onSelectAllHosts: {
                     model.selectAllHosts()
@@ -309,6 +317,7 @@ private final class PingScopeIOSAppModel: ObservableObject {
             UserDefaults.standard.pingScopeIOSConnectivityTipsEnabled = connectivityTipsEnabled
         }
     }
+    @Published private(set) var liveActivityPreferences: PingScopeIOSLiveActivityPreferences
     @Published private(set) var notificationAuthorization: PingScopeIOSNotificationAuthorization = .unknown
     @Published private(set) var hasConfiguredWidget = false
     @Published private(set) var diagnosticsLogText = ""
@@ -417,6 +426,7 @@ private final class PingScopeIOSAppModel: ObservableObject {
         self.backgroundKeepAliveEnabled = UserDefaults.standard.bool(forKey: Self.backgroundKeepAliveEnabledKey)
         self.displayMode = UserDefaults.standard.pingScopeIOSDisplayMode
         self.connectivityTipsEnabled = UserDefaults.standard.pingScopeIOSConnectivityTipsEnabled
+        self.liveActivityPreferences = PingScopeIOSLiveActivityPreferences(defaults: .standard)
         let loadedHistoryRange = UserDefaults.standard.pingScopeIOSHistoryRange
         self.historyRange = loadedHistoryRange
         self.historyLens = UserDefaults.standard.pingScopeIOSHistoryLens
@@ -797,6 +807,8 @@ private final class PingScopeIOSAppModel: ObservableObject {
                 await model.configureNotificationScope()
                 guard model.isCurrentLifecycle(context) else { return }
                 await model.refreshSnapshot()
+                guard model.isCurrentLifecycle(context) else { return }
+                await model.updateLiveActivity()
             }
             return
         }
@@ -889,6 +901,30 @@ private final class PingScopeIOSAppModel: ObservableObject {
             historyLocationService.requestAlwaysAuthorization()
         }
         applyBackgroundKeepAlive()
+    }
+
+    func setLockScreenLiveActivityEnabled(_ isEnabled: Bool) {
+        guard liveActivityPreferences.lockScreenEnabled != isEnabled else { return }
+        liveActivityPreferences.lockScreenEnabled = isEnabled
+        liveActivityPreferences.persist(to: .standard)
+        runLifecycleTask { model, context in
+            if isEnabled {
+                await model.ensureLiveActivityForPresentedSession()
+            } else {
+                await model.endLiveActivity()
+            }
+            guard model.isCurrentLifecycle(context) else { return }
+        }
+    }
+
+    func setDynamicIslandDetailsEnabled(_ isEnabled: Bool) {
+        guard liveActivityPreferences.dynamicIslandDetailsEnabled != isEnabled else { return }
+        liveActivityPreferences.dynamicIslandDetailsEnabled = isEnabled
+        liveActivityPreferences.persist(to: .standard)
+        runLifecycleTask { model, context in
+            await model.updateLiveActivity()
+            guard model.isCurrentLifecycle(context) else { return }
+        }
     }
 
     func requestBackgroundKeepAlivePermission() {
@@ -1998,32 +2034,39 @@ private final class PingScopeIOSAppModel: ObservableObject {
     }
 
     private func startLiveActivity(duration: MonitorSessionDuration) async {
-        guard ActivityAuthorizationInfo().areActivitiesEnabled else { return }
         guard let session = presentedSession,
               let attributes = liveActivityAttributes(duration: duration) else { return }
 
         do {
-            if liveActivity != nil {
-                await updateLiveActivity()
-                return
-            }
             let state = liveActivityContentState(session: session)
             let initialContent = PingScopeIOSLiveActivityStartup.initialContent(
                 state: state,
                 scheduledEndAt: session.scheduledEndAt
             )
-            let requestedActivity = try await PingScopeIOSLiveActivityStartup.requestReplacingOrphans(
-                in: ActivityKitLiveActivityDirectory()
-            ) {
-                try Activity.request(
-                    attributes: attributes,
-                    content: ActivityContent(
-                        state: initialContent.state,
-                        staleDate: initialContent.staleDate
-                    ),
-                    pushType: nil
-                )
-            }
+            guard let requestedActivity = try await PingScopeIOSLiveActivityRuntimeOrchestrator.perform(
+                .requestOrUpdate,
+                systemAuthorizationEnabled: ActivityAuthorizationInfo().areActivitiesEnabled,
+                preferences: liveActivityPreferences,
+                hasOwnedActivity: liveActivity != nil,
+                request: {
+                    try await PingScopeIOSLiveActivityStartup.requestReplacingOrphans(
+                        in: ActivityKitLiveActivityDirectory()
+                    ) {
+                        try Activity.request(
+                            attributes: attributes,
+                            content: ActivityContent(
+                                state: initialContent.state,
+                                staleDate: initialContent.staleDate
+                            ),
+                            pushType: nil
+                        )
+                    }
+                },
+                update: { [weak self] in
+                    await self?.publishLiveActivityUpdate()
+                },
+                end: { [weak self] in await self?.endLiveActivity() }
+            ) else { return }
             let lease = await lifecycleHarness.claimActivity()
             liveActivity = requestedActivity
             liveActivityLease = lease
@@ -2035,6 +2078,20 @@ private final class PingScopeIOSAppModel: ObservableObject {
     }
 
     private func updateLiveActivity(staleDateOverride: Date? = nil) async {
+        let _: Void? = await PingScopeIOSLiveActivityRuntimeOrchestrator.perform(
+            .update,
+            systemAuthorizationEnabled: ActivityAuthorizationInfo().areActivitiesEnabled,
+            preferences: liveActivityPreferences,
+            hasOwnedActivity: liveActivity != nil,
+            request: {},
+            update: { [weak self] in
+                await self?.publishLiveActivityUpdate(staleDateOverride: staleDateOverride)
+            },
+            end: { [weak self] in await self?.endLiveActivity() }
+        )
+    }
+
+    private func publishLiveActivityUpdate(staleDateOverride: Date? = nil) async {
         await releaseLiveActivityIfDefunct()
         guard let liveActivity, let session = presentedSession else { return }
         let state = liveActivityContentState(session: session)
@@ -2201,6 +2258,7 @@ private final class PingScopeIOSAppModel: ObservableObject {
                 session: session,
                 health: snapshot.health,
                 samples: snapshot.series.samples,
+                showsDynamicIslandDetails: liveActivityPreferences.dynamicIslandDetailsEnabled,
                 at: date
             )
         }
@@ -2216,7 +2274,8 @@ private final class PingScopeIOSAppModel: ObservableObject {
                 : Int(session.remainingDuration(at: date).seconds.rounded(.down)),
             isStale: session.phase(at: date) != .live,
             mode: .allHosts,
-            hostRows: activityRows
+            hostRows: activityRows,
+            showsDynamicIslandDetails: liveActivityPreferences.dynamicIslandDetailsEnabled
         )
     }
 }

@@ -64,12 +64,14 @@ public extension PingScopeLiveActivityDuration {
 
 public extension PingScopeLiveActivityAttributes {
     init(host: HostConfig, duration: MonitorSessionDuration) {
+        let resolvedColor = ResolvedHostDisplayColor(hostID: host.id, displayColor: host.displayColor)
         self.init(
             hostID: host.id,
             hostName: host.displayName,
             address: host.address,
             method: PingScopeLiveActivityMethod(host.method),
-            duration: PingScopeLiveActivityDuration(duration)
+            duration: PingScopeLiveActivityDuration(duration),
+            identityColor: WidgetGraphDisplayColor(resolvedColor: resolvedColor)
         )
     }
 }
@@ -84,7 +86,8 @@ public extension PingScopeLiveActivityAttributes.ContentState {
         isStale: Bool,
         failureMessage: String? = nil,
         mode: PingScopeLiveActivityMode = .focused,
-        hostRows: [PingScopeLiveActivityHostRow] = []
+        hostRows: [PingScopeLiveActivityHostRow] = [],
+        showsDynamicIslandDetails: Bool = true
     ) {
         self.init(
             latencyMilliseconds: latencyMilliseconds,
@@ -94,7 +97,8 @@ public extension PingScopeLiveActivityAttributes.ContentState {
             isStale: isStale,
             failureMessage: failureMessage,
             mode: mode,
-            hostRows: hostRows
+            hostRows: hostRows,
+            showsDynamicIslandDetails: showsDynamicIslandDetails
         )
     }
 
@@ -147,7 +151,21 @@ public extension PingScopeLiveActivityHostRow {
             samples: PingScopeIOSLatencySampleReducer.reduce(snapshot.samples, limit: Self.sampleLimit)
                 .compactMap { $0.latency.map { Int($0.milliseconds.rounded()) } },
             isStale: snapshot.isStale,
-            isDefaultGateway: snapshot.isDefaultGateway
+            isDefaultGateway: snapshot.isDefaultGateway,
+            identityColor: WidgetGraphDisplayColor(
+                resolvedColor: snapshot.resolvedColor
+            )
+        )
+    }
+}
+
+private extension WidgetGraphDisplayColor {
+    init(resolvedColor: ResolvedHostDisplayColor) {
+        let light = resolvedColor.components(for: .light)
+        let dark = resolvedColor.components(for: .dark)
+        self.init(
+            light: WidgetGraphRGB(red: light.red, green: light.green, blue: light.blue),
+            dark: WidgetGraphRGB(red: dark.red, green: dark.green, blue: dark.blue)
         )
     }
 }

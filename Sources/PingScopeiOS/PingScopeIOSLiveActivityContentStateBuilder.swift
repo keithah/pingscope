@@ -7,6 +7,7 @@ public enum PingScopeIOSLiveActivityContentStateBuilder {
         session: MonitorSessionState,
         health: HostHealth,
         samples: [PingResult],
+        showsDynamicIslandDetails: Bool = true,
         at date: Date = Date()
     ) -> PingScopeLiveActivityAttributes.ContentState {
         let latestResult = session.latestResult ?? health.latestResult
@@ -30,7 +31,8 @@ public enum PingScopeIOSLiveActivityContentStateBuilder {
             isStale: isStale,
             failureMessage: latestResult?.failureReason?.userMessage,
             mode: .focused,
-            hostRows: [row]
+            hostRows: [row],
+            showsDynamicIslandDetails: showsDynamicIslandDetails
         )
     }
 }

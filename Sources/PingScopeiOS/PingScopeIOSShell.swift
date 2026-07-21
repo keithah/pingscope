@@ -634,6 +634,8 @@ public struct PingScopeIOSRootView: View {
     public var allHostGraphSeries: [PingScopeIOSHostGraphSeries]
     public var monitorInsights: PingScopeIOSMonitorInsightsPresentation
     public var connectivityTipsEnabled: Bool
+    public var lockScreenLiveActivityEnabled: Bool
+    public var dynamicIslandDetailsEnabled: Bool
     public var allHostsPresentationEndDate: Date
     public var selectedHostID: UUID
     public var onboardingPresentation: PingScopeIOSOnboardingPresentation
@@ -643,6 +645,8 @@ public struct PingScopeIOSRootView: View {
     public var cloudSyncStatusText: String
     public var onSelectDisplayMode: (PingScopeIOSDisplayMode) -> Void
     public var onSetConnectivityTipsEnabled: (Bool) -> Void
+    public var onSetLockScreenLiveActivityEnabled: (Bool) -> Void
+    public var onSetDynamicIslandDetailsEnabled: (Bool) -> Void
     public var onSelectAllHosts: () -> Void
     public var onSelectHost: (UUID) -> Void
     public var onSaveHost: (HostConfig) -> Void
@@ -692,6 +696,8 @@ public struct PingScopeIOSRootView: View {
         allHostGraphSeries: [PingScopeIOSHostGraphSeries] = [],
         monitorInsights: PingScopeIOSMonitorInsightsPresentation = .init(snapshots: []),
         connectivityTipsEnabled: Bool = false,
+        lockScreenLiveActivityEnabled: Bool = true,
+        dynamicIslandDetailsEnabled: Bool = true,
         allHostsPresentationEndDate: Date? = nil,
         selectedHostID: UUID? = nil,
         onboardingPresentation: PingScopeIOSOnboardingPresentation = .init(
@@ -710,6 +716,8 @@ public struct PingScopeIOSRootView: View {
         cloudSyncStatusText: String = "Off",
         onSelectDisplayMode: @escaping (PingScopeIOSDisplayMode) -> Void = { _ in },
         onSetConnectivityTipsEnabled: @escaping (Bool) -> Void = { _ in },
+        onSetLockScreenLiveActivityEnabled: @escaping (Bool) -> Void = { _ in },
+        onSetDynamicIslandDetailsEnabled: @escaping (Bool) -> Void = { _ in },
         onSelectAllHosts: @escaping () -> Void = {},
         onSelectHost: @escaping (UUID) -> Void = { _ in },
         onSaveHost: @escaping (HostConfig) -> Void = { _ in },
@@ -762,6 +770,8 @@ public struct PingScopeIOSRootView: View {
         self.allHostGraphSeries = allHostGraphSeries
         self.monitorInsights = monitorInsights
         self.connectivityTipsEnabled = connectivityTipsEnabled
+        self.lockScreenLiveActivityEnabled = lockScreenLiveActivityEnabled
+        self.dynamicIslandDetailsEnabled = dynamicIslandDetailsEnabled
         self.allHostsPresentationEndDate = allHostsPresentationEndDate ?? resolvedGraphPresentation.renderData.endDate
         self.selectedHostID = resolvedSelectedHostID
         self.onboardingPresentation = onboardingPresentation
@@ -771,6 +781,8 @@ public struct PingScopeIOSRootView: View {
         self.cloudSyncStatusText = cloudSyncStatusText
         self.onSelectDisplayMode = onSelectDisplayMode
         self.onSetConnectivityTipsEnabled = onSetConnectivityTipsEnabled
+        self.onSetLockScreenLiveActivityEnabled = onSetLockScreenLiveActivityEnabled
+        self.onSetDynamicIslandDetailsEnabled = onSetDynamicIslandDetailsEnabled
         self.onSelectAllHosts = onSelectAllHosts
         self.onSelectHost = onSelectHost
         self.onSaveHost = onSaveHost
@@ -1425,6 +1437,20 @@ public struct PingScopeIOSRootView: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
+                }
+                Section("Live Activity") {
+                    Toggle("Lock Screen Live Activity", isOn: Binding(
+                        get: { lockScreenLiveActivityEnabled },
+                        set: { onSetLockScreenLiveActivityEnabled($0) }
+                    ))
+                    Toggle("Dynamic Island Details", isOn: Binding(
+                        get: { dynamicIslandDetailsEnabled },
+                        set: { onSetDynamicIslandDetailsEnabled($0) }
+                    ))
+                    .disabled(!lockScreenLiveActivityEnabled)
+                    Text("When off, Dynamic Island shows status only; the Lock Screen Live Activity is unchanged.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
                 Section("Background Keep Alive") {
                     Toggle(isOn: Binding(

@@ -30,10 +30,10 @@ final class PingScopeLiveActivityTests: XCTestCase {
         XCTAssertEqual(attributesJSON["method"] as? String, "https")
         XCTAssertEqual(attributesJSON["duration"] as? String, "oneMinute")
         XCTAssertEqual(stateJSON["status"] as? String, "degraded")
-        XCTAssertEqual(Set(attributesJSON.keys), ["hostID", "hostName", "address", "method", "duration"])
+        XCTAssertEqual(Set(attributesJSON.keys), ["hostID", "hostName", "address", "method", "duration", "identityColor"])
         XCTAssertEqual(
             Set(stateJSON.keys),
-            ["latencyMilliseconds", "status", "remainingSeconds", "isStale", "mode", "hostRows"]
+            ["latencyMilliseconds", "status", "remainingSeconds", "isStale", "mode", "hostRows", "showsDynamicIslandDetails"]
         )
     }
 
@@ -82,6 +82,134 @@ final class PingScopeLiveActivityTests: XCTestCase {
         XCTAssertEqual(try roundTrip(state), state)
     }
 
+    func testDynamicIslandDetailPreferenceChoosesRichOrStatusOnlyWhileLockScreenRowsStayEqual() {
+        let host = HostConfig(displayName: "Focused", address: "focused.example")
+        let attributes = PingScopeLiveActivityAttributes(host: host, duration: .continuous)
+        let rich = makeContentState(showsDynamicIslandDetails: true)
+        let statusOnly = makeContentState(showsDynamicIslandDetails: false)
+
+        XCTAssertEqual(
+            PingScopeLiveActivityPresentation.dynamicIslandContentStyle(contentState: rich),
+            .rich
+        )
+        XCTAssertEqual(
+            PingScopeLiveActivityPresentation.dynamicIslandContentStyle(contentState: statusOnly),
+            .statusOnly
+        )
+        XCTAssertEqual(
+            PingScopeLiveActivityPresentation.rows(attributes: attributes, contentState: rich),
+            PingScopeLiveActivityPresentation.rows(attributes: attributes, contentState: statusOnly)
+        )
+    }
+
+    func testLegacyContentStateDefaultsDynamicIslandDetailsOn() throws {
+        let legacy = Data("""
+        {
+          "latencyMilliseconds":42,
+          "status":"healthy",
+          "remainingSeconds":30,
+          "isStale":false,
+          "mode":"focused",
+          "hostRows":[]
+        }
+        """.utf8)
+
+        let decoded = try JSONDecoder().decode(
+            PingScopeLiveActivityAttributes.ContentState.self,
+            from: legacy
+        )
+
+        XCTAssertTrue(decoded.showsDynamicIslandDetails)
+    }
+
+    func testLiveActivityIdentityColorMatchesResolvedCustomAndAutomaticColors() {
+        let custom = HostDisplayColor(red: 0.2, green: 0.4, blue: 0.8)
+        let customHost = HostConfig(
+            id: UUID(uuidString: "00000000-0000-0000-0000-000000000001")!,
+            displayName: "Custom",
+            address: "custom.example",
+            displayColor: custom
+        )
+        let automaticHost = HostConfig(
+            id: UUID(uuidString: "00000000-0000-0000-0000-000000000007")!,
+            displayName: "Automatic",
+            address: "automatic.example"
+        )
+
+        for host in [customHost, automaticHost] {
+            let expected = ResolvedHostDisplayColor(hostID: host.id, displayColor: host.displayColor)
+            let attributes = PingScopeLiveActivityAttributes(host: host, duration: .continuous)
+            let snapshot = PingScopeIOSHostRowSnapshot(host: host, health: nil)
+            let row = PingScopeLiveActivityHostRow(snapshot: snapshot)
+
+            assertIdentityColor(attributes.identityColor, equals: expected)
+            assertIdentityColor(row.identityColor, equals: expected)
+        }
+    }
+
+    func testFocusedPresentationUsesCurrentStateIdentityColorAfterHostEdit() {
+        let host = HostConfig(displayName: "Focused", address: "focused.example")
+        let updatedColor = WidgetGraphDisplayColor(
+            light: WidgetGraphRGB(red: 0.2, green: 0.4, blue: 0.8),
+            dark: WidgetGraphRGB(red: 0.2, green: 0.4, blue: 0.8)
+        )
+        let state = makeContentState(hostRows: [
+            PingScopeLiveActivityHostRow(
+                hostID: host.id,
+                displayName: host.displayName,
+                endpointCaption: "TCP focused.example",
+                status: .healthy,
+                latestLatencyMilliseconds: 42,
+                samples: [42],
+                isStale: false,
+                identityColor: updatedColor
+            )
+        ])
+
+        let presentation = PingScopeLiveActivityPresentation.rows(
+            attributes: PingScopeLiveActivityAttributes(host: host, duration: .continuous),
+            contentState: state
+        )
+
+        XCTAssertEqual(presentation.first?.identityColor, updatedColor)
+    }
+
+    func testMissingOrInvalidIdentityColorFallsBackToAutomatic() throws {
+        let hostID = UUID(uuidString: "00000000-0000-0000-0000-000000000005")!
+        let missing = Data("""
+        {
+          "hostID":"\(hostID.uuidString)",
+          "hostName":"Legacy",
+          "address":"legacy.example",
+          "method":"tcp",
+          "duration":"continuous"
+        }
+        """.utf8)
+        let invalid = Data("""
+        {
+          "hostID":"\(hostID.uuidString)",
+          "hostName":"Invalid",
+          "address":"invalid.example",
+          "method":"tcp",
+          "duration":"continuous",
+          "identityColor":{
+            "light":{"red":2,"green":0,"blue":0},
+            "dark":{"red":0,"green":0,"blue":0}
+          }
+        }
+        """.utf8)
+        let expected = ResolvedHostDisplayColor(hostID: hostID, displayColor: nil)
+
+        assertIdentityColor(
+            try JSONDecoder().decode(PingScopeLiveActivityAttributes.self, from: missing).identityColor,
+            equals: expected
+        )
+        assertIdentityColor(
+            try JSONDecoder().decode(PingScopeLiveActivityAttributes.self, from: invalid).identityColor,
+            equals: expected
+        )
+    }
+
     func testHostileFocusedAttributesInitializationKeepsCombinedPayloadUnderFourKilobytes() throws {
         let hostID = UUID()
         let attributes = PingScopeLiveActivityAttributes(
@@ -89,7 +217,8 @@ final class PingScopeLiveActivityTests: XCTestCase {
                 id: hostID,
                 displayName: String(repeating: "👩🏽‍💻", count: 200),
                 address: oversizedAddress,
-                method: .https
+                method: .https,
+                displayColor: worstCaseHostDisplayColor
             ),
             duration: .oneMinute
         )
@@ -105,7 +234,8 @@ final class PingScopeLiveActivityTests: XCTestCase {
         XCTAssertEqual(attributes.address, boundedAddress)
         XCTAssertEqual(attributes.method, .https)
         XCTAssertEqual(attributes.duration, .oneMinute)
-        XCTAssertLessThan(try encodedCombinedPayloadSize(attributes: attributes, state: state), 4_096)
+        let payloadSize = try encodedCombinedPayloadSize(attributes: attributes, state: state)
+        XCTAssertLessThan(payloadSize, 4_096)
     }
 
     func testHostileAllHostsPlaceholderInitializationKeepsCombinedPayloadUnderFourKilobytes() throws {
@@ -115,7 +245,8 @@ final class PingScopeLiveActivityTests: XCTestCase {
                 id: hostID,
                 displayName: "All Hosts",
                 address: oversizedAddress,
-                method: .udp
+                method: .udp,
+                displayColor: worstCaseHostDisplayColor
             ),
             duration: .thirtySeconds
         )
@@ -131,7 +262,8 @@ final class PingScopeLiveActivityTests: XCTestCase {
         XCTAssertEqual(attributes.address, boundedAddress)
         XCTAssertEqual(attributes.method, .udp)
         XCTAssertEqual(attributes.duration, .thirtySeconds)
-        XCTAssertLessThan(try encodedCombinedPayloadSize(attributes: attributes, state: state), 4_096)
+        let payloadSize = try encodedCombinedPayloadSize(attributes: attributes, state: state)
+        XCTAssertLessThan(payloadSize, 4_096)
     }
 
     func testHostileAttributesDecodeKeepsCombinedPayloadUnderFourKilobytes() throws {
@@ -293,6 +425,7 @@ final class PingScopeLiveActivityTests: XCTestCase {
             JSONSerialization.jsonObject(with: JSONEncoder().encode(row)) as? [String: Any]
         )
         encodedObject.removeValue(forKey: "isDefaultGateway")
+        encodedObject.removeValue(forKey: "identityColor")
 
         let decoded = try JSONDecoder().decode(
             PingScopeLiveActivityHostRow.self,
@@ -300,6 +433,10 @@ final class PingScopeLiveActivityTests: XCTestCase {
         )
 
         XCTAssertFalse(decoded.isDefaultGateway)
+        assertIdentityColor(
+            decoded.identityColor,
+            equals: ResolvedHostDisplayColor(hostID: decoded.hostID, displayColor: nil)
+        )
     }
 
     func testSessionPresentationUsesOneLiveOrRemainingLabel() {
@@ -440,12 +577,14 @@ final class PingScopeLiveActivityTests: XCTestCase {
             session: session,
             health: health,
             samples: samples,
+            showsDynamicIslandDetails: false,
             at: startedAt.addingTimeInterval(6)
         )
 
         XCTAssertEqual(state.mode, .focused)
         XCTAssertEqual(state.latencyMilliseconds, 42)
         XCTAssertEqual(state.status, .healthy)
+        XCTAssertFalse(state.showsDynamicIslandDetails)
         XCTAssertEqual(state.hostRows.count, 1)
         XCTAssertEqual(state.hostRows[0].hostID, host.id)
         XCTAssertEqual(state.hostRows[0].displayName, "Focused Host")
@@ -579,7 +718,8 @@ final class PingScopeLiveActivityTests: XCTestCase {
     private func makeContentState(
         failureMessage: String? = nil,
         mode: PingScopeLiveActivityMode = .focused,
-        hostRows: [PingScopeLiveActivityHostRow] = []
+        hostRows: [PingScopeLiveActivityHostRow] = [],
+        showsDynamicIslandDetails: Bool = true
     ) -> PingScopeLiveActivityAttributes.ContentState {
         PingScopeLiveActivityAttributes.ContentState(
             latencyMilliseconds: 42,
@@ -589,8 +729,25 @@ final class PingScopeLiveActivityTests: XCTestCase {
             isStale: false,
             failureMessage: failureMessage,
             mode: mode,
-            hostRows: hostRows
+            hostRows: hostRows,
+            showsDynamicIslandDetails: showsDynamicIslandDetails
         )
+    }
+
+    private func assertIdentityColor(
+        _ actual: WidgetGraphDisplayColor,
+        equals expected: ResolvedHostDisplayColor,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let expectedLight = expected.components(for: .light)
+        let expectedDark = expected.components(for: .dark)
+        XCTAssertEqual(actual.light.red, expectedLight.red, accuracy: 0.000_001, file: file, line: line)
+        XCTAssertEqual(actual.light.green, expectedLight.green, accuracy: 0.000_001, file: file, line: line)
+        XCTAssertEqual(actual.light.blue, expectedLight.blue, accuracy: 0.000_001, file: file, line: line)
+        XCTAssertEqual(actual.dark.red, expectedDark.red, accuracy: 0.000_001, file: file, line: line)
+        XCTAssertEqual(actual.dark.green, expectedDark.green, accuracy: 0.000_001, file: file, line: line)
+        XCTAssertEqual(actual.dark.blue, expectedDark.blue, accuracy: 0.000_001, file: file, line: line)
     }
 
     private func makePayloadRow(index: Int, sampleCount: Int) -> PingScopeLiveActivityHostRow {
@@ -625,7 +782,27 @@ final class PingScopeLiveActivityTests: XCTestCase {
             status: .degraded,
             latestLatencyMilliseconds: Int.max,
             samples: Array(repeating: Int.max, count: 20),
-            isStale: true
+            isStale: true,
+            identityColor: WidgetGraphDisplayColor(
+                light: WidgetGraphRGB(
+                    red: 0.123_456_789_012_345_67,
+                    green: 0.234_567_890_123_456_78,
+                    blue: 0.345_678_901_234_567_9
+                ),
+                dark: WidgetGraphRGB(
+                    red: 0.456_789_012_345_678_9,
+                    green: 0.567_890_123_456_789,
+                    blue: 0.678_901_234_567_890_1
+                )
+            )
+        )
+    }
+
+    private var worstCaseHostDisplayColor: HostDisplayColor {
+        HostDisplayColor(
+            red: 0.123_456_789_012_345_67,
+            green: 0.234_567_890_123_456_78,
+            blue: 0.345_678_901_234_567_9
         )
     }
 

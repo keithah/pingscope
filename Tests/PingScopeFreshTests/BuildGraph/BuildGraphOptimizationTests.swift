@@ -106,7 +106,6 @@ final class BuildGraphOptimizationTests: XCTestCase {
             contentsOf: root.appendingPathComponent("Sources/PingScopeiOS/PingScopeIOSShell.swift"),
             encoding: .utf8
         )
-
         XCTAssertTrue(appSource.contains("@Published var connectivityTipsEnabled: Bool"))
         XCTAssertTrue(appSource.contains("UserDefaults.standard.pingScopeIOSConnectivityTipsEnabled = connectivityTipsEnabled"))
         XCTAssertTrue(appSource.contains("self.connectivityTipsEnabled = UserDefaults.standard.pingScopeIOSConnectivityTipsEnabled"))
@@ -117,6 +116,34 @@ final class BuildGraphOptimizationTests: XCTestCase {
         XCTAssertTrue(shellSource.contains("Toggle(\"Connectivity Tips\", isOn: Binding("))
         XCTAssertTrue(shellSource.contains("set: { onSetConnectivityTipsEnabled($0) }"))
         XCTAssertTrue(shellSource.contains("connectivityTipsEnabled: connectivityTipsEnabled"))
+    }
+
+    func testIOSLiveActivityPreferencesShipHonestSettingsAndLifecycleWiring() throws {
+        let root = try repositoryRoot()
+        let appSource = try String(
+            contentsOf: root.appendingPathComponent("Sources/PingScopeiOSApp/PingScopeIOSApp.swift"),
+            encoding: .utf8
+        )
+        let shellSource = try String(
+            contentsOf: root.appendingPathComponent("Sources/PingScopeiOS/PingScopeIOSShell.swift"),
+            encoding: .utf8
+        )
+        let extensionSource = try String(
+            contentsOf: root.appendingPathComponent("PingScopeLiveActivity/PingScopeLiveActivityBundle.swift"),
+            encoding: .utf8
+        )
+
+        XCTAssertTrue(appSource.contains("preferences: liveActivityPreferences"))
+        XCTAssertTrue(appSource.contains("await model.endLiveActivity()"))
+        XCTAssertTrue(appSource.contains("showsDynamicIslandDetails: liveActivityPreferences.dynamicIslandDetailsEnabled"))
+        XCTAssertTrue(shellSource.contains("Section(\"Live Activity\")"))
+        XCTAssertTrue(shellSource.contains("Toggle(\"Lock Screen Live Activity\""))
+        XCTAssertTrue(shellSource.contains("Toggle(\"Dynamic Island Details\""))
+        XCTAssertTrue(shellSource.contains(".disabled(!lockScreenLiveActivityEnabled)"))
+        XCTAssertTrue(shellSource.contains("When off, Dynamic Island shows status only; the Lock Screen Live Activity is unchanged."))
+        XCTAssertTrue(extensionSource.contains("PingScopeLiveActivityPresentation.dynamicIslandContentStyle"))
+        XCTAssertTrue(extensionSource.contains("case .statusOnly:"))
+        XCTAssertTrue(extensionSource.contains("identityColor(for: row.identityColor)"))
     }
 
     func testIOSFocusedLaunchHydratesAndMarksPeerRowsCachedWithinBoundedHistory() throws {

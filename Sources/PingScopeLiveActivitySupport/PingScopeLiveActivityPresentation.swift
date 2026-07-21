@@ -74,6 +74,7 @@ public struct PingScopeLiveActivityRowPresentation: Equatable, Sendable {
     public let statusAccessibilityDescription: String
     public let latencyMilliseconds: Int?
     public let samples: [Int]
+    public let identityColor: WidgetGraphDisplayColor
 
     public var latencyText: String {
         latencyMilliseconds.map { "\($0)ms" } ?? "--ms"
@@ -86,6 +87,17 @@ public struct PingScopeLiveActivityRowPresentation: Equatable, Sendable {
 }
 
 public enum PingScopeLiveActivityPresentation {
+    public enum DynamicIslandContentStyle: Equatable, Sendable {
+        case rich
+        case statusOnly
+    }
+
+    public static func dynamicIslandContentStyle(
+        contentState: PingScopeLiveActivityAttributes.ContentState
+    ) -> DynamicIslandContentStyle {
+        contentState.showsDynamicIslandDetails ? .rich : .statusOnly
+    }
+
     public static func rows(
         attributes: PingScopeLiveActivityAttributes,
         contentState: PingScopeLiveActivityAttributes.ContentState
@@ -116,9 +128,8 @@ public enum PingScopeLiveActivityPresentation {
         switch contentState.mode {
         case .focused:
             let renderedStatus = displayStatus(contentState.status, isStale: contentState.isStale)
-            let samples = contentState.hostRows
-                .first(where: { $0.hostID == attributes.hostID })?
-                .samples ?? []
+            let payloadRow = contentState.hostRows.first { $0.hostID == attributes.hostID }
+            let samples = payloadRow?.samples ?? []
             return [
                 PingScopeLiveActivityRowPresentation(
                     hostID: attributes.hostID,
@@ -134,7 +145,8 @@ public enum PingScopeLiveActivityPresentation {
                         status: contentState.status,
                         isStale: contentState.isStale
                     ),
-                    samples: samples
+                    samples: samples,
+                    identityColor: payloadRow?.identityColor ?? attributes.identityColor
                 )
             ]
         case .allHosts:
@@ -154,7 +166,8 @@ public enum PingScopeLiveActivityPresentation {
                         status: row.status,
                         isStale: row.isStale
                     ),
-                    samples: row.samples
+                    samples: row.samples,
+                    identityColor: row.identityColor
                 )
             }
         }

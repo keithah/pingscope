@@ -1,4 +1,5 @@
 import Foundation
+import PingScopeExtensionSupport
 
 #if os(iOS) && canImport(ActivityKit)
 import ActivityKit
@@ -56,6 +57,7 @@ public struct PingScopeLiveActivityHostRow: Codable, Hashable, Sendable {
     public let samples: [Int]
     public var isStale: Bool
     public let isDefaultGateway: Bool
+    public let identityColor: WidgetGraphDisplayColor
 
     public init(
         hostID: UUID,
@@ -65,7 +67,8 @@ public struct PingScopeLiveActivityHostRow: Codable, Hashable, Sendable {
         latestLatencyMilliseconds: Int?,
         samples: [Int],
         isStale: Bool,
-        isDefaultGateway: Bool = false
+        isDefaultGateway: Bool = false,
+        identityColor: WidgetGraphDisplayColor? = nil
     ) {
         self.hostID = hostID
         self.displayName = boundedActivityPayloadString(
@@ -83,6 +86,7 @@ public struct PingScopeLiveActivityHostRow: Codable, Hashable, Sendable {
         self.samples = Array(samples.prefix(Self.sampleLimit))
         self.isStale = isStale
         self.isDefaultGateway = isDefaultGateway
+        self.identityColor = identityColor?.validated ?? .automatic(for: hostID)
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -94,6 +98,7 @@ public struct PingScopeLiveActivityHostRow: Codable, Hashable, Sendable {
         case samples
         case isStale
         case isDefaultGateway
+        case identityColor
     }
 
     public init(from decoder: any Decoder) throws {
@@ -106,8 +111,26 @@ public struct PingScopeLiveActivityHostRow: Codable, Hashable, Sendable {
             latestLatencyMilliseconds: try container.decodeIfPresent(Int.self, forKey: .latestLatencyMilliseconds),
             samples: try container.decode([Int].self, forKey: .samples),
             isStale: try container.decode(Bool.self, forKey: .isStale),
-            isDefaultGateway: try container.decodeIfPresent(Bool.self, forKey: .isDefaultGateway) ?? false
+            isDefaultGateway: try container.decodeIfPresent(Bool.self, forKey: .isDefaultGateway) ?? false,
+            identityColor: (try? container.decodeIfPresent(WidgetGraphDisplayColor.self, forKey: .identityColor)) ?? nil
         )
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(hostID)
+        hasher.combine(displayName)
+        hasher.combine(endpointCaption)
+        hasher.combine(status)
+        hasher.combine(latestLatencyMilliseconds)
+        hasher.combine(samples)
+        hasher.combine(isStale)
+        hasher.combine(isDefaultGateway)
+        hasher.combine(identityColor.light.red)
+        hasher.combine(identityColor.light.green)
+        hasher.combine(identityColor.light.blue)
+        hasher.combine(identityColor.dark.red)
+        hasher.combine(identityColor.dark.green)
+        hasher.combine(identityColor.dark.blue)
     }
 
 }
@@ -131,6 +154,7 @@ public struct PingScopeLiveActivityAttributes: Codable, Sendable {
         public let failureMessage: String?
         public var mode: PingScopeLiveActivityMode
         public let hostRows: [PingScopeLiveActivityHostRow]
+        public var showsDynamicIslandDetails: Bool
 
         public init(
             latencyMilliseconds: Int?,
@@ -140,7 +164,8 @@ public struct PingScopeLiveActivityAttributes: Codable, Sendable {
             isStale: Bool,
             failureMessage: String? = nil,
             mode: PingScopeLiveActivityMode = .focused,
-            hostRows: [PingScopeLiveActivityHostRow] = []
+            hostRows: [PingScopeLiveActivityHostRow] = [],
+            showsDynamicIslandDetails: Bool = true
         ) {
             self.latencyMilliseconds = latencyMilliseconds
             self.status = status
@@ -156,6 +181,7 @@ public struct PingScopeLiveActivityAttributes: Codable, Sendable {
             }
             self.mode = mode
             self.hostRows = Array(hostRows.prefix(Self.hostRowLimit))
+            self.showsDynamicIslandDetails = showsDynamicIslandDetails
         }
 
         private enum CodingKeys: String, CodingKey {
@@ -167,6 +193,7 @@ public struct PingScopeLiveActivityAttributes: Codable, Sendable {
             case failureMessage
             case mode
             case hostRows
+            case showsDynamicIslandDetails
         }
 
         public init(from decoder: any Decoder) throws {
@@ -179,7 +206,8 @@ public struct PingScopeLiveActivityAttributes: Codable, Sendable {
                 isStale: try container.decode(Bool.self, forKey: .isStale),
                 failureMessage: try container.decodeIfPresent(String.self, forKey: .failureMessage),
                 mode: try container.decodeIfPresent(PingScopeLiveActivityMode.self, forKey: .mode) ?? .focused,
-                hostRows: try container.decodeIfPresent([PingScopeLiveActivityHostRow].self, forKey: .hostRows) ?? []
+                hostRows: try container.decodeIfPresent([PingScopeLiveActivityHostRow].self, forKey: .hostRows) ?? [],
+                showsDynamicIslandDetails: try container.decodeIfPresent(Bool.self, forKey: .showsDynamicIslandDetails) ?? true
             )
         }
     }
@@ -189,13 +217,15 @@ public struct PingScopeLiveActivityAttributes: Codable, Sendable {
     public let address: String
     public let method: PingScopeLiveActivityMethod
     public let duration: PingScopeLiveActivityDuration
+    public let identityColor: WidgetGraphDisplayColor
 
     public init(
         hostID: UUID,
         hostName: String,
         address: String,
         method: PingScopeLiveActivityMethod,
-        duration: PingScopeLiveActivityDuration
+        duration: PingScopeLiveActivityDuration,
+        identityColor: WidgetGraphDisplayColor? = nil
     ) {
         self.hostID = hostID
         self.hostName = boundedActivityPayloadString(
@@ -210,6 +240,7 @@ public struct PingScopeLiveActivityAttributes: Codable, Sendable {
         )
         self.method = method
         self.duration = duration
+        self.identityColor = identityColor?.validated ?? .automatic(for: hostID)
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -218,6 +249,7 @@ public struct PingScopeLiveActivityAttributes: Codable, Sendable {
         case address
         case method
         case duration
+        case identityColor
     }
 
     public init(from decoder: any Decoder) throws {
@@ -227,8 +259,23 @@ public struct PingScopeLiveActivityAttributes: Codable, Sendable {
             hostName: try container.decode(String.self, forKey: .hostName),
             address: try container.decode(String.self, forKey: .address),
             method: try container.decode(PingScopeLiveActivityMethod.self, forKey: .method),
-            duration: try container.decode(PingScopeLiveActivityDuration.self, forKey: .duration)
+            duration: try container.decode(PingScopeLiveActivityDuration.self, forKey: .duration),
+            identityColor: (try? container.decodeIfPresent(WidgetGraphDisplayColor.self, forKey: .identityColor)) ?? nil
         )
+    }
+}
+
+private extension WidgetGraphDisplayColor {
+    var validated: WidgetGraphDisplayColor? {
+        guard light.isValid, dark.isValid else { return nil }
+        return self
+    }
+}
+
+private extension WidgetGraphRGB {
+    var isValid: Bool {
+        red.isFinite && green.isFinite && blue.isFinite
+            && (0...1).contains(red) && (0...1).contains(green) && (0...1).contains(blue)
     }
 }
 

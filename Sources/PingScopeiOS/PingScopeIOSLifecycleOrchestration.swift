@@ -52,7 +52,8 @@ public struct PingScopeIOSPausedLiveActivityState: Equatable, Sendable {
                 isStale: true,
                 failureMessage: "Monitoring paused — reopen PingScope to resume",
                 mode: state.mode,
-                hostRows: staleRows
+                hostRows: staleRows,
+                showsDynamicIslandDetails: state.showsDynamicIslandDetails
             ),
             staleDate: date.addingTimeInterval(staleInterval)
         )
@@ -102,6 +103,44 @@ public enum PingScopeIOSForegroundLiveActivityDecision: Equatable, Sendable {
 
 @MainActor
 public enum PingScopeIOSLiveActivityRuntimeOrchestrator {
+    public enum RequestedOperation: Equatable, Sendable {
+        case requestOrUpdate
+        case update
+    }
+
+    /// Testable boundary for the ActivityKit request/update decision used by
+    /// the app model.
+    @discardableResult
+    public static func perform<ActivityHandle>(
+        _ operation: RequestedOperation,
+        systemAuthorizationEnabled: Bool,
+        preferences: PingScopeIOSLiveActivityPreferences = .init(),
+        hasOwnedActivity: Bool,
+        request: @escaping @MainActor () async throws -> ActivityHandle,
+        update: @escaping @MainActor () async -> Void,
+        end: @escaping @MainActor () async -> Void
+    ) async rethrows -> ActivityHandle? {
+        guard preferences.lockScreenEnabled else {
+            if hasOwnedActivity {
+                await end()
+            }
+            return nil
+        }
+        guard systemAuthorizationEnabled else { return nil }
+        switch operation {
+        case .requestOrUpdate:
+            if !hasOwnedActivity {
+                return try await request()
+            }
+            await update()
+            return nil
+        case .update:
+            guard hasOwnedActivity else { return nil }
+            await update()
+            return nil
+        }
+    }
+
     @discardableResult
     public static func finishSession(
         reason: MonitorSessionEndReason,
@@ -155,6 +194,32 @@ public enum PingScopeIOSLiveActivityRuntimeOrchestrator {
     }
 }
 
+public struct PingScopeIOSLiveActivityPreferences: Equatable, Sendable {
+    public static let lockScreenEnabledKey = "PingScope.iOS.lockScreenLiveActivityEnabled"
+    public static let dynamicIslandDetailsEnabledKey = "PingScope.iOS.dynamicIslandDetailsEnabled"
+
+    public var lockScreenEnabled: Bool
+    public var dynamicIslandDetailsEnabled: Bool
+
+    public init(
+        lockScreenEnabled: Bool = true,
+        dynamicIslandDetailsEnabled: Bool = true
+    ) {
+        self.lockScreenEnabled = lockScreenEnabled
+        self.dynamicIslandDetailsEnabled = dynamicIslandDetailsEnabled
+    }
+
+    public init(defaults: UserDefaults) {
+        lockScreenEnabled = defaults.object(forKey: Self.lockScreenEnabledKey) as? Bool ?? true
+        dynamicIslandDetailsEnabled = defaults.object(forKey: Self.dynamicIslandDetailsEnabledKey) as? Bool ?? true
+    }
+
+    public func persist(to defaults: UserDefaults) {
+        defaults.set(lockScreenEnabled, forKey: Self.lockScreenEnabledKey)
+        defaults.set(dynamicIslandDetailsEnabled, forKey: Self.dynamicIslandDetailsEnabledKey)
+    }
+}
+
 public struct PingScopeIOSLiveActivityUpdatePolicy: Sendable {
     private let minimumUpdateInterval: TimeInterval
     private var lastPublishedState: PingScopeLiveActivityAttributes.ContentState?
@@ -191,16 +256,18 @@ public struct PingScopeIOSLiveActivityUpdatePolicy: Sendable {
     ) -> Bool {
         guard previous.status == next.status,
               previous.isStale == next.isStale,
-              previous.mode == next.mode else {
+              previous.mode == next.mode,
+              previous.showsDynamicIslandDetails == next.showsDynamicIslandDetails else {
             return true
         }
-        let previousRows = previous.hostRows.map { ($0.hostID, $0.status, $0.isStale) }
-        let nextRows = next.hostRows.map { ($0.hostID, $0.status, $0.isStale) }
+        let previousRows = previous.hostRows
+        let nextRows = next.hostRows
         guard previousRows.count == nextRows.count else { return true }
         return zip(previousRows, nextRows).contains { previousRow, nextRow in
-            previousRow.0 != nextRow.0
-                || previousRow.1 != nextRow.1
-                || previousRow.2 != nextRow.2
+            previousRow.hostID != nextRow.hostID
+                || previousRow.status != nextRow.status
+                || previousRow.isStale != nextRow.isStale
+                || previousRow.identityColor != nextRow.identityColor
         }
     }
 }
