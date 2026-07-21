@@ -2,6 +2,29 @@ import Foundation
 import XCTest
 
 final class BuildGraphOptimizationTests: XCTestCase {
+    func testIOSConnectivityTipsShippingWiring() throws {
+        let root = try repositoryRoot()
+        let appSource = try String(
+            contentsOf: root.appendingPathComponent("Sources/PingScopeiOSApp/PingScopeIOSApp.swift"),
+            encoding: .utf8
+        )
+        let shellSource = try String(
+            contentsOf: root.appendingPathComponent("Sources/PingScopeiOS/PingScopeIOSShell.swift"),
+            encoding: .utf8
+        )
+
+        XCTAssertTrue(appSource.contains("@Published var connectivityTipsEnabled: Bool"))
+        XCTAssertTrue(appSource.contains("UserDefaults.standard.pingScopeIOSConnectivityTipsEnabled = connectivityTipsEnabled"))
+        XCTAssertTrue(appSource.contains("self.connectivityTipsEnabled = UserDefaults.standard.pingScopeIOSConnectivityTipsEnabled"))
+        XCTAssertTrue(appSource.contains("connectivityTipsEnabled: model.connectivityTipsEnabled"))
+        XCTAssertTrue(appSource.contains("onSetConnectivityTipsEnabled: { isEnabled in\n                    model.connectivityTipsEnabled = isEnabled"))
+
+        XCTAssertTrue(shellSource.contains("var pingScopeIOSConnectivityTipsEnabled: Bool"))
+        XCTAssertTrue(shellSource.contains("Toggle(\"Connectivity Tips\", isOn: Binding("))
+        XCTAssertTrue(shellSource.contains("set: { onSetConnectivityTipsEnabled($0) }"))
+        XCTAssertTrue(shellSource.contains("connectivityTipsEnabled: connectivityTipsEnabled"))
+    }
+
     func testIOSFocusedLaunchHydratesPeerRowsFromRecentHistory() throws {
         let source = try String(
             contentsOf: try repositoryRoot().appendingPathComponent("Sources/PingScopeiOSApp/PingScopeIOSApp.swift"),

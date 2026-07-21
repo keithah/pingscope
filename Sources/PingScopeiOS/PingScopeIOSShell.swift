@@ -166,6 +166,11 @@ public extension UserDefaults {
         }
     }
 
+    var pingScopeIOSConnectivityTipsEnabled: Bool {
+        get { bool(forKey: "pingScopeIOSConnectivityTipsEnabled") }
+        set { set(newValue, forKey: "pingScopeIOSConnectivityTipsEnabled") }
+    }
+
     var pingScopeIOSHistoryRange: HistoryRange {
         get {
             guard let rawValue = string(forKey: "pingScopeIOSHistoryRange"),
@@ -473,6 +478,7 @@ public struct PingScopeIOSRootView: View {
     public var cloudSyncEnabled: Bool
     public var cloudSyncStatusText: String
     public var onSelectDisplayMode: (PingScopeIOSDisplayMode) -> Void
+    public var onSetConnectivityTipsEnabled: (Bool) -> Void
     public var onSelectAllHosts: () -> Void
     public var onSelectHost: (UUID) -> Void
     public var onSaveHost: (HostConfig) -> Void
@@ -539,6 +545,7 @@ public struct PingScopeIOSRootView: View {
         cloudSyncEnabled: Bool = false,
         cloudSyncStatusText: String = "Off",
         onSelectDisplayMode: @escaping (PingScopeIOSDisplayMode) -> Void = { _ in },
+        onSetConnectivityTipsEnabled: @escaping (Bool) -> Void = { _ in },
         onSelectAllHosts: @escaping () -> Void = {},
         onSelectHost: @escaping (UUID) -> Void = { _ in },
         onSaveHost: @escaping (HostConfig) -> Void = { _ in },
@@ -599,6 +606,7 @@ public struct PingScopeIOSRootView: View {
         self.cloudSyncEnabled = cloudSyncEnabled
         self.cloudSyncStatusText = cloudSyncStatusText
         self.onSelectDisplayMode = onSelectDisplayMode
+        self.onSetConnectivityTipsEnabled = onSetConnectivityTipsEnabled
         self.onSelectAllHosts = onSelectAllHosts
         self.onSelectHost = onSelectHost
         self.onSaveHost = onSaveHost
@@ -1212,6 +1220,10 @@ public struct PingScopeIOSRootView: View {
                         }
                     }
                     .pickerStyle(.segmented)
+                    Toggle("Connectivity Tips", isOn: Binding(
+                        get: { connectivityTipsEnabled },
+                        set: { onSetConnectivityTipsEnabled($0) }
+                    ))
                 }
                 Section("Gateway") {
                     Button("Use Default Gateway", action: onUseDefaultGateway)

@@ -612,6 +612,16 @@ final class LiveMonitorSessionControllerTests: XCTestCase {
         XCTAssertEqual(defaults.pingScopeIOSDisplayMode, .ring)
     }
 
+    func testIOSConnectivityTipsDefaultOffAndPersistExplicitOptIn() {
+        let suiteName = "PingScopeIOSConnectivityTipsTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        XCTAssertFalse(defaults.pingScopeIOSConnectivityTipsEnabled)
+        defaults.pingScopeIOSConnectivityTipsEnabled = true
+        XCTAssertTrue(defaults.pingScopeIOSConnectivityTipsEnabled)
+    }
+
     func testInitialSessionCoordinatorAllowsActiveBackstopAfterSupersededStart() {
         var coordinator = PingScopeIOSInitialSessionCoordinator()
         var startedDurations: [MonitorSessionDuration] = []

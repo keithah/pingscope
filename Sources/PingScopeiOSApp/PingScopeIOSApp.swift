@@ -138,6 +138,7 @@ struct PingScopeIOSApp: App {
                 allHostRows: model.allHostRows,
                 allHostGraphSeries: model.allHostGraphSeries,
                 monitorInsights: model.monitorInsights,
+                connectivityTipsEnabled: model.connectivityTipsEnabled,
                 allHostsPresentationEndDate: model.allHostsPresentationEndDate,
                 selectedHostID: model.snapshot.host.id,
                 onboardingPresentation: model.onboardingPresentation,
@@ -147,6 +148,9 @@ struct PingScopeIOSApp: App {
                 cloudSyncStatusText: model.cloudSyncStatusText,
                 onSelectDisplayMode: { mode in
                     model.displayMode = mode
+                },
+                onSetConnectivityTipsEnabled: { isEnabled in
+                    model.connectivityTipsEnabled = isEnabled
                 },
                 onSelectAllHosts: {
                     model.selectAllHosts()
@@ -300,6 +304,11 @@ private final class PingScopeIOSAppModel: ObservableObject {
             UserDefaults.standard.pingScopeIOSDisplayMode = displayMode
         }
     }
+    @Published var connectivityTipsEnabled: Bool {
+        didSet {
+            UserDefaults.standard.pingScopeIOSConnectivityTipsEnabled = connectivityTipsEnabled
+        }
+    }
     @Published private(set) var notificationAuthorization: PingScopeIOSNotificationAuthorization = .unknown
     @Published private(set) var hasConfiguredWidget = false
     @Published private(set) var diagnosticsLogText = ""
@@ -407,6 +416,7 @@ private final class PingScopeIOSAppModel: ObservableObject {
         self.backgroundRuntime = LiveMonitorBackgroundRuntime(client: UIApplicationBackgroundTaskClient())
         self.backgroundKeepAliveEnabled = UserDefaults.standard.bool(forKey: Self.backgroundKeepAliveEnabledKey)
         self.displayMode = UserDefaults.standard.pingScopeIOSDisplayMode
+        self.connectivityTipsEnabled = UserDefaults.standard.pingScopeIOSConnectivityTipsEnabled
         let loadedHistoryRange = UserDefaults.standard.pingScopeIOSHistoryRange
         self.historyRange = loadedHistoryRange
         self.historyLens = UserDefaults.standard.pingScopeIOSHistoryLens
