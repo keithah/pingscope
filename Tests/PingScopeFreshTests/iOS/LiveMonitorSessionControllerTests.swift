@@ -2426,6 +2426,193 @@ final class LiveMonitorSessionControllerTests: XCTestCase {
         await controller.stop(reason: .completed)
     }
 
+    @MainActor
+    func testIOSAllHostsAcceptedRemovalSupersededDuringStopPreservesControllerSessionSamplesAndCommit() async throws {
+        let suite = "IOSAcceptedAllHostsRemovalBarrier.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let host = HostConfig(id: UUID(), displayName: "Edge", address: "edge.example")
+        let peer = HostConfig(id: UUID(), displayName: "Peer", address: "peer.example")
+        let store = PingScopeIOSHostStore(defaults: defaults, defaultHosts: [host, peer])
+        store.save(hosts: [host, peer], selectedHostID: peer.id, hostScope: .allHosts)
+        _ = store.load()
+
+        var remoteHost = host
+        remoteHost.displayColor = HostDisplayColor(red: 0.18, green: 0.46, blue: 0.79)
+        let capturedRemoteState = SharedHostStoreState(
+            hosts: [remoteHost],
+            selectedHostID: host.id
+        )
+        let sharedStore = UserDefaultsSharedHostStore(defaults: defaults, legacyPlatform: .iOS)
+        try sharedStore.save(capturedRemoteState)
+
+        let stopGate = IOSAllHostsStopGate()
+        let factory = RecordingIOSAllHostsControllerFactory(stopGate: stopGate)
+        let coordinator = PingScopeIOSMultiHostSessionCoordinator(controllerFactory: factory)
+        let sessionModel = PingScopeIOSAppSessionModel(coordinator: coordinator)
+        await coordinator.reconcile(hosts: [host, peer])
+        await coordinator.start(duration: .continuous)
+        let retainedSample = PingResult.success(hostID: peer.id, latency: .milliseconds(24))
+        await factory.setSnapshotSamples([retainedSample], for: peer.id)
+        let sessionBeforeValue = await coordinator.session()
+        let sessionBefore = try XCTUnwrap(sessionBeforeValue)
+        let snapshotsBefore = await coordinator.orderedSnapshots()
+        XCTAssertEqual(snapshotsBefore.first { $0.host.id == peer.id }?.series.samples, [retainedSample])
+
+        var appHosts = [host, peer]
+        var uploads: [[HostConfig]] = []
+        var mutationGeneration: UInt = 0
+        let delivery = Task { @MainActor in
+            while true {
+                let generation = mutationGeneration
+                let resolved = store.resolveAcceptedHostState(capturedRemoteState)
+                let reconciliation = await sessionModel.reconcileAcceptedHostState(
+                    resolved,
+                    currentHosts: appHosts,
+                    currentFocusedHostID: peer.id,
+                    scope: .allHosts,
+                    focusedController: LiveMonitorSessionController(host: peer),
+                    isCurrentMutation: { generation == mutationGeneration }
+                )
+                guard generation == mutationGeneration else { continue }
+                if case .superseded = reconciliation.disposition { continue }
+                store.commitAcceptedHostState(resolved)
+                appHosts = reconciliation.hosts
+                return
+            }
+        }
+        await stopGate.waitForStop()
+
+        var locallyEditedPeer = peer
+        locallyEditedPeer.notifications = .muted
+        mutationGeneration &+= 1
+        let persisted = store.save(
+            hosts: [host, locallyEditedPeer],
+            selectedHostID: peer.id,
+            hostScope: .allHosts
+        )
+        uploads.append(persisted.hosts)
+        let expectedHosts = [remoteHost, locallyEditedPeer]
+        let localReconciliation = Task {
+            await coordinator.reconcile(hosts: expectedHosts)
+        }
+        await stopGate.release()
+        await localReconciliation.value
+        await delivery.value
+
+        let finalSnapshots = await coordinator.orderedSnapshots()
+        let finalPeer = try XCTUnwrap(finalSnapshots.first { $0.host.id == peer.id })
+        let finalSession = await coordinator.session()
+        let createdControllerTokens = await factory.createdControllerTokens
+        let originalPeerControllerIsRunning = await factory.isRunning(controllerToken: 2)
+        XCTAssertEqual(appHosts, expectedHosts)
+        XCTAssertEqual(store.load().hosts, expectedHosts)
+        XCTAssertEqual(uploads, [expectedHosts])
+        XCTAssertEqual(finalSession, sessionBefore)
+        XCTAssertEqual(finalPeer.host, locallyEditedPeer)
+        XCTAssertEqual(finalPeer.series.samples, [retainedSample])
+        XCTAssertEqual(createdControllerTokens, [1, 2])
+        XCTAssertTrue(originalPeerControllerIsRunning)
+    }
+
+    @MainActor
+    func testIOSFocusedAcceptedReplacementSupersededDuringStopPreservesSessionSamplesAndCommit() async throws {
+        let suite = "IOSAcceptedFocusedReplacementBarrier.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let host = HostConfig(id: UUID(), displayName: "Edge", address: "edge.example")
+        let peer = HostConfig(id: UUID(), displayName: "Peer", address: "peer.example")
+        let store = PingScopeIOSHostStore(defaults: defaults, defaultHosts: [host, peer])
+        store.save(hosts: [host, peer], selectedHostID: peer.id, hostScope: .focused)
+        _ = store.load()
+
+        var remoteHost = host
+        remoteHost.displayColor = HostDisplayColor(red: 0.18, green: 0.46, blue: 0.79)
+        var remotePeer = peer
+        remotePeer.address = "new-peer.example"
+        let capturedRemoteState = SharedHostStoreState(
+            hosts: [remoteHost, remotePeer],
+            selectedHostID: peer.id
+        )
+        let sharedStore = UserDefaultsSharedHostStore(defaults: defaults, legacyPlatform: .iOS)
+        try sharedStore.save(capturedRemoteState)
+
+        let historyCommitGate = IOSSuspendedHistoryCommitGate()
+        let historyStore = IOSSuspendedLiveMonitorHistoryStore(gate: historyCommitGate)
+        let probe = IOSFirstResultThenSuspendedProbe(
+            result: .success(hostID: peer.id, latency: .milliseconds(17))
+        )
+        let clock = ManualClock()
+        let controller = LiveMonitorSessionController(
+            host: peer,
+            probeFactory: IOSFirstResultThenSuspendedProbeFactory(probe: probe),
+            policy: MonitorSessionPolicy(probeInterval: .seconds(60)),
+            historyStore: historyStore,
+            clock: clock,
+            now: { clock.currentDate }
+        )
+        let sessionModel = PingScopeIOSAppSessionModel(coordinator: PingScopeIOSMultiHostSessionCoordinator())
+        await controller.start(duration: .continuous, at: clock.baseDate)
+        try await clock.waitForSleepers(atLeast: 1)
+        let snapshotBefore = await controller.snapshot()
+        XCTAssertEqual(snapshotBefore.series.samples.count, 1)
+
+        var appHosts = [host, peer]
+        var uploads: [[HostConfig]] = []
+        var mutationGeneration: UInt = 0
+        let delivery = Task { @MainActor in
+            while true {
+                let generation = mutationGeneration
+                let resolved = store.resolveAcceptedHostState(capturedRemoteState)
+                let reconciliation = await sessionModel.reconcileAcceptedHostState(
+                    resolved,
+                    currentHosts: appHosts,
+                    currentFocusedHostID: peer.id,
+                    scope: .focused,
+                    focusedController: controller,
+                    isCurrentMutation: { generation == mutationGeneration }
+                )
+                guard generation == mutationGeneration else { continue }
+                if case .superseded = reconciliation.disposition { continue }
+                if case .focusedRequiresReplacement = reconciliation.disposition {
+                    guard await sessionModel.prepareFocusedHostReplacement(
+                        controller: controller,
+                        isCurrentMutation: { generation == mutationGeneration }
+                    ) else {
+                        continue
+                    }
+                    continue
+                }
+                store.commitAcceptedHostState(resolved)
+                appHosts = reconciliation.hosts
+                return
+            }
+        }
+        await historyCommitGate.waitUntilCommitStarts()
+
+        var locallyEditedPeer = peer
+        locallyEditedPeer.notifications = .muted
+        mutationGeneration &+= 1
+        let persisted = store.save(
+            hosts: [host, locallyEditedPeer],
+            selectedHostID: peer.id,
+            hostScope: .focused
+        )
+        uploads.append(persisted.hosts)
+        let expectedHosts = [remoteHost, locallyEditedPeer]
+        await historyCommitGate.release()
+        await delivery.value
+
+        let finalSnapshot = await controller.snapshot()
+        XCTAssertEqual(appHosts, expectedHosts)
+        XCTAssertEqual(store.load().hosts, expectedHosts)
+        XCTAssertEqual(uploads, [expectedHosts])
+        XCTAssertEqual(finalSnapshot.host, locallyEditedPeer)
+        XCTAssertEqual(finalSnapshot.session, snapshotBefore.session)
+        XCTAssertEqual(finalSnapshot.series.samples, snapshotBefore.series.samples)
+        await controller.stop(reason: .completed)
+    }
+
     func testIOSSharedHostStoreSameHostLaterLocalEditWinsWholeHostConflict() throws {
         let suite = "IOSAcceptedDeliverySameHost.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
@@ -3819,6 +4006,97 @@ private struct BlockingProbeFactory: ProbeFactory {
 
     func makeProbe(for method: PingMethod) async -> any PingProbe {
         probe
+    }
+}
+
+private actor IOSFirstResultThenSuspendedProbe: PingProbe {
+    private let result: PingResult
+    private var measurementCount = 0
+
+    init(result: PingResult) {
+        self.result = result
+    }
+
+    func measure(_ host: HostConfig) async -> PingResult {
+        measurementCount += 1
+        if measurementCount == 1 {
+            return result.withHostMetadata(from: host)
+        }
+        try? await Task.sleep(for: .seconds(60))
+        return .failure(hostID: host.id, reason: .timeout).withHostMetadata(from: host)
+    }
+}
+
+private struct IOSFirstResultThenSuspendedProbeFactory: ProbeFactory {
+    let probe: IOSFirstResultThenSuspendedProbe
+
+    func makeProbe(for method: PingMethod) async -> any PingProbe {
+        probe
+    }
+}
+
+private actor IOSSuspendedHistoryCommitGate {
+    private var commitStarted = false
+    private var isReleased = false
+    private var commitWaiters: [CheckedContinuation<Void, Never>] = []
+    private var releaseWaiters: [CheckedContinuation<Void, Never>] = []
+
+    func blockCommit() async {
+        commitStarted = true
+        commitWaiters.forEach { $0.resume() }
+        commitWaiters.removeAll()
+        while !isReleased {
+            await withCheckedContinuation { releaseWaiters.append($0) }
+        }
+    }
+
+    func waitUntilCommitStarts() async {
+        while !commitStarted {
+            await withCheckedContinuation { commitWaiters.append($0) }
+        }
+    }
+
+    func release() {
+        isReleased = true
+        releaseWaiters.forEach { $0.resume() }
+        releaseWaiters.removeAll()
+    }
+}
+
+private actor IOSSuspendedLiveMonitorHistoryStore: PingHistoryStore {
+    private let gate: IOSSuspendedHistoryCommitGate
+    private var stored: [PingResult] = []
+
+    init(gate: IOSSuspendedHistoryCommitGate) {
+        self.gate = gate
+    }
+
+    func append(_ result: PingResult) async {
+        stored.append(result)
+    }
+
+    func appendAndWait(_ results: [PingResult]) async throws {
+        await gate.blockCommit()
+        stored.append(contentsOf: results)
+    }
+
+    func samples(hostID: UUID, since: Date, limit: Int) async -> [PingResult] {
+        Array(stored.filter { $0.hostID == hostID && $0.timestamp >= since }.prefix(limit))
+    }
+
+    func latestSamples(hostID: UUID, since: Date, limit: Int) async -> [PingResult] {
+        Array(stored
+            .filter { $0.hostID == hostID && $0.timestamp >= since }
+            .sorted { $0.timestamp > $1.timestamp }
+            .prefix(max(1, limit)))
+    }
+
+    func prune(olderThan cutoff: Date) async {
+        stored.removeAll { $0.timestamp < cutoff }
+    }
+
+    func deleteAll() async {
+        stored.removeAll()
     }
 }
 

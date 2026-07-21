@@ -213,6 +213,37 @@ public actor LiveMonitorSessionController {
         LiveMonitorSessionSnapshot(host: host, session: session, health: health, series: series)
     }
 
+    /// Restores the exact observable controller state captured before a focused
+    /// host replacement that was superseded while `stop()` was awaiting its
+    /// history flush. Monitoring resumes on the preserved session without
+    /// resetting accumulated health or samples.
+    public func restoreAfterSupersededReplacement(
+        from snapshot: LiveMonitorSessionSnapshot
+    ) {
+        cancelLoop()
+        host = BuildFlavor.appStore.normalizedHost(snapshot.host)
+        session = snapshot.session
+        health = snapshot.health
+        series = snapshot.series
+        let resumeInterval = snapshot.session?.policy.probeInterval ?? policy.probeInterval
+        currentNextProbeInterval = resumeInterval
+        currentNextProbeDeadline = now().addingTimeInterval(resumeInterval.seconds)
+        guard let restoredSession = snapshot.session,
+              restoredSession.phase(at: now()) != .ended else {
+            return
+        }
+        let generation = loopGeneration
+        loopTask = Task {
+            do {
+                try await clock.sleep(for: resumeInterval)
+            } catch {
+                return
+            }
+            guard !Task.isCancelled else { return }
+            await runLoop(startedAt: restoredSession.startedAt, generation: generation)
+        }
+    }
+
     /// Applies presentation-only metadata without disturbing the active probe
     /// loop, session accounting, health, or accumulated samples.
     @discardableResult

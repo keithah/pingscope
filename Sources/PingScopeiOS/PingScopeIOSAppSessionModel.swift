@@ -174,6 +174,26 @@ public final class PingScopeIOSAppSessionModel {
         return await controller.updatePresentationHost(updatedHost)
     }
 
+    /// Stops the focused controller only while an accepted host mutation is
+    /// still current. The pre-stop snapshot is retained so a transaction that
+    /// becomes superseded during the awaited stop can restore its live state.
+    @discardableResult
+    public func prepareFocusedHostReplacement(
+        controller: LiveMonitorSessionController,
+        beforeDestructiveCommit: @MainActor () async -> Void = {},
+        isCurrentMutation: @escaping @MainActor @Sendable () -> Bool = { true }
+    ) async -> Bool {
+        let rollbackSnapshot = await controller.snapshot()
+        await beforeDestructiveCommit()
+        guard isCurrentMutation() else { return false }
+        await controller.stop(reason: .scopeSuspended)
+        guard isCurrentMutation() else {
+            await controller.restoreAfterSupersededReplacement(from: rollbackSnapshot)
+            return false
+        }
+        return true
+    }
+
     public func reconcileAcceptedHostState(
         _ state: SharedHostStoreState,
         currentHosts: [HostConfig],
@@ -181,7 +201,8 @@ public final class PingScopeIOSAppSessionModel {
         scope: PingScopeIOSHostScope,
         focusedController: LiveMonitorSessionController,
         beforeAcceptedCommit: @MainActor () async -> Void = {},
-        isCurrentMutation: @MainActor () -> Bool = { true }
+        beforeAllHostsDestructiveCommit: @escaping @MainActor @Sendable () async -> Void = {},
+        isCurrentMutation: @escaping @MainActor @Sendable () -> Bool = { true }
     ) async -> PingScopeIOSAcceptedHostStateReconciliation {
         func superseded() -> PingScopeIOSAcceptedHostStateReconciliation {
             PingScopeIOSAcceptedHostStateReconciliation(
@@ -244,8 +265,12 @@ public final class PingScopeIOSAppSessionModel {
                 disposition: .focusedPreserved(acceptedSnapshot)
             )
         case .allHosts:
-            await coordinator.reconcile(hosts: acceptedHosts)
-            guard isCurrentMutation() else { return superseded() }
+            let committed = await coordinator.reconcileIfCurrent(
+                hosts: acceptedHosts,
+                beforeDestructiveCommit: beforeAllHostsDestructiveCommit,
+                isCurrent: isCurrentMutation
+            )
+            guard committed, isCurrentMutation() else { return superseded() }
             let acceptedSnapshots = await coordinator.orderedSnapshots()
             guard isCurrentMutation() else { return superseded() }
             return PingScopeIOSAcceptedHostStateReconciliation(

@@ -292,7 +292,7 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
     private var isApplyingStartAtLoginChange = false
     private var isApplyingCloudSyncActivationState = false
     private var cloudSyncConfigurationGeneration: UInt64 = 0
-    private let hostMutationGeneration = HostMutationGenerationCounter()
+    private let hostMutationCommits = HostMutationCommitQueue()
     private var lastHistoryKey: String?
     private let displayPresentationRecomputeScheduler = DisplayPresentationRecomputeScheduler()
     private var presentationVisibleHistorySamples: [PingResult] = []
@@ -704,10 +704,9 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
         host.displayName = host.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
         host.address = host.address.trimmingCharacters(in: .whitespacesAndNewlines)
         let savedHost = host
-        beginUserHostMutation()
         applyHostOptimistically(savedHost)
         clearDraftHost()
-        Task { [runtime] in
+        performUserHostMutation { runtime in
             await runtime.upsertHost(savedHost)
         }
     }
@@ -1096,7 +1095,6 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
         )
         updateConfiguredHostsIfNeeded(snapshot)
         recomputeDisplayPresentation()
-        persistHostState(snapshot)
         onMenuStateChanged?(menuBarState)
     }
 
@@ -1164,44 +1162,55 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
     }
 
     func reconcileAcceptedCloudHostState(_ state: SharedHostStoreState) async {
-        while true {
-            let generation = hostMutationGeneration.current()
+        await hostMutationCommits.perform { [weak self] in
+            guard let self else { return }
             let resolvedState = hostConfigPersistence.resolveAcceptedHostState(state)
             await acceptedHostReconciliationGate()
-            guard generation == hostMutationGeneration.current() else { continue }
 
             let acceptedHosts = HostConfig.sanitizedHosts(resolvedState.hosts)
-            guard let acceptedSnapshot = await runtime.reconcileAcceptedHostStateIfCurrent(
+            let acceptedSnapshot = await runtime.reconcileAcceptedHostState(
                 SharedHostStoreState(
                     hosts: acceptedHosts,
                     primaryHostID: resolvedState.primaryHostID,
                     selectedHostID: resolvedState.selectedHostID
-                ),
-                isCurrent: { [hostMutationGeneration] in
-                    generation == hostMutationGeneration.current()
-                }
-            ) else {
-                continue
-            }
-            guard generation == hostMutationGeneration.current() else { continue }
+                )
+            )
 
             hostConfigPersistence.commitAcceptedHostState(resolvedState)
             lastCloudSyncHostIDs = Set(acceptedHosts.map(\.id))
             lastCloudSyncHostsByID = Dictionary(uniqueKeysWithValues: acceptedHosts.map { ($0.id, $0) })
             processRuntimeSnapshot(acceptedSnapshot)
-            return
         }
     }
 
-    private func beginUserHostMutation() {
-        hostMutationGeneration.advance()
-        hostConfigPersistence.allowUserManagedPersistence()
+    func waitForHostMutationCommits() async {
+        await hostMutationCommits.waitForIdle()
     }
 
-    private func performUserHostMutation(_ mutation: @escaping @Sendable (PingRuntime) async -> Void) {
-        beginUserHostMutation()
-        Task { [runtime] in
+    func performAutomaticHostMutation(
+        _ mutation: @escaping @MainActor @Sendable (PingRuntime) async -> Void
+    ) {
+        performHostMutation(allowsUserManagedPersistence: false, mutation)
+    }
+
+    private func performUserHostMutation(
+        _ mutation: @escaping @MainActor @Sendable (PingRuntime) async -> Void
+    ) {
+        performHostMutation(allowsUserManagedPersistence: true, mutation)
+    }
+
+    private func performHostMutation(
+        allowsUserManagedPersistence: Bool,
+        _ mutation: @escaping @MainActor @Sendable (PingRuntime) async -> Void
+    ) {
+        hostMutationCommits.enqueue { [weak self] in
+            guard let self else { return }
+            if allowsUserManagedPersistence {
+                hostConfigPersistence.allowUserManagedPersistence()
+            }
             await mutation(runtime)
+            let committedSnapshot = await runtime.currentSnapshot()
+            processRuntimeSnapshot(committedSnapshot)
         }
     }
 
@@ -1337,19 +1346,26 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
 
 }
 
-private nonisolated final class HostMutationGenerationCounter: @unchecked Sendable {
-    private let lock = NSLock()
-    private var value: UInt64 = 0
+@MainActor
+private final class HostMutationCommitQueue {
+    private var tail: Task<Void, Never>?
 
-    func current() -> UInt64 {
-        lock.lock()
-        defer { lock.unlock() }
-        return value
+    @discardableResult
+    func enqueue(_ operation: @escaping @MainActor () async -> Void) -> Task<Void, Never> {
+        let previous = tail
+        let next = Task { @MainActor in
+            await previous?.value
+            await operation()
+        }
+        tail = next
+        return next
     }
 
-    func advance() {
-        lock.lock()
-        value &+= 1
-        lock.unlock()
+    func perform(_ operation: @escaping @MainActor () async -> Void) async {
+        await enqueue(operation).value
+    }
+
+    func waitForIdle() async {
+        await tail?.value
     }
 }

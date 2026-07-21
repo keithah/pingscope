@@ -191,16 +191,20 @@ public struct PingScopeIOSMultiHostSessionState: Equatable, Sendable {
 private actor PingScopeIOSMultiHostLifecycleTransactions {
     private var tail: Task<Void, Never>?
 
-    func perform(_ transaction: @escaping @Sendable () async -> Void) async {
+    func perform<Result: Sendable>(
+        _ transaction: @escaping @Sendable () async -> Result
+    ) async -> Result {
         let previous = tail
         // The detached transaction is intentionally independent of the caller:
         // cancelling one lifecycle caller must not abandon the shared queue.
-        let next = Task.detached { [previous, transaction] in
+        let result = Task.detached { [previous, transaction] in
             await previous?.value
-            await transaction()
+            return await transaction()
         }
-        tail = next
-        await next.value
+        tail = Task.detached {
+            _ = await result.value
+        }
+        return await result.value
     }
 }
 
@@ -208,6 +212,19 @@ public actor PingScopeIOSMultiHostSessionCoordinator {
     private struct ControllerEntry: Sendable {
         let host: HostConfig
         let controller: any PingScopeIOSMultiHostSessionControlling
+    }
+
+    private struct ConditionalReconciliation: Sendable {
+        let beforeDestructiveCommit: @MainActor @Sendable () async -> Void
+        let isCurrent: @MainActor @Sendable () -> Bool
+    }
+
+    private struct ReconciliationRollbackState: Sendable {
+        let controllers: [UUID: ControllerEntry]
+        let orderedHostIDs: [UUID]
+        let aggregateSession: PingScopeIOSMultiHostSessionState?
+        let preservedSeries: [UUID: SampleSeries]
+        let snapshotsByHostID: [UUID: LiveMonitorSessionSnapshot]
     }
 
     private let historyStore: (any PingHistoryStore)?
@@ -255,8 +272,29 @@ public actor PingScopeIOSMultiHostSessionCoordinator {
     }
 
     public func reconcile(hosts: [HostConfig]) async {
-        await lifecycleTransactions.perform { [weak self] in
-            await self?.reconcileTransaction(hosts: hosts)
+        _ = await lifecycleTransactions.perform { [weak self] in
+            guard let self else { return false }
+            return await self.reconcileTransaction(hosts: hosts, conditional: nil)
+        }
+    }
+
+    /// Applies an accepted host topology transactionally. If a newer host
+    /// mutation arrives while a controller stop/start is suspended, the prior
+    /// topology, aggregate session, and captured series are restored before
+    /// the caller retries from the latest shared state.
+    @discardableResult
+    public func reconcileIfCurrent(
+        hosts: [HostConfig],
+        beforeDestructiveCommit: @escaping @MainActor @Sendable () async -> Void = {},
+        isCurrent: @escaping @MainActor @Sendable () -> Bool
+    ) async -> Bool {
+        let conditional = ConditionalReconciliation(
+            beforeDestructiveCommit: beforeDestructiveCommit,
+            isCurrent: isCurrent
+        )
+        return await lifecycleTransactions.perform { [weak self] in
+            guard let self else { return false }
+            return await self.reconcileTransaction(hosts: hosts, conditional: conditional)
         }
     }
 
@@ -384,15 +422,57 @@ public actor PingScopeIOSMultiHostSessionCoordinator {
         }
     }
 
-    private func reconcileTransaction(hosts: [HostConfig]) async {
+    private func reconcileTransaction(
+        hosts: [HostConfig],
+        conditional: ConditionalReconciliation?
+    ) async -> Bool {
         var desiredHostIDs = Set<UUID>()
         let enabledHosts = PingScopeIOSHostScopePresentation.enabledHosts(from: hosts).filter {
             desiredHostIDs.insert($0.id).inserted
         }
         let reconciledAt = now()
+        let rollbackState: ReconciliationRollbackState?
+        if let conditional {
+            let snapshots = await orderedSnapshots()
+            rollbackState = ReconciliationRollbackState(
+                controllers: controllers,
+                orderedHostIDs: orderedHostIDs,
+                aggregateSession: aggregateSession,
+                preservedSeries: seriesPreservedForScopeRoundTrip,
+                snapshotsByHostID: Dictionary(
+                    snapshots.map { ($0.host.id, $0) },
+                    uniquingKeysWith: { first, _ in first }
+                )
+            )
+            await conditional.beforeDestructiveCommit()
+            guard await conditional.isCurrent() else { return false }
+        } else {
+            rollbackState = nil
+        }
+        var stoppedPreviousHostIDs = Set<UUID>()
+        var createdEntries: [ControllerEntry] = []
+
+        func rollbackIfNeeded() async -> Bool {
+            guard let rollbackState else { return false }
+            await rollbackReconciliation(
+                to: rollbackState,
+                stoppedPreviousHostIDs: stoppedPreviousHostIDs,
+                createdEntries: createdEntries,
+                at: reconciledAt
+            )
+            return false
+        }
+
+        func isStillCurrent() async -> Bool {
+            guard let conditional else { return true }
+            return await conditional.isCurrent()
+        }
 
         for hostID in orderedHostIDs where !desiredHostIDs.contains(hostID) {
+            guard await isStillCurrent() else { return await rollbackIfNeeded() }
             await stopAndRemoveController(hostID: hostID, at: reconciledAt)
+            stoppedPreviousHostIDs.insert(hostID)
+            guard await isStillCurrent() else { return await rollbackIfNeeded() }
         }
 
         for host in enabledHosts {
@@ -400,10 +480,14 @@ public actor PingScopeIOSMultiHostSessionCoordinator {
                 if entry.host.hasSameProbeConfiguration(as: host) {
                     controllers[host.id] = ControllerEntry(host: host, controller: entry.controller)
                 } else {
+                    guard await isStillCurrent() else { return await rollbackIfNeeded() }
                     await stopAndRemoveController(hostID: host.id, at: reconciledAt)
+                    stoppedPreviousHostIDs.insert(host.id)
+                    guard await isStillCurrent() else { return await rollbackIfNeeded() }
                 }
             }
             guard controllers[host.id] == nil else { continue }
+            guard await isStillCurrent() else { return await rollbackIfNeeded() }
 
             let controller = await controllerFactory.makeController(
                 for: host,
@@ -411,13 +495,48 @@ public actor PingScopeIOSMultiHostSessionCoordinator {
                 historySampleEnricher: historySampleEnricher,
                 measurementObserver: measurementObserver
             )
-            controllers[host.id] = ControllerEntry(host: host, controller: controller)
+            let entry = ControllerEntry(host: host, controller: controller)
+            createdEntries.append(entry)
+            guard await isStillCurrent() else { return await rollbackIfNeeded() }
+            controllers[host.id] = entry
             if let aggregateSession, aggregateSession.isActive(at: reconciledAt) {
+                guard await isStillCurrent() else { return await rollbackIfNeeded() }
                 await controller.start(duration: aggregateSession.duration, at: aggregateSession.startedAt)
+                guard await isStillCurrent() else { return await rollbackIfNeeded() }
             }
         }
 
+        guard await isStillCurrent() else { return await rollbackIfNeeded() }
         orderedHostIDs = enabledHosts.map(\.id)
+        return true
+    }
+
+    private func rollbackReconciliation(
+        to state: ReconciliationRollbackState,
+        stoppedPreviousHostIDs: Set<UUID>,
+        createdEntries: [ControllerEntry],
+        at date: Date
+    ) async {
+        for entry in createdEntries {
+            await entry.controller.stop(reason: .userStopped, at: date)
+        }
+        controllers = state.controllers
+        orderedHostIDs = state.orderedHostIDs
+        aggregateSession = state.aggregateSession
+        seriesPreservedForScopeRoundTrip = state.preservedSeries
+        for hostID in stoppedPreviousHostIDs {
+            guard let snapshot = state.snapshotsByHostID[hostID] else { continue }
+            if let preserved = seriesPreservedForScopeRoundTrip[hostID] {
+                seriesPreservedForScopeRoundTrip[hostID] = mergePreservedSeries(preserved, with: snapshot.series)
+            } else {
+                seriesPreservedForScopeRoundTrip[hostID] = snapshot.series
+            }
+        }
+        guard let aggregateSession, aggregateSession.isActive(at: date) else { return }
+        for hostID in state.orderedHostIDs where stoppedPreviousHostIDs.contains(hostID) {
+            guard let entry = state.controllers[hostID] else { continue }
+            await entry.controller.start(duration: aggregateSession.duration, at: aggregateSession.startedAt)
+        }
     }
 
     private func stopAndRemoveController(hostID: UUID, at date: Date) async {

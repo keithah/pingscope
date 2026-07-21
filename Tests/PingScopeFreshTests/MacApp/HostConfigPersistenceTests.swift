@@ -348,9 +348,10 @@ final class HostConfigPersistenceTests: XCTestCase {
         model.loadDraft(from: peer)
         model.draftNotificationPolicy = .muted
         model.addDraftHost()
-        try await waitUntilRuntimeHost(runtime, hostID: peer.id) { $0.notifications == .muted }
         await commitGate.release()
         await delivery.value
+        try await waitUntilRuntimeHost(runtime, hostID: peer.id) { $0.notifications == .muted }
+        await model.waitForHostMutationCommits()
 
         var locallyEditedPeer = peer
         locallyEditedPeer.notifications = .muted
@@ -361,6 +362,72 @@ final class HostConfigPersistenceTests: XCTestCase {
         XCTAssertEqual(runtimeSnapshot.samplesByHost[host.id]?.samples, [retainedSample])
         XCTAssertEqual(sharedStore.load().state?.hosts, expectedHosts)
         XCTAssertEqual(uploadRecorder.values(), [expectedHosts])
+    }
+
+    @MainActor
+    func testMacAcceptedDeliveryWaitsForIntervalMutationRuntimeStoreAndModelCommit() async throws {
+        let suite = "MacAcceptedMutationBarrier.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let host = HostConfig(id: UUID(), displayName: "Edge", address: "edge.example")
+        let peer = HostConfig(id: UUID(), displayName: "Peer", address: "peer.example")
+        let sharedStore = UserDefaultsSharedHostStore(defaults: defaults, legacyPlatform: .macOS)
+        try sharedStore.save(SharedHostStoreState(hosts: [host, peer], primaryHostID: host.id))
+        let runtimeCommitGate = MacBlockedProbeCancellationGate()
+        let runtime = PingRuntime(
+            hostStore: HostStore(defaultHosts: [host, peer], primaryHostID: host.id),
+            scheduler: MeasurementScheduler(
+                probeFactory: MacBlockedCancellationProbeFactory(gate: runtimeCommitGate)
+            )
+        )
+        let acceptedCommitGate = MacAcceptedHostDeliveryGate()
+        let uploadRecorder = MacHostUploadRecorder()
+        let model = PingScopeModel(
+            cloudSyncDefaultsSuiteName: suite,
+            runtimeOverride: runtime,
+            acceptedHostReconciliationGate: { await acceptedCommitGate.block() },
+            cloudHostUploadObserver: uploadRecorder.record
+        )
+        await runtime.start()
+        try await runtimeCommitGate.waitUntilMeasurementStarts()
+        let retainedSample = PingResult.success(hostID: host.id, latency: .milliseconds(23))
+        await runtime.ingest(retainedSample)
+
+        var remotelyEditedPeer = peer
+        remotelyEditedPeer.displayColor = HostDisplayColor(red: 0.18, green: 0.46, blue: 0.79)
+        let capturedRemoteState = SharedHostStoreState(
+            hosts: [host, remotelyEditedPeer],
+            primaryHostID: host.id
+        )
+        try sharedStore.save(capturedRemoteState)
+
+        model.setPingInterval(.seconds(3), for: host.id)
+        try await runtimeCommitGate.waitUntilCancellationStarts()
+        let delivery = Task { @MainActor in
+            await model.reconcileAcceptedCloudHostState(capturedRemoteState)
+        }
+        for _ in 0..<50 where !(await acceptedCommitGate.blocked()) {
+            try await Task.sleep(for: .milliseconds(1))
+        }
+        let acceptedEnteredBeforeLocalCommit = await acceptedCommitGate.blocked()
+
+        await runtimeCommitGate.release()
+        await acceptedCommitGate.waitUntilBlocked()
+        await acceptedCommitGate.release()
+        await delivery.value
+
+        var locallyEditedHost = host
+        locallyEditedHost.interval = .seconds(3)
+        let expectedHosts = [locallyEditedHost, remotelyEditedPeer]
+        let runtimeSnapshot = try await currentSnapshot(runtime)
+        XCTAssertFalse(acceptedEnteredBeforeLocalCommit)
+        XCTAssertEqual(model.snapshot.hosts, expectedHosts)
+        XCTAssertEqual(model.snapshot.samplesByHost[host.id]?.samples, [retainedSample])
+        XCTAssertEqual(runtimeSnapshot.hosts, expectedHosts)
+        XCTAssertEqual(runtimeSnapshot.samplesByHost[host.id]?.samples, [retainedSample])
+        XCTAssertEqual(sharedStore.load().state?.hosts, expectedHosts)
+        XCTAssertEqual(uploadRecorder.values(), [expectedHosts])
+        await runtime.stop()
     }
 
     func testMacSharedHostStoreSameHostLaterLocalEditWinsWholeHostConflict() throws {
@@ -442,6 +509,10 @@ private actor MacAcceptedHostDeliveryGate {
         releaseWaiters.forEach { $0.resume() }
         releaseWaiters.removeAll()
     }
+
+    func blocked() -> Bool {
+        isBlocked
+    }
 }
 
 private final class MacHostUploadRecorder: @unchecked Sendable {
@@ -490,6 +561,74 @@ private struct MacCancellationTrackingProbe: PingProbe {
             return .failure(hostID: host.id, reason: .timeout)
         } onCancel: {
             Task { await tracker.markCancelled() }
+        }
+    }
+}
+
+private actor MacBlockedProbeCancellationGate {
+    private var measurementStarted = false
+    private var cancellationStarted = false
+    private var isReleased = false
+    private var measurementWaiters: [CheckedContinuation<Void, Never>] = []
+    private var cancellationWaiters: [CheckedContinuation<Void, Never>] = []
+    private var releaseWaiters: [CheckedContinuation<Void, Never>] = []
+
+    func markMeasurementStarted() {
+        measurementStarted = true
+        measurementWaiters.forEach { $0.resume() }
+        measurementWaiters.removeAll()
+    }
+
+    func markCancellationStarted() {
+        cancellationStarted = true
+        cancellationWaiters.forEach { $0.resume() }
+        cancellationWaiters.removeAll()
+    }
+
+    func waitUntilMeasurementStarts() async throws {
+        while !measurementStarted {
+            await withCheckedContinuation { measurementWaiters.append($0) }
+        }
+    }
+
+    func waitUntilCancellationStarts() async throws {
+        while !cancellationStarted {
+            await withCheckedContinuation { cancellationWaiters.append($0) }
+        }
+    }
+
+    func waitForRelease() async {
+        while !isReleased {
+            await withCheckedContinuation { releaseWaiters.append($0) }
+        }
+    }
+
+    func release() {
+        isReleased = true
+        releaseWaiters.forEach { $0.resume() }
+        releaseWaiters.removeAll()
+    }
+}
+
+private struct MacBlockedCancellationProbeFactory: ProbeFactory {
+    let gate: MacBlockedProbeCancellationGate
+
+    func makeProbe(for method: PingMethod) async -> any PingProbe {
+        MacBlockedCancellationProbe(gate: gate)
+    }
+}
+
+private struct MacBlockedCancellationProbe: PingProbe {
+    let gate: MacBlockedProbeCancellationGate
+
+    func measure(_ host: HostConfig) async -> PingResult {
+        await gate.markMeasurementStarted()
+        return await withTaskCancellationHandler {
+            await gate.waitForRelease()
+            try? await Task.sleep(for: .seconds(60))
+            return .failure(hostID: host.id, reason: .timeout)
+        } onCancel: {
+            Task { await gate.markCancellationStarted() }
         }
     }
 }

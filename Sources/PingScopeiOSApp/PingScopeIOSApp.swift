@@ -926,12 +926,12 @@ private final class PingScopeIOSAppModel: ObservableObject {
                     break
                 }
 
-                self.hostStore.commitAcceptedHostState(resolvedState)
-                self.hosts = reconciliation.hosts
                 switch reconciliation.disposition {
                 case .unavailable, .superseded:
                     continue
                 case let .focusedPreserved(acceptedSnapshot):
+                    self.hostStore.commitAcceptedHostState(resolvedState)
+                    self.hosts = reconciliation.hosts
                     self.snapshot = acceptedSnapshot
                     self.monitorInsights = PingScopeIOSMonitorInsightsPresentation(
                         snapshots: [acceptedSnapshot],
@@ -947,15 +947,27 @@ private final class PingScopeIOSAppModel: ObservableObject {
                     guard generation == self.hostMutationGeneration else { continue }
                     return
                 case let .focusedRequiresReplacement(host):
-                    await self.switchToHostAsync(
+                    // The controller switch can suspend in stop/history/start.
+                    // Publish the candidate host list for the switch, but do
+                    // not advance the accepted persistence baseline until the
+                    // complete transaction survives generation validation.
+                    self.hosts = reconciliation.hosts
+                    let switched = await self.switchToHostAsync(
                         host,
                         restartDuration: self.activeRestartDuration,
                         saveSelection: false,
-                        context: context
+                        context: context,
+                        acceptedMutationIsCurrent: { [weak self] in
+                            self?.hostMutationGeneration == generation
+                        }
                     )
+                    guard switched else { continue }
                     guard generation == self.hostMutationGeneration else { continue }
+                    self.hostStore.commitAcceptedHostState(resolvedState)
                     return
                 case .allHosts:
+                    self.hostStore.commitAcceptedHostState(resolvedState)
+                    self.hosts = reconciliation.hosts
                     await self.configureNotificationScope()
                     guard self.isCurrentLifecycle(context) else { return }
                     guard generation == self.hostMutationGeneration else { continue }
@@ -1467,14 +1479,42 @@ private final class PingScopeIOSAppModel: ObservableObject {
         replaceRememberedFocusedHost(selectedHost)
     }
 
+    @discardableResult
     private func switchToHostAsync(
         _ host: HostConfig,
         restartDuration: MonitorSessionDuration?,
         saveSelection: Bool,
-        context: LifecycleContext? = nil
-    ) async {
+        context: LifecycleContext? = nil,
+        acceptedMutationIsCurrent: (@MainActor @Sendable () -> Bool)? = nil
+    ) async -> Bool {
         let previousScope = hostScope
-        _ = await sessionModel.performLiveActivityScopeSwitch(
+        let outgoingController = controller
+        let acceptedRollbackSnapshot = if acceptedMutationIsCurrent != nil {
+            await outgoingController.snapshot()
+        } else {
+            Optional<LiveMonitorSessionSnapshot>.none
+        }
+        if let acceptedMutationIsCurrent, !acceptedMutationIsCurrent() {
+            return false
+        }
+        var acceptedControllerWasStopped = false
+
+        func rollbackSupersededAcceptedReplacement() async {
+            guard acceptedControllerWasStopped, let acceptedRollbackSnapshot else { return }
+            if self.controller !== outgoingController {
+                await self.controller.stop(reason: .scopeSuspended)
+                self.controller = outgoingController
+            }
+            await outgoingController.restoreAfterSupersededReplacement(from: acceptedRollbackSnapshot)
+            self.hostScope = previousScope
+            self.snapshot = acceptedRollbackSnapshot
+            self.monitorInsights = PingScopeIOSMonitorInsightsPresentation(
+                snapshots: [acceptedRollbackSnapshot],
+                activeNetworkInterface: self.historyLocationService.snapshotStore.snapshot().networkInterface
+            )
+        }
+
+        let switched = await sessionModel.performLiveActivityScopeSwitch(
             isSessionActive: restartDuration != nil,
             previousScope: previousScope,
             newScope: .focused,
@@ -1488,6 +1528,14 @@ private final class PingScopeIOSAppModel: ObservableObject {
                 guard self.isCurrentLifecycle(context) else { return false }
                 if previousScope == .allHosts {
                     await self.multiHostCoordinator.suspendForScopeChange()
+                } else if let acceptedMutationIsCurrent {
+                    guard await self.sessionModel.prepareFocusedHostReplacement(
+                        controller: self.controller,
+                        isCurrentMutation: acceptedMutationIsCurrent
+                    ) else {
+                        return false
+                    }
+                    acceptedControllerWasStopped = true
                 } else {
                     await self.controller.stop(reason: .scopeSuspended)
                 }
@@ -1497,9 +1545,16 @@ private final class PingScopeIOSAppModel: ObservableObject {
                 guard self.isCurrentLifecycle(context) else { return false }
                 return true
             },
-            endActivity: { [weak self] in await self?.endLiveActivity() },
+            endActivity: { [weak self] in
+                guard acceptedMutationIsCurrent?() != false else { return }
+                await self?.endLiveActivity()
+            },
             completeScopeSwitch: { [weak self] in
                 guard let self else { return false }
+                if acceptedMutationIsCurrent?() == false {
+                    await rollbackSupersededAcceptedReplacement()
+                    return false
+                }
                 // Neutralize the incoming selection and mark retained peer data
                 // cached before either the focused scope or host identity emits.
                 self.applyFocusedPeerPresentation(
@@ -1532,14 +1587,30 @@ private final class PingScopeIOSAppModel: ObservableObject {
                 )
                 await self.configureNotificationScope()
                 guard self.isCurrentLifecycle(context) else { return false }
+                if acceptedMutationIsCurrent?() == false {
+                    await rollbackSupersededAcceptedReplacement()
+                    return false
+                }
                 await self.refreshHistory(force: true)
                 guard self.isCurrentLifecycle(context) else { return false }
+                if acceptedMutationIsCurrent?() == false {
+                    await rollbackSupersededAcceptedReplacement()
+                    return false
+                }
                 if let restartDuration {
                     self.invalidateLifecycleSession()
                     await self.controller.start(duration: restartDuration)
                     guard self.isCurrentLifecycle(context) else { return false }
+                    if acceptedMutationIsCurrent?() == false {
+                        await rollbackSupersededAcceptedReplacement()
+                        return false
+                    }
                     await self.refreshSnapshot()
                     guard self.isCurrentLifecycle(context) else { return false }
+                    if acceptedMutationIsCurrent?() == false {
+                        await rollbackSupersededAcceptedReplacement()
+                        return false
+                    }
                 } else {
                     self.applyBackgroundKeepAlive()
                 }
@@ -1547,12 +1618,19 @@ private final class PingScopeIOSAppModel: ObservableObject {
             },
             resumeActivity: { [weak self] in
                 guard let self, let restartDuration else { return }
+                guard acceptedMutationIsCurrent?() != false else { return }
                 await self.startLiveActivity(duration: restartDuration)
                 guard self.isCurrentLifecycle(context) else { return }
+                guard acceptedMutationIsCurrent?() != false else { return }
                 self.applyBackgroundKeepAlive()
                 self.startRefreshLoop()
             }
         )
+        if acceptedMutationIsCurrent?() == false {
+            await rollbackSupersededAcceptedReplacement()
+            return false
+        }
+        return switched
     }
 
     private func switchToAllHostsAsync(

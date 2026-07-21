@@ -211,15 +211,25 @@ final class BuildGraphOptimizationTests: XCTestCase {
             contentsOf: root.appendingPathComponent("Sources/PingScopeApp/PingScopeModel.swift"),
             encoding: .utf8
         )
+        let macEndpoints = try String(
+            contentsOf: root.appendingPathComponent("Sources/PingScopeApp/PingScopeModel+NetworkEndpoints.swift"),
+            encoding: .utf8
+        )
 
         XCTAssertTrue(iosApp.contains("hostStore.resolveAcceptedHostState(state)"))
         XCTAssertTrue(iosApp.contains("let generation = self.hostMutationGeneration"))
         XCTAssertTrue(iosApp.contains("isCurrentMutation:"))
+        XCTAssertTrue(iosApp.contains("acceptedMutationIsCurrent:"))
         XCTAssertTrue(iosApp.contains("hostStore.commitAcceptedHostState(resolvedState)"))
         XCTAssertTrue(macApp.contains("hostConfigPersistence.resolveAcceptedHostState(state)"))
-        XCTAssertTrue(macApp.contains("let generation = hostMutationGeneration"))
-        XCTAssertTrue(macApp.contains("reconcileAcceptedHostStateIfCurrent("))
+        XCTAssertTrue(macApp.contains("await hostMutationCommits.perform"))
+        XCTAssertTrue(macApp.contains("runtime.reconcileAcceptedHostState("))
         XCTAssertTrue(macApp.contains("hostConfigPersistence.commitAcceptedHostState(resolvedState)"))
+        XCTAssertEqual(
+            macEndpoints.components(separatedBy: "performAutomaticHostMutation").count - 1,
+            3,
+            "Starlink upsert/removal and default-gateway refresh must share the host commit queue."
+        )
     }
 
     func testIOSFocusedLaunchHydratesAndMarksPeerRowsCachedWithinBoundedHistory() throws {
