@@ -321,6 +321,28 @@ final class PingScopeIOSMultiHostPresentationTests: XCTestCase {
         XCTAssertEqual(PingScopeIOSHostIdentityPalette.color(at: Int.max), .purple)
     }
 
+    func testHostIdentityPaletteUsesExactBoldUtilityComponents() {
+        typealias RGB = PingScopeIOSHostIdentityPalette.RGB
+        let expected: [(PingScopeIOSHostIdentityPalette.ColorToken, RGB, RGB)] = [
+            (.cobalt, RGB(red: 0x00, green: 0x68, blue: 0xD9), RGB(red: 0x27, green: 0x8D, blue: 0xFF)),
+            (.magenta, RGB(red: 0xD9, green: 0x1D, blue: 0x5B), RGB(red: 0xFF, green: 0x3D, blue: 0x7F)),
+            (.teal, RGB(red: 0x00, green: 0x8C, blue: 0x78), RGB(red: 0x00, green: 0xD1, blue: 0xB2)),
+            (.violet, RGB(red: 0x6D, green: 0x28, blue: 0xD9), RGB(red: 0x9B, green: 0x6C, blue: 0xFF)),
+            (.gold, RGB(red: 0xB7, green: 0x79, blue: 0x00), RGB(red: 0xFF, green: 0xC4, blue: 0x00)),
+            (.orange, RGB(red: 0xD9, green: 0x5F, blue: 0x00), RGB(red: 0xFF, green: 0x8A, blue: 0x00)),
+            (.seaGreen, RGB(red: 0x00, green: 0x83, blue: 0x5D), RGB(red: 0x00, green: 0xC8, blue: 0x96)),
+            (.purple, RGB(red: 0x8C, green: 0x22, blue: 0xC7), RGB(red: 0xC5, green: 0x4C, blue: 0xFF)),
+            (.azure, RGB(red: 0x00, green: 0x77, blue: 0xB6), RGB(red: 0x00, green: 0xB8, blue: 0xF5)),
+            (.crimson, RGB(red: 0xC9, green: 0x1E, blue: 0x3A), RGB(red: 0xFF, green: 0x45, blue: 0x60)),
+            (.olive, RGB(red: 0x56, green: 0x8A, blue: 0x00), RGB(red: 0x8F, green: 0xD4, blue: 0x00)),
+            (.bronze, RGB(red: 0xA8, green: 0x5D, blue: 0x00), RGB(red: 0xEF, green: 0xA3, blue: 0x3A))
+        ]
+
+        XCTAssertEqual(PingScopeIOSHostIdentityPalette.ColorToken.allCases, expected.map(\.0))
+        XCTAssertEqual(expected.map { $0.0.lightRGB }, expected.map(\.1))
+        XCTAssertEqual(expected.map { $0.0.darkRGB }, expected.map(\.2))
+    }
+
     func testSharedHostIdentityPaletteUsesTwelveDeterministicBuckets() {
         let hostIDs = (1...256).compactMap { value in
             UUID(uuidString: String(format: "00000000-0000-0000-0000-%012X", value))

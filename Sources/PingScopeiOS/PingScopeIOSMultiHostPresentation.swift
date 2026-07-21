@@ -151,35 +151,35 @@ public enum PingScopeIOSHostIdentityPalette {
 
         public var lightRGB: RGB {
             switch self {
-            case .cobalt: RGB(red: 0x25, green: 0x63, blue: 0xEB)
-            case .magenta: RGB(red: 0xDB, green: 0x27, blue: 0x77)
-            case .teal: RGB(red: 0x08, green: 0x91, blue: 0xB2)
-            case .violet: RGB(red: 0x7C, green: 0x3A, blue: 0xED)
-            case .gold: RGB(red: 0xCA, green: 0x8A, blue: 0x04)
-            case .orange: RGB(red: 0xEA, green: 0x58, blue: 0x0C)
-            case .seaGreen: RGB(red: 0x0F, green: 0x76, blue: 0x6E)
-            case .purple: RGB(red: 0x93, green: 0x33, blue: 0xEA)
-            case .azure: RGB(red: 0x03, green: 0x69, blue: 0xA1)
-            case .crimson: RGB(red: 0xBE, green: 0x12, blue: 0x3C)
-            case .olive: RGB(red: 0x4D, green: 0x7C, blue: 0x0F)
-            case .bronze: RGB(red: 0xA1, green: 0x62, blue: 0x07)
+            case .cobalt: RGB(red: 0x00, green: 0x68, blue: 0xD9)
+            case .magenta: RGB(red: 0xD9, green: 0x1D, blue: 0x5B)
+            case .teal: RGB(red: 0x00, green: 0x8C, blue: 0x78)
+            case .violet: RGB(red: 0x6D, green: 0x28, blue: 0xD9)
+            case .gold: RGB(red: 0xB7, green: 0x79, blue: 0x00)
+            case .orange: RGB(red: 0xD9, green: 0x5F, blue: 0x00)
+            case .seaGreen: RGB(red: 0x00, green: 0x83, blue: 0x5D)
+            case .purple: RGB(red: 0x8C, green: 0x22, blue: 0xC7)
+            case .azure: RGB(red: 0x00, green: 0x77, blue: 0xB6)
+            case .crimson: RGB(red: 0xC9, green: 0x1E, blue: 0x3A)
+            case .olive: RGB(red: 0x56, green: 0x8A, blue: 0x00)
+            case .bronze: RGB(red: 0xA8, green: 0x5D, blue: 0x00)
             }
         }
 
         public var darkRGB: RGB {
             switch self {
-            case .cobalt: RGB(red: 0x60, green: 0xA5, blue: 0xFA)
-            case .magenta: RGB(red: 0xF4, green: 0x72, blue: 0xB6)
-            case .teal: RGB(red: 0x22, green: 0xD3, blue: 0xEE)
-            case .violet: RGB(red: 0xA7, green: 0x8B, blue: 0xFA)
-            case .gold: RGB(red: 0xFA, green: 0xCC, blue: 0x15)
-            case .orange: RGB(red: 0xFB, green: 0x92, blue: 0x3C)
-            case .seaGreen: RGB(red: 0x2D, green: 0xD4, blue: 0xBF)
-            case .purple: RGB(red: 0xC0, green: 0x84, blue: 0xFC)
-            case .azure: RGB(red: 0x38, green: 0xBD, blue: 0xF8)
-            case .crimson: RGB(red: 0xFB, green: 0x71, blue: 0x85)
-            case .olive: RGB(red: 0xA3, green: 0xE6, blue: 0x35)
-            case .bronze: RGB(red: 0xFB, green: 0xBF, blue: 0x24)
+            case .cobalt: RGB(red: 0x27, green: 0x8D, blue: 0xFF)
+            case .magenta: RGB(red: 0xFF, green: 0x3D, blue: 0x7F)
+            case .teal: RGB(red: 0x00, green: 0xD1, blue: 0xB2)
+            case .violet: RGB(red: 0x9B, green: 0x6C, blue: 0xFF)
+            case .gold: RGB(red: 0xFF, green: 0xC4, blue: 0x00)
+            case .orange: RGB(red: 0xFF, green: 0x8A, blue: 0x00)
+            case .seaGreen: RGB(red: 0x00, green: 0xC8, blue: 0x96)
+            case .purple: RGB(red: 0xC5, green: 0x4C, blue: 0xFF)
+            case .azure: RGB(red: 0x00, green: 0xB8, blue: 0xF5)
+            case .crimson: RGB(red: 0xFF, green: 0x45, blue: 0x60)
+            case .olive: RGB(red: 0x8F, green: 0xD4, blue: 0x00)
+            case .bronze: RGB(red: 0xEF, green: 0xA3, blue: 0x3A)
             }
         }
     }
