@@ -1333,6 +1333,15 @@ private final class PingScopeIOSAppModel: ObservableObject {
             endActivity: { [weak self] in await self?.endLiveActivity() },
             completeScopeSwitch: { [weak self] in
                 guard let self else { return false }
+                // Neutralize the incoming selection and mark retained peer data
+                // cached before either the focused scope or host identity emits.
+                self.applyFocusedPeerPresentation(
+                    PingScopeIOSFocusedPeerPresentation.transitioning(
+                        to: host.id,
+                        from: self.hosts,
+                        previousGraphSeries: self.allHostGraphSeries
+                    )
+                )
                 self.hostScope = .focused
                 if saveSelection {
                     self.hostStore.save(hosts: self.hosts, selectedHostID: host.id, hostScope: .focused)
@@ -1630,6 +1639,19 @@ private final class PingScopeIOSAppModel: ObservableObject {
         lastHistoryRefreshAt = Date()
         guard let historyStore else {
             historySamples = []
+            if hostScope == .focused {
+                // Rebuild rather than leaving rows from a prior focused identity.
+                var samplesByHost = allHostGraphSeries.reduce(into: [UUID: [PingResult]]()) {
+                    $0[$1.hostID] = $1.samples
+                }
+                samplesByHost[snapshot.host.id] = snapshot.series.samples
+                applyFocusedPeerPresentation(PingScopeIOSFocusedPeerPresentation(
+                    hosts: hosts,
+                    selectedHostID: snapshot.host.id,
+                    selectedHealth: snapshot.health,
+                    samplesByHost: samplesByHost
+                ))
+            }
             rebuildGraphSamples()
             await publishWidgetSnapshot()
             return
@@ -1681,17 +1703,17 @@ private final class PingScopeIOSAppModel: ObservableObject {
         }
         resolvedSamples[requestedHostID] = selectedSamplesByID.values.sorted { $0.timestamp < $1.timestamp }
 
-        let healthByHost = [requestedHostID: snapshot.health]
+        applyFocusedPeerPresentation(PingScopeIOSFocusedPeerPresentation(
+            hosts: enabledHosts,
+            selectedHostID: requestedHostID,
+            selectedHealth: snapshot.health,
+            samplesByHost: resolvedSamples
+        ))
+    }
 
-        allHostRows = PingScopeIOSHostScopePresentation.rows(
-            from: enabledHosts,
-            healthByHost: healthByHost,
-            samplesByHost: resolvedSamples,
-            cachedHostIDs: Set(enabledHosts.map(\.id).filter { $0 != requestedHostID })
-        )
-        allHostGraphSeries = enabledHosts.map {
-            PingScopeIOSHostGraphSeries(hostID: $0.id, samples: resolvedSamples[$0.id] ?? [])
-        }
+    private func applyFocusedPeerPresentation(_ presentation: PingScopeIOSFocusedPeerPresentation) {
+        allHostRows = presentation.rows
+        allHostGraphSeries = presentation.graphSeries
         allHostsPresentationEndDate = Date()
     }
 

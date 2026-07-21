@@ -34,15 +34,44 @@ final class BuildGraphOptimizationTests: XCTestCase {
 
         XCTAssertTrue(source.contains("await refreshFocusedPeerPresentation()"))
         XCTAssertTrue(source.contains("Date().addingTimeInterval(-24 * 60 * 60)"))
-        XCTAssertTrue(source.contains("allHostRows = PingScopeIOSHostScopePresentation.rows"))
-        XCTAssertTrue(source.contains("cachedHostIDs: Set(enabledHosts.map(\\.id).filter { $0 != requestedHostID })"))
-
         let refreshStart = try XCTUnwrap(source.range(of: "private func refreshFocusedPeerPresentation() async"))
         let nextFunctionStart = try XCTUnwrap(
             source.range(of: "private func refreshRangedHistory(", range: refreshStart.upperBound..<source.endIndex)
         )
         let focusedRefresh = source[refreshStart.lowerBound..<nextFunctionStart.lowerBound]
+        XCTAssertTrue(focusedRefresh.contains("applyFocusedPeerPresentation(PingScopeIOSFocusedPeerPresentation("))
+        XCTAssertTrue(focusedRefresh.contains("selectedHostID: requestedHostID"))
         XCTAssertFalse(focusedRefresh.contains("health.ingest(sample)"))
+    }
+
+    func testIOSFocusedHostSwitchNeutralizesRowsBeforePublishingIdentityAndNilStoreRebuilds() throws {
+        let source = try String(
+            contentsOf: try repositoryRoot().appendingPathComponent("Sources/PingScopeiOSApp/PingScopeIOSApp.swift"),
+            encoding: .utf8
+        )
+        let switchStart = try XCTUnwrap(source.range(of: "private func switchToHostAsync("))
+        let allHostsSwitchStart = try XCTUnwrap(
+            source.range(of: "private func switchToAllHostsAsync(", range: switchStart.upperBound..<source.endIndex)
+        )
+        let focusedSwitch = source[switchStart.lowerBound..<allHostsSwitchStart.lowerBound]
+        let transition = try XCTUnwrap(focusedSwitch.range(of: "PingScopeIOSFocusedPeerPresentation.transitioning("))
+        let scopePublish = try XCTUnwrap(focusedSwitch.range(of: "self.hostScope = .focused"))
+        let identityPublish = try XCTUnwrap(focusedSwitch.range(of: "self.snapshot = LiveMonitorSessionSnapshot("))
+
+        XCTAssertLessThan(transition.lowerBound, scopePublish.lowerBound)
+        XCTAssertLessThan(transition.lowerBound, identityPublish.lowerBound)
+
+        let historyStart = try XCTUnwrap(source.range(of: "private func refreshHistory(force:"))
+        let peerRefreshStart = try XCTUnwrap(
+            source.range(of: "private func refreshFocusedPeerPresentation()", range: historyStart.upperBound..<source.endIndex)
+        )
+        let refreshHistory = source[historyStart.lowerBound..<peerRefreshStart.lowerBound]
+        let nilStore = try XCTUnwrap(refreshHistory.range(of: "guard let historyStore else"))
+        let cutoff = try XCTUnwrap(refreshHistory.range(of: "let cutoff =", range: nilStore.upperBound..<refreshHistory.endIndex))
+        let nilStoreBranch = refreshHistory[nilStore.lowerBound..<cutoff.lowerBound]
+
+        XCTAssertTrue(nilStoreBranch.contains("applyFocusedPeerPresentation("))
+        XCTAssertTrue(nilStoreBranch.contains("PingScopeIOSFocusedPeerPresentation("))
     }
 
     func testIOSOtherHostsAndHostsTabRenderAccessibleCachedLatencyAndMiniGraphs() throws {
@@ -51,6 +80,9 @@ final class BuildGraphOptimizationTests: XCTestCase {
             encoding: .utf8
         )
         let otherHostsStart = try XCTUnwrap(source.range(of: "private func otherHostsCard("))
+        let monitorRowsStart = try XCTUnwrap(
+            source.range(of: "private func monitorHostRows(", range: otherHostsStart.upperBound..<source.endIndex)
+        )
         let hostsTabStart = try XCTUnwrap(source.range(of: "private var hostsTab: some View"))
         let historyTabStart = try XCTUnwrap(
             source.range(of: "private var historyTab: some View", range: hostsTabStart.upperBound..<source.endIndex)
@@ -59,14 +91,16 @@ final class BuildGraphOptimizationTests: XCTestCase {
         let sectionHeaderStart = try XCTUnwrap(
             source.range(of: "private func sectionHeader(", range: rowStart.upperBound..<source.endIndex)
         )
-        let otherHosts = source[otherHostsStart.lowerBound..<hostsTabStart.lowerBound]
+        let otherHosts = source[otherHostsStart.lowerBound..<monitorRowsStart.lowerBound]
         let hostsTab = source[hostsTabStart.lowerBound..<historyTabStart.lowerBound]
         let shippingRow = source[rowStart.lowerBound..<sectionHeaderStart.lowerBound]
 
         XCTAssertTrue(otherHosts.contains("cachedRows[host.id]"))
         XCTAssertTrue(otherHosts.contains("allHostsRow("))
+        XCTAssertTrue(otherHosts.contains("action: .focus"))
         XCTAssertTrue(hostsTab.contains("cachedRows[listedHost.id]"))
         XCTAssertTrue(hostsTab.contains("allHostsRow("))
+        XCTAssertTrue(hostsTab.contains("action: .edit"))
         XCTAssertTrue(shippingRow.contains("PingScopeIOSSparkline(renderData: graphData"))
         XCTAssertTrue(shippingRow.contains("Text(presentation.latencyText)"))
         XCTAssertTrue(shippingRow.contains("if let cacheLabel = presentation.cacheLabel"))

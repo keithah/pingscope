@@ -551,25 +551,27 @@ final class PingScopeIOSMultiHostPresentationTests: XCTestCase {
         var peerHistoricalHealth = HostHealth(hostID: peerHost.id, thresholds: peerHost.thresholds)
         peerSamples.forEach { peerHistoricalHealth.ingest($0) }
 
-        let rows = PingScopeIOSHostScopePresentation.rows(
-            from: [selectedHost, peerHost],
-            healthByHost: [selectedHost.id: selectedHealth, peerHost.id: peerHistoricalHealth],
-            samplesByHost: [selectedHost.id: [selectedResult], peerHost.id: peerSamples],
-            cachedHostIDs: [peerHost.id]
+        let focusedPresentation = PingScopeIOSFocusedPeerPresentation(
+            hosts: [selectedHost, peerHost],
+            selectedHostID: selectedHost.id,
+            selectedHealth: selectedHealth,
+            samplesByHost: [selectedHost.id: [selectedResult], peerHost.id: peerSamples]
         )
+        let rows = focusedPresentation.rows
         let selectedRow = try XCTUnwrap(rows.first { $0.hostID == selectedHost.id })
         let peerRow = try XCTUnwrap(rows.first { $0.hostID == peerHost.id })
         let peerPresentation = PingScopeIOSAllHostsMonitorPresentation.rowPresentation(for: peerRow)
         let graphSamples = PingScopeIOSAllHostsMonitorPresentation.graphSamples(
             for: peerRow,
-            allHostGraphSeries: [PingScopeIOSHostGraphSeries(hostID: peerHost.id, samples: peerSamples)]
+            allHostGraphSeries: focusedPresentation.graphSeries
         )
 
         XCTAssertFalse(selectedRow.isCached)
         XCTAssertFalse(selectedRow.isStale)
         XCTAssertTrue(peerRow.isCached)
         XCTAssertFalse(peerRow.isStale)
-        XCTAssertEqual(peerRow.status, .down)
+        XCTAssertEqual(peerHistoricalHealth.status, .down)
+        XCTAssertEqual(peerRow.status, .noData)
         XCTAssertEqual(peerPresentation.displayStatus, .noData)
         XCTAssertEqual(peerPresentation.latencyText, "34ms")
         XCTAssertEqual(peerPresentation.cacheLabel, "Cached")
@@ -586,7 +588,89 @@ final class PingScopeIOSMultiHostPresentationTests: XCTestCase {
         )
     }
 
+    func testFocusedPeerTransitionNeutralizesNewSelectionAndCachesOnlyPeersWithRetainedSamples() throws {
+        let hostA = HostConfig(displayName: "Host A", address: "a.example")
+        let hostB = HostConfig(displayName: "Host B", address: "b.example")
+        let emptyPeer = HostConfig(displayName: "Empty", address: "empty.example")
+        let hostASamples = [
+            PingResult.success(hostID: hostA.id, latency: .milliseconds(14), timestamp: Date(timeIntervalSince1970: 1)),
+            PingResult.success(hostID: hostA.id, latency: .milliseconds(18), timestamp: Date(timeIntervalSince1970: 2))
+        ]
+        let staleSelectedSamples = [
+            PingResult.success(hostID: hostB.id, latency: .milliseconds(99), timestamp: Date(timeIntervalSince1970: 1))
+        ]
+
+        let presentation = PingScopeIOSFocusedPeerPresentation.transitioning(
+            to: hostB.id,
+            from: [hostA, hostB, emptyPeer],
+            previousGraphSeries: [
+                PingScopeIOSHostGraphSeries(hostID: hostA.id, samples: hostASamples),
+                PingScopeIOSHostGraphSeries(hostID: hostB.id, samples: staleSelectedSamples)
+            ]
+        )
+        let rowA = try XCTUnwrap(presentation.rows.first { $0.hostID == hostA.id })
+        let rowB = try XCTUnwrap(presentation.rows.first { $0.hostID == hostB.id })
+        let emptyRow = try XCTUnwrap(presentation.rows.first { $0.hostID == emptyPeer.id })
+
+        XCTAssertTrue(rowA.isCached)
+        XCTAssertEqual(rowA.latencyText, "18ms")
+        XCTAssertEqual(rowA.samples.count, 2)
+        XCTAssertFalse(rowB.isCached)
+        XCTAssertEqual(rowB.latencyText, "--ms")
+        XCTAssertTrue(rowB.samples.isEmpty)
+        XCTAssertFalse(emptyRow.isCached)
+        XCTAssertNil(PingScopeIOSAllHostsMonitorPresentation.rowPresentation(for: emptyRow).cacheLabel)
+        XCTAssertEqual(
+            presentation.graphSeries.first { $0.hostID == hostB.id }?.samples,
+            []
+        )
+        XCTAssertEqual(PingScopeIOSHostScopePresentation.aggregateStatus(from: presentation.rows), .noData)
+        XCTAssertNil(PingScopeIOSAllHostsMonitorPresentation.combinedLatencyMilliseconds(from: presentation.rows))
+    }
+
+    func testFocusedPeerPresentationWithoutHistoryKeepsSelectedLiveAndEmptyPeerNeutral() throws {
+        let selectedHost = HostConfig(displayName: "Selected", address: "selected.example")
+        let emptyPeer = HostConfig(displayName: "No history", address: "empty.example")
+        let selectedSample = PingResult.success(hostID: selectedHost.id, latency: .milliseconds(27))
+        var selectedHealth = HostHealth(hostID: selectedHost.id, thresholds: selectedHost.thresholds)
+        selectedHealth.ingest(selectedSample)
+
+        let presentation = PingScopeIOSFocusedPeerPresentation(
+            hosts: [selectedHost, emptyPeer],
+            selectedHostID: selectedHost.id,
+            selectedHealth: selectedHealth,
+            samplesByHost: [selectedHost.id: [selectedSample], emptyPeer.id: []]
+        )
+        let selectedRow = try XCTUnwrap(presentation.rows.first { $0.hostID == selectedHost.id })
+        let emptyRow = try XCTUnwrap(presentation.rows.first { $0.hostID == emptyPeer.id })
+
+        XCTAssertFalse(selectedRow.isCached)
+        XCTAssertEqual(selectedRow.latencyText, "27ms")
+        XCTAssertFalse(emptyRow.isCached)
+        XCTAssertEqual(emptyRow.latencyText, "--ms")
+        XCTAssertNil(PingScopeIOSAllHostsMonitorPresentation.rowPresentation(for: emptyRow).cacheLabel)
+        XCTAssertEqual(
+            presentation.graphSeries.first { $0.hostID == emptyPeer.id }?.samples,
+            []
+        )
+    }
+
+    func testHostRowActionAccessibilityHintMatchesFocusAndEditBehavior() {
+        let host = HostConfig(displayName: "Router", address: "router.example")
+        let row = PingScopeIOSHostRowSnapshot(host: host, health: nil)
+
+        XCTAssertEqual(
+            PingScopeIOSAllHostsMonitorPresentation.rowPresentation(for: row, action: .focus).actionAccessibilityHint,
+            "Double-tap to focus Router."
+        )
+        XCTAssertEqual(
+            PingScopeIOSAllHostsMonitorPresentation.rowPresentation(for: row, action: .edit).actionAccessibilityHint,
+            "Double-tap to edit Router."
+        )
+    }
+
     func testFocusedHistoricalFailureIsCachedUnavailableAndDoesNotBecomeLiveHealth() throws {
+        let selectedHost = HostConfig(displayName: "Selected", address: "selected.example")
         let peerHost = HostConfig(displayName: "Failed peer", address: "203.0.113.8")
         let failures = (0..<3).map { index in
             PingResult.failure(
@@ -598,17 +682,19 @@ final class PingScopeIOSMultiHostPresentationTests: XCTestCase {
         var peerHistoricalHealth = HostHealth(hostID: peerHost.id, thresholds: peerHost.thresholds)
         failures.forEach { peerHistoricalHealth.ingest($0) }
 
-        let row = try XCTUnwrap(PingScopeIOSHostScopePresentation.rows(
-            from: [peerHost],
-            healthByHost: [peerHost.id: peerHistoricalHealth],
-            samplesByHost: [peerHost.id: failures],
-            cachedHostIDs: [peerHost.id]
-        ).first)
+        let focusedPresentation = PingScopeIOSFocusedPeerPresentation(
+            hosts: [selectedHost, peerHost],
+            selectedHostID: selectedHost.id,
+            selectedHealth: nil,
+            samplesByHost: [peerHost.id: failures]
+        )
+        let row = try XCTUnwrap(focusedPresentation.rows.first { $0.hostID == peerHost.id })
         let presentation = PingScopeIOSAllHostsMonitorPresentation.rowPresentation(for: row)
 
         XCTAssertTrue(row.isCached)
         XCTAssertFalse(row.isStale)
-        XCTAssertEqual(row.status, .down)
+        XCTAssertEqual(peerHistoricalHealth.status, .down)
+        XCTAssertEqual(row.status, .noData)
         XCTAssertEqual(presentation.displayStatus, .noData)
         XCTAssertEqual(presentation.latencyText, "--ms")
         XCTAssertEqual(presentation.cacheLabel, "Cached")
@@ -774,7 +860,7 @@ final class PingScopeIOSMultiHostPresentationTests: XCTestCase {
         XCTAssertEqual(presentation.displayStatus, .noData)
         XCTAssertEqual(presentation.latencyText, "--ms")
         XCTAssertEqual(presentation.accessibilityLabel, "Router, TCP 192.168.1.1, Stale, unavailable")
-        XCTAssertEqual(presentation.focusAccessibilityHint, "Double-tap to focus Router.")
+        XCTAssertEqual(presentation.actionAccessibilityHint, "Double-tap to focus Router.")
         XCTAssertEqual(
             PingScopeIOSAllHostsMonitorPresentation.graphSamples(for: row, allHostGraphSeries: graphSeries),
             samples

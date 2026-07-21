@@ -46,6 +46,52 @@ public struct PingScopeIOSHostGraphSeries: Identifiable, Equatable, Sendable {
     }
 }
 
+public struct PingScopeIOSFocusedPeerPresentation: Equatable, Sendable {
+    public let rows: [PingScopeIOSHostRowSnapshot]
+    public let graphSeries: [PingScopeIOSHostGraphSeries]
+
+    public init(
+        hosts: [HostConfig],
+        selectedHostID: UUID,
+        selectedHealth: HostHealth?,
+        samplesByHost: [UUID: [PingResult]]
+    ) {
+        let enabledHosts = PingScopeIOSHostScopePresentation.enabledHosts(from: hosts)
+        let cachedHostIDs = Set<UUID>(enabledHosts.compactMap { host in
+            guard host.id != selectedHostID, samplesByHost[host.id]?.isEmpty == false else {
+                return nil
+            }
+            return host.id
+        })
+        rows = PingScopeIOSHostScopePresentation.rows(
+            from: enabledHosts,
+            healthByHost: selectedHealth.map { [selectedHostID: $0] } ?? [:],
+            samplesByHost: samplesByHost,
+            cachedHostIDs: cachedHostIDs
+        )
+        graphSeries = enabledHosts.map {
+            PingScopeIOSHostGraphSeries(hostID: $0.id, samples: samplesByHost[$0.id] ?? [])
+        }
+    }
+
+    public static func transitioning(
+        to selectedHostID: UUID,
+        from hosts: [HostConfig],
+        previousGraphSeries: [PingScopeIOSHostGraphSeries]
+    ) -> Self {
+        var samplesByHost = previousGraphSeries.reduce(into: [UUID: [PingResult]]()) {
+            $0[$1.hostID] = $1.samples
+        }
+        samplesByHost[selectedHostID] = []
+        return Self(
+            hosts: hosts,
+            selectedHostID: selectedHostID,
+            selectedHealth: nil,
+            samplesByHost: samplesByHost
+        )
+    }
+}
+
 public struct PingScopeIOSAllHostsGraphRenderSeries: Equatable, Sendable {
     public let hostID: UUID
     public let startDate: Date
@@ -122,7 +168,9 @@ public struct PingScopeIOSAllHostsRowPresentation: Equatable, Sendable {
     public let latencyText: String
     public let cacheLabel: String?
     public let accessibilityLabel: String
-    public let focusAccessibilityHint: String
+    public let actionAccessibilityHint: String
+
+    public var focusAccessibilityHint: String { actionAccessibilityHint }
 
     public init(
         displayName: String,
@@ -130,15 +178,20 @@ public struct PingScopeIOSAllHostsRowPresentation: Equatable, Sendable {
         latencyText: String,
         cacheLabel: String? = nil,
         accessibilityLabel: String,
-        focusAccessibilityHint: String
+        actionAccessibilityHint: String
     ) {
         self.displayName = displayName
         self.displayStatus = displayStatus
         self.latencyText = latencyText
         self.cacheLabel = cacheLabel
         self.accessibilityLabel = accessibilityLabel
-        self.focusAccessibilityHint = focusAccessibilityHint
+        self.actionAccessibilityHint = actionAccessibilityHint
     }
+}
+
+public enum PingScopeIOSHostRowAction: Equatable, Sendable {
+    case focus
+    case edit
 }
 
 public enum PingScopeIOSDisplayMode: String, CaseIterable, Identifiable, Sendable {
@@ -307,7 +360,10 @@ public enum PingScopeIOSAllHostsMonitorPresentation {
         return latencies.reduce(0, +) / Double(latencies.count)
     }
 
-    public static func rowPresentation(for row: PingScopeIOSHostRowSnapshot) -> PingScopeIOSAllHostsRowPresentation {
+    public static func rowPresentation(
+        for row: PingScopeIOSHostRowSnapshot,
+        action: PingScopeIOSHostRowAction = .focus
+    ) -> PingScopeIOSAllHostsRowPresentation {
         let displayName = row.displayName.isEmpty ? "Unnamed Host" : row.displayName
         let latencyText = row.isStale ? "--ms" : row.latencyText
         let isUnavailable = latencyText == "--ms"
@@ -323,13 +379,17 @@ public enum PingScopeIOSAllHostsMonitorPresentation {
         let latencyDescription = isUnavailable
             ? "unavailable"
             : "\(Int((row.latestLatencyMilliseconds ?? 0).rounded())) milliseconds"
+        let actionAccessibilityHint = switch action {
+        case .focus: "Double-tap to focus \(displayName)."
+        case .edit: "Double-tap to edit \(displayName)."
+        }
         return PingScopeIOSAllHostsRowPresentation(
             displayName: displayName,
             displayStatus: displayStatus,
             latencyText: latencyText,
             cacheLabel: row.isCached ? "Cached" : nil,
             accessibilityLabel: "\(displayName), \(row.endpointCaption), \(statusText), \(latencyDescription)",
-            focusAccessibilityHint: "Double-tap to focus \(displayName)."
+            actionAccessibilityHint: actionAccessibilityHint
         )
     }
 
@@ -991,7 +1051,10 @@ public struct PingScopeIOSRootView: View {
                         if let row = cachedRows[host.id] {
                             allHostsRow(
                                 row,
-                                presentation: PingScopeIOSAllHostsMonitorPresentation.rowPresentation(for: row),
+                                presentation: PingScopeIOSAllHostsMonitorPresentation.rowPresentation(
+                                    for: row,
+                                    action: .focus
+                                ),
                                 allHostsGraphPresentation: allHostsGraphPresentation
                             )
                         } else {
@@ -1035,7 +1098,10 @@ public struct PingScopeIOSRootView: View {
                     .frame(height: 54)
             } else {
                 ForEach(rows, id: \.hostID) { row in
-                    let presentation = PingScopeIOSAllHostsMonitorPresentation.rowPresentation(for: row)
+                    let presentation = PingScopeIOSAllHostsMonitorPresentation.rowPresentation(
+                        for: row,
+                        action: .focus
+                    )
                     Button {
                         onSelectHost(row.hostID)
                     } label: {
@@ -1047,7 +1113,7 @@ public struct PingScopeIOSRootView: View {
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel(presentation.accessibilityLabel)
-                    .accessibilityHint(presentation.focusAccessibilityHint)
+                    .accessibilityHint(presentation.actionAccessibilityHint)
                     if row.hostID != rows.last?.hostID {
                         Divider()
                             .padding(.leading, 20)
@@ -1077,7 +1143,10 @@ public struct PingScopeIOSRootView: View {
                         if listedHost.id != host.id, let row = cachedRows[listedHost.id] {
                             allHostsRow(
                                 row,
-                                presentation: PingScopeIOSAllHostsMonitorPresentation.rowPresentation(for: row),
+                                presentation: PingScopeIOSAllHostsMonitorPresentation.rowPresentation(
+                                    for: row,
+                                    action: .edit
+                                ),
                                 allHostsGraphPresentation: allHostsGraphPresentation
                             )
                         } else {
@@ -1439,7 +1508,7 @@ public struct PingScopeIOSRootView: View {
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
         .accessibilityLabel(presentation.accessibilityLabel)
-        .accessibilityHint(presentation.focusAccessibilityHint)
+        .accessibilityHint(presentation.actionAccessibilityHint)
     }
 
     private func sectionHeader(_ text: String) -> some View {
