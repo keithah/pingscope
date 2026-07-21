@@ -596,6 +596,11 @@ final class PingScopeIOSMultiHostPresentationTests: XCTestCase {
             PingResult.success(hostID: hostA.id, latency: .milliseconds(14), timestamp: Date(timeIntervalSince1970: 1)),
             PingResult.success(hostID: hostA.id, latency: .milliseconds(18), timestamp: Date(timeIntervalSince1970: 2))
         ]
+        let latestOutgoingSample = PingResult.success(
+            hostID: hostA.id,
+            latency: .milliseconds(31),
+            timestamp: Date(timeIntervalSince1970: 3)
+        )
         let staleSelectedSamples = [
             PingResult.success(hostID: hostB.id, latency: .milliseconds(99), timestamp: Date(timeIntervalSince1970: 1))
         ]
@@ -603,6 +608,8 @@ final class PingScopeIOSMultiHostPresentationTests: XCTestCase {
         let presentation = PingScopeIOSFocusedPeerPresentation.transitioning(
             to: hostB.id,
             from: [hostA, hostB, emptyPeer],
+            outgoingHostID: hostA.id,
+            outgoingSamples: [hostASamples[1], latestOutgoingSample],
             previousGraphSeries: [
                 PingScopeIOSHostGraphSeries(hostID: hostA.id, samples: hostASamples),
                 PingScopeIOSHostGraphSeries(hostID: hostB.id, samples: staleSelectedSamples)
@@ -613,8 +620,8 @@ final class PingScopeIOSMultiHostPresentationTests: XCTestCase {
         let emptyRow = try XCTUnwrap(presentation.rows.first { $0.hostID == emptyPeer.id })
 
         XCTAssertTrue(rowA.isCached)
-        XCTAssertEqual(rowA.latencyText, "18ms")
-        XCTAssertEqual(rowA.samples.count, 2)
+        XCTAssertEqual(rowA.latencyText, "31ms")
+        XCTAssertEqual(rowA.samples.map(\.id), [hostASamples[0].id, hostASamples[1].id, latestOutgoingSample.id])
         XCTAssertFalse(rowB.isCached)
         XCTAssertEqual(rowB.latencyText, "--ms")
         XCTAssertTrue(rowB.samples.isEmpty)
@@ -626,6 +633,46 @@ final class PingScopeIOSMultiHostPresentationTests: XCTestCase {
         )
         XCTAssertEqual(PingScopeIOSHostScopePresentation.aggregateStatus(from: presentation.rows), .noData)
         XCTAssertNil(PingScopeIOSAllHostsMonitorPresentation.combinedLatencyMilliseconds(from: presentation.rows))
+    }
+
+    func testFocusedPeerTransitionAndNilStoreRebuildRetainOutgoingLiveSamplesWhenGraphIsEmpty() throws {
+        let hostA = HostConfig(displayName: "Host A", address: "a.example")
+        let hostB = HostConfig(displayName: "Host B", address: "b.example")
+        let outgoingSamples = [
+            PingResult.success(hostID: hostA.id, latency: .milliseconds(23), timestamp: Date(timeIntervalSince1970: 1)),
+            PingResult.success(hostID: hostA.id, latency: .milliseconds(37), timestamp: Date(timeIntervalSince1970: 2))
+        ]
+
+        let transitioned = PingScopeIOSFocusedPeerPresentation.transitioning(
+            to: hostB.id,
+            from: [hostA, hostB],
+            outgoingHostID: hostA.id,
+            outgoingSamples: outgoingSamples,
+            previousGraphSeries: []
+        )
+        var nilStoreSamplesByHost = Dictionary(uniqueKeysWithValues: transitioned.graphSeries.map {
+            ($0.hostID, $0.samples)
+        })
+        nilStoreSamplesByHost[hostB.id] = []
+        let rebuilt = PingScopeIOSFocusedPeerPresentation(
+            hosts: [hostA, hostB],
+            selectedHostID: hostB.id,
+            selectedHealth: nil,
+            samplesByHost: nilStoreSamplesByHost
+        )
+        let outgoingRow = try XCTUnwrap(rebuilt.rows.first { $0.hostID == hostA.id })
+        let incomingRow = try XCTUnwrap(rebuilt.rows.first { $0.hostID == hostB.id })
+
+        XCTAssertTrue(outgoingRow.isCached)
+        XCTAssertEqual(outgoingRow.latencyText, "37ms")
+        XCTAssertEqual(outgoingRow.samples.map(\.id), outgoingSamples.map(\.id))
+        XCTAssertEqual(
+            rebuilt.graphSeries.first { $0.hostID == hostA.id }?.samples.map(\.id),
+            outgoingSamples.map(\.id)
+        )
+        XCTAssertFalse(incomingRow.isCached)
+        XCTAssertEqual(incomingRow.latencyText, "--ms")
+        XCTAssertTrue(incomingRow.samples.isEmpty)
     }
 
     func testFocusedPeerPresentationWithoutHistoryKeepsSelectedLiveAndEmptyPeerNeutral() throws {

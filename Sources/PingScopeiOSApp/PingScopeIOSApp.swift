@@ -1339,6 +1339,8 @@ private final class PingScopeIOSAppModel: ObservableObject {
                     PingScopeIOSFocusedPeerPresentation.transitioning(
                         to: host.id,
                         from: self.hosts,
+                        outgoingHostID: self.snapshot.host.id,
+                        outgoingSamples: self.snapshot.series.samples,
                         previousGraphSeries: self.allHostGraphSeries
                     )
                 )

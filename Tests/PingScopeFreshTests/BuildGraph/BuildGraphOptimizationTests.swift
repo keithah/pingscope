@@ -58,6 +58,8 @@ final class BuildGraphOptimizationTests: XCTestCase {
         let scopePublish = try XCTUnwrap(focusedSwitch.range(of: "self.hostScope = .focused"))
         let identityPublish = try XCTUnwrap(focusedSwitch.range(of: "self.snapshot = LiveMonitorSessionSnapshot("))
 
+        XCTAssertTrue(focusedSwitch.contains("outgoingHostID: self.snapshot.host.id"))
+        XCTAssertTrue(focusedSwitch.contains("outgoingSamples: self.snapshot.series.samples"))
         XCTAssertLessThan(transition.lowerBound, scopePublish.lowerBound)
         XCTAssertLessThan(transition.lowerBound, identityPublish.lowerBound)
 

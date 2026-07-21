@@ -77,10 +77,24 @@ public struct PingScopeIOSFocusedPeerPresentation: Equatable, Sendable {
     public static func transitioning(
         to selectedHostID: UUID,
         from hosts: [HostConfig],
+        outgoingHostID: UUID,
+        outgoingSamples: [PingResult],
         previousGraphSeries: [PingScopeIOSHostGraphSeries]
     ) -> Self {
         var samplesByHost = previousGraphSeries.reduce(into: [UUID: [PingResult]]()) {
             $0[$1.hostID] = $1.samples
+        }
+        var outgoingSamplesByID = Dictionary(
+            uniqueKeysWithValues: (samplesByHost[outgoingHostID] ?? []).map { ($0.id, $0) }
+        )
+        for sample in outgoingSamples {
+            outgoingSamplesByID[sample.id] = sample
+        }
+        samplesByHost[outgoingHostID] = outgoingSamplesByID.values.sorted {
+            if $0.timestamp != $1.timestamp {
+                return $0.timestamp < $1.timestamp
+            }
+            return $0.id.uuidString < $1.id.uuidString
         }
         samplesByHost[selectedHostID] = []
         return Self(
