@@ -314,7 +314,7 @@ public actor HostStore {
     }
 
     private static func isManagedDefaultGateway(_ host: HostConfig) -> Bool {
-        host.displayName == "Default Gateway"
+        host.isManagedDefaultGateway
     }
 
     private func coalesceManagedDefaultGatewayHosts() {

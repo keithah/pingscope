@@ -1368,7 +1368,7 @@ private final class PingScopeIOSAppModel: ObservableObject {
     }
 
     private var defaultGatewayHostIndex: Array<HostConfig>.Index? {
-        hosts.firstIndex(where: \.isDefaultGateway)
+        hosts.firstIndex(where: \.isManagedDefaultGateway)
     }
 
     private var hasDefaultGatewayHost: Bool {

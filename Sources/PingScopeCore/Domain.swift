@@ -314,6 +314,13 @@ public struct HostConfig: Identifiable, Codable, Equatable, Sendable {
 }
 
 public extension HostConfig {
+    /// Dedicated identity for the app-managed router entry. This is narrower
+    /// than `isDefaultGateway`, which intentionally also classifies other local
+    /// gateway-tier hosts for UI and diagnosis.
+    var isManagedDefaultGateway: Bool {
+        displayName == "Default Gateway"
+    }
+
     /// Stable gateway classification for UI scopes that intentionally omit the router.
     var isDefaultGateway: Bool {
         tier == .localGateway || displayName == "Default Gateway"

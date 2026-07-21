@@ -2239,6 +2239,75 @@ final class LiveMonitorSessionControllerTests: XCTestCase {
     }
 
     @MainActor
+    func testAppGatewayUpdateTargetsManagedGatewayAfterStarlinkAndOtherLocalTierHosts() {
+        let selectedID = UUID()
+        let starlink = HostConfig(
+            id: selectedID,
+            displayName: "Starlink",
+            address: "192.168.100.1",
+            tier: .localGateway,
+            method: .starlink,
+            port: PingMethod.starlink.defaultPort
+        )
+        let localAppliance = HostConfig(
+            id: UUID(),
+            displayName: "Local appliance",
+            address: "192.168.50.20",
+            tier: .localGateway
+        )
+        var managedGateway = HostConfig.defaultGatewayHost(address: "192.168.20.1")
+        managedGateway.displayColor = HostDisplayColor(red: 0.17, green: 0.42, blue: 0.73)
+        managedGateway.notifications = .muted
+        let trailingLocalHost = HostConfig(
+            id: UUID(),
+            displayName: "LAN service",
+            address: "192.168.50.30",
+            tier: .localGateway
+        )
+        let originalHosts = [starlink, localAppliance, managedGateway, trailingLocalHost]
+        let sessionModel = PingScopeIOSAppSessionModel(coordinator: PingScopeIOSMultiHostSessionCoordinator())
+
+        let update = sessionModel.gatewayHostUpdate(
+            hosts: originalHosts,
+            selectedHostID: selectedID,
+            detectedHost: HostConfig.defaultGatewayHost(address: "192.168.88.1"),
+            shouldCreateIfMissing: false,
+            shouldSelect: false
+        )
+
+        XCTAssertTrue(starlink.isDefaultGateway, "Broad UI/diagnosis classification must remain unchanged.")
+        XCTAssertTrue(localAppliance.isDefaultGateway, "Other explicit local-tier hosts remain gateway-classified.")
+        XCTAssertEqual(update.change, .updated(index: 2, previousAddress: "192.168.20.1"))
+        XCTAssertEqual(update.selectedHostID, selectedID)
+        XCTAssertEqual(update.hosts.map(\.id), originalHosts.map(\.id))
+        XCTAssertEqual(update.hosts[0], starlink, "Starlink must never be rewritten by managed-gateway refresh.")
+        XCTAssertEqual(update.hosts[1], localAppliance)
+        XCTAssertEqual(update.hosts[3], trailingLocalHost)
+        var expectedGateway = managedGateway
+        expectedGateway.address = "192.168.88.1"
+        XCTAssertEqual(update.hosts[2], expectedGateway)
+    }
+
+    @MainActor
+    func testAppGatewayUpdateSelectsNewManagedGatewayWhenCreatingIt() throws {
+        let previousSelection = HostConfig(id: UUID(), displayName: "DNS", address: "1.1.1.1")
+        let detectedGateway = HostConfig.defaultGatewayHost(address: "192.168.88.1")
+        let sessionModel = PingScopeIOSAppSessionModel(coordinator: PingScopeIOSMultiHostSessionCoordinator())
+
+        let update = sessionModel.gatewayHostUpdate(
+            hosts: [previousSelection],
+            selectedHostID: previousSelection.id,
+            detectedHost: detectedGateway,
+            shouldCreateIfMissing: true,
+            shouldSelect: true
+        )
+
+        XCTAssertEqual(update.change, .created(index: 1))
+        XCTAssertEqual(update.selectedHostID, detectedGateway.id)
+        XCTAssertEqual(try XCTUnwrap(update.affectedHost).id, detectedGateway.id)
+    }
+
+    @MainActor
     func testAppGatewayUpdateLeavesSavedGatewayUntouchedWhenDetectorRejectsLinkLocalCandidate() {
         let gateway = HostConfig.defaultGatewayHost(address: "192.168.20.1")
         let originalHosts = [

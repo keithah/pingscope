@@ -50,7 +50,7 @@ public final class PingScopeIOSAppSessionModel {
             )
         }
 
-        guard let index = hosts.firstIndex(where: \.isDefaultGateway) else {
+        guard let index = hosts.firstIndex(where: \.isManagedDefaultGateway) else {
             guard shouldCreateIfMissing else {
                 return PingScopeIOSGatewayHostUpdate(
                     hosts: hosts,
