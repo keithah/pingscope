@@ -625,6 +625,20 @@ final class BuildGraphOptimizationTests: XCTestCase {
         }.sorted()
     }
 
+    func testReleaseNotesMatchBuild94AndCurrentCrossPlatformFeatures() throws {
+        let root = try repositoryRoot()
+        let notes = try String(
+            contentsOf: root.appendingPathComponent("RELEASE_NOTES.md"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(notes.contains("Build: 94"))
+        XCTAssertTrue(notes.contains("per-host colors"))
+        XCTAssertTrue(notes.contains("widget"))
+        XCTAssertTrue(notes.contains("Live Activity"))
+        XCTAssertFalse(notes.contains("Build: 89"))
+        XCTAssertFalse(notes.contains("intentionally not part of this preparation commit"))
+    }
+
     private struct PBXObject {
         let identifier: String
         let contents: String

@@ -12,7 +12,12 @@ PingScope 0.5.0 makes continuous monitoring lighter, adds a true All Hosts exper
 ## All Hosts and Live Activity
 
 - Added All Hosts Signal and Ring views on iPhone with stable host ordering, status, latency, and per-host controls.
+- Added persistent per-host colors and ordering across Mac, iPhone, widgets, and Live Activities.
+- Expanded the iPhone widget to graph and label up to five ordered hosts.
+- Added current latency and sparklines to host switching and focused monitoring.
 - Added Live Activities for at-a-glance monitoring, including Lock Screen and Dynamic Island presentations on supported devices.
+- Fixed default-gateway refresh across network changes and rejected link-local candidates.
+- Made connectivity tips optional and off by default.
 - Improved multi-host session coordination and history navigation while preserving existing probe behavior.
 
 ## Sync and history reliability
@@ -20,6 +25,7 @@ PingScope 0.5.0 makes continuous monitoring lighter, adds a true All Hosts exper
 - Hardened CloudKit account recovery, retry backoff, record accumulation, and terminal-record handling.
 - Batched large remote history backfills into retry-safe SQLite transactions.
 - Preserved legitimate out-of-retention CloudKit backfills delivered in the current batch while still pruning older stored data.
+- Closed host-sync races that could roll back edits or reset active sessions and samples.
 - Streamed weekly digest input and expanded bounded memoization to avoid unnecessary full-history materialization.
 
 ## Internal
@@ -29,6 +35,4 @@ PingScope 0.5.0 makes continuous monitoring lighter, adds a true All Hosts exper
 - Developer ID release tooling now requires, validates, and embeds a non-expired CloudKit provisioning profile before signing.
 - Sparkle tools are discovered automatically from Xcode-resolved build artifacts.
 - Version: 0.5.0
-- Build: 89
-
-Publishing, tagging, notarization, Sparkle feed updates, TestFlight submission, and App Store submission are intentionally not part of this preparation commit.
+- Build: 94
