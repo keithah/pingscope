@@ -131,6 +131,7 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
     }
     @Published var draftHostName = ""
     @Published var draftHostAddress = ""
+    @Published var draftHostID = UUID()
     @Published var draftNetworkTier: NetworkTier?
     @Published var draftMethod: PingMethod = .https
     @Published var draftPort: Int = Int(PingMethod.https.defaultPort ?? 0)
@@ -140,6 +141,7 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
     @Published var draftDownAfterFailures: Int = LatencyThresholds.defaults.downAfterFailures
     @Published var draftIsEnabled = true
     @Published var draftNotificationPolicy: HostNotificationPolicy = .inherit
+    @Published var draftDisplayColor: HostDisplayColor?
     @Published var draftTestResultText: String?
     @Published private(set) var isTestingDraftHost = false
     @Published var editingHostID: UUID?
@@ -526,7 +528,7 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
 
     var draftHost: HostConfig {
         HostConfig(
-            id: editingHostID ?? UUID(),
+            id: draftHostID,
             displayName: draftHostName,
             address: draftHostAddress,
             tier: draftNetworkTier,
@@ -539,7 +541,8 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
                 downAfterFailures: draftDownAfterFailures
             ),
             isEnabled: draftIsEnabled,
-            notifications: draftNotificationPolicy
+            notifications: draftNotificationPolicy,
+            displayColor: draftDisplayColor
         )
     }
 
@@ -686,6 +689,7 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
         editingHostID = nil
         isCreatingHost = false
         showsAdvancedHostFields = false
+        draftHostID = UUID()
         draftHostName = ""
         draftHostAddress = ""
         draftNetworkTier = nil
@@ -697,6 +701,7 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
         draftDownAfterFailures = LatencyThresholds.defaults.downAfterFailures
         draftIsEnabled = true
         draftNotificationPolicy = .inherit
+        draftDisplayColor = nil
         draftTestResultText = nil
     }
 
@@ -708,6 +713,7 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
 
     func useStarlinkDishPreset() {
         loadDraft(from: .defaultStarlinkDish)
+        draftHostID = UUID()
         editingHostID = nil
         isCreatingHost = true
         draftTestResultText = nil

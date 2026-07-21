@@ -39,6 +39,7 @@ extension PingScopeModel {
     }
 
     func loadDraft(from host: HostConfig) {
+        draftHostID = host.id
         editingHostID = host.id
         isCreatingHost = false
         showsAdvancedHostFields = false
@@ -53,6 +54,7 @@ extension PingScopeModel {
         draftDownAfterFailures = host.thresholds.downAfterFailures
         draftIsEnabled = host.isEnabled
         draftNotificationPolicy = host.notifications
+        draftDisplayColor = host.displayColor
         draftTestResultText = nil
     }
 }

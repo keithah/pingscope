@@ -2,6 +2,36 @@ import Foundation
 import XCTest
 
 final class BuildGraphOptimizationTests: XCTestCase {
+    func testHostEditorsShipCustomAndAutomaticColorControls() throws {
+        let root = try repositoryRoot()
+        let iosDraft = try String(
+            contentsOf: root.appendingPathComponent("Sources/PingScopeiOS/PingScopeIOSHostDraft.swift"),
+            encoding: .utf8
+        )
+        let iosEditor = try String(
+            contentsOf: root.appendingPathComponent("Sources/PingScopeiOS/PingScopeIOSHostEditorView.swift"),
+            encoding: .utf8
+        )
+        let macModel = try String(
+            contentsOf: root.appendingPathComponent("Sources/PingScopeApp/PingScopeModel.swift"),
+            encoding: .utf8
+        )
+        let macEditor = try String(
+            contentsOf: root.appendingPathComponent("Sources/PingScopeApp/SettingsRootView+Hosts.swift"),
+            encoding: .utf8
+        )
+
+        XCTAssertTrue(iosDraft.contains("var displayColor: HostDisplayColor?"))
+        XCTAssertTrue(iosDraft.contains("var usesAutomaticDisplayColor: Bool"))
+        XCTAssertTrue(iosEditor.contains("ColorPicker(\"Host Color\", selection:"))
+        XCTAssertTrue(iosEditor.contains("Button(\"Use Automatic Color\")"))
+        XCTAssertTrue(iosEditor.contains("opaqueSRGBHostDisplayColor"))
+        XCTAssertTrue(macModel.contains("var draftDisplayColor: HostDisplayColor?"))
+        XCTAssertTrue(macEditor.contains("ColorPicker(\"Host Color\", selection:"))
+        XCTAssertTrue(macEditor.contains("Button(\"Use Automatic Color\")"))
+        XCTAssertTrue(macEditor.contains("opaqueSRGBHostDisplayColor"))
+    }
+
     func testIOSConnectivityTipsShippingWiring() throws {
         let root = try repositoryRoot()
         let appSource = try String(

@@ -88,4 +88,54 @@ final class HostConfigPersistenceTests: XCTestCase {
         XCTAssertEqual(reloaded.hosts.map(\.displayName), ["Cloudflare DNS", "Default Gateway"])
         XCTAssertFalse(reloaded.hosts.contains { $0.displayName == "Google DNS" })
     }
+
+    @MainActor
+    func testMacHostDraftSavesCustomAndAutomaticColorWithoutChangingProbeConfiguration() throws {
+        let customColor = HostDisplayColor(red: 0.15, green: 0.45, blue: 0.75)
+        let host = HostConfig(
+            id: UUID(),
+            displayName: "Edge",
+            address: "edge.example",
+            tier: .remoteService,
+            method: .tcp,
+            port: 8443,
+            interval: .milliseconds(1_250),
+            timeout: .milliseconds(2_750),
+            thresholds: LatencyThresholds(degradedMilliseconds: 240, downAfterFailures: 4),
+            isEnabled: false,
+            notifications: .muted,
+            displayColor: nil
+        )
+        let model = PingScopeModel()
+
+        model.loadDraft(from: host)
+        model.draftDisplayColor = customColor
+        model.addDraftHost()
+
+        let saved = try XCTUnwrap(model.snapshot.hosts.first { $0.id == host.id })
+        XCTAssertEqual(saved.displayColor, customColor)
+        XCTAssertEqual(saved.displayName, host.displayName)
+        XCTAssertEqual(saved.address, host.address)
+        XCTAssertEqual(saved.tier, host.tier)
+        XCTAssertEqual(saved.method, host.method)
+        XCTAssertEqual(saved.port, host.port)
+        XCTAssertEqual(saved.interval, host.interval)
+        XCTAssertEqual(saved.timeout, host.timeout)
+        XCTAssertEqual(saved.thresholds, host.thresholds)
+        XCTAssertEqual(saved.isEnabled, host.isEnabled)
+        XCTAssertEqual(saved.notifications, host.notifications)
+
+        model.loadDraft(from: saved)
+        XCTAssertEqual(model.draftDisplayColor, customColor)
+        model.draftDisplayColor = nil
+        model.addDraftHost()
+
+        let automatic = try XCTUnwrap(model.snapshot.hosts.first { $0.id == host.id })
+        XCTAssertNil(automatic.displayColor)
+        XCTAssertEqual(automatic.address, host.address)
+        XCTAssertEqual(automatic.method, host.method)
+        XCTAssertEqual(automatic.port, host.port)
+        XCTAssertEqual(automatic.interval, host.interval)
+        XCTAssertEqual(automatic.timeout, host.timeout)
+    }
 }

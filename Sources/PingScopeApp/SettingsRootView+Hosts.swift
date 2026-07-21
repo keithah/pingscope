@@ -99,6 +99,23 @@ extension SettingsRootView {
                     Spacer(minLength: 0)
                 }
 
+                SettingsField("Appearance") {
+                    HStack(spacing: 10) {
+                        ColorPicker("Host Color", selection: displayColorSelection, supportsOpacity: false)
+                            .labelsHidden()
+                        Circle()
+                            .fill(resolvedDraftDisplayColor)
+                            .frame(width: 16, height: 16)
+                        Text(model.draftDisplayColor == nil ? "Automatic Color" : "Custom Color")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Button("Use Automatic Color") {
+                            model.draftDisplayColor = nil
+                        }
+                        .disabled(model.draftDisplayColor == nil)
+                    }
+                }
+
                 Button {
                     model.showsAdvancedHostFields.toggle()
                 } label: {
@@ -192,6 +209,35 @@ extension SettingsRootView {
 
     private static let autoNetworkTierSelection = "__auto_network_tier__"
 
+    private var displayColorSelection: Binding<Color> {
+        Binding(
+            get: { resolvedDraftDisplayColor },
+            set: { color in
+                if let displayColor = color.opaqueSRGBHostDisplayColor {
+                    model.draftDisplayColor = displayColor
+                }
+            }
+        )
+    }
+
+    private var resolvedDraftDisplayColor: Color {
+        ResolvedHostDisplayColor(
+            hostID: model.draftHostID,
+            displayColor: model.draftDisplayColor
+        ).swiftUIColor
+    }
+
+}
+
+private extension Color {
+    var opaqueSRGBHostDisplayColor: HostDisplayColor? {
+        guard let converted = NSColor(self).usingColorSpace(.sRGB) else { return nil }
+        return HostDisplayColor(
+            red: min(max(Double(converted.redComponent), 0), 1),
+            green: min(max(Double(converted.greenComponent), 0), 1),
+            blue: min(max(Double(converted.blueComponent), 0), 1)
+        )
+    }
 }
 
 private struct LiveHostSettingsList: View {

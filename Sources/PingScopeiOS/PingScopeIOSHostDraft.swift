@@ -13,6 +13,7 @@ public struct PingScopeIOSHostDraft: Equatable, Sendable {
     public var downAfterFailures: Int
     public var isEnabled: Bool
     public var notifications: HostNotificationPolicy
+    public var displayColor: HostDisplayColor?
 
     public init(host: HostConfig) {
         self.id = host.id
@@ -26,6 +27,7 @@ public struct PingScopeIOSHostDraft: Equatable, Sendable {
         self.downAfterFailures = host.thresholds.downAfterFailures
         self.isEnabled = host.isEnabled
         self.notifications = host.notifications
+        self.displayColor = host.displayColor
     }
 
     public var finalizedHost: HostConfig {
@@ -42,7 +44,8 @@ public struct PingScopeIOSHostDraft: Equatable, Sendable {
                 downAfterFailures: downAfterFailures
             ),
             isEnabled: isEnabled,
-            notifications: notifications
+            notifications: notifications,
+            displayColor: displayColor
         )
     }
 
@@ -52,6 +55,10 @@ public struct PingScopeIOSHostDraft: Equatable, Sendable {
 
     public var canSave: Bool {
         validationErrors.isEmpty
+    }
+
+    public var usesAutomaticDisplayColor: Bool {
+        displayColor == nil
     }
 
     public mutating func apply(method: PingMethod) {

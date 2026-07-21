@@ -2,6 +2,8 @@ import PingScopeCore
 import SwiftUI
 
 #if os(iOS)
+import UIKit
+
 struct PingScopeIOSHostEditor: View {
     @State private var draft: PingScopeIOSHostDraft
 
@@ -33,6 +35,23 @@ struct PingScopeIOSHostEditor: View {
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                     Toggle("Enabled", isOn: $draft.isEnabled)
+                }
+
+                Section("Appearance") {
+                    ColorPicker("Host Color", selection: displayColorSelection, supportsOpacity: false)
+
+                    HStack {
+                        Circle()
+                            .fill(resolvedDisplayColor)
+                            .frame(width: 16, height: 16)
+                        Text(draft.usesAutomaticDisplayColor ? "Automatic Color" : "Custom Color")
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Button("Use Automatic Color") {
+                        draft.displayColor = nil
+                    }
+                    .disabled(draft.usesAutomaticDisplayColor)
                 }
 
                 Section("Probe") {
@@ -104,8 +123,43 @@ struct PingScopeIOSHostEditor: View {
         )
     }
 
+    private var displayColorSelection: Binding<Color> {
+        Binding(
+            get: { resolvedDisplayColor },
+            set: { color in
+                if let displayColor = color.opaqueSRGBHostDisplayColor {
+                    draft.displayColor = displayColor
+                }
+            }
+        )
+    }
+
+    private var resolvedDisplayColor: Color {
+        ResolvedHostDisplayColor(hostID: draft.id, displayColor: draft.displayColor).swiftUIColor
+    }
+
     private var canSave: Bool {
         draft.canSave
+    }
+}
+
+private extension Color {
+    var opaqueSRGBHostDisplayColor: HostDisplayColor? {
+        guard let colorSpace = CGColorSpace(name: CGColorSpace.sRGB),
+              let converted = UIColor(self).cgColor.converted(
+                to: colorSpace,
+                intent: .defaultIntent,
+                options: nil
+              ),
+              let components = converted.components,
+              components.count >= 3 else {
+            return nil
+        }
+        return HostDisplayColor(
+            red: min(max(Double(components[0]), 0), 1),
+            green: min(max(Double(components[1]), 0), 1),
+            blue: min(max(Double(components[2]), 0), 1)
+        )
     }
 }
 #endif

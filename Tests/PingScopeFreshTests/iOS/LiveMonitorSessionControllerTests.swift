@@ -1773,6 +1773,29 @@ final class LiveMonitorSessionControllerTests: XCTestCase {
         XCTAssertFalse(draft.finalizedHost.isEnabled)
     }
 
+    func testIOSHostDraftRoundTripsCustomAndAutomaticDisplayColors() {
+        let customColor = HostDisplayColor(red: 0.2, green: 0.4, blue: 0.8)
+        let host = HostConfig(
+            id: UUID(),
+            displayName: "Editable color",
+            address: "1.1.1.1",
+            displayColor: nil
+        )
+        var draft = PingScopeIOSHostDraft(host: host)
+        var existingCustomHost = host
+        existingCustomHost.displayColor = customColor
+
+        XCTAssertEqual(PingScopeIOSHostDraft(host: existingCustomHost).displayColor, customColor)
+        XCTAssertTrue(draft.usesAutomaticDisplayColor)
+        draft.displayColor = customColor
+        XCTAssertFalse(draft.usesAutomaticDisplayColor)
+        XCTAssertEqual(draft.finalizedHost.displayColor, customColor)
+
+        draft.displayColor = nil
+        XCTAssertTrue(draft.usesAutomaticDisplayColor)
+        XCTAssertNil(draft.finalizedHost.displayColor)
+    }
+
     func testIOSHostDraftAppliesMethodAwarePortAndRejectsInvalidInput() {
         var draft = PingScopeIOSHostDraft(host: HostConfig(displayName: "Cloudflare", address: "1.1.1.1"))
 
