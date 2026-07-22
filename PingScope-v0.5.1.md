@@ -16,8 +16,9 @@ PingScope 0.5.1 reduces power use during long-running monitoring and fixes lifec
 - Improved CloudKit history batching and synchronization hot paths.
 - Reduced repeated history, widget, and presentation work during long sessions.
 - Hardened release recovery when a tag or GitHub release already exists.
+- Live Activity and Dynamic Island settings default to off, so both features require explicit opt-in.
 
 ## Release
 
 - Version: 0.5.1
-- Build: 95
+- Build: 96
