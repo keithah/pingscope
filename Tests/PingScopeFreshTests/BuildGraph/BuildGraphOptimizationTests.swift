@@ -801,9 +801,9 @@ final class BuildGraphOptimizationTests: XCTestCase {
             .filter { $0.contains("CURRENT_PROJECT_VERSION =") }
 
         XCTAssertFalse(marketingVersions.isEmpty)
-        XCTAssertTrue(marketingVersions.allSatisfy { $0.contains("MARKETING_VERSION = 0.5.0;") })
+        XCTAssertTrue(marketingVersions.allSatisfy { $0.contains("MARKETING_VERSION = 0.5.1;") })
         XCTAssertFalse(buildVersions.isEmpty)
-        XCTAssertTrue(buildVersions.allSatisfy { $0.contains("CURRENT_PROJECT_VERSION = 94;") })
+        XCTAssertTrue(buildVersions.allSatisfy { $0.contains("CURRENT_PROJECT_VERSION = 95;") })
     }
 
     func testBatteryAwareLifecycleWiringSeedsInitialStateAndSerializesUpdates() throws {
@@ -963,16 +963,18 @@ final class BuildGraphOptimizationTests: XCTestCase {
         }.sorted()
     }
 
-    func testReleaseNotesMatchBuild94AndCurrentCrossPlatformFeatures() throws {
+    func testReleaseNotesMatchBuild95AndCurrentPatchFeatures() throws {
         let root = try repositoryRoot()
         let notes = try String(
             contentsOf: root.appendingPathComponent("RELEASE_NOTES.md"),
             encoding: .utf8
         )
-        XCTAssertTrue(notes.contains("Build: 94"))
-        XCTAssertTrue(notes.contains("per-host colors"))
-        XCTAssertTrue(notes.contains("widget"))
-        XCTAssertTrue(notes.contains("Live Activity"))
+        XCTAssertTrue(notes.contains("Version: 0.5.1"))
+        XCTAssertTrue(notes.contains("Build: 95"))
+        XCTAssertTrue(notes.contains("battery-aware adaptive monitoring"))
+        XCTAssertTrue(notes.contains("outage alert"))
+        XCTAssertTrue(notes.contains("CloudKit"))
+        XCTAssertFalse(notes.contains("Build: 94"))
         XCTAssertFalse(notes.contains("Build: 89"))
         XCTAssertFalse(notes.contains("intentionally not part of this preparation commit"))
     }
