@@ -102,3 +102,15 @@ active check, suspend, then persist work after account-change cleanup.
   - focused stale-callback test: 1 passed
   - `swift test --filter CloudSyncCoordinatorTests`: 89 passed
   - `swift test`: 995 passed
+
+## Final review follow-up: commit fencing and persistence failure
+
+- Added an epoch context to remote application. The receiver validates it at
+  each storage/host commit point; deterministic gates prove account changes
+  reject paused live and startup-replay applies before history mutation.
+- Added an internal persistence seam and a controlled boundary failure path:
+  enqueue/archive failure deactivates and releases the boundary, cancels work,
+  and enters the existing lifecycle handler without invoking the receiver.
+- Tests: focused commit-fencing and persistence-failure tests passed;
+  `CloudSyncCoordinatorTests` passed on rerun after one pre-existing timing
+  assertion flaked; final `swift test` passed 1,000 tests.

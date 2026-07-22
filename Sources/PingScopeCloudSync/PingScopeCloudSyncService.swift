@@ -143,26 +143,35 @@ private actor CloudSyncRemoteReceiver {
     private let historyStore: any PingHistoryStore
     private let hostStore: any SharedHostStoring
     private let versions: CloudSyncHostVersionRegistry
+    private let beforeRemoteCommit: @Sendable () async -> Void
     private var acceptedHostStateHandler: PingScopeCloudSyncAcceptedHostStateHandler?
 
     init(
         historyStore: any PingHistoryStore,
         hostStore: any SharedHostStoring,
-        versions: CloudSyncHostVersionRegistry
+        versions: CloudSyncHostVersionRegistry,
+        beforeRemoteCommit: @escaping @Sendable () async -> Void = {}
     ) {
         self.historyStore = historyStore
         self.hostStore = hostStore
         self.versions = versions
+        self.beforeRemoteCommit = beforeRemoteCommit
     }
 
     func setAcceptedHostStateHandler(_ handler: PingScopeCloudSyncAcceptedHostStateHandler?) {
         acceptedHostStateHandler = handler
     }
 
-    func apply(records: [CKRecord], deletions: [CloudSyncRemoteDeletion]) async throws {
+    func apply(
+        records: [CKRecord],
+        deletions: [CloudSyncRemoteDeletion],
+        context: CloudSyncRemoteApplyContext = .unconditional
+    ) async throws {
         let sampleRecords = records.filter {
             $0.recordType == PingScopeCloudKitModel.RecordType.pingSample
         }
+        await beforeRemoteCommit()
+        try context.ensureCurrent()
         try await CloudSyncRemoteChangeApplier.apply(sampleRecords: sampleRecords, to: historyStore)
 
         var hostState = hostStore.load().state ?? SharedHostStoreState(hosts: [])
@@ -199,6 +208,7 @@ private actor CloudSyncRemoteReceiver {
         let sampleDeletionIDs = deletions
             .filter { $0.recordType == PingScopeCloudKitModel.RecordType.pingSample }
             .map(\.recordID)
+        try context.ensureCurrent()
         try await CloudSyncRemoteChangeApplier.deleteSampleRecordIDs(sampleDeletionIDs, from: historyStore)
 
         let confirmedDeletionIDs = Set(deletions.compactMap { deletion -> UUID? in
@@ -224,10 +234,13 @@ private actor CloudSyncRemoteReceiver {
 
         let didChangeHostState = hostState != originalHostState
         if didChangeHostState {
+            try context.ensureCurrent()
             try hostStore.save(hostState)
         }
+        try context.ensureCurrent()
         await versions.applyBatch(acceptedVersions, confirmingDeletions: confirmedDeletionIDs)
         if didChangeHostState {
+            try context.ensureCurrent()
             await acceptedHostStateHandler?(hostState)
         }
     }
@@ -273,8 +286,8 @@ public actor PingScopeCloudSyncService {
             hostStore: hostStore,
             versions: versions
         )
-        let boundary = CKSyncEngineBoundary { records, deletions in
-            try await receiver.apply(records: records, deletions: deletions)
+        let boundary = CKSyncEngineBoundary { records, deletions, context in
+            try await receiver.apply(records: records, deletions: deletions, context: context)
         }
         self.historyStore = historyStore
         self.hostStore = hostStore
@@ -293,6 +306,7 @@ public actor PingScopeCloudSyncService {
         recordBuilder: any CloudSyncRecordBuilding,
         registrySuiteName: String,
         registryPersistenceObserver: @escaping @Sendable () -> Void = {},
+        beforeRemoteCommit: @escaping @Sendable () async -> Void = {},
         beforeDisableCoordinatorTeardown: @escaping @Sendable () async -> Void = {},
         afterDisableAuthorizationTeardown: @escaping @Sendable () async -> Void = {},
         sleep: @escaping @Sendable (Duration) async throws -> Void = {
@@ -306,7 +320,8 @@ public actor PingScopeCloudSyncService {
         let receiver = CloudSyncRemoteReceiver(
             historyStore: historyStore,
             hostStore: hostStore,
-            versions: versions
+            versions: versions,
+            beforeRemoteCommit: beforeRemoteCommit
         )
         self.historyStore = historyStore
         self.hostStore = hostStore
@@ -323,9 +338,10 @@ public actor PingScopeCloudSyncService {
 
     func applyRemoteChanges(
         records: [CKRecord],
-        deletions: [CloudSyncRemoteDeletion] = []
+        deletions: [CloudSyncRemoteDeletion] = [],
+        context: CloudSyncRemoteApplyContext = .unconditional
     ) async throws {
-        try await receiver.apply(records: records, deletions: deletions)
+        try await receiver.apply(records: records, deletions: deletions, context: context)
     }
 
     public func setAcceptedHostStateHandler(
