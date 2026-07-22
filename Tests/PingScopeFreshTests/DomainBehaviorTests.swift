@@ -589,6 +589,41 @@ final class DomainBehaviorTests: XCTestCase {
         )
     }
 
+    func testMultipleFailuresDiagnosisIsGatedByRemoteServiceDownType() {
+        let hostID = UUID()
+        let diagnosis = NetworkPerspectiveDiagnosis(
+            scope: .partialDegradation,
+            title: "Multiple failures",
+            detail: "test",
+            affectedHostIDs: [hostID],
+            verdict: .multipleFailures(hostIDs: [hostID]),
+            confidence: .high
+        )
+        let base = Date(timeIntervalSince1970: 3_000)
+
+        // Enabling remoteServiceDown (the delivered decision) must surface the alert.
+        var enabledEngine = AlertDecisionEngine(rules: NotificationRuleSet(
+            isEnabled: true,
+            cooldown: .seconds(60),
+            alertTypes: [.remoteServiceDown],
+            diagnosisSensitivity: .sensitive
+        ))
+        XCTAssertEqual(
+            enabledEngine.diagnosisAlertCandidate(diagnosis, at: base)?.decision,
+            .remoteServiceDown(hostIDs: [hostID])
+        )
+
+        // Disabling remoteServiceDown must suppress it — the gate follows the decision,
+        // not an unrelated .hostDown toggle.
+        var disabledEngine = AlertDecisionEngine(rules: NotificationRuleSet(
+            isEnabled: true,
+            cooldown: .seconds(60),
+            alertTypes: [.hostDown],
+            diagnosisSensitivity: .sensitive
+        ))
+        XCTAssertNil(disabledEngine.diagnosisAlertCandidate(diagnosis, at: base))
+    }
+
     func testTentativeDiagnosisAlertsFallBackToInternetLoss() {
         let hostID = UUID()
         var engine = AlertDecisionEngine(rules: NotificationRuleSet(

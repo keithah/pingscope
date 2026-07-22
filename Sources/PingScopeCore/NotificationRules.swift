@@ -472,7 +472,7 @@ public struct AlertDecisionEngine: Sendable {
         case let .partialDegradation(tier):
             return (.pathDegraded, .pathDegraded(tier: tier))
         case let .multipleFailures(hostIDs):
-            return (.hostDown, .remoteServiceDown(hostIDs: hostIDs))
+            return (.remoteServiceDown, .remoteServiceDown(hostIDs: hostIDs))
         case .noData, .allReachable:
             return nil
         }
