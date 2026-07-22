@@ -101,6 +101,59 @@ final class HistoryIncidentDigestTests: XCTestCase {
         XCTAssertEqual(try XCTUnwrap(log.incidents.first).onsetDiagnosisScope, .localNetwork)
     }
 
+    func testIncidentOnsetUsesLatestInterleavedSamplesAcrossHosts() throws {
+        let start = Date(timeIntervalSince1970: 4_500)
+        let thresholds = LatencyThresholds(degradedMilliseconds: 100, downAfterFailures: 1)
+        let gateway = HostConfig(
+            displayName: "Gateway",
+            address: "192.168.1.1",
+            tier: .localGateway,
+            thresholds: thresholds
+        )
+        let upstream = HostConfig(
+            displayName: "Upstream",
+            address: "1.1.1.1",
+            tier: .upstream,
+            thresholds: thresholds
+        )
+        let onsetCount = 16
+        var gatewaySamples: [PingResult] = []
+        var upstreamSamples: [PingResult] = []
+
+        for index in 0..<onsetCount {
+            let onset = start.addingTimeInterval(Double(index * 20 + 10))
+            gatewaySamples.append(failure(gateway.id, at: onset))
+            gatewaySamples.append(success(gateway.id, at: onset.addingTimeInterval(10), latency: 10))
+            upstreamSamples.append(success(upstream.id, at: onset.addingTimeInterval(-5), latency: 20))
+        }
+
+        let lookupWorkCounter = IncidentOnsetLookupWorkCounter()
+        let log = HistoryIncidentLog(
+            samples: gatewaySamples.reversed(),
+            host: gateway,
+            allHosts: [gateway, upstream],
+            samplesByHost: [
+                gateway.id: gatewaySamples.reversed(),
+                upstream.id: upstreamSamples.reversed()
+            ],
+            endingAt: start.addingTimeInterval(Double(onsetCount * 20 + 10)),
+            lookupWorkCounter: lookupWorkCounter
+        )
+
+        let expectedOnsets = (0..<onsetCount).map {
+            start.addingTimeInterval(Double($0 * 20 + 10))
+        }
+        XCTAssertEqual(log.incidents.map(\.startDate), expectedOnsets)
+        XCTAssertEqual(log.incidents.map(\.endDate), expectedOnsets.map { $0.addingTimeInterval(10) })
+        XCTAssertEqual(log.incidents.map(\.sampleCount), Array(repeating: 1, count: onsetCount))
+        XCTAssertEqual(log.incidents.map(\.onsetDiagnosisScope), Array(repeating: .localNetwork, count: onsetCount))
+        XCTAssertEqual(log.incidents.map(\.onsetFaultTier), Array(repeating: .localGateway, count: onsetCount))
+        // Gateway advances through every onset plus the preceding recoveries;
+        // upstream advances once per onset.
+        let expectedLookupWork = (2 * onsetCount - 1) + onsetCount
+        XCTAssertEqual(lookupWorkCounter.count, expectedLookupWork)
+    }
+
     func testWeeklyDigestAggregatesSevenDayWindowAcrossHostsIncludingNoDataHosts() throws {
         let endingAt = Date(timeIntervalSince1970: 10_000)
         let first = HostConfig(id: UUID(), displayName: "First", address: "1.1.1.1")

@@ -1,6 +1,11 @@
 import Foundation
 import PingScopeCore
 
+/// Internal instrumentation for testing the amount of onset lookup work.
+final class IncidentOnsetLookupWorkCounter {
+    var count = 0
+}
+
 public struct HistoryIncident: Equatable, Sendable, Identifiable {
     public let id: UUID
     public let startDate: Date
@@ -86,20 +91,66 @@ public struct HistoryIncidentLog: Equatable, Sendable {
         samplesByHost: [UUID: [PingResult]],
         endingAt: Date
     ) {
+        self.init(
+            samples: samples,
+            host: host,
+            allHosts: allHosts,
+            samplesByHost: samplesByHost,
+            endingAt: endingAt,
+            recordLookupWork: nil
+        )
+    }
+
+    init(
+        samples: [PingResult],
+        host: HostConfig,
+        allHosts: [HostConfig],
+        samplesByHost: [UUID: [PingResult]],
+        endingAt: Date,
+        lookupWorkCounter: IncidentOnsetLookupWorkCounter
+    ) {
+        self.init(
+            samples: samples,
+            host: host,
+            allHosts: allHosts,
+            samplesByHost: samplesByHost,
+            endingAt: endingAt,
+            recordLookupWork: { lookupWorkCounter.count += 1 }
+        )
+    }
+
+    private init(
+        samples: [PingResult],
+        host: HostConfig,
+        allHosts: [HostConfig],
+        samplesByHost: [UUID: [PingResult]],
+        endingAt: Date,
+        recordLookupWork: (() -> Void)?
+    ) {
         let chronological = samples.sorted(by: Self.isChronologicallyOrdered)
         let chronologicalByHost = samplesByHost.mapValues {
             $0.sorted(by: Self.isChronologicallyOrdered)
         }
         var previousWasDown = false
         var diagnoses: [UUID: NetworkPerspectiveDiagnosis] = [:]
+        var nextSampleIndexByHost: [UUID: Int] = [:]
         let diagnoser = NetworkPerspectiveDiagnoser()
+        // `chronological` is ascending, so failure-onset thresholds never move
+        // backward and each host cursor can advance without resetting.
         for sample in chronological {
             let isDown = !sample.isSuccess
             if isDown, !previousWasDown {
                 var healthByHost: [UUID: HostHealth] = [:]
                 for monitoredHost in allHosts {
-                    guard let hostSamples = chronologicalByHost[monitoredHost.id],
-                          let latest = Self.latestSample(in: hostSamples, through: sample.timestamp) else { continue }
+                    guard let hostSamples = chronologicalByHost[monitoredHost.id] else { continue }
+                    var cursor = nextSampleIndexByHost[monitoredHost.id, default: 0]
+                    while cursor < hostSamples.count, hostSamples[cursor].timestamp <= sample.timestamp {
+                        recordLookupWork?()
+                        cursor += 1
+                    }
+                    nextSampleIndexByHost[monitoredHost.id] = cursor
+                    guard cursor > 0 else { continue }
+                    let latest = hostSamples[cursor - 1]
                     var health = HostHealth(hostID: monitoredHost.id, thresholds: monitoredHost.thresholds)
                     health.ingest(latest)
                     healthByHost[monitoredHost.id] = health
@@ -118,20 +169,6 @@ public struct HistoryIncidentLog: Equatable, Sendable {
         return lhs.id.uuidString < rhs.id.uuidString
     }
 
-    private static func latestSample(in samples: [PingResult], through timestamp: Date) -> PingResult? {
-        var lowerBound = 0
-        var upperBound = samples.count
-        while lowerBound < upperBound {
-            let middle = lowerBound + (upperBound - lowerBound) / 2
-            if samples[middle].timestamp <= timestamp {
-                lowerBound = middle + 1
-            } else {
-                upperBound = middle
-            }
-        }
-        guard lowerBound > 0 else { return nil }
-        return samples[lowerBound - 1]
-    }
 }
 
 public struct HistoryWeeklyDigest: Equatable, Sendable {

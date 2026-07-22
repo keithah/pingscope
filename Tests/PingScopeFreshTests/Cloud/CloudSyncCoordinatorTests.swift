@@ -1123,8 +1123,8 @@ final class CloudSyncCoordinatorTests: XCTestCase {
             await invocation.recordReturn()
         }
 
-        try await waitUntil { await cancellationGate.hasStarted() }
-        try await waitUntil { await invocation.hasReturned() }
+        await cancellationGate.waitUntilStarted()
+        await invocation.waitForReturn()
         try await waitUntil { await coordinator.status == .checkingAccount }
         try await waitUntil { UserDefaults.standard.data(forKey: stateKey) == nil }
 
@@ -1138,7 +1138,7 @@ final class CloudSyncCoordinatorTests: XCTestCase {
         eventTask = nil
         oldDelegate = nil
 
-        try await waitUntil { await fixture.host.activeHandleCount() == 0 }
+        try await waitUntil { await coordinator.status == .accountUnavailable }
         let status = await coordinator.status
         let uploadAfterAccountLoss = try await coordinator.upload(samples: [], hosts: [])
         let releaseCount = await fixture.host.releaseCount()
@@ -1213,6 +1213,659 @@ final class CloudSyncCoordinatorTests: XCTestCase {
         XCTAssertEqual(Set(result.failedRecordSaveErrors.keys), [failed.recordID])
         XCTAssertFalse(result.allRecordsConfirmed)
         await fixture.boundary.stop()
+    }
+
+    func testRemoteApplyFailureIsReplayedAfterRestart() async throws {
+        let suiteName = "CloudSyncInboundReplayTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let stateKey = "PingScope.CloudSync.InboundReplayState"
+        let historyStore = FailingOnceRemoteHistoryStore()
+        let hostStore = LockedSharedHostStore(state: SharedHostStoreState(hosts: []))
+        let sample = PingResult.success(hostID: UUID(), latency: .milliseconds(12))
+        let record = PingSampleRecordMapper.record(from: sample)
+
+        let firstBridge = RemoteApplyBridge()
+        let firstHost = RecordingCloudKitEngineHost(deleteError: nil)
+        let firstBoundary = CKSyncEngineBoundary(
+            engineHost: firstHost,
+            stateKey: stateKey,
+            subscriptionID: "CloudSyncInboundReplayTests",
+            defaultsSuiteName: suiteName,
+            onRemoteChanges: { records, deletions, _ in
+                try await firstBridge.apply(records: records, deletions: deletions)
+            }
+        )
+        let firstService = PingScopeCloudSyncService(
+            historyStore: historyStore,
+            hostStore: hostStore,
+            boundary: firstBoundary,
+            recordBuilder: DefaultCloudSyncRecordBuilder(),
+            registrySuiteName: suiteName
+        )
+        await firstBridge.setService(firstService)
+        try await firstBoundary.start()
+        let latestFirstDelegate = await firstHost.latestDelegate()
+        let firstDelegate = try XCTUnwrap(latestFirstDelegate)
+
+        await firstDelegate.handleFetchedRecordZoneChanges(records: [record], deletions: [])
+
+        let firstRemoteSampleCount = await historyStore.remoteSampleCount()
+        XCTAssertEqual(firstRemoteSampleCount, 0)
+        XCTAssertNotNil(defaults.data(forKey: "\(stateKey).InboundWork"))
+        await firstBoundary.stop()
+
+        let secondBridge = RemoteApplyBridge()
+        let secondHost = RecordingCloudKitEngineHost(deleteError: nil)
+        let secondBoundary = CKSyncEngineBoundary(
+            engineHost: secondHost,
+            stateKey: stateKey,
+            subscriptionID: "CloudSyncInboundReplayTests",
+            defaultsSuiteName: suiteName,
+            onRemoteChanges: { records, deletions, _ in
+                try await secondBridge.apply(records: records, deletions: deletions)
+            }
+        )
+        let secondService = PingScopeCloudSyncService(
+            historyStore: historyStore,
+            hostStore: hostStore,
+            boundary: secondBoundary,
+            recordBuilder: DefaultCloudSyncRecordBuilder(),
+            registrySuiteName: suiteName
+        )
+        await secondBridge.setService(secondService)
+
+        try await secondBoundary.start()
+
+        let secondRemoteSampleCount = await historyStore.remoteSampleCount()
+        XCTAssertEqual(secondRemoteSampleCount, 1)
+        XCTAssertNil(defaults.data(forKey: "\(stateKey).InboundWork"))
+        await secondBoundary.stop()
+    }
+
+    func testQueuedInboundWorkIsDiscardedWhenCloudKitAccountChanges() async throws {
+        let suiteName = "CloudSyncInboundAccountChangeTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let stateKey = "PingScope.CloudSync.InboundAccountChange"
+        let handler = ThrowingRemoteChangeHandler(failures: 1)
+        let record = PingSampleRecordMapper.record(
+            from: .success(hostID: UUID(), latency: .milliseconds(14))
+        )
+        let firstHost = RecordingCloudKitEngineHost(deleteError: nil)
+        let firstBoundary = CKSyncEngineBoundary(
+            engineHost: firstHost,
+            stateKey: stateKey,
+            subscriptionID: "CloudSyncInboundAccountChangeTests",
+            defaultsSuiteName: suiteName,
+            onRemoteChanges: { records, deletions, _ in
+                try await handler.apply(records: records, deletions: deletions)
+            }
+        )
+        await firstBoundary.setAccountChangeHandler {}
+        try await firstBoundary.start()
+        let latestFirstDelegate = await firstHost.latestDelegate()
+        let firstDelegate = try XCTUnwrap(latestFirstDelegate)
+
+        await firstDelegate.handleFetchedRecordZoneChanges(records: [record], deletions: [])
+
+        XCTAssertNotNil(defaults.data(forKey: "\(stateKey).InboundWork"))
+        await firstHost.emitAccountChange(availability: .privateAccount)
+        XCTAssertNil(defaults.data(forKey: "\(stateKey).InboundWork"))
+        await firstBoundary.stop()
+
+        let secondHost = RecordingCloudKitEngineHost(deleteError: nil)
+        let secondBoundary = CKSyncEngineBoundary(
+            engineHost: secondHost,
+            stateKey: stateKey,
+            subscriptionID: "CloudSyncInboundAccountChangeTests",
+            defaultsSuiteName: suiteName,
+            onRemoteChanges: { records, deletions, _ in
+                try await handler.apply(records: records, deletions: deletions)
+            }
+        )
+
+        try await secondBoundary.start()
+
+        let accountChangeCallCount = await handler.callCount()
+        XCTAssertEqual(accountChangeCallCount, 1)
+        await secondBoundary.stop()
+    }
+
+    func testOldAccountCallbackPausedBeforeAdmissionCannotReplayAfterAccountChange() async throws {
+        let suiteName = "CloudSyncInboundAdmissionEpochTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let stateKey = "PingScope.CloudSync.InboundAdmissionEpoch"
+        let gate = RemoteChangeAdmissionGate()
+        let handler = ThrowingRemoteChangeHandler(failures: 0)
+        let record = PingSampleRecordMapper.record(
+            from: .success(hostID: UUID(), latency: .milliseconds(16))
+        )
+        let firstHost = RecordingCloudKitEngineHost(deleteError: nil)
+        let firstBoundary = CKSyncEngineBoundary(
+            engineHost: firstHost,
+            stateKey: stateKey,
+            subscriptionID: "CloudSyncInboundAdmissionEpochTests",
+            defaultsSuiteName: suiteName,
+            onRemoteChanges: { records, deletions, _ in
+                try await handler.apply(records: records, deletions: deletions)
+            },
+            beforeRemoteChangeAdmission: {
+                await gate.pause()
+            }
+        )
+        await firstBoundary.setAccountChangeHandler {}
+        try await firstBoundary.start()
+        let latestFirstDelegate = await firstHost.latestDelegate()
+        let firstDelegate = try XCTUnwrap(latestFirstDelegate)
+
+        let callback = Task {
+            await firstDelegate.handleFetchedRecordZoneChanges(records: [record], deletions: [])
+        }
+        await gate.waitUntilPaused()
+        await firstHost.emitAccountChange(availability: .privateAccount)
+        await gate.resume()
+        await callback.value
+        await firstBoundary.stop()
+
+        let secondHost = RecordingCloudKitEngineHost(deleteError: nil)
+        let secondBoundary = CKSyncEngineBoundary(
+            engineHost: secondHost,
+            stateKey: stateKey,
+            subscriptionID: "CloudSyncInboundAdmissionEpochTests",
+            defaultsSuiteName: suiteName,
+            onRemoteChanges: { records, deletions, _ in
+                try await handler.apply(records: records, deletions: deletions)
+            }
+        )
+
+        try await secondBoundary.start()
+
+        let handlerCallCount = await handler.callCount()
+        XCTAssertEqual(handlerCallCount, 0)
+        XCTAssertNil(defaults.data(forKey: "\(stateKey).InboundWork"))
+        await secondBoundary.stop()
+    }
+
+    func testAccountRecoveryRejectsLateRetiredStateUpdate() async throws {
+        let suiteName = "CloudSyncAccountStateFenceTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let stateKey = "PingScope.CloudSync.AccountStateFence"
+        let gate = RemoteCommitGate()
+        let host = RecordingCloudKitEngineHost(deleteError: nil)
+        let boundary = CKSyncEngineBoundary(
+            engineHost: host,
+            stateKey: stateKey,
+            subscriptionID: "CloudSyncAccountStateFenceTests",
+            defaultsSuiteName: suiteName,
+            beforeStateSerializationPersist: { await gate.pause() }
+        )
+        let service = PingScopeCloudSyncService(
+            historyStore: InMemoryHistoryStore(),
+            hostStore: LockedSharedHostStore(state: SharedHostStoreState(hosts: [])),
+            boundary: boundary,
+            recordBuilder: DefaultCloudSyncRecordBuilder(),
+            registrySuiteName: suiteName
+        )
+        await service.setEnabled(true, hosts: [])
+        let latestDelegate = await host.latestDelegate()
+        let retiredDelegate = try XCTUnwrap(latestDelegate)
+        let event = try cloudKitStateUpdateEvent()
+
+        let lateUpdate = Task {
+            await retiredDelegate.handleEvent(
+                event,
+                syncEngine: inertCloudKitSyncEngineArgument()
+            )
+        }
+        await gate.waitUntilPaused()
+
+        await host.emitAccountChange(availability: .privateAccount)
+
+        let creationCountAfterRecovery = await host.engineCreationCount()
+        let statusAfterRecovery = await service.status()
+        XCTAssertEqual(creationCountAfterRecovery, 2)
+        XCTAssertEqual(statusAfterRecovery, .idle)
+        XCTAssertNil(defaults.data(forKey: stateKey))
+
+        await gate.resume()
+        await lateUpdate.value
+
+        XCTAssertNil(defaults.data(forKey: stateKey))
+        await service.setEnabled(false, hosts: [])
+    }
+
+    func testAccountRecoveryWaitsForAdmittedLiveApplyToFinish() async throws {
+        let suiteName = "CloudSyncLiveApplyDrainTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let stateKey = "PingScope.CloudSync.LiveApplyDrain"
+        let historyStore = RecordingRemoteHistoryStore()
+        let gate = RemoteCommitGate()
+        let bridge = RemoteApplyBridge()
+        let accountChangeCompletion = AsyncCompletionProbe()
+        let host = RecordingCloudKitEngineHost(deleteError: nil)
+        let boundary = CKSyncEngineBoundary(
+            engineHost: host,
+            stateKey: stateKey,
+            subscriptionID: "CloudSyncLiveApplyDrainTests",
+            defaultsSuiteName: suiteName,
+            onRemoteChanges: { records, deletions, context in
+                try await bridge.apply(records: records, deletions: deletions, context: context)
+            }
+        )
+        let service = PingScopeCloudSyncService(
+            historyStore: historyStore,
+            hostStore: LockedSharedHostStore(state: SharedHostStoreState(hosts: [])),
+            boundary: boundary,
+            recordBuilder: DefaultCloudSyncRecordBuilder(),
+            registrySuiteName: suiteName,
+            beforeRemoteCommit: { await gate.pause() }
+        )
+        await bridge.setService(service)
+        await service.setEnabled(true, hosts: [])
+        let latestDelegate = await host.latestDelegate()
+        let delegate = try XCTUnwrap(latestDelegate)
+        let record = PingSampleRecordMapper.record(
+            from: .success(hostID: UUID(), latency: .milliseconds(17))
+        )
+
+        let callback = Task {
+            await delegate.handleFetchedRecordZoneChanges(records: [record], deletions: [])
+        }
+        await gate.waitUntilPaused()
+        let accountChange = Task {
+            await host.emitAccountChange(availability: .privateAccount)
+            await accountChangeCompletion.finish()
+        }
+        try await waitUntil { !(await delegate.isActive()) }
+
+        let creationsWhileApplyIsHeld = await host.engineCreationCount()
+        let recoveryFinishedWhileApplyIsHeld = await accountChangeCompletion.isFinished()
+        XCTAssertEqual(creationsWhileApplyIsHeld, 1)
+        XCTAssertFalse(recoveryFinishedWhileApplyIsHeld)
+
+        await gate.resume()
+        await callback.value
+        await accountChange.value
+
+        let liveRemoteSampleCount = await historyStore.remoteSampleCount()
+        let finalCreationCount = await host.engineCreationCount()
+        let status = await service.status()
+        XCTAssertEqual(liveRemoteSampleCount, 1)
+        XCTAssertEqual(finalCreationCount, 2)
+        XCTAssertEqual(status, .idle)
+        XCTAssertNil(defaults.data(forKey: "\(stateKey).InboundWork"))
+        await service.setEnabled(false, hosts: [])
+    }
+
+    func testAccountRecoveryWaitsForAdmittedStartupReplayToFinish() async throws {
+        let suiteName = "CloudSyncReplayApplyDrainTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let stateKey = "PingScope.CloudSync.ReplayApplyDrain"
+        let historyStore = FailingOnceRemoteHistoryStore()
+        let firstBridge = RemoteApplyBridge()
+        let firstHost = RecordingCloudKitEngineHost(deleteError: nil)
+        let firstBoundary = CKSyncEngineBoundary(
+            engineHost: firstHost,
+            stateKey: stateKey,
+            subscriptionID: "CloudSyncReplayApplyDrainTests",
+            defaultsSuiteName: suiteName,
+            onRemoteChanges: { records, deletions, context in
+                try await firstBridge.apply(records: records, deletions: deletions, context: context)
+            }
+        )
+        let firstService = PingScopeCloudSyncService(
+            historyStore: historyStore,
+            hostStore: LockedSharedHostStore(state: SharedHostStoreState(hosts: [])),
+            boundary: firstBoundary,
+            recordBuilder: DefaultCloudSyncRecordBuilder(),
+            registrySuiteName: suiteName
+        )
+        await firstBridge.setService(firstService)
+        await firstService.setEnabled(true, hosts: [])
+        let latestFirstDelegate = await firstHost.latestDelegate()
+        let firstDelegate = try XCTUnwrap(latestFirstDelegate)
+        let record = PingSampleRecordMapper.record(
+            from: .success(hostID: UUID(), latency: .milliseconds(18))
+        )
+        await firstDelegate.handleFetchedRecordZoneChanges(records: [record], deletions: [])
+        await firstService.setEnabled(false, hosts: [])
+        XCTAssertNotNil(defaults.data(forKey: "\(stateKey).InboundWork"))
+
+        let gate = RemoteCommitGate()
+        let secondBridge = RemoteApplyBridge()
+        let accountChangeCompletion = AsyncCompletionProbe()
+        let secondHost = RecordingCloudKitEngineHost(deleteError: nil)
+        let secondBoundary = CKSyncEngineBoundary(
+            engineHost: secondHost,
+            stateKey: stateKey,
+            subscriptionID: "CloudSyncReplayApplyDrainTests",
+            defaultsSuiteName: suiteName,
+            onRemoteChanges: { records, deletions, context in
+                try await secondBridge.apply(records: records, deletions: deletions, context: context)
+            }
+        )
+        let secondService = PingScopeCloudSyncService(
+            historyStore: historyStore,
+            hostStore: LockedSharedHostStore(state: SharedHostStoreState(hosts: [])),
+            boundary: secondBoundary,
+            recordBuilder: DefaultCloudSyncRecordBuilder(),
+            registrySuiteName: suiteName,
+            beforeRemoteCommit: { await gate.pause() }
+        )
+        await secondBridge.setService(secondService)
+
+        let starting = Task { await secondService.setEnabled(true, hosts: []) }
+        await gate.waitUntilPaused()
+        let latestSecondDelegate = await secondHost.latestDelegate()
+        let secondDelegate = try XCTUnwrap(latestSecondDelegate)
+        let accountChange = Task {
+            await secondHost.emitAccountChange(availability: .privateAccount)
+            await accountChangeCompletion.finish()
+        }
+        try await waitUntil { !(await secondDelegate.isActive()) }
+
+        let creationsWhileReplayIsHeld = await secondHost.engineCreationCount()
+        let recoveryFinishedWhileReplayIsHeld = await accountChangeCompletion.isFinished()
+        XCTAssertEqual(creationsWhileReplayIsHeld, 1)
+        XCTAssertFalse(recoveryFinishedWhileReplayIsHeld)
+
+        await gate.resume()
+        await starting.value
+        await accountChange.value
+
+        let replayRemoteSampleCount = await historyStore.remoteSampleCount()
+        let remoteUpsertAttemptCount = await historyStore.remoteUpsertAttemptCount()
+        let finalCreationCount = await secondHost.engineCreationCount()
+        let status = await secondService.status()
+        XCTAssertEqual(replayRemoteSampleCount, 1)
+        XCTAssertEqual(remoteUpsertAttemptCount, 2)
+        XCTAssertEqual(finalCreationCount, 2)
+        XCTAssertEqual(status, .idle)
+        XCTAssertNil(defaults.data(forKey: "\(stateKey).InboundWork"))
+        await secondService.setEnabled(false, hosts: [])
+    }
+
+    func testInboundPersistenceFailureFailsServiceClosedUntilExplicitRetryRefetches() async throws {
+        let suiteName = "CloudSyncInboundPersistenceFailureTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let stateKey = "PingScope.CloudSync.InboundPersistenceFailure"
+        let historyStore = RecordingRemoteHistoryStore()
+        let persistence = FailingOnceInboundPersistence()
+        let bridge = RemoteApplyBridge()
+        let host = RecordingCloudKitEngineHost(
+            deleteError: nil,
+            serializedStateExists: {
+                UserDefaults(suiteName: suiteName)?.data(forKey: stateKey) != nil
+            }
+        )
+        let boundary = CKSyncEngineBoundary(
+            engineHost: host,
+            stateKey: stateKey,
+            subscriptionID: "CloudSyncInboundPersistenceFailureTests",
+            defaultsSuiteName: suiteName,
+            onRemoteChanges: { records, deletions, context in
+                try await bridge.apply(records: records, deletions: deletions, context: context)
+            },
+            beforeInboundWorkPersist: {
+                try persistence.persist()
+            }
+        )
+        let service = PingScopeCloudSyncService(
+            historyStore: historyStore,
+            hostStore: LockedSharedHostStore(state: SharedHostStoreState(hosts: [])),
+            boundary: boundary,
+            recordBuilder: DefaultCloudSyncRecordBuilder(),
+            registrySuiteName: suiteName
+        )
+        await bridge.setService(service)
+        await service.setEnabled(true, hosts: [])
+        await host.emitAccountChange(availability: .privateAccount)
+        let latestDelegate = await host.latestDelegate()
+        let delegate = try XCTUnwrap(latestDelegate)
+        let record = PingSampleRecordMapper.record(
+            from: .success(hostID: UUID(), latency: .milliseconds(19))
+        )
+        defaults.set(Data("serialized-state".utf8), forKey: stateKey)
+
+        await delegate.handleFetchedRecordZoneChanges(records: [record], deletions: [])
+
+        let failedStatus = await service.status()
+        let sampleCountAfterFailure = await historyStore.remoteSampleCount()
+        let creationsAfterFailure = await host.engineCreationCount()
+        let activeHandlesAfterFailure = await host.activeHandleCount()
+        XCTAssertEqual(failedStatus, .failed("forcedFailure"))
+        XCTAssertEqual(sampleCountAfterFailure, 0)
+        XCTAssertEqual(creationsAfterFailure, 2)
+        XCTAssertEqual(activeHandlesAfterFailure, 0)
+        XCTAssertNil(defaults.data(forKey: stateKey))
+        XCTAssertNil(defaults.data(forKey: "\(stateKey).InboundWork"))
+
+        await Task.yield()
+        let creationsAfterYield = await host.engineCreationCount()
+        XCTAssertEqual(creationsAfterYield, 2)
+
+        await host.fetchOnNextEngineStart(records: [record])
+        await service.setEnabled(true, hosts: [])
+
+        let recoveredStatus = await service.status()
+        let recoveredSampleCount = await historyStore.remoteSampleCount()
+        let finalCreationCount = await host.engineCreationCount()
+        let statePresenceAtCreation = await host.statePresenceAtEngineCreation()
+        XCTAssertEqual(recoveredStatus, .idle)
+        XCTAssertEqual(recoveredSampleCount, 1)
+        XCTAssertEqual(finalCreationCount, 3)
+        XCTAssertEqual(statePresenceAtCreation, [false, false, false])
+        await service.setEnabled(false, hosts: [])
+    }
+
+    func testTerminalPersistenceFailureRejectsLateRetiredStateUpdateAfterExplicitRetry() async throws {
+        let suiteName = "CloudSyncFailureStateFenceTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let stateKey = "PingScope.CloudSync.FailureStateFence"
+        let historyStore = RecordingRemoteHistoryStore()
+        let persistence = FailingOnceInboundPersistence()
+        let bridge = RemoteApplyBridge()
+        let gate = RemoteCommitGate()
+        let host = RecordingCloudKitEngineHost(deleteError: nil)
+        let boundary = CKSyncEngineBoundary(
+            engineHost: host,
+            stateKey: stateKey,
+            subscriptionID: "CloudSyncFailureStateFenceTests",
+            defaultsSuiteName: suiteName,
+            onRemoteChanges: { records, deletions, context in
+                try await bridge.apply(records: records, deletions: deletions, context: context)
+            },
+            beforeInboundWorkPersist: { try persistence.persist() },
+            beforeStateSerializationPersist: { await gate.pause() }
+        )
+        let service = PingScopeCloudSyncService(
+            historyStore: historyStore,
+            hostStore: LockedSharedHostStore(state: SharedHostStoreState(hosts: [])),
+            boundary: boundary,
+            recordBuilder: DefaultCloudSyncRecordBuilder(),
+            registrySuiteName: suiteName
+        )
+        await bridge.setService(service)
+        await service.setEnabled(true, hosts: [])
+        let latestDelegate = await host.latestDelegate()
+        let retiredDelegate = try XCTUnwrap(latestDelegate)
+        let event = try cloudKitStateUpdateEvent()
+        let record = PingSampleRecordMapper.record(
+            from: .success(hostID: UUID(), latency: .milliseconds(20))
+        )
+
+        let lateUpdate = Task {
+            await retiredDelegate.handleEvent(
+                event,
+                syncEngine: inertCloudKitSyncEngineArgument()
+            )
+        }
+        await gate.waitUntilPaused()
+
+        await retiredDelegate.handleFetchedRecordZoneChanges(records: [record], deletions: [])
+
+        let failedStatus = await service.status()
+        XCTAssertEqual(failedStatus, .failed("forcedFailure"))
+        XCTAssertNil(defaults.data(forKey: stateKey))
+
+        await host.fetchOnNextEngineStart(records: [record])
+        await service.setEnabled(true, hosts: [])
+
+        let recoveredStatus = await service.status()
+        let recoveredSampleCount = await historyStore.remoteSampleCount()
+        XCTAssertEqual(recoveredStatus, .idle)
+        XCTAssertEqual(recoveredSampleCount, 1)
+        XCTAssertNil(defaults.data(forKey: stateKey))
+
+        await gate.resume()
+        await lateUpdate.value
+
+        XCTAssertNil(defaults.data(forKey: stateKey))
+        let finalCreationCount = await host.engineCreationCount()
+        XCTAssertEqual(finalCreationCount, 2)
+        await service.setEnabled(false, hosts: [])
+    }
+
+    func testMalformedPersistedInboundQueueFailsClosedUntilExplicitRetryRefetches() async throws {
+        let suiteName = "CloudSyncMalformedInboundQueueTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let stateKey = "PingScope.CloudSync.MalformedInboundQueue"
+        let inboundKey = "\(stateKey).InboundWork"
+        let historyStore = RecordingRemoteHistoryStore()
+        let bridge = RemoteApplyBridge()
+        let host = RecordingCloudKitEngineHost(
+            deleteError: nil,
+            serializedStateExists: {
+                UserDefaults(suiteName: suiteName)?.data(forKey: stateKey) != nil
+            }
+        )
+        let boundary = CKSyncEngineBoundary(
+            engineHost: host,
+            stateKey: stateKey,
+            subscriptionID: "CloudSyncMalformedInboundQueueTests",
+            defaultsSuiteName: suiteName,
+            onRemoteChanges: { records, deletions, context in
+                try await bridge.apply(records: records, deletions: deletions, context: context)
+            }
+        )
+        let service = PingScopeCloudSyncService(
+            historyStore: historyStore,
+            hostStore: LockedSharedHostStore(state: SharedHostStoreState(hosts: [])),
+            boundary: boundary,
+            recordBuilder: DefaultCloudSyncRecordBuilder(),
+            registrySuiteName: suiteName
+        )
+        await bridge.setService(service)
+        defaults.set(Data("serialized-state".utf8), forKey: stateKey)
+        defaults.set(Data("not-json".utf8), forKey: inboundKey)
+
+        await service.setEnabled(true, hosts: [])
+
+        let failedStatus = await service.status()
+        let sampleCountAfterFailure = await historyStore.remoteSampleCount()
+        let creationsAfterFailure = await host.engineCreationCount()
+        let activeHandlesAfterFailure = await host.activeHandleCount()
+        guard case let .failed(failureDescription) = failedStatus else {
+            return XCTFail("Expected malformed inbound queue to fail the service")
+        }
+        XCTAssertTrue(failureDescription.contains("dataCorrupted"))
+        XCTAssertEqual(sampleCountAfterFailure, 0)
+        XCTAssertEqual(creationsAfterFailure, 1)
+        XCTAssertEqual(activeHandlesAfterFailure, 0)
+        XCTAssertNil(defaults.data(forKey: stateKey))
+        XCTAssertNil(defaults.data(forKey: inboundKey))
+
+        await Task.yield()
+        let creationsAfterYield = await host.engineCreationCount()
+        XCTAssertEqual(creationsAfterYield, 1)
+
+        let record = PingSampleRecordMapper.record(
+            from: .success(hostID: UUID(), latency: .milliseconds(21))
+        )
+        await host.fetchOnNextEngineStart(records: [record])
+        await service.setEnabled(true, hosts: [])
+
+        let recoveredStatus = await service.status()
+        let recoveredSampleCount = await historyStore.remoteSampleCount()
+        let finalCreationCount = await host.engineCreationCount()
+        let statePresenceAtCreation = await host.statePresenceAtEngineCreation()
+        XCTAssertEqual(recoveredStatus, .idle)
+        XCTAssertEqual(recoveredSampleCount, 1)
+        XCTAssertEqual(finalCreationCount, 2)
+        XCTAssertEqual(statePresenceAtCreation, [true, false])
+        await service.setEnabled(false, hosts: [])
+    }
+
+    func testReplayFailurePropagatesFromStartAndKeepsInboundWorkQueued() async throws {
+        let suiteName = "CloudSyncInboundReplayFailureTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let stateKey = "PingScope.CloudSync.InboundReplayFailure"
+        let handler = ThrowingRemoteChangeHandler(failures: 2)
+        let record = PingSampleRecordMapper.record(
+            from: .success(hostID: UUID(), latency: .milliseconds(15))
+        )
+        let firstHost = RecordingCloudKitEngineHost(deleteError: nil)
+        let firstBoundary = CKSyncEngineBoundary(
+            engineHost: firstHost,
+            stateKey: stateKey,
+            subscriptionID: "CloudSyncInboundReplayFailureTests",
+            defaultsSuiteName: suiteName,
+            onRemoteChanges: { records, deletions, _ in
+                try await handler.apply(records: records, deletions: deletions)
+            }
+        )
+        try await firstBoundary.start()
+        let latestFirstDelegate = await firstHost.latestDelegate()
+        let firstDelegate = try XCTUnwrap(latestFirstDelegate)
+        await firstDelegate.handleFetchedRecordZoneChanges(records: [record], deletions: [])
+        await firstBoundary.stop()
+
+        let secondHost = RecordingCloudKitEngineHost(deleteError: nil)
+        let secondBoundary = CKSyncEngineBoundary(
+            engineHost: secondHost,
+            stateKey: stateKey,
+            subscriptionID: "CloudSyncInboundReplayFailureTests",
+            defaultsSuiteName: suiteName,
+            onRemoteChanges: { records, deletions, _ in
+                try await handler.apply(records: records, deletions: deletions)
+            }
+        )
+
+        do {
+            try await secondBoundary.start()
+            XCTFail("Expected replay failure to escape boundary start")
+        } catch {
+            // The failed batch must remain available for a later start.
+        }
+        XCTAssertNotNil(defaults.data(forKey: "\(stateKey).InboundWork"))
+        await secondBoundary.stop()
+
+        let thirdHost = RecordingCloudKitEngineHost(deleteError: nil)
+        let thirdBoundary = CKSyncEngineBoundary(
+            engineHost: thirdHost,
+            stateKey: stateKey,
+            subscriptionID: "CloudSyncInboundReplayFailureTests",
+            defaultsSuiteName: suiteName,
+            onRemoteChanges: { records, deletions, _ in
+                try await handler.apply(records: records, deletions: deletions)
+            }
+        )
+
+        try await thirdBoundary.start()
+
+        let retryCallCount = await handler.callCount()
+        XCTAssertEqual(retryCallCount, 3)
+        XCTAssertNil(defaults.data(forKey: "\(stateKey).InboundWork"))
+        await thirdBoundary.stop()
     }
 
     func testUnavailableOrNonPrivateAccountBailsOutWithoutSyncOrRecordCreation() async throws {
@@ -1554,7 +2207,7 @@ final class CloudSyncCoordinatorTests: XCTestCase {
             try MonitoredHostRecordMapper.record(from: $0, modifiedAt: .now)
         }
 
-        await fixture.service.applyRemoteChanges(records: records)
+        try await fixture.service.applyRemoteChanges(records: records)
 
         let applied = try XCTUnwrap(fixture.hostStore.load().state?.hosts)
         XCTAssertEqual(applied.count, 64)
@@ -1584,10 +2237,15 @@ final class CloudSyncCoordinatorTests: XCTestCase {
             modifiedAt: Date(timeIntervalSince1970: 10_000)
         )
 
-        await service.applyRemoteChanges(records: [record])
+        do {
+            try await service.applyRemoteChanges(records: [record])
+            XCTFail("Expected remote host store failure")
+        } catch {
+            // The receiver must surface the storage error to its durable caller.
+        }
         XCTAssertEqual(hostStore.load().state?.hosts, [local])
 
-        await service.applyRemoteChanges(records: [record])
+        try await service.applyRemoteChanges(records: [record])
         XCTAssertEqual(hostStore.load().state?.hosts, [remote])
         XCTAssertEqual(hostStore.saveAttemptCount(), 2)
     }
@@ -1613,7 +2271,7 @@ final class CloudSyncCoordinatorTests: XCTestCase {
             )
         }
 
-        await service.applyRemoteChanges(records: records)
+        try await service.applyRemoteChanges(records: records)
 
         XCTAssertEqual(persistenceCounter.value(), 1)
         XCTAssertEqual(hostStore.saveCount(), 1)
@@ -1922,8 +2580,8 @@ final class CloudSyncCoordinatorTests: XCTestCase {
             from: otherEditedOnB,
             modifiedAt: baseline.addingTimeInterval(20)
         )
-        await deviceA.service.applyRemoteChanges(records: [otherRecordFromB])
-        await deviceB.service.applyRemoteChanges(records: [hostRecordFromA])
+        try await deviceA.service.applyRemoteChanges(records: [otherRecordFromB])
+        try await deviceB.service.applyRemoteChanges(records: [hostRecordFromA])
 
         let convergedA = try XCTUnwrap(deviceA.hostStore.load().state?.hosts)
         let convergedB = try XCTUnwrap(deviceB.hostStore.load().state?.hosts)
@@ -1969,7 +2627,7 @@ final class CloudSyncCoordinatorTests: XCTestCase {
 
         let remoteDate = Date().addingTimeInterval(1_000)
         let remoteRecord = try MonitoredHostRecordMapper.record(from: remote, modifiedAt: remoteDate)
-        await fixture.service.applyRemoteChanges(records: [remoteRecord])
+        try await fixture.service.applyRemoteChanges(records: [remoteRecord])
         await fixture.boundary.resetUploads()
 
         let appliedHosts = try XCTUnwrap(fixture.hostStore.load().state?.hosts)
@@ -1998,7 +2656,7 @@ final class CloudSyncCoordinatorTests: XCTestCase {
             modifiedAt: Date().addingTimeInterval(1_000)
         )
 
-        await fixture.service.applyRemoteChanges(records: [remoteRecord])
+        try await fixture.service.applyRemoteChanges(records: [remoteRecord])
 
         let persistedState = try XCTUnwrap(fixture.hostStore.load().state)
         let acceptedStates = await recorder.values()
@@ -2069,7 +2727,7 @@ final class CloudSyncCoordinatorTests: XCTestCase {
 
         await fixture.service.deleteHost(id: host.id)
         let remoteRecord = try MonitoredHostRecordMapper.record(from: host, modifiedAt: .now)
-        await fixture.service.applyRemoteChanges(records: [remoteRecord])
+        try await fixture.service.applyRemoteChanges(records: [remoteRecord])
         await fixture.service.setEnabled(true, hosts: [])
 
         XCTAssertEqual(fixture.hostStore.load().state?.hosts, [])
@@ -2094,7 +2752,7 @@ final class CloudSyncCoordinatorTests: XCTestCase {
             suiteName: first.suiteName
         )
         let staleRemote = try MonitoredHostRecordMapper.record(from: host, modifiedAt: .now)
-        await second.service.applyRemoteChanges(records: [staleRemote])
+        try await second.service.applyRemoteChanges(records: [staleRemote])
         await second.service.setEnabled(true, hosts: [])
 
         XCTAssertEqual(first.hostStore.load().state?.hosts, [])
@@ -2570,6 +3228,138 @@ private actor InMemoryHistoryStore: PingHistoryStore {
     func deleteAll() async {}
 }
 
+private enum FailingOnceRemoteHistoryStoreError: Error {
+    case forcedUpsertFailure
+}
+
+private actor FailingOnceRemoteHistoryStore: PingHistoryStore {
+    private var shouldFailNextRemoteUpsert = true
+    private var remoteSamplesByID: [UUID: PingResult] = [:]
+    private var remoteUpsertAttempts = 0
+
+    func append(_ result: PingResult) async {}
+
+    func upsertRemoteSamples(_ results: [PingResult]) async throws {
+        remoteUpsertAttempts += 1
+        if shouldFailNextRemoteUpsert {
+            shouldFailNextRemoteUpsert = false
+            throw FailingOnceRemoteHistoryStoreError.forcedUpsertFailure
+        }
+        for result in results {
+            remoteSamplesByID[result.id] = result
+        }
+    }
+
+    func samples(hostID: UUID, since: Date, limit: Int) async -> [PingResult] { [] }
+    func latestSamples(hostID: UUID, since: Date, limit: Int) async -> [PingResult] { [] }
+    func prune(olderThan cutoff: Date) async {}
+    func deleteAll() async {}
+
+    func remoteSampleCount() -> Int { remoteSamplesByID.count }
+    func remoteUpsertAttemptCount() -> Int { remoteUpsertAttempts }
+}
+
+private actor RemoteApplyBridge {
+    private var service: PingScopeCloudSyncService?
+
+    func setService(_ service: PingScopeCloudSyncService) {
+        self.service = service
+    }
+
+    func apply(
+        records: [CKRecord],
+        deletions: [CloudSyncRemoteDeletion],
+        context: CloudSyncRemoteApplyContext = .unconditional
+    ) async throws {
+        guard let service else { return }
+        try await service.applyRemoteChanges(
+            records: records,
+            deletions: deletions,
+            context: context
+        )
+    }
+}
+
+private enum ThrowingRemoteChangeHandlerError: Error {
+    case forcedFailure
+}
+
+private actor ThrowingRemoteChangeHandler {
+    private var remainingFailures: Int
+    private var calls = 0
+
+    init(failures: Int) {
+        remainingFailures = failures
+    }
+
+    func apply(records: [CKRecord], deletions: [CloudSyncRemoteDeletion]) throws {
+        _ = records
+        _ = deletions
+        calls += 1
+        guard remainingFailures > 0 else { return }
+        remainingFailures -= 1
+        throw ThrowingRemoteChangeHandlerError.forcedFailure
+    }
+
+    func callCount() -> Int { calls }
+}
+
+private actor RemoteCommitGate {
+    private var hasPaused = false
+    private var pauseWaiters: [CheckedContinuation<Void, Never>] = []
+    private var resumeContinuation: CheckedContinuation<Void, Never>?
+    private var isResumed = false
+
+    func pause() async {
+        hasPaused = true
+        let waiters = pauseWaiters
+        pauseWaiters.removeAll(keepingCapacity: false)
+        waiters.forEach { $0.resume() }
+        guard !isResumed else { return }
+        await withCheckedContinuation { resumeContinuation = $0 }
+    }
+
+    func waitUntilPaused() async {
+        guard !hasPaused else { return }
+        await withCheckedContinuation { pauseWaiters.append($0) }
+    }
+
+    func resume() {
+        isResumed = true
+        resumeContinuation?.resume()
+        resumeContinuation = nil
+    }
+}
+
+private typealias RemoteChangeAdmissionGate = RemoteCommitGate
+
+private actor RecordingRemoteHistoryStore: PingHistoryStore {
+    private var remoteSamplesByID: [UUID: PingResult] = [:]
+
+    func append(_ result: PingResult) async {}
+    func upsertRemoteSamples(_ results: [PingResult]) async throws {
+        for result in results { remoteSamplesByID[result.id] = result }
+    }
+    func samples(hostID: UUID, since: Date, limit: Int) async -> [PingResult] { [] }
+    func latestSamples(hostID: UUID, since: Date, limit: Int) async -> [PingResult] { [] }
+    func prune(olderThan cutoff: Date) async {}
+    func deleteAll() async {}
+    func remoteSampleCount() -> Int { remoteSamplesByID.count }
+}
+
+private final class FailingOnceInboundPersistence: @unchecked Sendable {
+    private let lock = NSLock()
+    private var shouldFail = true
+
+    func persist() throws {
+        try lock.withLock {
+            guard shouldFail else { return }
+            shouldFail = false
+            throw ThrowingRemoteChangeHandlerError.forcedFailure
+        }
+    }
+}
+
 private enum RecordingCloudSyncBoundaryError: Error {
     case transient
 }
@@ -2670,13 +3460,22 @@ private final class WeakDeferredCancellationLifetimeToken {
 
 private actor AccountChangeInvocationProbe {
     private var returned = false
+    private var returnWaiters: [CheckedContinuation<Void, Never>] = []
 
     func recordReturn() {
         returned = true
+        let waiters = returnWaiters
+        returnWaiters.removeAll(keepingCapacity: false)
+        waiters.forEach { $0.resume() }
     }
 
     func hasReturned() -> Bool {
         returned
+    }
+
+    func waitForReturn() async {
+        guard !returned else { return }
+        await withCheckedContinuation { returnWaiters.append($0) }
     }
 }
 
@@ -2735,6 +3534,28 @@ private func cloudKitAccountChangeEvent(
     )
     return .accountChange(
         unsafeBitCast(changeType, to: CKSyncEngine.Event.AccountChange.self)
+    )
+}
+
+private func cloudKitStateUpdateEvent() throws -> CKSyncEngine.Event {
+    let serialization = try JSONDecoder().decode(
+        CKSyncEngine.State.Serialization.self,
+        from: Data("{\"data\":\"AQID\"}".utf8)
+    )
+    precondition(
+        MemoryLayout<CKSyncEngine.State.Serialization>.size
+            == MemoryLayout<CKSyncEngine.Event.StateUpdate>.size
+    )
+    precondition(
+        MemoryLayout<CKSyncEngine.State.Serialization>.stride
+            == MemoryLayout<CKSyncEngine.Event.StateUpdate>.stride
+    )
+    precondition(
+        MemoryLayout<CKSyncEngine.State.Serialization>.alignment
+            == MemoryLayout<CKSyncEngine.Event.StateUpdate>.alignment
+    )
+    return .stateUpdate(
+        unsafeBitCast(serialization, to: CKSyncEngine.Event.StateUpdate.self)
     )
 }
 
@@ -2914,6 +3735,7 @@ private final class RecordingCloudKitEngineHost: CloudKitEngineHosting, @uncheck
     private var accountChangeHandler: (@concurrent @Sendable () async -> Void)?
     private var availability: CloudSyncAccountAvailability = .privateAccount
     private var recordedStatePresenceAtEngineCreation: [Bool] = []
+    private var recordsForNextFetch: [CKRecord] = []
 
     init(
         deleteError: CKError?,
@@ -3009,10 +3831,15 @@ private final class RecordingCloudKitEngineHost: CloudKitEngineHosting, @uncheck
     }
 
     func fetchChanges(on handle: CloudKitEngineHandle) async throws {
-        lock.withLock {
-            guard activeHandles.contains(handle) else { return }
+        let fetch = lock.withLock { () -> (PingScopeCKSyncEngineDelegate?, [CKRecord]) in
+            guard activeHandles.contains(handle) else { return (nil, []) }
             recordedEvents.append(.fetchChanges)
+            let records = recordsForNextFetch
+            recordsForNextFetch.removeAll(keepingCapacity: false)
+            return (delegates[handle], records)
         }
+        guard let delegate = fetch.0, !fetch.1.isEmpty else { return }
+        await delegate.handleFetchedRecordZoneChanges(records: fetch.1, deletions: [])
     }
 
     func cancelOperations(on handle: CloudKitEngineHandle) async {
@@ -3073,6 +3900,10 @@ private final class RecordingCloudKitEngineHost: CloudKitEngineHosting, @uncheck
 
     func statePresenceAtEngineCreation() async -> [Bool] {
         lock.withLock { recordedStatePresenceAtEngineCreation }
+    }
+
+    func fetchOnNextEngineStart(records: [CKRecord]) async {
+        lock.withLock { recordsForNextFetch = records }
     }
 }
 
