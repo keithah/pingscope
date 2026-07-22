@@ -107,7 +107,7 @@ public struct HostConfig: Identifiable, Codable, Equatable, Sendable {
             tier: .localGateway,
             method: .icmp,
             port: nil,
-            interval: .seconds(2),
+            interval: .seconds(5),
             timeout: .seconds(1),
             thresholds: LatencyThresholds(degradedMilliseconds: 20, downAfterFailures: 3)
         )

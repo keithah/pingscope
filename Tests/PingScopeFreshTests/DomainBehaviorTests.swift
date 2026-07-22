@@ -1124,6 +1124,10 @@ final class DomainBehaviorTests: XCTestCase {
         XCTAssertEqual(BuildFlavor.developerID.normalizedHosts(HostConfig.defaultHosts()).map(\.method), [.icmp, .icmp, .icmp])
     }
 
+    func testDefaultGatewayIntervalIsFiveSeconds() {
+        XCTAssertEqual(HostConfig.defaultGatewayHost(address: "192.168.1.1").interval, .seconds(5))
+    }
+
     private func health(for host: HostConfig, statusAfter results: [PingResult]) -> HostHealth {
         var health = HostHealth(hostID: host.id, thresholds: host.thresholds)
         for result in results {
