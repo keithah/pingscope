@@ -233,11 +233,11 @@ private struct GatewayRaceProbe: PingProbe {
         switch (host.method, host.port) {
         case (.tcp, 80):
             do {
-                try await Task.sleep(for: .seconds(60))
+                try await Task.sleep(for: .seconds(1))
             } catch {
                 return .failure(hostID: host.id, reason: .cancelled).withHostMetadata(from: host)
             }
-            return .failure(hostID: host.id, reason: .timeout).withHostMetadata(from: host)
+            return .success(hostID: host.id, latency: .milliseconds(20)).withHostMetadata(from: host)
         case (.udp, 53):
             return .success(hostID: host.id, latency: .milliseconds(5)).withHostMetadata(from: host)
         default:

@@ -148,7 +148,10 @@ final class HistoryIncidentDigestTests: XCTestCase {
         XCTAssertEqual(log.incidents.map(\.sampleCount), Array(repeating: 1, count: onsetCount))
         XCTAssertEqual(log.incidents.map(\.onsetDiagnosisScope), Array(repeating: .localNetwork, count: onsetCount))
         XCTAssertEqual(log.incidents.map(\.onsetFaultTier), Array(repeating: .localGateway, count: onsetCount))
-        XCTAssertLessThanOrEqual(lookupWorkCounter.count, 47)
+        // Gateway advances through every onset plus the preceding recoveries;
+        // upstream advances once per onset.
+        let expectedLookupWork = (2 * onsetCount - 1) + onsetCount
+        XCTAssertEqual(lookupWorkCounter.count, expectedLookupWork)
     }
 
     func testWeeklyDigestAggregatesSevenDayWindowAcrossHostsIncludingNoDataHosts() throws {

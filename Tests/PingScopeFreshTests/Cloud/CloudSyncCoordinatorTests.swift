@@ -3304,33 +3304,6 @@ private actor ThrowingRemoteChangeHandler {
     func callCount() -> Int { calls }
 }
 
-private actor RemoteChangeAdmissionGate {
-    private var hasPaused = false
-    private var pauseWaiters: [CheckedContinuation<Void, Never>] = []
-    private var resumeContinuation: CheckedContinuation<Void, Never>?
-    private var isResumed = false
-
-    func pause() async {
-        hasPaused = true
-        let waiters = pauseWaiters
-        pauseWaiters.removeAll(keepingCapacity: false)
-        waiters.forEach { $0.resume() }
-        guard !isResumed else { return }
-        await withCheckedContinuation { resumeContinuation = $0 }
-    }
-
-    func waitUntilPaused() async {
-        guard !hasPaused else { return }
-        await withCheckedContinuation { pauseWaiters.append($0) }
-    }
-
-    func resume() {
-        isResumed = true
-        resumeContinuation?.resume()
-        resumeContinuation = nil
-    }
-}
-
 private actor RemoteCommitGate {
     private var hasPaused = false
     private var pauseWaiters: [CheckedContinuation<Void, Never>] = []
@@ -3357,6 +3330,8 @@ private actor RemoteCommitGate {
         resumeContinuation = nil
     }
 }
+
+private typealias RemoteChangeAdmissionGate = RemoteCommitGate
 
 private actor RecordingRemoteHistoryStore: PingHistoryStore {
     private var remoteSamplesByID: [UUID: PingResult] = [:]

@@ -135,6 +135,8 @@ public struct HistoryIncidentLog: Equatable, Sendable {
         var diagnoses: [UUID: NetworkPerspectiveDiagnosis] = [:]
         var nextSampleIndexByHost: [UUID: Int] = [:]
         let diagnoser = NetworkPerspectiveDiagnoser()
+        // `chronological` is ascending, so failure-onset thresholds never move
+        // backward and each host cursor can advance without resetting.
         for sample in chronological {
             let isDown = !sample.isSuccess
             if isDown, !previousWasDown {
