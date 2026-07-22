@@ -374,6 +374,65 @@ private enum CloudSyncInboundReplayError: Error {
     case receiver(any Error)
 }
 
+final class CloudSyncEngineStateStore: @unchecked Sendable {
+    struct Session: Hashable, Sendable {
+        fileprivate let generation: UInt
+    }
+
+    private let defaults: UserDefaults
+    private let key: String
+    private let lock = NSLock()
+    private var generation: UInt = 0
+    private var activeSession: Session?
+
+    init(defaults: UserDefaults, key: String) {
+        self.defaults = defaults
+        self.key = key
+    }
+
+    func openSession() -> Session {
+        lock.withLock {
+            generation &+= 1
+            let session = Session(generation: generation)
+            activeSession = session
+            return session
+        }
+    }
+
+    func restoredStateSerialization() -> CKSyncEngine.State.Serialization? {
+        lock.withLock {
+            guard let data = defaults.data(forKey: key) else { return nil }
+            return try? JSONDecoder().decode(CKSyncEngine.State.Serialization.self, from: data)
+        }
+    }
+
+    func persist(
+        _ serialization: CKSyncEngine.State.Serialization,
+        for session: Session
+    ) {
+        guard let data = try? JSONEncoder().encode(serialization) else { return }
+        lock.withLock {
+            guard activeSession == session else { return }
+            defaults.set(data, forKey: key)
+        }
+    }
+
+    func closeSession() {
+        lock.withLock {
+            generation &+= 1
+            activeSession = nil
+        }
+    }
+
+    func invalidateAndClear() {
+        lock.withLock {
+            generation &+= 1
+            activeSession = nil
+            defaults.removeObject(forKey: key)
+        }
+    }
+}
+
 private final class CloudSyncInboundApplyDrain: @unchecked Sendable {
     struct Admission: @unchecked Sendable {
         fileprivate let id: UUID
@@ -647,17 +706,18 @@ public actor CKSyncEngineBoundary: CloudSyncEngineBoundary {
         CloudSyncRemoteApplyContext
     ) async throws -> Void
     typealias RemoteChangeAdmissionHook = @Sendable () async -> Void
+    typealias StateSerializationAdmissionHook = @Sendable () async -> Void
     typealias SyncEngineCancellation = @Sendable (CKSyncEngine) async -> Void
 
-    private let stateKey: String
     private let subscriptionID: CKSubscription.ID
     private let engineHost: any CloudKitEngineHosting
     private let onRemoteChanges: RemoteChangeHandler
     private let beforeRemoteChangeAdmission: RemoteChangeAdmissionHook
+    private let beforeStateSerializationPersist: StateSerializationAdmissionHook
     private let beforeInboundWorkPersist: @Sendable () throws -> Void
     private let inboundWork: CloudSyncInboundWorkStore
     private let inboundApplyDrain = CloudSyncInboundApplyDrain()
-    private let defaults: UserDefaults
+    private let engineState: CloudSyncEngineStateStore
     private let cancelSyncEngine: SyncEngineCancellation
     private var resourcesInitialized = false
     private var delegate: PingScopeCKSyncEngineDelegate?
@@ -674,14 +734,14 @@ public actor CKSyncEngineBoundary: CloudSyncEngineBoundary {
         defaultsSuiteName: String? = nil,
         onRemoteChanges: @escaping RemoteChangeHandler = { _, _, _ in }
     ) {
-        self.stateKey = stateKey
         self.subscriptionID = subscriptionID
         self.engineHost = LiveCloudKitEngineHost(containerIdentifier: containerIdentifier)
         self.onRemoteChanges = onRemoteChanges
         self.beforeRemoteChangeAdmission = {}
+        self.beforeStateSerializationPersist = {}
         self.beforeInboundWorkPersist = {}
         let defaults = defaultsSuiteName.flatMap(UserDefaults.init(suiteName:)) ?? .standard
-        self.defaults = defaults
+        self.engineState = CloudSyncEngineStateStore(defaults: defaults, key: stateKey)
         self.inboundWork = CloudSyncInboundWorkStore(
             defaults: defaults,
             key: "\(stateKey).InboundWork",
@@ -698,16 +758,17 @@ public actor CKSyncEngineBoundary: CloudSyncEngineBoundary {
         onRemoteChanges: @escaping RemoteChangeHandler = { _, _, _ in },
         beforeRemoteChangeAdmission: @escaping RemoteChangeAdmissionHook = {},
         beforeInboundWorkPersist: @escaping @Sendable () throws -> Void = {},
+        beforeStateSerializationPersist: @escaping StateSerializationAdmissionHook = {},
         cancelSyncEngine: @escaping SyncEngineCancellation = { await $0.cancelOperations() }
     ) {
-        self.stateKey = stateKey
         self.subscriptionID = subscriptionID
         self.engineHost = engineHost
         self.onRemoteChanges = onRemoteChanges
         self.beforeRemoteChangeAdmission = beforeRemoteChangeAdmission
+        self.beforeStateSerializationPersist = beforeStateSerializationPersist
         self.beforeInboundWorkPersist = beforeInboundWorkPersist
         let defaults = defaultsSuiteName.flatMap(UserDefaults.init(suiteName:)) ?? .standard
-        self.defaults = defaults
+        self.engineState = CloudSyncEngineStateStore(defaults: defaults, key: stateKey)
         self.inboundWork = CloudSyncInboundWorkStore(
             defaults: defaults,
             key: "\(stateKey).InboundWork",
@@ -740,10 +801,11 @@ public actor CKSyncEngineBoundary: CloudSyncEngineBoundary {
         inboundApplyDrain.openSession()
         try engineHost.prepareResources()
         resourcesInitialized = true
+        let stateSession = engineState.openSession()
         let delegate = ensureDelegate()
-        await delegate.setActive(true)
+        await delegate.setActive(true, stateSession: stateSession)
         let engineHandle = try engineHost.createEngine(
-            stateSerialization: delegate.restoredStateSerialization(),
+            stateSerialization: engineState.restoredStateSerialization(),
             delegate: delegate,
             subscriptionID: subscriptionID
         )
@@ -797,6 +859,7 @@ public actor CKSyncEngineBoundary: CloudSyncEngineBoundary {
         } else {
             completedDeferredCancellation = false
         }
+        engineState.closeSession()
         if let engineHandle, !completedDeferredCancellation {
             await engineHost.cancelOperations(on: engineHandle)
         }
@@ -854,12 +917,12 @@ public actor CKSyncEngineBoundary: CloudSyncEngineBoundary {
     private func ensureDelegate() -> PingScopeCKSyncEngineDelegate {
         if let delegate { return delegate }
         let delegate = PingScopeCKSyncEngineDelegate(
-            stateKey: stateKey,
-            defaults: defaults,
+            engineState: engineState,
             onRemoteChanges: onRemoteChanges,
             inboundWork: inboundWork,
             inboundApplyDrain: inboundApplyDrain,
             beforeRemoteChangeAdmission: beforeRemoteChangeAdmission,
+            beforeStateSerializationPersist: beforeStateSerializationPersist,
             onInboundWorkFailure: { [weak self] error in
                 await self?.handleInboundWorkFailure(error)
             },
@@ -881,7 +944,7 @@ public actor CKSyncEngineBoundary: CloudSyncEngineBoundary {
             hasPendingAccountChange = false
             await delegate?.setActive(false)
             await inboundApplyDrain.invalidateAndDrain()
-            defaults.removeObject(forKey: stateKey)
+            engineState.invalidateAndClear()
             inboundWork.discardAll()
             guard !inboundApplyDrain.terminalFailureOccurred() else { continue }
             await accountChangeHandler?()
@@ -901,7 +964,7 @@ public actor CKSyncEngineBoundary: CloudSyncEngineBoundary {
         await delegate.setActive(false)
         await inboundApplyDrain.failAndDrain()
         inboundWork.discardAll()
-        defaults.removeObject(forKey: stateKey)
+        engineState.invalidateAndClear()
         await retireEngine(engineHandle, delegate: delegate)
         await failureHandler?(error)
     }
@@ -910,6 +973,7 @@ public actor CKSyncEngineBoundary: CloudSyncEngineBoundary {
         _ engineHandle: CloudKitEngineHandle,
         delegate: PingScopeCKSyncEngineDelegate
     ) async {
+        engineState.closeSession()
         await engineHost.cancelOperations(on: engineHandle)
         engineHost.releaseEngine(engineHandle)
         if self.engineHandle == engineHandle {
@@ -931,12 +995,21 @@ actor PingScopeCKSyncEngineDelegateState {
     private var confirmedRecordSaveIDs: Set<CKRecord.ID> = []
     private var failedRecordSaves: [CKRecord.ID: CKError] = [:]
     private var failedDeletions: [CKRecord.ID: CKError] = [:]
+    private var stateSession: CloudSyncEngineStateStore.Session?
 
-    func setActive(_ value: Bool) {
+    func setActive(
+        _ value: Bool,
+        stateSession: CloudSyncEngineStateStore.Session? = nil
+    ) {
         active = value
         if value {
             acceptsDeferredCancellation = true
+            self.stateSession = stateSession
         }
+    }
+
+    func activeStateSession() -> CloudSyncEngineStateStore.Session? {
+        active ? stateSession : nil
     }
 
     func scheduleCancellation(operation: @escaping @Sendable () async -> Void) {
@@ -960,6 +1033,7 @@ actor PingScopeCKSyncEngineDelegateState {
         confirmedRecordSaveIDs.removeAll(keepingCapacity: false)
         failedRecordSaves.removeAll(keepingCapacity: false)
         failedDeletions.removeAll(keepingCapacity: false)
+        stateSession = nil
         return completedDeferredCancellation
     }
 
@@ -1052,46 +1126,46 @@ actor PingScopeCKSyncEngineDelegateState {
 
 final class PingScopeCKSyncEngineDelegate: CKSyncEngineDelegate, @unchecked Sendable {
     private let state = PingScopeCKSyncEngineDelegateState()
-    private let stateKey: String
-    private let defaults: UserDefaults
+    private let engineState: CloudSyncEngineStateStore
     private let onRemoteChanges: CKSyncEngineBoundary.RemoteChangeHandler
     private let inboundWork: CloudSyncInboundWorkStore
     private let inboundApplyDrain: CloudSyncInboundApplyDrain
     private let beforeRemoteChangeAdmission: CKSyncEngineBoundary.RemoteChangeAdmissionHook
+    private let beforeStateSerializationPersist: CKSyncEngineBoundary.StateSerializationAdmissionHook
     private let onInboundWorkFailure: @Sendable (any Error) async -> Void
     private let onAccountChange: @Sendable () -> Void
     private let cancelSyncEngine: CKSyncEngineBoundary.SyncEngineCancellation
 
     fileprivate init(
-        stateKey: String,
-        defaults: UserDefaults,
+        engineState: CloudSyncEngineStateStore,
         onRemoteChanges: @escaping CKSyncEngineBoundary.RemoteChangeHandler,
         inboundWork: CloudSyncInboundWorkStore,
         inboundApplyDrain: CloudSyncInboundApplyDrain,
         beforeRemoteChangeAdmission: @escaping CKSyncEngineBoundary.RemoteChangeAdmissionHook,
+        beforeStateSerializationPersist: @escaping CKSyncEngineBoundary.StateSerializationAdmissionHook,
         onInboundWorkFailure: @escaping @Sendable (any Error) async -> Void,
         onAccountChange: @escaping @Sendable () -> Void,
         cancelSyncEngine: @escaping CKSyncEngineBoundary.SyncEngineCancellation = {
             await $0.cancelOperations()
         }
     ) {
-        self.stateKey = stateKey
-        self.defaults = defaults
+        self.engineState = engineState
         self.onRemoteChanges = onRemoteChanges
         self.inboundWork = inboundWork
         self.inboundApplyDrain = inboundApplyDrain
         self.beforeRemoteChangeAdmission = beforeRemoteChangeAdmission
+        self.beforeStateSerializationPersist = beforeStateSerializationPersist
         self.onInboundWorkFailure = onInboundWorkFailure
         self.onAccountChange = onAccountChange
         self.cancelSyncEngine = cancelSyncEngine
     }
 
-    func restoredStateSerialization() -> CKSyncEngine.State.Serialization? {
-        guard let data = defaults.data(forKey: stateKey) else { return nil }
-        return try? JSONDecoder().decode(CKSyncEngine.State.Serialization.self, from: data)
+    func setActive(
+        _ active: Bool,
+        stateSession: CloudSyncEngineStateStore.Session? = nil
+    ) async {
+        await state.setActive(active, stateSession: stateSession)
     }
-
-    func setActive(_ active: Bool) async { await state.setActive(active) }
     func awaitDeferredCancellation() async -> Bool {
         await state.deactivateAndAwaitDeferredCancellation()
     }
@@ -1171,12 +1245,11 @@ final class PingScopeCKSyncEngineDelegate: CKSyncEngineDelegate, @unchecked Send
             onAccountChange()
             return
         }
-        guard await state.isActive() else { return }
+        guard let stateSession = await state.activeStateSession() else { return }
         switch event {
         case let .stateUpdate(update):
-            if let data = try? JSONEncoder().encode(update.stateSerialization) {
-                defaults.set(data, forKey: stateKey)
-            }
+            await beforeStateSerializationPersist()
+            engineState.persist(update.stateSerialization, for: stateSession)
         case let .fetchedRecordZoneChanges(changes):
             let records = changes.modifications.map(\.record)
             let deletions = changes.deletions.map {
