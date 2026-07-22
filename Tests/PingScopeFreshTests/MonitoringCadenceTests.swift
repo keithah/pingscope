@@ -44,4 +44,53 @@ final class MonitoringCadenceTests: XCTestCase {
         // 8x * 60s = 480s, clamped to 300s ceiling
         XCTAssertEqual(inputs.effectiveInterval(base: .seconds(60)), .seconds(300))
     }
+
+    func testCombiningScreenObscuredForcesBackground() {
+        let inputs = CadenceInputs.combining(
+            screenObscured: true,     // display asleep or locked
+            uiVisible: true,          // popover open, but screen is off
+            appBackgrounded: false,
+            powerSource: .ac,
+            isLowPowerMode: false,
+            thermalTier: .nominal
+        )
+        XCTAssertEqual(inputs.visibility, .background)
+    }
+
+    func testCombiningUIVisibleIsActive() {
+        let inputs = CadenceInputs.combining(
+            screenObscured: false,
+            uiVisible: true,
+            appBackgrounded: false,
+            powerSource: .ac,
+            isLowPowerMode: false,
+            thermalTier: .nominal
+        )
+        XCTAssertEqual(inputs.visibility, .activeUI)
+    }
+
+    func testCombiningForegroundNoUIIsIdleForeground() {
+        let inputs = CadenceInputs.combining(
+            screenObscured: false,
+            uiVisible: false,
+            appBackgrounded: false,
+            powerSource: .battery,
+            isLowPowerMode: false,
+            thermalTier: .nominal
+        )
+        XCTAssertEqual(inputs.visibility, .idleForeground)
+        XCTAssertEqual(inputs.powerSource, .battery)
+    }
+
+    func testCombiningBackgroundedIsBackground() {
+        let inputs = CadenceInputs.combining(
+            screenObscured: false,
+            uiVisible: false,
+            appBackgrounded: true,
+            powerSource: .unknown,
+            isLowPowerMode: false,
+            thermalTier: .nominal
+        )
+        XCTAssertEqual(inputs.visibility, .background)
+    }
 }

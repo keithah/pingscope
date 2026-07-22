@@ -77,4 +77,32 @@ public struct CadenceInputs: Sendable, Equatable {
         let clamped = min(max(scaled, base.seconds), ceiling.seconds)
         return .seconds(clamped)
     }
+
+    /// Reduces raw platform signals to a single set of inputs. Visibility is the
+    /// most-conservative of: an obscured screen (asleep/locked) forces
+    /// `.background`; a backgrounded app is `.background`; visible live UI is
+    /// `.activeUI`; otherwise `.idleForeground`.
+    public static func combining(
+        screenObscured: Bool,
+        uiVisible: Bool,
+        appBackgrounded: Bool,
+        powerSource: PowerSource,
+        isLowPowerMode: Bool,
+        thermalTier: ThermalTier
+    ) -> CadenceInputs {
+        let visibility: MonitoringVisibility
+        if screenObscured || appBackgrounded {
+            visibility = .background
+        } else if uiVisible {
+            visibility = .activeUI
+        } else {
+            visibility = .idleForeground
+        }
+        return CadenceInputs(
+            visibility: visibility,
+            powerSource: powerSource,
+            isLowPowerMode: isLowPowerMode,
+            thermalTier: thermalTier
+        )
+    }
 }
