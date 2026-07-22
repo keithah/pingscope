@@ -404,6 +404,10 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
         Task { await runtime.stop() }
     }
 
+    func applyCadenceInputs(_ inputs: CadenceInputs) async {
+        await runtime.setCadenceInputs(inputs)
+    }
+
     func pauseMeasurementsForSleep() {
         Task { await runtime.stopMeasurements() }
     }

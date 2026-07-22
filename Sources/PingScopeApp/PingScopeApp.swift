@@ -25,7 +25,7 @@ struct PingScopeApp: App {
 }
 
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSWindowDelegate {
     static weak var shared: AppDelegate?
 
     let model = PingScopeModel()
@@ -43,6 +43,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private var wakeObserver: NSObjectProtocol?
     private var sleepObserver: NSObjectProtocol?
     private var screenObserver: NSObjectProtocol?
+    private var powerMonitor: MacPowerActivityMonitor?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         Self.shared = self
@@ -54,6 +55,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         NSApp.setActivationPolicy(.accessory)
         installStatusItem()
         model.start()
+        startPowerMonitor()
         model.onMenuStateChanged = { [weak self] state in
             self?.renderMenuState(state)
         }
@@ -141,6 +143,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         applyOverlayBehavior()
         constrainOverlayToVisibleScreen()
         overlayController?.showWindow(nil)
+        updatePowerMonitorUIVisibility()
         DebugLog.write("overlay shown frame=\(String(describing: overlayController?.window?.frame))")
     }
 
@@ -173,6 +176,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         DebugLog.write("AppDelegate.hideOverlay called")
         model.overlayVisible = false
         overlayController?.close()
+        updatePowerMonitorUIVisibility()
     }
 
     func resetOverlayFrame() {
@@ -401,6 +405,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         popover.delegate = self
         popover.show(relativeTo: anchorView.bounds, of: anchorView, preferredEdge: .minY)
         self.popover = popover
+        updatePowerMonitorUIVisibility()
         applyWindowOpacity()
         DispatchQueue.main.async { [weak self, weak popover] in
             guard self?.popover === popover else { return }
@@ -414,6 +419,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
 
     func popoverDidDetach(_ popover: NSPopover) {
         DebugLog.write("menu popover detached to window")
+        updatePowerMonitorUIVisibility()
+    }
+
+    func popoverDidClose(_ notification: Notification) {
+        updatePowerMonitorUIVisibility()
     }
 
     func detachableWindow(for popover: NSPopover) -> NSWindow? {
@@ -452,10 +462,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         }
         window.minSize = MenuBarPresentationMode.statusContentMinimumSize
         window.isReleasedWhenClosed = false
+        window.delegate = self
         DispatchQueue.main.async { [weak window] in
             window?.setContentSize(MenuBarPresentationMode.statusContentSize)
         }
         return window
+    }
+
+    func windowWillClose(_ notification: Notification) {
+        DispatchQueue.main.async { [weak self] in
+            self?.updatePowerMonitorUIVisibility()
+        }
+    }
+
+    private func startPowerMonitor() {
+        let monitor = MacPowerActivityMonitor { [weak self] inputs in
+            guard let self else { return }
+            DebugLog.write("cadence inputs visibility=\(inputs.visibility) power=\(inputs.powerSource) lowPower=\(inputs.isLowPowerMode) thermal=\(inputs.thermalTier) multiplier=\(inputs.multiplier)")
+            Task { await self.model.applyCadenceInputs(inputs) }
+        }
+        monitor.start()
+        powerMonitor = monitor
+        updatePowerMonitorUIVisibility()
+    }
+
+    private func updatePowerMonitorUIVisibility() {
+        let isVisible = overlayController?.window?.isVisible == true
+            || popover?.isShown == true
+            || detachedPopoverWindow?.isVisible == true
+        powerMonitor?.setUIVisible(isVisible)
     }
 
     private func showContextMenu(from view: NSView) {
