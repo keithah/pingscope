@@ -383,13 +383,19 @@ public actor PingScopeCloudSyncService {
             await self?.resumeAfterCoordinatorAccountRecovery()
         }
         guard isCurrentTransition(transition), requestedSyncEnabled else { return }
-        guard !isSyncEnabled else {
-            await drainPendingHostDeletions()
-            guard isCurrentLifecycle(transition) else { return }
-            await uploadHosts(hosts)
-            guard isCurrentLifecycle(transition) else { return }
-            requestSampleDrain()
-            return
+        if isSyncEnabled {
+            if case .failed = await coordinator.status {
+                let cancelledDrain = beginStoppingSampleDrain()
+                await cancelledDrain?.value
+                guard isCurrentTransition(transition), requestedSyncEnabled else { return }
+            } else {
+                await drainPendingHostDeletions()
+                guard isCurrentLifecycle(transition) else { return }
+                await uploadHosts(hosts)
+                guard isCurrentLifecycle(transition) else { return }
+                requestSampleDrain()
+                return
+            }
         }
         await coordinator.setEnabled(enabled, serviceLifecycleGeneration: transition)
         let coordinatorStatus = await coordinator.status
