@@ -257,3 +257,85 @@ and the complete coordinator suite passed on the first final run.
 No unresolved concerns. The intentional at-least-once tradeoff remains: a
 process death after receiver success but before queue removal may reapply an
 idempotent batch.
+
+## Critical re-review: serialized-state late-write fence
+
+### Result
+
+Serialized `CKSyncEngine` state now uses the same session-generation model as
+the delegate lifecycle. Each engine start opens a new state session, and each
+delegate callback captures that session only while active. State writes are
+conditionally committed under the same lock that retires a session and clears
+its stored state. Therefore either a previously admitted write wins before
+invalidation and is then cleared, or invalidation wins and the retired
+session's late write is rejected. A newly recovered engine cannot make an old
+delegate's token valid again.
+
+Malformed persisted inbound work now also has a production-path regression
+test through the real boundary, coordinator, and service. Startup invokes no
+receiver, enters terminal failure, releases the engine, clears both serialized
+state and inbound work, does not restart automatically, and only an explicit
+retry creates a new engine to refetch and apply the record.
+
+### RED / GREEN evidence
+
+- RED: `testAccountRecoveryRejectsLateRetiredStateUpdate` paused a real
+  `.stateUpdate` after delegate/session admission, completed account recovery,
+  then resumed the retired callback. Before the state-session fence, the final
+  `XCTAssertNil` failed because the old callback restored 15 bytes of serialized
+  state after recovery had cleared it.
+- GREEN: the same test now completes recovery on a second engine with no state,
+  resumes the old callback, and still observes no state.
+- RED:
+  `testTerminalPersistenceFailureRejectsLateRetiredStateUpdateAfterExplicitRetry`
+  paused the same production callback, forced terminal inbound persistence
+  failure, explicitly retried/refetched, and then resumed it. Before the fence,
+  its final `XCTAssertNil` likewise found the retired callback's 15-byte write.
+- GREEN: terminal failure and explicit retry both observe absent state, the
+  refetched record applies once, and the resumed old callback remains unable to
+  write.
+- Coverage-only correction: the first malformed-queue test run expected state
+  presence `[false, false]` at engine creation. Because the test deliberately
+  seeds serialized state before the first start, the correct observation is
+  `[true, false]`: the malformed queue clears it before explicit retry. With
+  that assertion corrected, the existing fail-closed implementation passed;
+  no additional production change was needed for this minor finding.
+
+### Files changed
+
+- `Sources/PingScopeCloudSync/CKSyncEngineBoundary.swift`
+  - Added a locked serialized-state store with generation-bound sessions.
+  - Made conditional state persistence and session invalidation/clear one
+    atomic ordering domain.
+  - Opened sessions at engine start and closed them on stop or retirement.
+- `Tests/PingScopeFreshTests/Cloud/CloudSyncCoordinatorTests.swift`
+  - Added deterministic account-change and terminal-failure late-write tests.
+  - Added malformed persisted inbound-queue startup and explicit-retry coverage.
+
+### Verification
+
+- Focused re-review tests: 3 passed, 0 failures.
+- `swift test --filter CloudSyncCoordinatorTests`: 95 passed, 0 failures.
+- `swift test`: 1,003 passed, 0 failures.
+
+### Self-review
+
+- Serialization is prepared outside the lock, but the session comparison and
+  write happen together under it. Invalidation during encoding therefore still
+  rejects the write; a write that finishes first is removed by the subsequent
+  clear.
+- Account invalidation and terminal persistence failure both clear serialized
+  state through the session store before recovery or failure publication.
+- Stop and generic engine retirement close the active session without clearing
+  valid persisted state, preventing callbacks from retired delegates while
+  preserving normal restart cursors.
+- The tests pause after active/session admission and resume only after the new
+  lifecycle has completed, so they exercise the reported late-write window
+  rather than merely an initially inactive callback.
+- No probe/wire protocol, retention, graph/downsampling, or cache-fingerprint
+  code changed.
+
+### Concerns
+
+No unresolved concerns. The existing intentional at-least-once inbound apply
+tradeoff remains unchanged.

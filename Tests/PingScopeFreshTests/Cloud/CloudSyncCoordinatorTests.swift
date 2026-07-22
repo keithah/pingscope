@@ -1388,6 +1388,55 @@ final class CloudSyncCoordinatorTests: XCTestCase {
         await secondBoundary.stop()
     }
 
+    func testAccountRecoveryRejectsLateRetiredStateUpdate() async throws {
+        let suiteName = "CloudSyncAccountStateFenceTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let stateKey = "PingScope.CloudSync.AccountStateFence"
+        let gate = RemoteCommitGate()
+        let host = RecordingCloudKitEngineHost(deleteError: nil)
+        let boundary = CKSyncEngineBoundary(
+            engineHost: host,
+            stateKey: stateKey,
+            subscriptionID: "CloudSyncAccountStateFenceTests",
+            defaultsSuiteName: suiteName,
+            beforeStateSerializationPersist: { await gate.pause() }
+        )
+        let service = PingScopeCloudSyncService(
+            historyStore: InMemoryHistoryStore(),
+            hostStore: LockedSharedHostStore(state: SharedHostStoreState(hosts: [])),
+            boundary: boundary,
+            recordBuilder: DefaultCloudSyncRecordBuilder(),
+            registrySuiteName: suiteName
+        )
+        await service.setEnabled(true, hosts: [])
+        let latestDelegate = await host.latestDelegate()
+        let retiredDelegate = try XCTUnwrap(latestDelegate)
+        let event = try cloudKitStateUpdateEvent()
+
+        let lateUpdate = Task {
+            await retiredDelegate.handleEvent(
+                event,
+                syncEngine: inertCloudKitSyncEngineArgument()
+            )
+        }
+        await gate.waitUntilPaused()
+
+        await host.emitAccountChange(availability: .privateAccount)
+
+        let creationCountAfterRecovery = await host.engineCreationCount()
+        let statusAfterRecovery = await service.status()
+        XCTAssertEqual(creationCountAfterRecovery, 2)
+        XCTAssertEqual(statusAfterRecovery, .idle)
+        XCTAssertNil(defaults.data(forKey: stateKey))
+
+        await gate.resume()
+        await lateUpdate.value
+
+        XCTAssertNil(defaults.data(forKey: stateKey))
+        await service.setEnabled(false, hosts: [])
+    }
+
     func testAccountRecoveryWaitsForAdmittedLiveApplyToFinish() async throws {
         let suiteName = "CloudSyncLiveApplyDrainTests-\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
@@ -1612,6 +1661,146 @@ final class CloudSyncCoordinatorTests: XCTestCase {
         XCTAssertEqual(recoveredSampleCount, 1)
         XCTAssertEqual(finalCreationCount, 3)
         XCTAssertEqual(statePresenceAtCreation, [false, false, false])
+        await service.setEnabled(false, hosts: [])
+    }
+
+    func testTerminalPersistenceFailureRejectsLateRetiredStateUpdateAfterExplicitRetry() async throws {
+        let suiteName = "CloudSyncFailureStateFenceTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let stateKey = "PingScope.CloudSync.FailureStateFence"
+        let historyStore = RecordingRemoteHistoryStore()
+        let persistence = FailingOnceInboundPersistence()
+        let bridge = RemoteApplyBridge()
+        let gate = RemoteCommitGate()
+        let host = RecordingCloudKitEngineHost(deleteError: nil)
+        let boundary = CKSyncEngineBoundary(
+            engineHost: host,
+            stateKey: stateKey,
+            subscriptionID: "CloudSyncFailureStateFenceTests",
+            defaultsSuiteName: suiteName,
+            onRemoteChanges: { records, deletions, context in
+                try await bridge.apply(records: records, deletions: deletions, context: context)
+            },
+            beforeInboundWorkPersist: { try persistence.persist() },
+            beforeStateSerializationPersist: { await gate.pause() }
+        )
+        let service = PingScopeCloudSyncService(
+            historyStore: historyStore,
+            hostStore: LockedSharedHostStore(state: SharedHostStoreState(hosts: [])),
+            boundary: boundary,
+            recordBuilder: DefaultCloudSyncRecordBuilder(),
+            registrySuiteName: suiteName
+        )
+        await bridge.setService(service)
+        await service.setEnabled(true, hosts: [])
+        let latestDelegate = await host.latestDelegate()
+        let retiredDelegate = try XCTUnwrap(latestDelegate)
+        let event = try cloudKitStateUpdateEvent()
+        let record = PingSampleRecordMapper.record(
+            from: .success(hostID: UUID(), latency: .milliseconds(20))
+        )
+
+        let lateUpdate = Task {
+            await retiredDelegate.handleEvent(
+                event,
+                syncEngine: inertCloudKitSyncEngineArgument()
+            )
+        }
+        await gate.waitUntilPaused()
+
+        await retiredDelegate.handleFetchedRecordZoneChanges(records: [record], deletions: [])
+
+        let failedStatus = await service.status()
+        XCTAssertEqual(failedStatus, .failed("forcedFailure"))
+        XCTAssertNil(defaults.data(forKey: stateKey))
+
+        await host.fetchOnNextEngineStart(records: [record])
+        await service.setEnabled(true, hosts: [])
+
+        let recoveredStatus = await service.status()
+        let recoveredSampleCount = await historyStore.remoteSampleCount()
+        XCTAssertEqual(recoveredStatus, .idle)
+        XCTAssertEqual(recoveredSampleCount, 1)
+        XCTAssertNil(defaults.data(forKey: stateKey))
+
+        await gate.resume()
+        await lateUpdate.value
+
+        XCTAssertNil(defaults.data(forKey: stateKey))
+        let finalCreationCount = await host.engineCreationCount()
+        XCTAssertEqual(finalCreationCount, 2)
+        await service.setEnabled(false, hosts: [])
+    }
+
+    func testMalformedPersistedInboundQueueFailsClosedUntilExplicitRetryRefetches() async throws {
+        let suiteName = "CloudSyncMalformedInboundQueueTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let stateKey = "PingScope.CloudSync.MalformedInboundQueue"
+        let inboundKey = "\(stateKey).InboundWork"
+        let historyStore = RecordingRemoteHistoryStore()
+        let bridge = RemoteApplyBridge()
+        let host = RecordingCloudKitEngineHost(
+            deleteError: nil,
+            serializedStateExists: {
+                UserDefaults(suiteName: suiteName)?.data(forKey: stateKey) != nil
+            }
+        )
+        let boundary = CKSyncEngineBoundary(
+            engineHost: host,
+            stateKey: stateKey,
+            subscriptionID: "CloudSyncMalformedInboundQueueTests",
+            defaultsSuiteName: suiteName,
+            onRemoteChanges: { records, deletions, context in
+                try await bridge.apply(records: records, deletions: deletions, context: context)
+            }
+        )
+        let service = PingScopeCloudSyncService(
+            historyStore: historyStore,
+            hostStore: LockedSharedHostStore(state: SharedHostStoreState(hosts: [])),
+            boundary: boundary,
+            recordBuilder: DefaultCloudSyncRecordBuilder(),
+            registrySuiteName: suiteName
+        )
+        await bridge.setService(service)
+        defaults.set(Data("serialized-state".utf8), forKey: stateKey)
+        defaults.set(Data("not-json".utf8), forKey: inboundKey)
+
+        await service.setEnabled(true, hosts: [])
+
+        let failedStatus = await service.status()
+        let sampleCountAfterFailure = await historyStore.remoteSampleCount()
+        let creationsAfterFailure = await host.engineCreationCount()
+        let activeHandlesAfterFailure = await host.activeHandleCount()
+        guard case let .failed(failureDescription) = failedStatus else {
+            return XCTFail("Expected malformed inbound queue to fail the service")
+        }
+        XCTAssertTrue(failureDescription.contains("dataCorrupted"))
+        XCTAssertEqual(sampleCountAfterFailure, 0)
+        XCTAssertEqual(creationsAfterFailure, 1)
+        XCTAssertEqual(activeHandlesAfterFailure, 0)
+        XCTAssertNil(defaults.data(forKey: stateKey))
+        XCTAssertNil(defaults.data(forKey: inboundKey))
+
+        await Task.yield()
+        let creationsAfterYield = await host.engineCreationCount()
+        XCTAssertEqual(creationsAfterYield, 1)
+
+        let record = PingSampleRecordMapper.record(
+            from: .success(hostID: UUID(), latency: .milliseconds(21))
+        )
+        await host.fetchOnNextEngineStart(records: [record])
+        await service.setEnabled(true, hosts: [])
+
+        let recoveredStatus = await service.status()
+        let recoveredSampleCount = await historyStore.remoteSampleCount()
+        let finalCreationCount = await host.engineCreationCount()
+        let statePresenceAtCreation = await host.statePresenceAtEngineCreation()
+        XCTAssertEqual(recoveredStatus, .idle)
+        XCTAssertEqual(recoveredSampleCount, 1)
+        XCTAssertEqual(finalCreationCount, 2)
+        XCTAssertEqual(statePresenceAtCreation, [true, false])
         await service.setEnabled(false, hosts: [])
     }
 
@@ -3370,6 +3559,28 @@ private func cloudKitAccountChangeEvent(
     )
     return .accountChange(
         unsafeBitCast(changeType, to: CKSyncEngine.Event.AccountChange.self)
+    )
+}
+
+private func cloudKitStateUpdateEvent() throws -> CKSyncEngine.Event {
+    let serialization = try JSONDecoder().decode(
+        CKSyncEngine.State.Serialization.self,
+        from: Data("{\"data\":\"AQID\"}".utf8)
+    )
+    precondition(
+        MemoryLayout<CKSyncEngine.State.Serialization>.size
+            == MemoryLayout<CKSyncEngine.Event.StateUpdate>.size
+    )
+    precondition(
+        MemoryLayout<CKSyncEngine.State.Serialization>.stride
+            == MemoryLayout<CKSyncEngine.Event.StateUpdate>.stride
+    )
+    precondition(
+        MemoryLayout<CKSyncEngine.State.Serialization>.alignment
+            == MemoryLayout<CKSyncEngine.Event.StateUpdate>.alignment
+    )
+    return .stateUpdate(
+        unsafeBitCast(serialization, to: CKSyncEngine.Event.StateUpdate.self)
     )
 }
 
