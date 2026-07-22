@@ -14,6 +14,16 @@
 	<key>com.apple.security.cs.allow-dyld-environment-variables</key>
 	<false/>
 
+	<!-- Opt-in history and host sync uses only the user's private CloudKit database. -->
+	<key>com.apple.developer.icloud-container-identifiers</key>
+	<array>
+		<string>iCloud.com.hadm.PingScope</string>
+	</array>
+	<key>com.apple.developer.icloud-services</key>
+	<array>
+		<string>CloudKit</string>
+	</array>
+
 	<!-- App Groups for widget data sharing -->
 	<key>com.apple.security.application-groups</key>
 	<array>

@@ -31,6 +31,7 @@ public enum MonitorSessionPhase: String, Codable, Equatable, Sendable {
 public enum MonitorSessionEndReason: String, Codable, Equatable, Sendable {
     case completed
     case userStopped
+    case scopeSuspended
     case backgroundRuntimeExpired
 }
 

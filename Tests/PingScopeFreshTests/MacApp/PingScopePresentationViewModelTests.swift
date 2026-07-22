@@ -1,0 +1,531 @@
+import Combine
+import XCTest
+@testable import PingScope
+import PingScopeCore
+import PingScopeCloudSync
+
+@MainActor
+final class PingScopePresentationViewModelTests: XCTestCase {
+    func testMacPersistedCloudSyncUsesCrashLoopGuardWhenContainerEntitlementIsAbsent() async {
+        let suiteName = "PingScopePresentationCrashGuardTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let enabledKey = PingScopeCloudSyncPreference.enabledKey
+        let failureKey = PingScopeCloudSyncPreference.automaticStartFailureCountKey
+        defaults.set(true, forKey: enabledKey)
+        defaults.set(
+            PingScopeCloudSyncActivationController.defaultMaximumAutomaticStartFailures - 1,
+            forKey: failureKey
+        )
+
+        let model = PingScopeModel(cloudSyncDefaultsSuiteName: suiteName)
+        let activationFinished = expectation(description: "persisted CloudKit activation finished")
+        var cancellable: AnyCancellable?
+        if model.cloudSyncStatusText == "Checking iCloud account…" {
+            cancellable = model.$cloudSyncStatusText
+                .dropFirst()
+                .filter { $0 != "Checking iCloud account…" }
+                .prefix(1)
+                .sink { _ in activationFinished.fulfill() }
+            await fulfillment(of: [activationFinished], timeout: 10)
+        }
+        withExtendedLifetime(cancellable) {}
+
+        XCTAssertFalse(model.isCloudSyncEnabled)
+        XCTAssertFalse(defaults.bool(forKey: enabledKey))
+        XCTAssertTrue(model.cloudSyncStatusText.contains("turned off"))
+        XCTAssertTrue(model.cloudSyncStatusText.contains("iCloud.com.hadm.PingScope"))
+    }
+
+    func testLiveDisplayUpdatesDoNotPublishThroughSettingsModel() {
+        let model = PingScopeModel()
+        var modelChangeCount = 0
+        var liveDisplayChangeCount = 0
+        let modelCancellable = model.objectWillChange.sink {
+            modelChangeCount += 1
+        }
+        let liveDisplayCancellable = model.liveDisplay.objectWillChange.sink {
+            liveDisplayChangeCount += 1
+        }
+        let host = HostConfig(displayName: "Edge", address: "1.1.1.1")
+
+        model.liveDisplay.updateSnapshot(
+            RuntimeSnapshot(
+                hosts: [host],
+                primaryHostID: host.id,
+                healthByHost: [:],
+                samplesByHost: [:]
+            )
+        )
+        model.liveDisplay.updateDisplayPresentation(PingScopeDisplayPresentation())
+
+        XCTAssertEqual(liveDisplayChangeCount, 2)
+        XCTAssertEqual(modelChangeCount, 0)
+        withExtendedLifetime((modelCancellable, liveDisplayCancellable)) {}
+    }
+
+    func testDisplayPresentationRecomputeSchedulerCoalescesBurst() async {
+        let scheduler = DisplayPresentationRecomputeScheduler(delay: .milliseconds(10))
+        let recomputed = expectation(description: "presentation recomputed")
+        var recomputeCount = 0
+
+        for _ in 0..<5 {
+            scheduler.schedule {
+                recomputeCount += 1
+                recomputed.fulfill()
+            }
+        }
+
+        await fulfillment(of: [recomputed], timeout: 1)
+        XCTAssertEqual(recomputeCount, 1)
+    }
+
+    func testDisplayPresentationInputKeyTracksVisibleInputs() {
+        let host = HostConfig(displayName: "Primary", address: "1.1.1.1")
+        let sample = PingResult.success(
+            hostID: host.id,
+            latency: .milliseconds(12),
+            timestamp: Date(timeIntervalSince1970: 100)
+        )
+        let baseline = DisplayPresentationInputKey(
+            visibleSamples: [sample],
+            selectedRange: .fiveMinutes,
+            includesAllHosts: false,
+            primaryHost: host,
+            hosts: [host],
+            healthByHost: [:],
+            allHostVisibleSamples: nil
+        )
+
+        XCTAssertEqual(baseline, baseline)
+        XCTAssertNotEqual(
+            baseline,
+            DisplayPresentationInputKey(
+                visibleSamples: [],
+                selectedRange: .fiveMinutes,
+                includesAllHosts: false,
+                primaryHost: host,
+                hosts: [host],
+                healthByHost: [:],
+                allHostVisibleSamples: nil
+            )
+        )
+    }
+
+    func testDisplayPresentationSampleFingerprintTracksCountAndNewestSamplePerHost() {
+        let firstHostID = UUID()
+        let secondHostID = UUID()
+        let first = PingResult.success(hostID: firstHostID, latency: .milliseconds(10), timestamp: Date(timeIntervalSince1970: 100))
+        let newest = PingResult.success(hostID: firstHostID, latency: .milliseconds(20), timestamp: Date(timeIntervalSince1970: 200))
+        let otherHost = PingResult.success(hostID: secondHostID, latency: .milliseconds(30), timestamp: Date(timeIntervalSince1970: 150))
+
+        XCTAssertEqual(
+            DisplayPresentationSampleFingerprint(samples: [first, newest, otherHost]),
+            DisplayPresentationSampleFingerprint(samples: [otherHost, first, newest])
+        )
+        XCTAssertNotEqual(
+            DisplayPresentationSampleFingerprint(samples: [first, newest]),
+            DisplayPresentationSampleFingerprint(samples: [first])
+        )
+        XCTAssertNotEqual(
+            DisplayPresentationSampleFingerprint(samples: [first]),
+            DisplayPresentationSampleFingerprint(samples: [newest])
+        )
+    }
+
+    func testDisplayPresentationSampleFingerprintUsesGreatestIDToBreakNewestTimestampTie() throws {
+        let hostID = UUID()
+        let timestamp = Date(timeIntervalSince1970: 100)
+        let lowerID = UUID(uuidString: "00000000-0000-0000-0000-000000000001")!
+        let greaterID = UUID(uuidString: "FFFFFFFF-FFFF-FFFF-FFFF-FFFFFFFFFFFF")!
+        let lower = PingResult(id: lowerID, hostID: hostID, timestamp: timestamp, latency: .milliseconds(10), failureReason: nil)
+        let greater = PingResult(id: greaterID, hostID: hostID, timestamp: timestamp, latency: .milliseconds(20), failureReason: nil)
+
+        let fingerprint = DisplayPresentationSampleFingerprint(samples: [greater, lower])
+
+        XCTAssertEqual(try XCTUnwrap(fingerprint.hosts.first).count, 2)
+        XCTAssertEqual(try XCTUnwrap(fingerprint.hosts.first).newestSampleID, greaterID)
+        XCTAssertEqual(try XCTUnwrap(fingerprint.hosts.first).newestTimestamp, timestamp)
+    }
+
+    func testDisplayPresentationSampleFingerprintMatchesUnorderedEquivalenceOracle() {
+        struct OracleHost: Equatable {
+            let hostID: UUID
+            let count: Int
+            let newestSampleID: UUID
+            let newestTimestamp: Date
+        }
+
+        func oracle(_ samples: [PingResult]) -> [OracleHost] {
+            Dictionary(grouping: samples, by: \PingResult.hostID)
+                .map { hostID, hostSamples in
+                    let newest = hostSamples.max { lhs, rhs in
+                        if lhs.timestamp != rhs.timestamp {
+                            return lhs.timestamp < rhs.timestamp
+                        }
+                        return lhs.id.uuidString < rhs.id.uuidString
+                    }!
+                    return OracleHost(
+                        hostID: hostID,
+                        count: hostSamples.count,
+                        newestSampleID: newest.id,
+                        newestTimestamp: newest.timestamp
+                    )
+                }
+                .sorted { $0.hostID.uuidString < $1.hostID.uuidString }
+        }
+
+        let firstHostID = UUID(uuidString: "10000000-0000-0000-0000-000000000000")!
+        let secondHostID = UUID(uuidString: "20000000-0000-0000-0000-000000000000")!
+        let lowerSampleID = UUID(uuidString: "00000000-0000-0000-0000-000000000001")!
+        let greaterSampleID = UUID(uuidString: "00000000-0000-0000-0000-0000000000FF")!
+        let old = PingResult(
+            id: UUID(),
+            hostID: firstHostID,
+            timestamp: Date(timeIntervalSince1970: 100),
+            latency: .milliseconds(10),
+            failureReason: nil
+        )
+        let tiedLower = PingResult(
+            id: lowerSampleID,
+            hostID: firstHostID,
+            timestamp: Date(timeIntervalSince1970: 200),
+            latency: .milliseconds(20),
+            failureReason: nil
+        )
+        let tiedGreater = PingResult(
+            id: greaterSampleID,
+            hostID: firstHostID,
+            timestamp: Date(timeIntervalSince1970: 200),
+            latency: .milliseconds(30),
+            failureReason: nil
+        )
+        let otherHost = PingResult(
+            id: UUID(),
+            hostID: secondHostID,
+            timestamp: Date(timeIntervalSince1970: 150),
+            latency: .milliseconds(40),
+            failureReason: nil
+        )
+        let samples = [old, tiedLower, tiedGreater, otherHost]
+        let reordered = [otherHost, tiedGreater, old, tiedLower]
+
+        for input in [samples, reordered] {
+            let actual = DisplayPresentationSampleFingerprint(samples: input).hosts.map {
+                OracleHost(
+                    hostID: $0.hostID,
+                    count: $0.count,
+                    newestSampleID: $0.newestSampleID!,
+                    newestTimestamp: $0.newestTimestamp!
+                )
+            }
+            XCTAssertEqual(actual, oracle(input))
+        }
+        XCTAssertEqual(
+            DisplayPresentationSampleFingerprint(samples: samples),
+            DisplayPresentationSampleFingerprint(samples: reordered)
+        )
+        let additionalOld = PingResult(
+            id: UUID(),
+            hostID: firstHostID,
+            timestamp: Date(timeIntervalSince1970: 50),
+            latency: .milliseconds(5),
+            failureReason: nil
+        )
+        XCTAssertNotEqual(
+            DisplayPresentationSampleFingerprint(samples: samples),
+            DisplayPresentationSampleFingerprint(samples: samples + [additionalOld])
+        )
+        let newest = PingResult(
+            id: UUID(),
+            hostID: firstHostID,
+            timestamp: Date(timeIntervalSince1970: 300),
+            latency: .milliseconds(50),
+            failureReason: nil
+        )
+        XCTAssertNotEqual(
+            DisplayPresentationSampleFingerprint(samples: samples),
+            DisplayPresentationSampleFingerprint(samples: [old, tiedLower, newest, otherHost])
+        )
+    }
+
+    func testDisplayPresentationConsumesPreparedSamplesWithoutMaterializingThemAgain() {
+        let host = HostConfig(displayName: "Primary", address: "1.1.1.1")
+        let preparedSample = PingResult.success(
+            hostID: host.id,
+            latency: .milliseconds(42),
+            timestamp: Date(timeIntervalSince1970: 100)
+        )
+        let snapshot = RuntimeSnapshot(
+            hosts: [host],
+            primaryHostID: host.id,
+            healthByHost: [:],
+            samplesByHost: [:]
+        )
+        let preparation = PingScopeDisplayPreparation(
+            visibleHistorySamples: [preparedSample],
+            visibleSamples: [preparedSample],
+            allHostGraphSeries: []
+        )
+
+        let presentation = PingScopeDisplayPresentation(
+            snapshot: snapshot,
+            preparation: preparation,
+            includesAllHosts: false,
+            presenter: DisplayStatePresenter()
+        )
+
+        XCTAssertEqual(presentation.visibleHistorySamples, [preparedSample])
+        XCTAssertEqual(presentation.visibleSamples, [preparedSample])
+        XCTAssertEqual(presentation.primaryStats.transmitted, 1)
+    }
+
+    func testOverlayPresentationViewModelRefreshesOverlayPreferences() {
+        let oldShowsAllHosts = UserDefaults.standard.overlayShowsAllHosts
+        let oldShowsLegend = UserDefaults.standard.overlayShowsLegend
+        defer {
+            UserDefaults.standard.overlayShowsAllHosts = oldShowsAllHosts
+            UserDefaults.standard.overlayShowsLegend = oldShowsLegend
+        }
+
+        let model = PingScopeModel()
+        model.overlayShowsAllHosts = false
+        model.overlayShowsLegend = false
+
+        let viewModel = OverlayPresentationViewModel(model: model)
+        XCTAssertFalse(viewModel.presentation.showsAllHosts)
+        XCTAssertFalse(viewModel.presentation.showsLegend)
+
+        viewModel.selectAllHosts()
+        viewModel.toggleLegend()
+
+        XCTAssertTrue(model.overlayShowsAllHosts)
+        XCTAssertTrue(model.overlayShowsLegend)
+        XCTAssertTrue(viewModel.presentation.showsAllHosts)
+        XCTAssertTrue(viewModel.presentation.showsLegend)
+    }
+
+    func testStatusPopoverPresentationViewModelRefreshesRangeAndHostMode() {
+        let oldPopoverShowsAllHosts = UserDefaults.standard.popoverShowsAllHosts
+        defer {
+            UserDefaults.standard.popoverShowsAllHosts = oldPopoverShowsAllHosts
+        }
+
+        let model = PingScopeModel()
+        model.selectedRange = .fiveMinutes
+        model.popoverShowsAllHosts = false
+
+        let viewModel = StatusPopoverPresentationViewModel(model: model)
+        XCTAssertEqual(viewModel.presentation.selectedRange, .fiveMinutes)
+        XCTAssertFalse(viewModel.presentation.popoverShowsAllHosts)
+
+        viewModel.setSelectedRange(.oneHour)
+        viewModel.selectAllHosts()
+
+        XCTAssertEqual(model.selectedRange, .oneHour)
+        XCTAssertTrue(model.popoverShowsAllHosts)
+        XCTAssertEqual(viewModel.presentation.selectedRange, .oneHour)
+        XCTAssertTrue(viewModel.presentation.popoverShowsAllHosts)
+    }
+
+    func testShareGraphAppearanceResolvesForcedColorSchemes() {
+        XCTAssertEqual(PingScopeShareGraphAppearance.light.resolvedColorScheme, .light)
+        XCTAssertEqual(PingScopeShareGraphAppearance.dark.resolvedColorScheme, .dark)
+    }
+
+    func testShareGraphCurrentAppearanceFollowsEffectiveAppAppearance() throws {
+        let darkAppearance = try XCTUnwrap(NSAppearance(named: .darkAqua))
+        let lightAppearance = try XCTUnwrap(NSAppearance(named: .aqua))
+
+        XCTAssertEqual(PingScopeShareGraphAppearance.resolvedColorScheme(for: darkAppearance), .dark)
+        XCTAssertEqual(PingScopeShareGraphAppearance.resolvedColorScheme(for: lightAppearance), .light)
+    }
+
+    func testShareGraphPresentationUsesSelectedAppearanceColorScheme() async {
+        let model = PingScopeModel()
+
+        let lightPresentation = await model.shareGraphPresentation(options: PingScopeShareGraphOptions(appearance: .light))
+        let darkPresentation = await model.shareGraphPresentation(options: PingScopeShareGraphOptions(appearance: .dark))
+
+        XCTAssertEqual(lightPresentation.colorScheme, .light)
+        XCTAssertEqual(darkPresentation.colorScheme, .dark)
+    }
+
+    func testMacDisplayModeDefaultsToSignalAndPersistsRing() {
+        let suiteName = "PingScopeDisplayModeTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        defaults.removeObject(forKey: "pingScopeDisplayMode")
+        XCTAssertEqual(defaults.pingScopeDisplayMode, .signal)
+
+        defaults.pingScopeDisplayMode = .ring
+        XCTAssertEqual(defaults.pingScopeDisplayMode, .ring)
+    }
+
+    func testDisplayModeFlowsIntoPopoverAndOverlayPresentations() {
+        let oldDisplayMode = UserDefaults.standard.pingScopeDisplayMode
+        defer { UserDefaults.standard.pingScopeDisplayMode = oldDisplayMode }
+
+        let model = PingScopeModel()
+        model.displayMode = .ring
+
+        let popoverViewModel = StatusPopoverPresentationViewModel(model: model)
+        let overlayViewModel = OverlayPresentationViewModel(model: model)
+
+        XCTAssertEqual(popoverViewModel.presentation.displayMode, .ring)
+        XCTAssertEqual(overlayViewModel.presentation.displayMode, .ring)
+
+        model.displayMode = .signal
+        popoverViewModel.refresh()
+        overlayViewModel.refresh()
+
+        XCTAssertEqual(popoverViewModel.presentation.displayMode, .signal)
+        XCTAssertEqual(overlayViewModel.presentation.displayMode, .signal)
+    }
+
+    func testDisplayModeKeepsRingForAllHosts() {
+        let oldDisplayMode = UserDefaults.standard.pingScopeDisplayMode
+        let oldPopoverShowsAllHosts = UserDefaults.standard.popoverShowsAllHosts
+        let oldOverlayShowsAllHosts = UserDefaults.standard.overlayShowsAllHosts
+        defer {
+            UserDefaults.standard.pingScopeDisplayMode = oldDisplayMode
+            UserDefaults.standard.popoverShowsAllHosts = oldPopoverShowsAllHosts
+            UserDefaults.standard.overlayShowsAllHosts = oldOverlayShowsAllHosts
+        }
+
+        let model = PingScopeModel()
+        model.displayMode = .ring
+        model.popoverShowsAllHosts = true
+        model.overlayShowsAllHosts = true
+
+        XCTAssertEqual(StatusPopoverPresentation(model: model).displayMode, .ring)
+        XCTAssertEqual(OverlayPresentation(model: model).displayMode, .ring)
+    }
+
+    func testOverlayCompactModeDefaultsToExpandedAndPersistsExplicitCompact() {
+        let suiteName = "PingScopeOverlayCompactModeTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        defaults.removeObject(forKey: "overlayCompactMode")
+        XCTAssertFalse(defaults.overlayCompactMode)
+
+        defaults.overlayCompactMode = true
+        XCTAssertTrue(defaults.overlayCompactMode)
+    }
+
+    func testPingIntervalSelectionIsMixedWhenHostIntervalsDiffer() {
+        XCTAssertEqual(
+            PingIntervalPresentation.commonSelection(for: [.seconds(2), .seconds(2)]),
+            2_000
+        )
+        XCTAssertNil(
+            PingIntervalPresentation.commonSelection(for: [.seconds(2), .seconds(5)])
+        )
+    }
+
+    func testSavingDraftHostOptimisticallyUpdatesVisibleSnapshot() {
+        let oldHostConfigs = UserDefaults.standard.hostConfigs
+        let oldPrimaryHostID = UserDefaults.standard.primaryHostID
+        defer {
+            UserDefaults.standard.hostConfigs = oldHostConfigs
+            UserDefaults.standard.primaryHostID = oldPrimaryHostID
+        }
+
+        let model = PingScopeModel()
+        let hostID = HostConfig.defaultInternet.id
+
+        model.selectHostForEditing(hostID)
+        model.draftIntervalMilliseconds = 30_000
+        model.addDraftHost()
+
+        let savedHost = model.snapshot.hosts.first { $0.id == hostID }
+        XCTAssertEqual(savedHost?.interval, .milliseconds(30_000))
+    }
+
+    func testWidgetSnapshotPublishQueuePersistsLatestSnapshot() async throws {
+        let oldWidgetsEnabled = UserDefaults.standard.widgetsEnabled
+        let oldWidgetSharingOptedIn = UserDefaults.standard.widgetSharingOptedIn
+        let suiteName = "pingscope-model-widget-tests-\(UUID().uuidString)"
+        let inspectionDefaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer {
+            UserDefaults.standard.widgetsEnabled = oldWidgetsEnabled
+            UserDefaults.standard.widgetSharingOptedIn = oldWidgetSharingOptedIn
+            inspectionDefaults.removePersistentDomain(forName: suiteName)
+        }
+
+        let model = PingScopeModel()
+        model.widgetSnapshotStore = WidgetSnapshotStore(suiteName: suiteName, key: "snapshot")
+        model.widgetsEnabled = true
+        let host = HostConfig(displayName: "Edge", address: "1.1.1.1")
+
+        // The second snapshot must be a genuine widget-state change (status /
+        // failure reason): latency-only changes are volatile per-ping noise and
+        // are deliberately absorbed by the publish throttle.
+        model.publishWidgetSnapshot(runtimeSnapshot(host: host, latencyMilliseconds: 12))
+        model.publishWidgetSnapshot(runtimeSnapshot(host: host, latencyMilliseconds: 34, isFailure: true))
+        await model.widgetSnapshotPublishTask?.value
+
+        let saved = await model.widgetSnapshotStore?.load()
+        XCTAssertEqual(saved?.health.first?.failureReason, .timeout)
+    }
+
+    func testGatewayObservationEnablesLocalNetworkAndSyncsResolvedHost() {
+        let oldAllowsLocalNetworkProbes = UserDefaults.standard.allowsLocalNetworkProbes
+        defer {
+            UserDefaults.standard.allowsLocalNetworkProbes = oldAllowsLocalNetworkProbes
+        }
+        let model = PingScopeModel()
+        model.allowsLocalNetworkProbes = false
+        let gateway = DefaultGatewayDetector.gatewayHost(address: "192.168.1.1")
+
+        model.handleGatewayObservation(.detected(gateway), resolvedHost: gateway)
+
+        XCTAssertTrue(model.allowsLocalNetworkProbes)
+    }
+
+    func testStarlinkDetectionEnablesLocalNetworkForDetectedDish() {
+        let oldAllowsLocalNetworkProbes = UserDefaults.standard.allowsLocalNetworkProbes
+        defer {
+            UserDefaults.standard.allowsLocalNetworkProbes = oldAllowsLocalNetworkProbes
+        }
+        let model = PingScopeModel()
+        model.allowsLocalNetworkProbes = false
+
+        model.reconcileStarlinkDetection(.detected(.defaultStarlinkDish), removeMissing: false)
+
+        XCTAssertTrue(model.allowsLocalNetworkProbes)
+    }
+
+    private func runtimeSnapshot(
+        host: HostConfig,
+        latencyMilliseconds: Double,
+        isFailure: Bool = false
+    ) -> RuntimeSnapshot {
+        let result: PingResult
+        if isFailure {
+            result = PingResult.failure(
+                hostID: host.id,
+                reason: .timeout,
+                timestamp: Date(timeIntervalSince1970: latencyMilliseconds)
+            ).withHostMetadata(from: host)
+        } else {
+            result = PingResult.success(
+                hostID: host.id,
+                latency: .milliseconds(latencyMilliseconds),
+                timestamp: Date(timeIntervalSince1970: latencyMilliseconds)
+            ).withHostMetadata(from: host)
+        }
+        var health = HostHealth(hostID: host.id)
+        health.ingest(result)
+        var series = SampleSeries(hostID: host.id)
+        series.append(result)
+        return RuntimeSnapshot(
+            hosts: [host],
+            primaryHostID: host.id,
+            healthByHost: [host.id: health],
+            samplesByHost: [host.id: series]
+        )
+    }
+}

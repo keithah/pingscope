@@ -1,4 +1,4 @@
-app: Pingscope
+app: PingScope
 mode: explore
 
 # Reliable adapter path: app-run launches the detached menu-bar content window.

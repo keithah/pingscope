@@ -68,6 +68,7 @@ public struct HostConfig: Identifiable, Codable, Equatable, Sendable {
     public var thresholds: LatencyThresholds
     public var isEnabled: Bool
     public var notifications: HostNotificationPolicy
+    public var displayColor: HostDisplayColor?
 
     public init(
         id: UUID = UUID(),
@@ -80,7 +81,8 @@ public struct HostConfig: Identifiable, Codable, Equatable, Sendable {
         timeout: Duration = .seconds(2),
         thresholds: LatencyThresholds = .defaults,
         isEnabled: Bool = true,
-        notifications: HostNotificationPolicy = .inherit
+        notifications: HostNotificationPolicy = .inherit,
+        displayColor: HostDisplayColor? = nil
     ) {
         self.id = id
         self.displayName = displayName
@@ -93,6 +95,54 @@ public struct HostConfig: Identifiable, Codable, Equatable, Sendable {
         self.thresholds = thresholds
         self.isEnabled = isEnabled
         self.notifications = notifications
+        self.displayColor = displayColor
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case displayName
+        case address
+        case tier
+        case method
+        case port
+        case interval
+        case timeout
+        case thresholds
+        case isEnabled
+        case notifications
+        case displayColor
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        displayName = try container.decode(String.self, forKey: .displayName)
+        address = try container.decode(String.self, forKey: .address)
+        tier = try container.decodeIfPresent(NetworkTier.self, forKey: .tier)
+        method = try container.decode(PingMethod.self, forKey: .method)
+        port = try container.decodeIfPresent(UInt16.self, forKey: .port)
+        interval = try container.decode(Duration.self, forKey: .interval)
+        timeout = try container.decode(Duration.self, forKey: .timeout)
+        thresholds = try container.decode(LatencyThresholds.self, forKey: .thresholds)
+        isEnabled = try container.decode(Bool.self, forKey: .isEnabled)
+        notifications = try container.decode(HostNotificationPolicy.self, forKey: .notifications)
+        displayColor = try? container.decodeIfPresent(HostDisplayColor.self, forKey: .displayColor)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(displayName, forKey: .displayName)
+        try container.encode(address, forKey: .address)
+        try container.encodeIfPresent(tier, forKey: .tier)
+        try container.encode(method, forKey: .method)
+        try container.encodeIfPresent(port, forKey: .port)
+        try container.encode(interval, forKey: .interval)
+        try container.encode(timeout, forKey: .timeout)
+        try container.encode(thresholds, forKey: .thresholds)
+        try container.encode(isEnabled, forKey: .isEnabled)
+        try container.encode(notifications, forKey: .notifications)
+        try container.encodeIfPresent(displayColor, forKey: .displayColor)
     }
 
     public static let defaultInternet = HostConfig(displayName: "Cloudflare DNS", address: "1.1.1.1", method: .icmp, port: nil)
@@ -209,6 +259,26 @@ public struct HostConfig: Identifiable, Codable, Equatable, Sendable {
         NetworkTierClassifier().tier(for: self)
     }
 
+    /// Probe-affecting fields only. Presentation metadata intentionally does
+    /// not participate so a cosmetic edit can update a running session in place.
+    public func hasSameProbeConfiguration(as other: HostConfig) -> Bool {
+        address == other.address
+            && method == other.method
+            && port == other.port
+            && interval == other.interval
+            && timeout == other.timeout
+            && thresholds == other.thresholds
+    }
+
+    public func applyingPresentationMetadata(from other: HostConfig) -> HostConfig {
+        var copy = self
+        copy.displayName = other.displayName
+        copy.tier = other.tier
+        copy.notifications = other.notifications
+        copy.displayColor = other.displayColor?.validatedComponents
+        return copy
+    }
+
     public func sanitizedForStorage() -> HostConfig? {
         var host = self
         host.displayName = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -217,11 +287,21 @@ public struct HostConfig: Identifiable, Codable, Equatable, Sendable {
         host.timeout = min(max(timeout, .milliseconds(250)), .seconds(60))
         host.thresholds.degradedMilliseconds = max(1, thresholds.degradedMilliseconds)
         host.thresholds.downAfterFailures = max(1, thresholds.downAfterFailures)
+        host.displayColor = displayColor?.validatedComponents
         return host.validationErrors.isEmpty ? host : nil
     }
 
     public static func sanitizedHosts(_ hosts: [HostConfig], limit: Int = 64) -> [HostConfig] {
-        Array(hosts.compactMap { $0.sanitizedForStorage() }.prefix(max(1, limit)))
+        // Duplicate IDs (corrupt or hand-migrated blobs) must not survive: hosts
+        // are keyed by ID in coordinators and history, and keyed dictionaries
+        // built with uniqueKeysWithValues trap on duplicates.
+        var seenIDs = Set<UUID>()
+        let uniqueHosts = hosts.compactMap { host -> HostConfig? in
+            guard let sanitized = host.sanitizedForStorage(),
+                  seenIDs.insert(sanitized.id).inserted else { return nil }
+            return sanitized
+        }
+        return Array(uniqueHosts.prefix(max(1, limit)))
     }
 
     private static func isLocalIPv6Literal(_ address: String) -> Bool {
@@ -230,6 +310,20 @@ public struct HostConfig: Identifiable, Codable, Equatable, Sendable {
         if literal.hasPrefix("fe80:") { return true }
         if literal.hasPrefix("fc") || literal.hasPrefix("fd") { return true }
         return false
+    }
+}
+
+public extension HostConfig {
+    /// Dedicated identity for the app-managed router entry. This is narrower
+    /// than `isDefaultGateway`, which intentionally also classifies other local
+    /// gateway-tier hosts for UI and diagnosis.
+    var isManagedDefaultGateway: Bool {
+        displayName == "Default Gateway"
+    }
+
+    /// Stable gateway classification for UI scopes that intentionally omit the router.
+    var isDefaultGateway: Bool {
+        tier == .localGateway || displayName == "Default Gateway"
     }
 }
 
@@ -430,6 +524,70 @@ public struct StarlinkTelemetry: Codable, Equatable, Sendable {
     }
 }
 
+public struct SampleLocation: Codable, Equatable, Sendable {
+    public var latitude: Double
+    public var longitude: Double
+    public var horizontalAccuracy: Double?
+    public var networkName: String?
+    public var networkInterface: String?
+
+    public init?(
+        latitude: Double,
+        longitude: Double,
+        horizontalAccuracy: Double? = nil,
+        networkName: String? = nil,
+        networkInterface: String? = nil
+    ) {
+        guard latitude.isFinite,
+              longitude.isFinite,
+              (-90...90).contains(latitude),
+              (-180...180).contains(longitude) else { return nil }
+
+        self.latitude = latitude
+        self.longitude = longitude
+        if let horizontalAccuracy, horizontalAccuracy.isFinite, horizontalAccuracy >= 0 {
+            self.horizontalAccuracy = horizontalAccuracy
+        } else {
+            self.horizontalAccuracy = nil
+        }
+        self.networkName = networkName
+        self.networkInterface = NetworkInterfaceNormalizer.normalize(networkInterface)
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case latitude
+        case longitude
+        case horizontalAccuracy
+        case networkName
+        case networkInterface
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let latitude = try container.decode(Double.self, forKey: .latitude)
+        let longitude = try container.decode(Double.self, forKey: .longitude)
+        let horizontalAccuracy = try container.decodeIfPresent(Double.self, forKey: .horizontalAccuracy)
+        let networkName = try container.decodeIfPresent(String.self, forKey: .networkName)
+        let networkInterface = try container.decodeIfPresent(String.self, forKey: .networkInterface)
+
+        guard let normalized = SampleLocation(
+            latitude: latitude,
+            longitude: longitude,
+            horizontalAccuracy: horizontalAccuracy,
+            networkName: networkName,
+            networkInterface: networkInterface
+        ) else {
+            throw DecodingError.dataCorruptedError(
+                forKey: .latitude,
+                in: container,
+                debugDescription: "Location coordinates must be finite and within valid ranges."
+            )
+        }
+        self = normalized
+    }
+
+}
+
 public struct PingResult: Identifiable, Codable, Equatable, Sendable {
     public var id: UUID
     public var hostID: UUID
@@ -440,6 +598,26 @@ public struct PingResult: Identifiable, Codable, Equatable, Sendable {
     public var latency: Duration?
     public var failureReason: FailureReason?
     public var metadata: ProbeMetadata
+    public var location: SampleLocation?
+    public var networkInterface: String?
+    public var networkName: String?
+    public var isVPN: Bool
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case hostID
+        case address
+        case method
+        case port
+        case timestamp
+        case latency
+        case failureReason
+        case metadata
+        case location
+        case networkInterface
+        case networkName
+        case isVPN
+    }
 
     public init(
         id: UUID = UUID(),
@@ -450,7 +628,11 @@ public struct PingResult: Identifiable, Codable, Equatable, Sendable {
         timestamp: Date = Date(),
         latency: Duration?,
         failureReason: FailureReason?,
-        metadata: ProbeMetadata = ProbeMetadata()
+        metadata: ProbeMetadata = ProbeMetadata(),
+        location: SampleLocation? = nil,
+        networkInterface: String? = nil,
+        networkName: String? = nil,
+        isVPN: Bool = false
     ) {
         self.id = id
         self.hostID = hostID
@@ -461,6 +643,29 @@ public struct PingResult: Identifiable, Codable, Equatable, Sendable {
         self.latency = latency
         self.failureReason = failureReason
         self.metadata = metadata
+        self.location = location
+        self.networkInterface = NetworkInterfaceNormalizer.normalize(networkInterface)
+        self.networkName = networkName
+        self.isVPN = isVPN
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        hostID = try container.decode(UUID.self, forKey: .hostID)
+        address = try container.decode(String.self, forKey: .address)
+        method = try container.decode(PingMethod.self, forKey: .method)
+        port = try container.decodeIfPresent(UInt16.self, forKey: .port)
+        timestamp = try container.decode(Date.self, forKey: .timestamp)
+        latency = try container.decodeIfPresent(Duration.self, forKey: .latency)
+        failureReason = try container.decodeIfPresent(FailureReason.self, forKey: .failureReason)
+        metadata = try container.decode(ProbeMetadata.self, forKey: .metadata)
+        location = (try? container.decodeIfPresent(SampleLocation.self, forKey: .location)) ?? nil
+        networkInterface = NetworkInterfaceNormalizer.normalize(
+            try container.decodeIfPresent(String.self, forKey: .networkInterface)
+        )
+        networkName = try container.decodeIfPresent(String.self, forKey: .networkName)
+        isVPN = try container.decodeIfPresent(Bool.self, forKey: .isVPN) ?? false
     }
 
     public var isSuccess: Bool {
@@ -471,18 +676,46 @@ public struct PingResult: Identifiable, Codable, Equatable, Sendable {
         hostID: UUID,
         latency: Duration,
         timestamp: Date = Date(),
-        metadata: ProbeMetadata = ProbeMetadata()
+        metadata: ProbeMetadata = ProbeMetadata(),
+        location: SampleLocation? = nil,
+        networkInterface: String? = nil,
+        networkName: String? = nil,
+        isVPN: Bool = false
     ) -> PingResult {
-        PingResult(hostID: hostID, timestamp: timestamp, latency: latency, failureReason: nil, metadata: metadata)
+        PingResult(
+            hostID: hostID,
+            timestamp: timestamp,
+            latency: latency,
+            failureReason: nil,
+            metadata: metadata,
+            location: location,
+            networkInterface: networkInterface,
+            networkName: networkName,
+            isVPN: isVPN
+        )
     }
 
     public static func failure(
         hostID: UUID,
         reason: FailureReason,
         timestamp: Date = Date(),
-        metadata: ProbeMetadata = ProbeMetadata()
+        metadata: ProbeMetadata = ProbeMetadata(),
+        location: SampleLocation? = nil,
+        networkInterface: String? = nil,
+        networkName: String? = nil,
+        isVPN: Bool = false
     ) -> PingResult {
-        PingResult(hostID: hostID, timestamp: timestamp, latency: nil, failureReason: reason, metadata: metadata)
+        PingResult(
+            hostID: hostID,
+            timestamp: timestamp,
+            latency: nil,
+            failureReason: reason,
+            metadata: metadata,
+            location: location,
+            networkInterface: networkInterface,
+            networkName: networkName,
+            isVPN: isVPN
+        )
     }
 
     public func withHostMetadata(from host: HostConfig) -> PingResult {

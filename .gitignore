@@ -49,3 +49,6 @@ fastlane/.env.*
 # Build artifacts
 *.o
 *.dSYMdist/
+
+# Local design artifacts
+design/

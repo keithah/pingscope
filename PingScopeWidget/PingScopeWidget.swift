@@ -1,7 +1,6 @@
 import WidgetKit
 import SwiftUI
 
-@main
 struct PingScopeWidget: Widget {
     let kind: String = "PingScopeWidget"
 
@@ -15,5 +14,18 @@ struct PingScopeWidget: Widget {
         .configurationDisplayName("PingScope")
         .description("Monitor ping status and latency")
         .supportedFamilies([.systemSmall, .systemMedium, .systemLarge])
+    }
+}
+
+@main
+struct PingScopeWidgetBundle: WidgetBundle {
+    var body: some Widget {
+        PingScopeWidget()
+#if os(iOS)
+        if #available(iOS 18.0, *) {
+            PingScopeMonitoringControl()
+            PingScopeStatusControl()
+        }
+#endif
     }
 }

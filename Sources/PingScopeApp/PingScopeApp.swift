@@ -3,6 +3,19 @@ import Darwin
 import PingScopeCore
 import SwiftUI
 
+enum PingScopePrimaryWindowConfiguration {
+    static let tabbingIdentifier = "com.hadm.PingScope.primary"
+
+    @MainActor
+    static func apply(to window: NSWindow) {
+        window.styleMask.insert(.resizable)
+        window.isReleasedWhenClosed = false
+        window.hidesOnDeactivate = false
+        window.tabbingIdentifier = tabbingIdentifier
+        window.tabbingMode = .preferred
+    }
+}
+
 @main
 struct PingScopeApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
@@ -14,6 +27,12 @@ struct PingScopeApp: App {
                 .frame(width: 700, height: 680)
         }
         .commands {
+            CommandGroup(after: .newItem) {
+                Button("History") {
+                    appDelegate.openHistory()
+                }
+                .keyboardShortcut("h", modifiers: [.command, .shift])
+            }
             CommandGroup(replacing: .appSettings) {
                 Button("Settings...") {
                     appDelegate.openSettings()
@@ -38,6 +57,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     private var detachedPopoverWindow: NSWindow?
     private var overlayController: NSWindowController?
     private var settingsWindowController: NSWindowController?
+    private var historyWindowController: NSWindowController?
     private var lastExpandedOverlayFrame: NSRect?
     private var instanceLockFD: Int32 = -1
     private var wakeObserver: NSObjectProtocol?
@@ -80,9 +100,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         CommandLine.arguments.contains("-windowed")
     }
 
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        // Await the runtime shutdown (history flush included) before letting the
+        // process exit; a fire-and-forget stop loses the write buffer's pending
+        // samples on every quit. The watchdog task bounds the wait so a wedged
+        // flush cannot block quitting; a duplicate reply is ignored by AppKit.
+        let model = model
+        Task { @MainActor in
+            await model.stopAndFlush()
+            NSApp.reply(toApplicationShouldTerminate: true)
+        }
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(3))
+            NSApp.reply(toApplicationShouldTerminate: true)
+        }
+        return .terminateLater
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
         removePowerObservers()
-        model.stop()
         releaseSingleInstanceLock()
     }
 
@@ -102,7 +138,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
                 defer: false
             )
             window.title = "PingScope Settings"
-            window.isReleasedWhenClosed = false
+            PingScopePrimaryWindowConfiguration.apply(to: window)
             window.contentView = NSHostingView(rootView: view)
             window.center()
             settingsWindowController = NSWindowController(window: window)
@@ -113,10 +149,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         settingsWindowController?.window?.makeKeyAndOrderFront(nil)
     }
 
+    func openHistory() {
+        if historyWindowController == nil {
+            let window = NSWindow(
+                contentRect: NSRect(x: 0, y: 0, width: 960, height: 760),
+                styleMask: [.titled, .closable, .miniaturizable, .resizable],
+                backing: .buffered,
+                defer: false
+            )
+            window.title = "PingScope History"
+            window.minSize = NSSize(width: 760, height: 580)
+            PingScopePrimaryWindowConfiguration.apply(to: window)
+            window.contentView = NSHostingView(rootView: HistoryWindowView(model: model))
+            window.center()
+            historyWindowController = NSWindowController(window: window)
+        }
+        historyWindowController?.showWindow(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        historyWindowController?.window?.makeKeyAndOrderFront(nil)
+    }
+
     func showOverlay() {
         DebugLog.write("AppDelegate.showOverlay called overlayControllerNil=\(overlayController == nil)")
         if overlayController == nil {
-            let view = OverlayView(viewModel: overlayViewModel)
+            let view = OverlayView(viewModel: overlayViewModel, liveDisplay: model.liveDisplay)
             let window = OverlayWindow(contentRect: model.overlayFrame)
             window.contentView = OverlayContainerView(
                 rootView: view,
@@ -264,7 +320,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
 
     private func refreshOverlayContent() {
         overlayController?.window?.contentView = OverlayContainerView(
-            rootView: OverlayView(viewModel: overlayViewModel),
+            rootView: OverlayView(viewModel: overlayViewModel, liveDisplay: model.liveDisplay),
             isCompact: { [weak self] in self?.overlayViewModel.presentation.compactMode ?? false },
             hostOptions: { [weak self] in self?.overlayHostOptions() ?? [] },
             onToggleCompact: { [weak self] in self?.toggleOverlayCompactMode() },
@@ -375,6 +431,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         let controller = NSHostingController(
             rootView: StatusPopoverView(
                 viewModel: statusPopoverViewModel,
+                liveDisplay: model.liveDisplay,
+                onHistory: { [weak self] in
+                    self?.openHistoryFromStatusContent()
+                },
                 onSettings: { [weak self] in
                     self?.openSettingsFromStatusContent()
                 }
@@ -395,6 +455,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
             detachedPopoverWindow?.close()
         }
         openSettings()
+    }
+
+    private func openHistoryFromStatusContent() {
+        popover?.performClose(nil)
+        if detachedPopoverWindow?.isVisible == true {
+            detachedPopoverWindow?.close()
+        }
+        openHistory()
     }
 
     private func showPopover(relativeTo anchorView: NSView) {
@@ -496,6 +564,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     private func showContextMenu(from view: NSView) {
         let menu = NSMenu()
         menu.addItem(NSMenuItem(title: "Show Overlay", action: #selector(openOverlayFromMenu), keyEquivalent: ""))
+        menu.addItem(NSMenuItem(title: "History...", action: #selector(openHistoryFromMenu), keyEquivalent: ""))
         #if !APPSTORE
             if softwareUpdateController.isAvailable {
                 menu.addItem(NSMenuItem(title: "Check for Updates...", action: #selector(checkForUpdatesFromMenu), keyEquivalent: ""))
@@ -514,6 +583,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
 
     @objc private func openSettingsFromMenu() {
         openSettings()
+    }
+
+    @objc private func openHistoryFromMenu() {
+        openHistory()
     }
 
     #if !APPSTORE

@@ -4,7 +4,7 @@
    version = "1.3">
    <BuildAction
       parallelizeBuildables = "YES"
-      buildImplicitDependencies = "YES">
+      buildImplicitDependencies = "NO">
       <BuildActionEntries>
          <BuildActionEntry
             buildForTesting = "YES"
@@ -27,26 +27,24 @@
       selectedDebuggerIdentifier = "Xcode.DebuggerFoundation.Debugger.LLDB"
       selectedLauncherIdentifier = "Xcode.DebuggerFoundation.Launcher.LLDB"
       shouldUseLaunchSchemeArgsEnv = "YES">
+      <MacroExpansion>
+         <BuildableReference
+            BuildableIdentifier = "primary"
+            BlueprintIdentifier = "53AA6F362F441DAB009FEF3A"
+            BuildableName = "PingScope.app"
+            BlueprintName = "PingScopeApp"
+            ReferencedContainer = "container:PingScope.xcodeproj">
+         </BuildableReference>
+      </MacroExpansion>
       <Testables>
          <TestableReference
             skipped = "NO"
-            parallelizable = "YES">
+            parallelizable = "NO">
             <BuildableReference
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "53AA6F432F441DAD009FEF3A"
-               BuildableName = "PingScope.xctest"
+               BuildableName = "PingScopeTests.xctest"
                BlueprintName = "PingScopeTests"
-               ReferencedContainer = "container:PingScope.xcodeproj">
-            </BuildableReference>
-         </TestableReference>
-         <TestableReference
-            skipped = "NO"
-            parallelizable = "YES">
-            <BuildableReference
-               BuildableIdentifier = "primary"
-               BlueprintIdentifier = "53AA6F4D2F441DAD009FEF3A"
-               BuildableName = "PingScope.xctest"
-               BlueprintName = "PingScopeUITests"
                ReferencedContainer = "container:PingScope.xcodeproj">
             </BuildableReference>
          </TestableReference>

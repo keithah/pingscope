@@ -19,25 +19,49 @@ enum StoredHostConfigs {
 
 final class HostConfigPersistence {
     private let defaults: UserDefaults
+    private let sharedStore: UserDefaultsSharedHostStore
     private var lastPersistedHostState: PersistedHostState?
+    private var lastObservedSharedState: SharedHostStoreState?
+    private var preservedSelectedHostID: UUID?
     private var preservesUndecodableData = false
     private let seededDefaultsKey = "didSeedDefaultHosts"
+    static let undecodableBackupKey = "hostConfigsUndecodableBackup"
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
+        sharedStore = UserDefaultsSharedHostStore(defaults: defaults, legacyPlatform: .macOS)
     }
 
     func loadInitialConfiguration(logger: (String) -> Void) -> LoadedHostConfiguration {
         let savedHosts: [HostConfig]
-        switch defaults.storedHostConfigs() {
-        case .decoded(let hosts):
+        let primaryHostID: UUID?
+        let loaded = sharedStore.load()
+        switch loaded.source {
+        case .shared, .legacy:
+            guard let state = loaded.state else {
+                return LoadedHostConfiguration(hosts: [], primaryHostID: nil)
+            }
+            preservedSelectedHostID = state.selectedHostID
+            primaryHostID = state.primaryHostID
+            let hosts = state.hosts
             savedHosts = hosts.isEmpty ? seedDefaultsIfNeeded(logger: logger) : migrateExistingHosts(hosts, logger: logger)
         case .missing:
             savedHosts = seedDefaultsIfNeeded(logger: logger)
-        case .decodeFailed(let error):
-            logger("host config decode failed; preserving stored data error=\(error.localizedDescription)")
+            primaryHostID = defaults.primaryHostID
+        case .unreadable:
+            logger("host config decode failed; preserving stored data")
             preservesUndecodableData = true
+            // The preservation flag is cleared by the first user host mutation
+            // (allowUserManagedPersistence), after which persist() overwrites the
+            // stored blob. Keep a copy under a backup key so the user's prior
+            // host list stays recoverable even after they add or reset hosts.
+            if let undecodableData = defaults.data(forKey: SharedHostStoreKeys.current)
+                ?? defaults.data(forKey: SharedHostStoreKeys.macHosts) {
+                defaults.set(undecodableData, forKey: Self.undecodableBackupKey)
+                logger("host config backup written key=\(Self.undecodableBackupKey)")
+            }
             savedHosts = []
+            primaryHostID = nil
         }
 
         let sanitizedHosts = HostConfig.sanitizedHosts(BuildFlavor.current.normalizedHosts(savedHosts))
@@ -45,28 +69,73 @@ final class HostConfigPersistence {
             logger("host config sanitized dropped=\(savedHosts.count - sanitizedHosts.count)")
         }
         let hosts = sanitizedHosts
-        return LoadedHostConfiguration(hosts: hosts, primaryHostID: defaults.primaryHostID)
+        lastObservedSharedState = sharedStore.load().state.map(Self.sanitizedSharedState)
+        return LoadedHostConfiguration(hosts: hosts, primaryHostID: primaryHostID)
     }
 
-    func persist(_ snapshot: RuntimeSnapshot, logger: (String) -> Void) {
-        guard !preservesUndecodableData else { return }
+    @discardableResult
+    func persist(_ snapshot: RuntimeSnapshot, logger: (String) -> Void) -> SharedHostStoreState? {
+        guard !preservesUndecodableData else { return nil }
         let hosts = HostConfig.sanitizedHosts(snapshot.hosts)
         let primaryHostID = hosts.contains { $0.id == snapshot.primaryHostID } ? snapshot.primaryHostID : hosts.first?.id
         let hostState = PersistedHostState(hosts: hosts, primaryHostID: primaryHostID)
-        guard hostState != lastPersistedHostState else { return }
+        let latest = sharedStore.load().state.map(Self.sanitizedSharedState)
+        let desired = SharedHostStoreState(
+            hosts: hosts,
+            primaryHostID: primaryHostID,
+            selectedHostID: preservedSelectedHostID
+        )
+        guard hostState != lastPersistedHostState else {
+            return latest ?? lastObservedSharedState ?? desired
+        }
+        let baseline = lastObservedSharedState ?? latest ?? desired
+        let resolved = latest.map {
+            SharedHostStoreReconciliation.mergingLocalChanges(
+                from: baseline,
+                desired: desired,
+                into: $0
+            )
+        } ?? desired
         do {
-            try defaults.setHostConfigs(hosts)
+            try sharedStore.save(resolved)
         } catch {
             logger("host config encode failed; leaving previous persisted state error=\(error.localizedDescription)")
-            return
+            return nil
         }
         lastPersistedHostState = hostState
-        defaults.primaryHostID = primaryHostID
+        lastObservedSharedState = resolved
+        preservedSelectedHostID = resolved.selectedHostID
+        return resolved
+    }
+
+    func resolveAcceptedHostState(_ captured: SharedHostStoreState) -> SharedHostStoreState {
+        sharedStore.load().state.map(Self.sanitizedSharedState)
+            ?? Self.sanitizedSharedState(captured)
+    }
+
+    func commitAcceptedHostState(_ state: SharedHostStoreState) {
+        let accepted = Self.sanitizedSharedState(state)
+        lastObservedSharedState = accepted
+        preservedSelectedHostID = accepted.selectedHostID
+        lastPersistedHostState = PersistedHostState(
+            hosts: accepted.hosts,
+            primaryHostID: accepted.primaryHostID
+        )
     }
 
     func allowUserManagedPersistence() {
         preservesUndecodableData = false
         lastPersistedHostState = nil
+    }
+
+    private nonisolated static func sanitizedSharedState(_ state: SharedHostStoreState) -> SharedHostStoreState {
+        let hosts = HostConfig.sanitizedHosts(state.hosts)
+        let ids = Set(hosts.map(\.id))
+        return SharedHostStoreState(
+            hosts: hosts,
+            primaryHostID: state.primaryHostID.flatMap { ids.contains($0) ? $0 : nil },
+            selectedHostID: state.selectedHostID.flatMap { ids.contains($0) ? $0 : nil }
+        )
     }
 
     private func migrateExistingHosts(_ hosts: [HostConfig], logger: (String) -> Void) -> [HostConfig] {
@@ -122,8 +191,13 @@ final class HostConfigPersistence {
         )
         guard !hosts.isEmpty else { return [] }
         do {
-            try defaults.setHostConfigs(hosts)
-            defaults.primaryHostID = hosts.first?.id
+            try sharedStore.save(
+                SharedHostStoreState(
+                    hosts: hosts,
+                    primaryHostID: hosts.first?.id,
+                    selectedHostID: preservedSelectedHostID
+                )
+            )
             defaults.set(true, forKey: seededDefaultsKey)
         } catch {
             logger("default host seed encode failed; using in-memory defaults error=\(error.localizedDescription)")

@@ -1,74 +1,48 @@
 import SwiftUI
 import WidgetKit
+import PingScopeExtensionSupport
 
 struct SmallWidgetView: View {
     let entry: WidgetEntry
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            if let snapshot = entry.snapshot,
-               let host = snapshot.primaryHost {
-                let primaryHealth = snapshot.primaryHealth
-                HStack(spacing: 7) {
-                    Circle()
-                        .fill(WidgetStatusStyle.color(for: primaryHealth))
-                        .frame(width: 10, height: 10)
+        let presentation = ringPresentation
 
-                    Text(host.displayName)
-                        .font(.headline.weight(.semibold))
-                        .lineLimit(1)
-                }
-
-                if let latency = primaryHealth?.latencyMilliseconds {
-                    Text("\(Int(latency.rounded()))ms")
-                        .font(.system(.title2, design: .rounded))
-                        .fontWeight(.semibold)
-                        .monospacedDigit()
+        WidgetHealthRing(
+            progress: presentation.progress,
+            color: presentation.color.opacity(presentation.isFailure ? 0.72 : 1)
+        ) {
+            VStack(spacing: 3) {
+                if let latency = presentation.latency {
+                    HStack(alignment: .firstTextBaseline, spacing: 2) {
+                        Text("\(Int(latency.rounded()))")
+                            .font(.system(.title2, design: .rounded).weight(.semibold))
+                            .monospacedDigit()
+                        Text("ms")
+                            .font(.caption2.weight(.medium))
+                            .foregroundStyle(.secondary)
+                    }
                 } else {
-                    Text(primaryHealth?.failureReason ?? "No sample")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
-
-                Spacer(minLength: 0)
-
-                WidgetStaleBadge(isStale: snapshot.isStale, label: snapshot.statusLabel)
-            } else if let data = entry.data,
-               let host = data.hosts.first,
-               let result = data.results.first {
-
-                HStack(spacing: 7) {
-                    Circle()
-                        .fill(WidgetStatusStyle.color(for: result))
-                        .frame(width: 10, height: 10)
-
-                    Text(host.name)
-                        .font(.headline.weight(.semibold))
+                    Text(presentation.failureText)
+                        .font(.caption.weight(.semibold))
                         .lineLimit(1)
+                        .minimumScaleFactor(0.65)
                 }
 
-                if let latency = result.latencyMS {
-                    Text("\(Int(latency.rounded()))ms")
-                        .font(.system(.title2, design: .rounded))
-                        .fontWeight(.semibold)
-                        .monospacedDigit()
-                } else {
-                    Text("Timeout")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
-
-                Spacer(minLength: 0)
-
-                WidgetStaleBadge(isStale: data.isStale, label: data.isStale ? "Stale" : "Live")
-            } else {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("PingScope")
-                        .font(.headline)
-                    Text("No shared data")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
+                Text(presentation.hostName)
+                    .font(.caption.weight(.medium))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+                    .foregroundStyle(.secondary)
+            }
+            .multilineTextAlignment(.center)
+            .padding(.horizontal, 20)
+        }
+        .aspectRatio(1, contentMode: .fit)
+        .padding(8)
+        .overlay(alignment: .topTrailing) {
+            if WidgetFamilyRenderPolicy.forFamily(.small).showsStalenessMarker, entry.isStale {
+                WidgetStaleBadge(isStale: entry.isStale, label: entry.statusLabel)
             }
         }
         .opacity(entry.isStale ? 0.6 : 1.0)
@@ -77,4 +51,54 @@ struct SmallWidgetView: View {
         }
         .widgetURL(URL(string: "pingscope://open"))
     }
+
+    private var ringPresentation: SmallWidgetRingPresentation {
+        if let snapshot = entry.snapshot,
+           let host = snapshot.primaryHost {
+            let health = snapshot.primaryHealth
+            let latency = health?.latencyMilliseconds
+            let isFailure = health?.status == "down" || latency == nil
+            return SmallWidgetRingPresentation(
+                hostName: host.displayName,
+                latency: isFailure ? nil : latency,
+                failureText: health?.failureReason ?? "--",
+                color: isFailure ? .red : WidgetStatusStyle.color(for: health),
+                progress: isFailure ? 1 : WidgetStatusStyle.ringProgress(forLatency: latency),
+                isFailure: isFailure
+            )
+        }
+
+        if let data = entry.data,
+           let host = data.hosts.first,
+           let result = data.results.first {
+            return SmallWidgetRingPresentation(
+                hostName: host.name,
+                latency: result.isSuccess ? result.latencyMS : nil,
+                failureText: result.isSuccess ? "--" : "Timeout",
+                color: WidgetStatusStyle.color(for: result),
+                progress: result.isSuccess
+                    ? WidgetStatusStyle.ringProgress(forLatency: result.latencyMS)
+                    : 1,
+                isFailure: !result.isSuccess
+            )
+        }
+
+        return SmallWidgetRingPresentation(
+            hostName: "PingScope",
+            latency: nil,
+            failureText: "--",
+            color: .red,
+            progress: 1,
+            isFailure: true
+        )
+    }
+}
+
+private struct SmallWidgetRingPresentation {
+    let hostName: String
+    let latency: Double?
+    let failureText: String
+    let color: Color
+    let progress: Double
+    let isFailure: Bool
 }

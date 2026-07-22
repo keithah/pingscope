@@ -1,0 +1,17 @@
+mode: explore
+open: launched
+
+persona: >
+  A PingScope user who wants to share a clear record of recent network quality.
+goal: >
+  Open the dedicated History window, generate the current host/range report, verify the report card's
+  summary, graph, By Network, and Recent Sessions content, save it as a PNG, then open the native Share menu.
+success_criteria: >
+  The Report action is enabled only with loaded samples; its preview visibly matches the selected host and
+  range and contains shared metrics/network/session content. Save a PNG to /tmp/pingscope-history-report.png,
+  confirm it exists, open Share, and capture the report preview as screenshot evidence.
+step_budget: 14
+notes: >
+  Use the gear menu's Open History command. Wait for the History window to finish loading before pressing
+  Report. In the save panel use /tmp/pingscope-history-report.png. Dismiss the save panel after saving, then
+  use Share and confirm the native sharing picker appears. Do not send or publish the report anywhere.

@@ -1,5 +1,6 @@
 import SwiftUI
 import WidgetKit
+import PingScopeExtensionSupport
 
 struct LargeWidgetView: View {
     let entry: WidgetEntry
@@ -13,42 +14,50 @@ struct LargeWidgetView: View {
                 Spacer()
 
                 if let snapshot = entry.snapshot {
-                    WidgetStaleBadge(isStale: snapshot.isStale, label: snapshot.statusLabel)
-                } else if let data = entry.data {
-                    WidgetStaleBadge(isStale: data.isStale, label: data.isStale ? "Stale" : "Live")
+                    WidgetStaleBadge(isStale: entry.isStale, label: entry.statusLabel)
+                } else if entry.data != nil {
+                    WidgetStaleBadge(isStale: entry.isStale, label: entry.statusLabel)
                 }
             }
 
             if let snapshot = entry.snapshot {
                 let healthByHostID = snapshot.healthByHostID
-                WidgetLatencySparkline(samples: snapshot.recentSamples, color: .blue)
-                    .frame(height: 42)
-                    .padding(.vertical, 2)
+                let presentation = snapshot.graphPresentation
+                let layout = WidgetLargeFamilyLayout(hostCount: presentation.legend.count)
+                WidgetHostKey(presentation: presentation, healthByHostID: healthByHostID)
 
-                ForEach(snapshot.hosts, id: \.id) { host in
-                    let health = healthByHostID[host.id]
-                    HStack {
-                        Circle()
-                            .fill(WidgetStatusStyle.color(for: health))
-                            .frame(width: 8, height: 8)
+                if WidgetFamilyRenderPolicy.forFamily(.large).showsSparkline {
+                    WidgetMultiHostLatencyGraph(presentation: presentation)
+                        .frame(height: 42)
+                        .padding(.vertical, 2)
+                }
 
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text(host.displayName)
-                                .font(.subheadline.weight(host.isPrimary ? .semibold : .regular))
-                                .lineLimit(1)
-                            Text("\(host.method.uppercased()) \(host.address)")
-                                .font(.caption2)
+                ForEach(presentation.legend.prefix(layout.detailRowCount), id: \.hostID) { entry in
+                    if let host = snapshot.hosts.first(where: { $0.id == entry.hostID }) {
+                        let health = healthByHostID[host.id]
+                        HStack {
+                            Circle()
+                                .fill(WidgetStatusStyle.color(for: health))
+                                .frame(width: 8, height: 8)
+
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(host.displayName)
+                                    .font(.subheadline.weight(host.isPrimary ? .semibold : .regular))
+                                    .lineLimit(1)
+                                Text("\(host.method.uppercased()) \(host.address)")
+                                    .font(.caption2)
+                                    .foregroundColor(.secondary)
+                                    .lineLimit(1)
+                            }
+
+                            Spacer()
+
+                            Text(WidgetStatusStyle.latencyText(for: health))
+                                .font(.caption.monospacedDigit().weight(.medium))
                                 .foregroundColor(.secondary)
-                                .lineLimit(1)
                         }
-
-                        Spacer()
-
-                        Text(WidgetStatusStyle.latencyText(for: health))
-                            .font(.caption.monospacedDigit().weight(.medium))
-                            .foregroundColor(.secondary)
+                        .padding(.vertical, 1)
                     }
-                    .padding(.vertical, 1)
                 }
             } else if let data = entry.data {
                 ForEach(Array(zip(data.hosts, data.results)), id: \.0.id) { host, result in

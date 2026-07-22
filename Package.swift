@@ -13,11 +13,24 @@ let package = Package(
             targets: ["PingScopeCore"]
         ),
         .library(
+            name: "PingScopeCloudSync",
+            targets: ["PingScopeCloudSync"]
+        ),
+        .library(
+            name: "PingScopeHistoryKit",
+            targets: ["PingScopeHistoryKit"]
+        ),
+        .library(
             name: "PingScopeiOS",
             targets: ["PingScopeiOS"]
         ),
+        .library(
+            name: "PingScopeLiveActivitySupport",
+            targets: ["PingScopeLiveActivitySupport"]
+        ),
+        .library(name: "PingScopeExtensionSupport", targets: ["PingScopeExtensionSupport"]),
         .executable(
-            name: "PingScope",
+            name: "PingScopePackage",
             targets: ["PingScope"]
         ),
         .executable(
@@ -32,6 +45,10 @@ let package = Package(
     dependencies: [],
     targets: [
         .target(
+            name: "PingScopeExtensionSupport",
+            path: "Sources/PingScopeExtensionSupport"
+        ),
+        .target(
             name: "PingScopeCore",
             dependencies: [],
             path: "Sources/PingScopeCore",
@@ -40,13 +57,38 @@ let package = Package(
             ]
         ),
         .target(
-            name: "PingScopeiOS",
+            name: "PingScopeCloudSync",
+            dependencies: ["PingScopeCore", "PingScopeObjCExceptionBoundary"],
+            path: "Sources/PingScopeCloudSync"
+        ),
+        .target(
+            name: "PingScopeObjCExceptionBoundary",
+            path: "Sources/PingScopeObjCExceptionBoundary",
+            publicHeadersPath: "include",
+            cSettings: [
+                // This package must remain a local/root dependency: unsafeFlags
+                // prevents it from being consumed as a versioned dependency.
+                .unsafeFlags(["-fobjc-arc-exceptions"])
+            ]
+        ),
+        .target(
+            name: "PingScopeHistoryKit",
             dependencies: ["PingScopeCore"],
+            path: "Sources/PingScopeHistoryKit"
+        ),
+        .target(
+            name: "PingScopeLiveActivitySupport",
+            dependencies: ["PingScopeExtensionSupport"],
+            path: "Sources/PingScopeLiveActivitySupport"
+        ),
+        .target(
+            name: "PingScopeiOS",
+            dependencies: ["PingScopeCore", "PingScopeHistoryKit", "PingScopeLiveActivitySupport"],
             path: "Sources/PingScopeiOS"
         ),
         .executableTarget(
             name: "PingScope",
-            dependencies: ["PingScopeCore"],
+            dependencies: ["PingScopeCore", "PingScopeCloudSync", "PingScopeHistoryKit"],
             path: "Sources/PingScopeApp"
         ),
         .executableTarget(
@@ -60,9 +102,39 @@ let package = Package(
             path: "Sources/PingScopeProbeValidate"
         ),
         .testTarget(
-            name: "PingScopeTests",
-            dependencies: ["PingScopeCore", "PingScopeiOS", "PingScope"],
-            path: "Tests/PingScopeFreshTests"
+            name: "PingScopeCoreTests",
+            dependencies: ["PingScopeCore"],
+            path: "Tests/PingScopeFreshTests/Core"
+        ),
+        .testTarget(
+            name: "PingScopeHistoryKitTests",
+            dependencies: ["PingScopeCore", "PingScopeHistoryKit"],
+            path: "Tests/PingScopeFreshTests/History"
+        ),
+        .testTarget(
+            name: "PingScopeCloudSyncTests",
+            dependencies: ["PingScopeCore", "PingScopeCloudSync", "PingScopeObjCExceptionBoundary"],
+            path: "Tests/PingScopeFreshTests/Cloud"
+        ),
+        .testTarget(
+            name: "PingScopeiOSTests",
+            dependencies: ["PingScopeCore", "PingScopeHistoryKit", "PingScopeiOS"],
+            path: "Tests/PingScopeFreshTests/iOS"
+        ),
+        .testTarget(
+            name: "PingScopeMacAppTests",
+            dependencies: ["PingScopeCore", "PingScopeHistoryKit", "PingScope"],
+            path: "Tests/PingScopeFreshTests/MacApp"
+        ),
+        .testTarget(
+            name: "PingScopeExtensionSupportTests",
+            dependencies: ["PingScopeCore", "PingScopeExtensionSupport"],
+            path: "Tests/PingScopeFreshTests/ExtensionSupport"
+        ),
+        .testTarget(
+            name: "PingScopeBuildGraphTests",
+            dependencies: [],
+            path: "Tests/PingScopeFreshTests/BuildGraph"
         )
     ]
 )

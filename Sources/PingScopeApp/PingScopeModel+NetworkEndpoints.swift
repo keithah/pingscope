@@ -94,7 +94,7 @@ extension PingScopeModel {
         if let existing = snapshot.hosts.first(where: { $0.id == starlinkHost.id }), existing == starlinkHost {
             return
         }
-        Task {
+        performAutomaticHostMutation { runtime in
             await runtime.upsertHost(starlinkHost)
             if let preferredPrimaryID {
                 await runtime.selectPrimaryHost(preferredPrimaryID)
@@ -115,10 +115,10 @@ extension PingScopeModel {
     }
 
     func removeStaleStarlinkHosts() {
-        Task {
+        performAutomaticHostMutation { [weak self] runtime in
             let removedIDs = await runtime.removeStarlinkHosts()
-            if let editingHostID, removedIDs.contains(editingHostID) {
-                clearDraftHost()
+            if let editingHostID = self?.editingHostID, removedIDs.contains(editingHostID) {
+                self?.clearDraftHost()
             }
             DebugLog.write("stale starlink removal completed count=\(removedIDs.count)")
         }
@@ -149,7 +149,7 @@ extension PingScopeModel {
             loadDraft(from: updated)
         }
         let isPrimary = primaryHost?.id == updated.id
-        Task {
+        performAutomaticHostMutation { runtime in
             await runtime.upsertHost(updated)
             if isPrimary {
                 await runtime.selectPrimaryHost(updated.id)

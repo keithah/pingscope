@@ -77,7 +77,7 @@ RESOURCES_DIR="${CONTENTS_DIR}/Resources"
 rm -rf "${APP_DIR}"
 mkdir -p "${MACOS_DIR}" "${RESOURCES_DIR}"
 
-cp "${BIN_DIR}/PingScope" "${MACOS_DIR}/PingScope"
+cp "${BIN_DIR}/PingScopePackage" "${MACOS_DIR}/PingScope"
 cp "Configuration/Info.plist" "${CONTENTS_DIR}/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier ${BUNDLE_IDENTIFIER}" "${CONTENTS_DIR}/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString ${MARKETING_VERSION}" "${CONTENTS_DIR}/Info.plist"

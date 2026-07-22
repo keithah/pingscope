@@ -172,7 +172,8 @@ public struct NetworkPerspectiveDiagnoser: Sendable {
     public func diagnose(
         hosts: [HostConfig],
         healthByHost: [UUID: HostHealth],
-        networkStatus: NetworkConnectivityStatus = .connected
+        networkStatus: NetworkConnectivityStatus = .connected,
+        activeNetworkInterface: String? = nil
     ) -> NetworkPerspectiveDiagnosis {
         let enabledHosts = hosts.filter(\.isEnabled)
         guard !enabledHosts.isEmpty else {
@@ -188,7 +189,29 @@ public struct NetworkPerspectiveDiagnoser: Sendable {
             return gatedDiagnosis
         }
 
-        let observed = enabledHosts.compactMap { host -> ObservedHost? in
+        let sampledInterfaces = Set(enabledHosts.compactMap { host in
+            healthByHost[host.id]?.latestResult?.networkInterface
+        })
+        let inferredInterface = sampledInterfaces.count == 1 ? sampledInterfaces.first : nil
+        let normalizedActiveInterface = NetworkInterfaceNormalizer.normalize(activeNetworkInterface)
+        let activeInterface = normalizedActiveInterface
+            ?? inferredInterface
+        let diagnosticHosts = enabledHosts.filter { host in
+            !(activeInterface == "cellular"
+                && (host.requiresLocalNetworkPermission || classifier.tier(for: host) == .localGateway))
+        }
+
+        if activeInterface == "cellular", diagnosticHosts.isEmpty {
+            return NetworkPerspectiveDiagnosis(
+                scope: .noData,
+                title: "No cellular-path checks configured",
+                detail: "Local-network hosts are not on the active cellular path.",
+                verdict: .noData,
+                confidence: .tentative
+            )
+        }
+
+        let observed = diagnosticHosts.compactMap { host -> ObservedHost? in
             guard let health = healthByHost[host.id], health.latestResult != nil else { return nil }
             return ObservedHost(host: host, health: health, tier: classifier.tier(for: host))
         }
@@ -249,13 +272,19 @@ public struct NetworkPerspectiveDiagnoser: Sendable {
         switch fault.tier {
         case .localGateway:
             let title = fault.down.contains { $0.host.displayName.localizedCaseInsensitiveContains("gateway") } ? "Default gateway down" : "Local network down"
+            let localConfidence: NetworkPerspectiveDiagnosis.Confidence = if normalizedActiveInterface == nil,
+                                                                            sampledInterfaces.count > 1 {
+                .tentative
+            } else {
+                confidence
+            }
             return NetworkPerspectiveDiagnosis(
                 scope: .localNetwork,
                 title: title,
                 detail: "\(names(fault.down)) not responding; failures beyond the router are unknown.",
                 affectedHostIDs: affected,
                 verdict: .localNetworkDown,
-                confidence: confidence,
+                confidence: localConfidence,
                 faultTier: fault.tier,
                 evidenceNote: evidence,
                 tierEvidence: tierEvidence
