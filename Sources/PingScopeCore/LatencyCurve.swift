@@ -1,7 +1,32 @@
 import CoreGraphics
+#if DEBUG
+import os
+
+private let latencyCurvePointsOfInterestLog = OSLog(
+    subsystem: "tv.kodi.pingscope",
+    category: .pointsOfInterest
+)
+#endif
 
 public enum LatencyCurve {
     public static func smoothedPath(points: [CGPoint], closed: Bool) -> CGPath {
+        #if DEBUG
+        let signpostID = OSSignpostID(log: latencyCurvePointsOfInterestLog)
+        os_signpost(
+            .begin,
+            log: latencyCurvePointsOfInterestLog,
+            name: "LatencyCurve.smoothedPath",
+            signpostID: signpostID
+        )
+        defer {
+            os_signpost(
+                .end,
+                log: latencyCurvePointsOfInterestLog,
+                name: "LatencyCurve.smoothedPath",
+                signpostID: signpostID
+            )
+        }
+        #endif
         let path = CGMutablePath()
         guard let first = points.first else {
             return path

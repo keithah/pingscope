@@ -313,8 +313,20 @@ public actor HostStore {
         coalesceManagedDefaultGatewayHosts()
     }
 
+    public func reconcile(hosts: [HostConfig], primaryHostID: UUID?) {
+        let requestedPrimaryID = primaryHostID ?? primaryID
+        let normalized = Self.coalescingManagedDefaultGatewayHosts(
+            hosts,
+            primaryID: requestedPrimaryID
+        )
+        orderedHosts = normalized.hosts
+        primaryID = normalized.primaryID.flatMap { candidate in
+            orderedHosts.contains { $0.id == candidate } ? candidate : nil
+        } ?? orderedHosts.first?.id
+    }
+
     private static func isManagedDefaultGateway(_ host: HostConfig) -> Bool {
-        host.displayName == "Default Gateway"
+        host.isManagedDefaultGateway
     }
 
     private func coalesceManagedDefaultGatewayHosts() {
@@ -352,7 +364,11 @@ public actor MeasurementScheduler {
     private let probeFactory: any ProbeFactory
     private let logger: (@Sendable (String) -> Void)?
     private let probePermits: AsyncPermitPool
-    private var tasks: [Task<Void, Never>] = []
+    private let sleepUntil: @Sendable (Duration, Duration) async throws -> Void
+    private var cadenceInputs: CadenceInputs = .default
+    private var tasks: [BoundedTaskLifetime] = []
+    private var shutdownTask: Task<Void, Never>?
+    private var shutdownToken: UUID?
     private var continuation: AsyncStream<PingResult>.Continuation?
     private var generation = 0
     private var lastFailureLogByHost: [UUID: (reason: FailureReason, date: Date)] = [:]
@@ -362,21 +378,48 @@ public actor MeasurementScheduler {
         logger: (@Sendable (String) -> Void)? = nil,
         maxConcurrentProbes: Int = 8
     ) {
+        let clock = ContinuousClock()
         self.probeFactory = probeFactory
         self.logger = logger
         self.probePermits = AsyncPermitPool(permits: max(1, maxConcurrentProbes))
+        self.sleepUntil = { duration, tolerance in
+            try await clock.sleep(until: clock.now.advanced(by: duration), tolerance: tolerance)
+        }
+    }
+
+    public init<C: Clock>(
+        probeFactory: any ProbeFactory,
+        logger: (@Sendable (String) -> Void)? = nil,
+        maxConcurrentProbes: Int = 8,
+        clock: C
+    ) where C.Duration == Duration {
+        self.probeFactory = probeFactory
+        self.logger = logger
+        self.probePermits = AsyncPermitPool(permits: max(1, maxConcurrentProbes))
+        self.sleepUntil = { duration, tolerance in
+            try await clock.sleep(until: clock.now.advanced(by: duration), tolerance: tolerance)
+        }
+    }
+
+    /// Updates the environment inputs that scale probe cadence. Applied on each
+    /// host's next loop iteration; a live scheduler picks it up without restart.
+    public func setCadenceInputs(_ inputs: CadenceInputs) {
+        cadenceInputs = inputs
     }
 
     public func start(hosts: [HostConfig], allowsLocalNetworkProbes: Bool = true) async -> AsyncStream<PingResult> {
         if !tasks.isEmpty {
             logger?("scheduler restart generation=\(generation) cancelingTasks=\(tasks.count)")
         }
-        cancelRunningTasks()
+        generation += 1
+        let runGeneration = generation
         continuation?.finish()
         continuation = nil
-        generation += 1
+        await stopTasks()
+        guard runGeneration == generation else {
+            return AsyncStream { $0.finish() }
+        }
         lastFailureLogByHost.removeAll()
-        let runGeneration = generation
 
         // Deep but bounded: multiple hosts probe concurrently and the runtime
         // consumes results serially, so `bufferingNewest(1)` silently dropped
@@ -405,15 +448,8 @@ public actor MeasurementScheduler {
         }
         logger?("scheduler start generation=\(runGeneration) hosts=\(hosts.count) measurable=\(measurableHosts.count) disabled=\(disabledCount) localSuppressed=\(localSuppressedCount) allowsLocal=\(allowsLocalNetworkProbes)")
 
-        for (offset, host) in measurableHosts.enumerated() {
-            let task = Task { [weak self] in
-                if offset > 0 {
-                    do {
-                        try await Task.sleep(for: .milliseconds(offset * 250))
-                    } catch {
-                        return
-                    }
-                }
+        for host in measurableHosts {
+            let task = BoundedTaskLifetime { [weak self] in
                 guard !Task.isCancelled else { return }
                 await self?.runLoop(for: host, generation: runGeneration)
             }
@@ -424,6 +460,7 @@ public actor MeasurementScheduler {
     }
 
     public func stop() async {
+        generation += 1
         await stopTasks()
         continuation?.finish()
         continuation = nil
@@ -433,27 +470,32 @@ public actor MeasurementScheduler {
         logger?("scheduler result stream terminated generation=\(terminatedGeneration) currentGeneration=\(generation)")
     }
 
-    private func cancelRunningTasks() {
-        let runningTasks = tasks
-        tasks.removeAll()
-        for task in runningTasks {
-            task.cancel()
-        }
-    }
-
     private func stopTasks() async {
         let runningTasks = tasks
         tasks.removeAll()
-        for task in runningTasks {
-            task.cancel()
+        runningTasks.forEach { $0.task.cancel() }
+
+        guard !runningTasks.isEmpty || shutdownTask != nil else { return }
+        let priorShutdown = shutdownTask
+        let token = UUID()
+        let shutdown = Task {
+            await priorShutdown?.value
+            await BoundedTaskLifetime.cancelAndJoin(runningTasks)
         }
-        for task in runningTasks {
-            await task.value
+        shutdownTask = shutdown
+        shutdownToken = token
+        await shutdown.value
+        if shutdownToken == token {
+            shutdownTask = nil
+            shutdownToken = nil
         }
     }
 
     private nonisolated func runLoop(for host: HostConfig, generation: Int) async {
         logger?("scheduler runLoop begin generation=\(generation) hostID=\(host.id.uuidString) method=\(host.method.rawValue)")
+        // Scheduler cannot consume PingRuntime's downstream health without reversing the result-stream dependency, so cadence derives the same transition locally.
+        var cadenceHealth = HostHealth(hostID: host.id, thresholds: host.thresholds)
+        var idleBackoff = ProbeIdleBackoffTracker()
         while !Task.isCancelled {
             let probe = await probeFactory.makeProbe(for: host.method)
             do {
@@ -462,21 +504,34 @@ public actor MeasurementScheduler {
                 return
             }
             let permitLease = AsyncPermitLease(pool: probePermits)
-            let result = await withTaskCancellationHandler {
-                let result = await probe.measure(host)
-                await permitLease.release()
-                return result
-            } onCancel: {
-                Task { await permitLease.release() }
-            }
+            // The permit remains leased for the complete measurement lifetime,
+            // including cancellation cleanup joined by stop/restart.
+            let result = await probe.measure(host)
+            await permitLease.release()
             guard !Task.isCancelled, await publish(result, for: host, generation: generation) else { return }
+            let previousStatus = cadenceHealth.status
+            cadenceHealth.ingest(result)
+            let nextInterval = idleBackoff.interval(
+                after: result,
+                previousStatus: previousStatus,
+                currentStatus: cadenceHealth.status,
+                baseInterval: host.interval
+            )
+            let effectiveInterval = await currentEffectiveInterval(base: nextInterval)
             do {
-                try await Task.sleep(for: host.interval)
+                // Tolerance lets the OS coalesce timer fires across hosts so the
+                // CPU/radio can settle between bursts instead of waking per-host.
+                let tolerance = Duration.seconds(min(max(effectiveInterval.seconds * 0.25, 1), 30))
+                try await sleepUntil(effectiveInterval, tolerance)
             } catch {
                 break
             }
         }
         logger?("scheduler runLoop end generation=\(generation) hostID=\(host.id.uuidString)")
+    }
+
+    private func currentEffectiveInterval(base: Duration) -> Duration {
+        cadenceInputs.effectiveInterval(base: base)
     }
 
     private func publish(_ result: PingResult, for host: HostConfig, generation: Int) -> Bool {
@@ -517,10 +572,10 @@ public actor PingRuntime {
     private var streamTask: Task<Void, Never>?
     private var continuation: AsyncStream<RuntimeSnapshot>.Continuation?
     private var continuationToken: UUID?
-    private var alertContinuation: AsyncStream<RuntimeAlertEvent>.Continuation?
     private var alertContinuationToken: UUID?
-    private var pendingAlertEvents: [RuntimeAlertEvent] = []
-    private var pendingAlertStartIndex = 0
+    private var alertWaiter: CheckedContinuation<RuntimeAlertEvent?, Never>?
+    private var alertDeliveryFinished = false
+    private var pendingAlertEvents = RuntimeAlertEventBuffer(capacity: 256)
     private var cachedHosts: [HostConfig] = []
     private var hostByID: [UUID: HostConfig] = [:]
     private var cachedPrimaryHostID: UUID?
@@ -561,29 +616,49 @@ public actor PingRuntime {
         }
     }
 
-    /// One-shot alert events. Alerts produced before any subscriber attached are
-    /// held and replayed to the next subscriber, so an outage present at launch is
-    /// not lost to the registration race with the scheduler's first results.
-    ///
-    /// Deliberately unbounded: these are edge transitions, not conflatable state.
-    /// Dropping an old "outage started" while keeping its later recovery can leave
-    /// consumers with an impossible alert timeline.
+    /// Returns the fully refreshed runtime state without replacing the live
+    /// snapshot-stream subscriber. Host mutation commit queues use this as the
+    /// publication handoff after an awaited runtime mutation completes.
+    public func currentSnapshot() async -> RuntimeSnapshot {
+        await refreshHostCache()
+        return makeSnapshot()
+    }
+
+    /// One-shot alert events. Delivery is demand-driven so a stalled subscriber
+    /// cannot create an unbounded `AsyncStream` buffer. The actor-owned queue has
+    /// a finite capacity and coalesces only undelivered transition cycles: a
+    /// down/recovery pair is omitted together, never as a single orphaned edge.
     public func alerts() -> AsyncStream<RuntimeAlertEvent> {
         let token = UUID()
-        return AsyncStream(bufferingPolicy: .unbounded) { continuation in
-            // Finish a superseded subscriber's stream so its `for await` loop
-            // ends instead of hanging on an orphaned continuation forever.
-            self.alertContinuation?.finish()
-            self.alertContinuation = continuation
-            self.alertContinuationToken = token
-            continuation.onTermination = { [weak self] _ in
-                Task { await self?.clearAlertContinuation(token: token) }
+        alertWaiter?.resume(returning: nil)
+        alertWaiter = nil
+        alertContinuationToken = token
+        alertDeliveryFinished = false
+        return AsyncStream(unfolding: { [weak self] in
+            guard let self else { return nil }
+            return await self.nextAlertEvent(token: token)
+        }, onCancel: { [weak self] in
+            Task { await self?.cancelAlertDelivery(token: token) }
+        })
+    }
+
+    private func nextAlertEvent(token: UUID) async -> RuntimeAlertEvent? {
+        guard alertContinuationToken == token else { return nil }
+        if let event = pendingAlertEvents.popFirst() {
+            return event
+        }
+        guard !alertDeliveryFinished else { return nil }
+
+        return await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                guard alertContinuationToken == token, !Task.isCancelled else {
+                    continuation.resume(returning: nil)
+                    return
+                }
+                alertWaiter = continuation
             }
-            for event in self.pendingAlertEvents[self.pendingAlertStartIndex...] {
-                continuation.yield(event)
-            }
-            self.pendingAlertEvents.removeAll()
-            self.pendingAlertStartIndex = 0
+        } onCancel: {
+            Task { await self.cancelAlertDelivery(token: token) }
         }
     }
 
@@ -597,9 +672,9 @@ public actor PingRuntime {
             await refreshHostCache()
         }
         let resultStream = await scheduler.start(hosts: cachedHosts.filter(\.isEnabled), allowsLocalNetworkProbes: allowsLocalNetworkProbes)
-        streamTask = Task { [self] in
+        streamTask = Task { [weak self] in
             for await result in resultStream {
-                await ingest(result)
+                await self?.ingest(result)
             }
         }
         publishSnapshot()
@@ -612,9 +687,9 @@ public actor PingRuntime {
         continuation?.finish()
         continuation = nil
         continuationToken = nil
-        alertContinuation?.finish()
-        alertContinuation = nil
-        alertContinuationToken = nil
+        alertDeliveryFinished = true
+        alertWaiter?.resume(returning: nil)
+        alertWaiter = nil
     }
 
     public func stopMeasurements() async {
@@ -716,7 +791,54 @@ public actor PingRuntime {
         } else {
             healthByHost[host.id, default: HostHealth(hostID: host.id, thresholds: host.thresholds)].thresholds = host.thresholds
         }
-        await restartScheduler(refreshCache: false)
+        if let previous,
+           previous.isEnabled == host.isEnabled,
+           previous.hasSameProbeConfiguration(as: host) {
+            publishSnapshot()
+        } else {
+            await restartScheduler(refreshCache: false)
+        }
+    }
+
+    @discardableResult
+    public func reconcileAcceptedHostState(_ state: SharedHostStoreState) async -> RuntimeSnapshot {
+        await refreshHostCache()
+        let previousHostsByID = hostByID
+        let acceptedHosts = HostConfig.sanitizedHosts(state.hosts)
+        let acceptedHostsByID = Dictionary(uniqueKeysWithValues: acceptedHosts.map { ($0.id, $0) })
+        let previousEnabledHostsByID = previousHostsByID.filter { $0.value.isEnabled }
+        let acceptedEnabledHostsByID = acceptedHostsByID.filter { $0.value.isEnabled }
+        let requiresProbeRestart = previousEnabledHostsByID.keys != acceptedEnabledHostsByID.keys
+            || acceptedEnabledHostsByID.contains { id, host in
+                guard let previous = previousEnabledHostsByID[id] else { return true }
+                return !previous.hasSameProbeConfiguration(as: host)
+            }
+
+        await hostStore.reconcile(
+            hosts: acceptedHosts,
+            primaryHostID: state.primaryHostID ?? state.selectedHostID ?? cachedPrimaryHostID
+        )
+        await refreshHostCache()
+
+        let acceptedHostIDs = Set(acceptedHostsByID.keys)
+        healthByHost = healthByHost.filter { acceptedHostIDs.contains($0.key) }
+        samplesByHost = samplesByHost.filter { acceptedHostIDs.contains($0.key) }
+        for host in acceptedHosts {
+            if let previous = previousHostsByID[host.id],
+               previous.measurementEndpoint != host.measurementEndpoint {
+                healthByHost[host.id] = HostHealth(hostID: host.id, thresholds: host.thresholds)
+                samplesByHost[host.id] = SampleSeries(hostID: host.id)
+            } else if healthByHost[host.id] != nil {
+                healthByHost[host.id]?.thresholds = host.thresholds
+            }
+        }
+
+        if requiresProbeRestart {
+            await restartScheduler(refreshCache: false)
+        } else {
+            publishSnapshot()
+        }
+        return makeSnapshot()
     }
 
     public func deleteHost(_ id: UUID) async {
@@ -751,6 +873,10 @@ public actor PingRuntime {
         guard allowsLocalNetworkProbes != isEnabled else { return }
         allowsLocalNetworkProbes = isEnabled
         await restartScheduler(refreshCache: false)
+    }
+
+    public func setCadenceInputs(_ inputs: CadenceInputs) async {
+        await scheduler.setCadenceInputs(inputs)
     }
 
     public func updateNotificationRules(_ rules: NotificationRuleSet) {
@@ -796,39 +922,25 @@ public actor PingRuntime {
     }
 
     private func publishSnapshot() {
-        continuation?.yield(RuntimeSnapshot(
+        continuation?.yield(makeSnapshot())
+    }
+
+    private func makeSnapshot() -> RuntimeSnapshot {
+        RuntimeSnapshot(
             hosts: cachedHosts,
             primaryHostID: cachedPrimaryHostID,
             healthByHost: healthByHost,
             samplesByHost: samplesByHost
-        ))
+        )
     }
 
     private func publishAlerts(_ decisions: [AlertDecision]) {
         guard !decisions.isEmpty else { return }
         let event = RuntimeAlertEvent(decisions: decisions, hosts: cachedHosts)
-        guard let alertContinuation else {
-            // The decision engine has already committed its cooldown and edge
-            // state, so an alert with no subscriber yet would be permanently
-            // lost. Hold it for the next subscriber; capped so a runtime nobody
-            // ever subscribes to cannot grow without bound.
-            pendingAlertEvents.append(event)
-            if pendingAlertEvents.count - pendingAlertStartIndex > 64 {
-                pendingAlertStartIndex += 1
-            }
-            compactPendingAlertsIfNeeded()
-            return
-        }
-        alertContinuation.yield(event)
-    }
-
-    private func compactPendingAlertsIfNeeded() {
-        if pendingAlertStartIndex == pendingAlertEvents.count {
-            pendingAlertEvents.removeAll(keepingCapacity: true)
-            pendingAlertStartIndex = 0
-        } else if pendingAlertStartIndex > 32, pendingAlertStartIndex * 2 > pendingAlertEvents.count {
-            pendingAlertEvents = Array(pendingAlertEvents[pendingAlertStartIndex...])
-            pendingAlertStartIndex = 0
+        pendingAlertEvents.append(event)
+        if let waiter = alertWaiter, let next = pendingAlertEvents.popFirst() {
+            alertWaiter = nil
+            waiter.resume(returning: next)
         }
     }
 
@@ -838,10 +950,12 @@ public actor PingRuntime {
         continuationToken = nil
     }
 
-    private func clearAlertContinuation(token: UUID) {
+    private func cancelAlertDelivery(token: UUID) {
         guard alertContinuationToken == token else { return }
-        alertContinuation = nil
         alertContinuationToken = nil
+        alertDeliveryFinished = true
+        alertWaiter?.resume(returning: nil)
+        alertWaiter = nil
     }
 
     private func shouldSuppressDiagnosisAlert(_ alert: AlertDecision) -> Bool {
@@ -866,7 +980,8 @@ private extension HostConfig {
 
 /// A batch of alert decisions produced by a single ingested result, together with
 /// the host list needed to render them. Delivered on ``PingRuntime/alerts()``, a
-/// non-conflating stream, so no decision is ever silently dropped.
+/// transition-safe stream that preserves all edges until its finite buffer is
+/// under pressure, then coalesces only complete undelivered state cycles.
 public struct RuntimeAlertEvent: Sendable, Equatable {
     public let decisions: [AlertDecision]
     public let hosts: [HostConfig]
@@ -874,6 +989,134 @@ public struct RuntimeAlertEvent: Sendable, Equatable {
     public init(decisions: [AlertDecision], hosts: [HostConfig]) {
         self.decisions = decisions
         self.hosts = hosts
+    }
+}
+
+/// Finite alert storage that preserves a valid transition timeline.
+///
+/// Once capacity is exceeded, the buffer remembers the last edge handed to the
+/// consumer for each host and for the aggregate path. All still-pending edges
+/// for that identity can then be replaced by the single edge required to reach
+/// the newest state. A complete unobserved down/recovery cycle becomes no edge.
+struct RuntimeAlertEventBuffer {
+    private enum TransitionIdentity: Hashable {
+        case host(UUID)
+        case path
+    }
+
+    private enum InformationalIdentity: Hashable {
+        case highLatency(UUID)
+        case networkChange
+        case networkStatus
+    }
+
+    private struct Entry {
+        let eventID: UUID
+        let decision: AlertDecision
+        let hosts: [HostConfig]
+    }
+
+    let capacity: Int
+    private var entries: [Entry] = []
+    private var deliveredTransitionState: [TransitionIdentity: Bool] = [:]
+    private var isCoalescingUnderPressure = false
+
+    init(capacity: Int) {
+        self.capacity = max(1, capacity)
+    }
+
+    mutating func append(_ event: RuntimeAlertEvent) {
+        let eventID = UUID()
+        for decision in event.decisions {
+            entries.append(Entry(eventID: eventID, decision: decision, hosts: event.hosts))
+        }
+        if entries.count > capacity {
+            isCoalescingUnderPressure = true
+        }
+        if isCoalescingUnderPressure {
+            coalescePendingState()
+        }
+    }
+
+    mutating func popFirst() -> RuntimeAlertEvent? {
+        guard let first = entries.first else { return nil }
+        let matchingCount = entries.prefix { $0.eventID == first.eventID }.count
+        let matchingEntries = Array(entries.prefix(matchingCount))
+        entries.removeFirst(matchingCount)
+        for entry in matchingEntries {
+            if let (identity, isActive) = Self.transition(for: entry.decision) {
+                deliveredTransitionState[identity] = isActive
+            }
+        }
+        if entries.isEmpty {
+            isCoalescingUnderPressure = false
+        }
+        return RuntimeAlertEvent(
+            decisions: matchingEntries.map(\.decision),
+            hosts: matchingEntries.last?.hosts ?? first.hosts
+        )
+    }
+
+    /// Once delivery falls behind, reduce every transition identity to the one
+    /// edge (if any) needed to move from the last delivered state to the latest
+    /// pending state. Complete down/recovery cycles disappear together.
+    private mutating func coalescePendingState() {
+        var latestTransition: [TransitionIdentity: (isActive: Bool, index: Int)] = [:]
+        var latestInformational: [InformationalIdentity: Int] = [:]
+        for (index, entry) in entries.enumerated() {
+            if let (identity, isActive) = Self.transition(for: entry.decision) {
+                latestTransition[identity] = (isActive, index)
+            } else if let identity = Self.informationalIdentity(for: entry.decision) {
+                latestInformational[identity] = index
+            }
+        }
+
+        var retainedIndices = Set(latestInformational.values)
+        for (identity, pending) in latestTransition
+        where deliveredTransitionState[identity, default: false] != pending.isActive {
+            retainedIndices.insert(pending.index)
+        }
+        entries = entries.enumerated().compactMap { index, entry in
+            retainedIndices.contains(index) ? entry : nil
+        }
+        if entries.count > capacity {
+            let overflowCount = entries.count - capacity
+            for entry in entries.prefix(overflowCount) {
+                if let (identity, isActive) = Self.transition(for: entry.decision) {
+                    deliveredTransitionState[identity] = isActive
+                }
+            }
+            entries.removeFirst(overflowCount)
+        }
+    }
+
+    private static func transition(for decision: AlertDecision) -> (identity: TransitionIdentity, isActive: Bool)? {
+        switch decision {
+        case let .hostDown(hostID):
+            (.host(hostID), true)
+        case let .recovered(hostID):
+            (.host(hostID), false)
+        case .internetLoss, .localNetworkDown, .ispPathDown, .upstreamDown, .remoteServiceDown, .pathDegraded:
+            (.path, true)
+        case .pathRecovered:
+            (.path, false)
+        case .highLatency, .networkChange, .networkStatus:
+            nil
+        }
+    }
+
+    private static func informationalIdentity(for decision: AlertDecision) -> InformationalIdentity? {
+        switch decision {
+        case let .highLatency(hostID):
+            .highLatency(hostID)
+        case .networkChange:
+            .networkChange
+        case .networkStatus:
+            .networkStatus
+        case .hostDown, .recovered, .internetLoss, .localNetworkDown, .ispPathDown,
+             .upstreamDown, .remoteServiceDown, .pathDegraded, .pathRecovered:
+            nil
+        }
     }
 }
 

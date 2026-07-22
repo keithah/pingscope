@@ -3,10 +3,12 @@ import Foundation
 public struct WidgetSnapshotPublishDecision: Equatable, Sendable {
     public let shouldSave: Bool
     public let shouldReloadTimeline: Bool
+    public let shouldReloadControls: Bool
 
-    public init(shouldSave: Bool, shouldReloadTimeline: Bool) {
+    public init(shouldSave: Bool, shouldReloadTimeline: Bool, shouldReloadControls: Bool) {
         self.shouldSave = shouldSave
         self.shouldReloadTimeline = shouldReloadTimeline
+        self.shouldReloadControls = shouldReloadControls
     }
 }
 
@@ -30,7 +32,11 @@ public struct WidgetSnapshotPublishPolicy: Sendable {
         let sampleFeedSaveDue = sampleFeedChanged
             && snapshot.generatedAt.timeIntervalSince(lastTimelineReloadAt ?? .distantPast) >= timelineReloadInterval
         guard widgetStateChanged || heartbeatDue || sampleFeedSaveDue else {
-            return WidgetSnapshotPublishDecision(shouldSave: false, shouldReloadTimeline: false)
+            return WidgetSnapshotPublishDecision(
+                shouldSave: false,
+                shouldReloadTimeline: false,
+                shouldReloadControls: false
+            )
         }
 
         return WidgetSnapshotPublishDecision(
@@ -41,7 +47,8 @@ public struct WidgetSnapshotPublishPolicy: Sendable {
                 lastTimelineReloadAt: lastTimelineReloadAt,
                 widgetStateChanged: widgetStateChanged,
                 sampleFeedChanged: sampleFeedChanged
-            )
+            ),
+            shouldReloadControls: !snapshot.hasSameControlState(as: previousSnapshot)
         )
     }
 
@@ -58,5 +65,19 @@ public struct WidgetSnapshotPublishPolicy: Sendable {
             return true
         }
         return snapshot.generatedAt.timeIntervalSince(lastTimelineReloadAt ?? .distantPast) >= timelineReloadInterval
+    }
+}
+
+private extension WidgetSnapshot {
+    func hasSameControlState(as other: WidgetSnapshot?) -> Bool {
+        guard let other else { return false }
+        return monitoring == other.monitoring
+            && primaryHostID == other.primaryHostID
+            && primaryHealthStatus == other.primaryHealthStatus
+    }
+
+    var primaryHealthStatus: HealthStatus? {
+        guard let primaryHostID else { return nil }
+        return health.first { $0.hostID == primaryHostID }?.status
     }
 }

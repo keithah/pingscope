@@ -14,7 +14,11 @@ extension PingScopeModel {
             await previousPublishTask?.value
             let publishDecision = await MainActor.run {
                 guard let self else {
-                    return WidgetSnapshotPublishDecision(shouldSave: false, shouldReloadTimeline: false)
+                    return WidgetSnapshotPublishDecision(
+                        shouldSave: false,
+                        shouldReloadTimeline: false,
+                        shouldReloadControls: false
+                    )
                 }
                 return self.widgetPublishPolicy.decision(
                     for: widgetSnapshot,

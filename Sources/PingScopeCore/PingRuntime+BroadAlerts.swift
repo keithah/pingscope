@@ -36,12 +36,22 @@ struct BroadOutageAlertCoordinator {
 
         if isOutage {
             guard !aggregateInternetOutageActive, !pathAlertActive else { return nil }
+            // Detection owns host-transition suppression even when the broad
+            // notification is inside its cooldown. Keep disabled alert types
+            // independent so users who opt out of internet-loss alerts still
+            // receive the enabled per-host transitions.
+            if rules.alertTypes.contains(.internetLoss) {
+                aggregateInternetOutageActive = true
+                recoverySuppressionHostIDs.formUnion(
+                    Self.currentFailingAlertableHostIDs(hosts: hosts, healthByHost: healthByHost)
+                )
+            }
             return .internetLoss(latestResults)
         }
 
         if aggregateInternetOutageActive, failedHostIDs.isEmpty {
             aggregateInternetOutageActive = false
-            if shouldDeliverPathRecovered(rules: rules) {
+            if pathAlertActive, shouldDeliverPathRecovered(rules: rules) {
                 return .pathRecovered
             }
         }

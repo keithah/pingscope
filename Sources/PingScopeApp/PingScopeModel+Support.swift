@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import PingScopeCore
+import PingScopeHistoryKit
 import UniformTypeIdentifiers
 
 struct SetupChecklistItem: Identifiable {
@@ -38,6 +39,7 @@ extension PingScopeModel {
     }
 
     func loadDraft(from host: HostConfig) {
+        draftHostID = host.id
         editingHostID = host.id
         isCreatingHost = false
         showsAdvancedHostFields = false
@@ -52,11 +54,25 @@ extension PingScopeModel {
         draftDownAfterFailures = host.thresholds.downAfterFailures
         draftIsEnabled = host.isEnabled
         draftNotificationPolicy = host.notifications
+        draftDisplayColor = host.displayColor?.validatedComponents
         draftTestResultText = nil
     }
 }
 
 extension UserDefaults {
+    var pingScopeMacHistoryRange: HistoryRange {
+        get {
+            guard let rawValue = string(forKey: "pingScopeMacHistoryRange"),
+                  let range = HistoryRange(rawValue: rawValue) else {
+                return .defaultValue
+            }
+            return range
+        }
+        set {
+            set(newValue.rawValue, forKey: "pingScopeMacHistoryRange")
+        }
+    }
+
     var overlayFrame: NSRect? {
         get {
             guard let string = string(forKey: "overlayFrame") else { return nil }
@@ -81,14 +97,20 @@ extension UserDefaults {
             }
         }
         set {
-            let data = try? JSONEncoder().encode(newValue)
-            set(data, forKey: "hostConfigs")
+            try? setHostConfigs(newValue)
         }
     }
 
     func setHostConfigs(_ hosts: [HostConfig]) throws {
-        let data = try JSONEncoder().encode(hosts)
-        set(data, forKey: "hostConfigs")
+        let store = UserDefaultsSharedHostStore(defaults: self, legacyPlatform: .macOS)
+        let existing = store.load().state
+        try store.save(
+            SharedHostStoreState(
+                hosts: hosts,
+                primaryHostID: existing?.primaryHostID ?? primaryHostID,
+                selectedHostID: existing?.selectedHostID
+            )
+        )
     }
 
     func storedHostConfigs() -> StoredHostConfigs {
@@ -107,20 +129,6 @@ extension UserDefaults {
         }
         set {
             set(newValue?.uuidString, forKey: "primaryHostID")
-        }
-    }
-
-    var notificationRules: NotificationRuleSet? {
-        get {
-            guard let data = data(forKey: "notificationRules") else { return nil }
-            return try? JSONDecoder().decode(NotificationRuleSet.self, from: data)
-        }
-        set {
-            if let data = try? newValue.map(JSONEncoder().encode) {
-                set(data, forKey: "notificationRules")
-            } else {
-                removeObject(forKey: "notificationRules")
-            }
         }
     }
 

@@ -16,9 +16,6 @@ enum PingScopeDisplayMode: String, CaseIterable, Identifiable {
         }
     }
 
-    func resolvedForHostScope(showsAllHosts: Bool) -> PingScopeDisplayMode {
-        showsAllHosts ? .signal : self
-    }
 }
 
 struct OverlayHostOption: Identifiable {

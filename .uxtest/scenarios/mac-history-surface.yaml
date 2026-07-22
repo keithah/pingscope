@@ -1,0 +1,15 @@
+mode: explore
+open: launched
+
+persona: >
+  A PingScope user reviewing recent connection quality on a Mac.
+goal: >
+  Open the dedicated History window from the status interface, verify the host and seven-range controls,
+  graph or honest empty state, metrics/sessions/network sections when data exists, and switch to another range.
+success_criteria: >
+  The PingScope History window opens from Open History, defaults to 24H, exposes 1H/4H/12H/24H/7D/14D/30D,
+  and remains usable after changing the range. Confirm the visible presentation without inventing missing data.
+step_budget: 10
+notes: >
+  Use the gear menu's Open History command. Capture the History window after it settles. If the local store
+  has no samples, accept the explicit No History Yet state but still verify host/range controls and range changes.

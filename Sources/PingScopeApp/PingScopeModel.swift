@@ -3,17 +3,126 @@ import Combine
 import Foundation
 @preconcurrency import Network
 import PingScopeCore
+import PingScopeCloudSync
+import PingScopeHistoryKit
 import ServiceManagement
 import WidgetKit
+#if DEBUG
+import os
+
+private let snapshotPointsOfInterestLog = OSLog(
+    subsystem: "tv.kodi.pingscope",
+    category: .pointsOfInterest
+)
+#endif
+
+typealias DisplayPresentationSampleFingerprint = PerHostSampleFingerprint
+
+struct DisplayPresentationInputKey: Equatable {
+    let visibleSamples: DisplayPresentationSampleFingerprint
+    let selectedRange: TimeRange
+    let includesAllHosts: Bool
+    let primaryHost: HostConfig?
+    let hosts: [HostConfig]
+    let healthByHost: [UUID: HostHealth]
+    let allHostVisibleSamples: [UUID: DisplayPresentationSampleFingerprint]?
+
+    init(
+        visibleSamples: [PingResult],
+        selectedRange: TimeRange,
+        includesAllHosts: Bool,
+        primaryHost: HostConfig?,
+        hosts: [HostConfig],
+        healthByHost: [UUID: HostHealth],
+        allHostVisibleSamples: [UUID: [PingResult]]?
+    ) {
+        self.visibleSamples = DisplayPresentationSampleFingerprint(samples: visibleSamples)
+        self.selectedRange = selectedRange
+        self.includesAllHosts = includesAllHosts
+        self.primaryHost = primaryHost
+        self.hosts = hosts
+        self.healthByHost = healthByHost
+        self.allHostVisibleSamples = allHostVisibleSamples?.mapValues { samples in
+            DisplayPresentationSampleFingerprint(samples: samples)
+        }
+    }
+}
+
+@MainActor
+final class DisplayPresentationRecomputeScheduler {
+    private let delay: Duration
+    private var task: Task<Void, Never>?
+    private(set) var needsRecompute = false
+
+    init(delay: Duration = .milliseconds(200)) {
+        self.delay = delay
+    }
+
+    func schedule(_ operation: @escaping @MainActor () -> Void) {
+        needsRecompute = true
+        guard task == nil else { return }
+
+        task = Task { [weak self] in
+            guard let self else { return }
+            try? await Task.sleep(for: delay)
+            guard !Task.isCancelled else { return }
+
+            task = nil
+            guard needsRecompute else { return }
+            needsRecompute = false
+            operation()
+        }
+    }
+
+    func cancel() {
+        task?.cancel()
+        task = nil
+        needsRecompute = false
+    }
+}
+
+@MainActor
+final class LiveDisplayModel: ObservableObject {
+    @Published private(set) var snapshot: RuntimeSnapshot
+    @Published private(set) var displayPresentation: PingScopeDisplayPresentation
+
+    init(
+        snapshot: RuntimeSnapshot = RuntimeSnapshot(
+            hosts: HostConfig.defaultHosts(),
+            primaryHostID: HostConfig.defaultInternet.id,
+            healthByHost: [:],
+            samplesByHost: [:]
+        ),
+        displayPresentation: PingScopeDisplayPresentation? = nil
+    ) {
+        self.snapshot = snapshot
+        self.displayPresentation = displayPresentation ?? PingScopeDisplayPresentation()
+    }
+
+    func updateSnapshot(_ snapshot: RuntimeSnapshot) {
+        self.snapshot = snapshot
+    }
+
+    func updateDisplayPresentation(_ displayPresentation: PingScopeDisplayPresentation) {
+        self.displayPresentation = displayPresentation
+    }
+}
 
 @MainActor
 final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
-    @Published private(set) var snapshot = RuntimeSnapshot(
-        hosts: HostConfig.defaultHosts(),
-        primaryHostID: HostConfig.defaultInternet.id,
-        healthByHost: [:],
-        samplesByHost: [:]
-    )
+    nonisolated static let historyRetention = PingHistoryRetention.maximumDuration
+
+    let liveDisplay: LiveDisplayModel
+    var snapshot: RuntimeSnapshot { liveDisplay.snapshot }
+    var displayPresentation: PingScopeDisplayPresentation { liveDisplay.displayPresentation }
+    @Published private(set) var configuredHosts = HostConfig.defaultHosts()
+    @Published private(set) var configuredPrimaryHostID: UUID? = HostConfig.defaultInternet.id
+
+    var configuredPrimaryHost: HostConfig? {
+        guard let configuredPrimaryHostID else { return configuredHosts.first }
+        return configuredHosts.first { $0.id == configuredPrimaryHostID } ?? configuredHosts.first
+    }
+
     @Published var selectedRange: TimeRange = .fiveMinutes {
         didSet {
             recomputeDisplayPresentation()
@@ -22,6 +131,7 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
     }
     @Published var draftHostName = ""
     @Published var draftHostAddress = ""
+    @Published var draftHostID = UUID()
     @Published var draftNetworkTier: NetworkTier?
     @Published var draftMethod: PingMethod = .https
     @Published var draftPort: Int = Int(PingMethod.https.defaultPort ?? 0)
@@ -31,6 +141,7 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
     @Published var draftDownAfterFailures: Int = LatencyThresholds.defaults.downAfterFailures
     @Published var draftIsEnabled = true
     @Published var draftNotificationPolicy: HostNotificationPolicy = .inherit
+    @Published var draftDisplayColor: HostDisplayColor?
     @Published var draftTestResultText: String?
     @Published private(set) var isTestingDraftHost = false
     @Published var editingHostID: UUID?
@@ -130,14 +241,27 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
     @Published private(set) var currentNetworkStatus: NetworkConnectivityStatus = .connected
     @Published private(set) var notificationPermissionState: NotificationPermissionState = .unknown
     @Published private(set) var notificationRequestMessage: String?
-    @Published private(set) var displayPresentation = PingScopeDisplayPresentation()
     @Published var historyExportHostID: UUID?
     @Published var historyExportRange: HistoryExportRangePreset = .default
     @Published var historyExportCustomValue = "1"
     @Published var historyExportCustomUnit: HistoryExportRangeUnit = .hours
     @Published private(set) var historyExportMessage: String?
     @Published private(set) var isExportingHistory = false
+    @Published var historySurfaceHostID: UUID?
+    @Published var historySurfaceRange = UserDefaults.standard.pingScopeMacHistoryRange {
+        didSet { UserDefaults.standard.pingScopeMacHistoryRange = historySurfaceRange }
+    }
+    @Published var historySurfacePresentation: MacHistorySurfacePresentation?
+    @Published var isLoadingHistorySurface = false
     @Published private(set) var diagnosticsMessage: String?
+    @Published var isCloudSyncEnabled: Bool {
+        didSet {
+            guard !isApplyingCloudSyncActivationState else { return }
+            cloudSyncDefaults.set(isCloudSyncEnabled, forKey: PingScopeCloudSyncPreference.enabledKey)
+            configureCloudSync(isAutomaticLaunch: false)
+        }
+    }
+    @Published private(set) var cloudSyncStatusText = "Off"
     @Published var overlayFrame: NSRect
 
     let presenter = DisplayStatePresenter()
@@ -150,12 +274,15 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
     private let notificationDispatcher = MacNotificationDispatcher()
     private let pathMonitor = NWPathMonitor()
     private let pathMonitorQueue = DispatchQueue(label: "com.pingscope.network-path")
+    private let networkCaptureStore: NetworkCaptureSnapshotStore
     var widgetSnapshotStore: WidgetSnapshotStore?
     private var snapshotTask: Task<Void, Never>?
     private var alertTask: Task<Void, Never>?
     private var networkTask: Task<Void, Never>?
     var endpointRefreshTask: Task<Void, Never>?
     private var historyTask: Task<Void, Never>?
+    var historySurfaceTask: Task<Void, Never>?
+    var historySurfaceLoadToken: UInt64 = 0
     private var overlayFramePersistTask: Task<Void, Never>?
     var widgetSnapshotPublishTask: Task<Void, Never>?
     var notificationRulesTask: Task<Void, Never>?
@@ -163,37 +290,87 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
     private var draftTestTask: Task<Void, Never>?
     private var draftTestGeneration = 0
     private var isApplyingStartAtLoginChange = false
+    private var isApplyingCloudSyncActivationState = false
+    private var cloudSyncConfigurationGeneration: UInt64 = 0
+    private let hostMutationCommits = HostMutationCommitQueue()
     private var lastHistoryKey: String?
+    private let displayPresentationRecomputeScheduler = DisplayPresentationRecomputeScheduler()
+    private var presentationVisibleHistorySamples: [PingResult] = []
+    private var lastDisplayPresentationInputKey: DisplayPresentationInputKey?
     var lastPublishedWidgetSnapshot: WidgetSnapshot?
     var lastWidgetTimelineReloadAt: Date?
     let widgetPublishPolicy = WidgetSnapshotPublishPolicy()
     private let hostConfigPersistence: HostConfigPersistence
+    private let cloudSyncService: PingScopeCloudSyncService?
+    private let cloudSyncActivation: PingScopeCloudSyncActivationController?
+    private let cloudSyncDefaults: UserDefaults
+    private let acceptedHostReconciliationGate: @Sendable () async -> Void
+    private let cloudHostUploadObserver: @Sendable ([HostConfig]) -> Void
+    private var lastCloudSyncHostIDs: Set<UUID> = []
+    private var lastCloudSyncHostsByID: [UUID: HostConfig] = [:]
+    var historySurfaceStore: (any PingHistoryStore)?
+    var historySurfaceLoader: any MacHistorySurfaceLoading
     private var lastObservedGateway: String?
     private var lastNetworkPathSignature: String?
     var onMenuStateChanged: ((MenuBarState) -> Void)?
     var onOverlayGraphClicked: (() -> Void)?
     var onPresentationChanged: (() -> Void)?
 
-    override init() {
-        let hostConfigPersistence = HostConfigPersistence()
+    override convenience init() {
+        self.init(cloudSyncDefaultsSuiteName: nil)
+    }
+
+    init(
+        cloudSyncDefaultsSuiteName: String?,
+        runtimeOverride: PingRuntime? = nil,
+        acceptedHostReconciliationGate: @escaping @Sendable () async -> Void = {},
+        cloudHostUploadObserver: @escaping @Sendable ([HostConfig]) -> Void = { _ in }
+    ) {
+        let cloudSyncDefaults = cloudSyncDefaultsSuiteName.flatMap(UserDefaults.init(suiteName:)) ?? .standard
+        let hostConfigPersistence = HostConfigPersistence(defaults: cloudSyncDefaults)
         let loadedHosts = hostConfigPersistence.loadInitialConfiguration { message in
             DebugLog.write(message)
         }
+        self.liveDisplay = LiveDisplayModel(
+            snapshot: RuntimeSnapshot(
+                hosts: loadedHosts.hosts,
+                primaryHostID: loadedHosts.primaryHostID ?? loadedHosts.hosts.first?.id,
+                healthByHost: [:],
+                samplesByHost: [:]
+            )
+        )
         let hostStore = HostStore(defaultHosts: loadedHosts.hosts, primaryHostID: loadedHosts.primaryHostID)
         let probeFactory = DefaultProbeFactory()
-        let historyStore: SQLiteHistoryStore?
+        let networkCaptureStore = NetworkCaptureSnapshotStore()
+        self.networkCaptureStore = networkCaptureStore
+        let historyStore: (any PingHistoryStore)?
+        let cloudSyncService: PingScopeCloudSyncService?
         do {
-            historyStore = try SQLiteHistoryStore(url: SQLiteHistoryStore.defaultURL(), logger: { message in
-                DebugLog.write(message)
-            })
+            let sqliteHistoryStore = try SQLiteHistoryStore(
+                url: SQLiteHistoryStore.defaultURL(),
+                retention: Self.historyRetention,
+                logger: { message in
+                    DebugLog.write(message)
+                }
+            )
+            let service = PingScopeCloudSyncService(
+                historyStore: sqliteHistoryStore,
+                hostStore: UserDefaultsSharedHostStore(legacyPlatform: .macOS)
+            )
+            historyStore = NetworkCapturedHistoryStore(
+                destination: CloudSyncingHistoryStore(destination: sqliteHistoryStore, service: service),
+                networkCaptureStore: networkCaptureStore
+            )
+            cloudSyncService = service
         } catch {
             DebugLog.write("history store unavailable: \(error)")
             historyStore = nil
+            cloudSyncService = nil
         }
         let allowsLocalNetworkProbes = UserDefaults.standard.allowsLocalNetworkProbes
         UserDefaults.standard.migrateNoisyNetworkStatusAlertDefaults()
         let notificationRules = UserDefaults.standard.notificationRules ?? NotificationRuleSet()
-        self.runtime = PingRuntime(
+        self.runtime = runtimeOverride ?? PingRuntime(
             hostStore: hostStore,
             scheduler: MeasurementScheduler(probeFactory: probeFactory, logger: { message in
                 DebugLog.write(message)
@@ -205,6 +382,18 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
                 DebugLog.write(message)
             }
         )
+        self.historySurfaceStore = historyStore
+        self.historySurfaceLoader = MacHistorySurfaceLoader()
+        self.cloudSyncService = cloudSyncService
+        self.cloudSyncActivation = cloudSyncService.map {
+            PingScopeCloudSyncActivationController(
+                service: $0,
+                defaultsSuiteName: cloudSyncDefaultsSuiteName
+            )
+        }
+        self.cloudSyncDefaults = cloudSyncDefaults
+        self.acceptedHostReconciliationGate = acceptedHostReconciliationGate
+        self.cloudHostUploadObserver = cloudHostUploadObserver
         self.hostConfigPersistence = hostConfigPersistence
         self.hostTester = HostTester(probeFactory: probeFactory)
         self.gatewayEndpointResolver = DefaultGatewayEndpointResolver(probeFactory: probeFactory)
@@ -225,8 +414,34 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
             UserDefaults.standard.widgetsEnabled = false
         }
         self.widgetsEnabled = widgetsEnabled
+        self.isCloudSyncEnabled = PingScopeCloudSyncPreference.isEnabled(in: cloudSyncDefaults)
+        self.lastCloudSyncHostIDs = Set(loadedHosts.hosts.map(\.id))
+        self.lastCloudSyncHostsByID = Dictionary(uniqueKeysWithValues: loadedHosts.hosts.map { ($0.id, $0) })
         self.overlayFrame = UserDefaults.standard.overlayFrame ?? NSRect(x: 80, y: 620, width: 240, height: 96)
         super.init()
+        configureCloudSync(isAutomaticLaunch: true)
+    }
+
+    convenience init(runtimeForTesting runtime: PingRuntime) {
+        self.init(cloudSyncDefaultsSuiteName: nil, runtimeOverride: runtime)
+    }
+
+    convenience init(
+        historySurfaceStore: any PingHistoryStore,
+        historySurfaceLoader: any MacHistorySurfaceLoading,
+        configuredHosts: [HostConfig],
+        primaryHostID: UUID?
+    ) {
+        self.init()
+        self.historySurfaceStore = historySurfaceStore
+        self.historySurfaceLoader = historySurfaceLoader
+        self.configuredHosts = configuredHosts
+        self.configuredPrimaryHostID = primaryHostID
+    }
+
+    func replaceConfiguredHostsForTesting(_ hosts: [HostConfig], primaryHostID: UUID?) {
+        configuredHosts = hosts
+        configuredPrimaryHostID = primaryHostID
     }
 
     var primaryHost: HostConfig? {
@@ -335,7 +550,7 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
 
     var draftHost: HostConfig {
         HostConfig(
-            id: editingHostID ?? UUID(),
+            id: draftHostID,
             displayName: draftHostName,
             address: draftHostAddress,
             tier: draftNetworkTier,
@@ -348,27 +563,26 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
                 downAfterFailures: draftDownAfterFailures
             ),
             isEnabled: draftIsEnabled,
-            notifications: draftNotificationPolicy
+            notifications: draftNotificationPolicy,
+            displayColor: draftDisplayColor
         )
     }
 
     func start() {
+        startRuntimeSubscriptions()
+        Task { [runtime] in await runtime.start() }
+        startNetworkMonitoring()
+        startNetworkPathMonitoring()
+        refreshNotificationPermission()
+    }
+
+    func startRuntimeSubscriptions() {
         snapshotTask?.cancel()
         snapshotTask = Task { [weak self] in
-            guard let self else { return }
-            let snapshots = await self.runtime.snapshots()
+            guard let snapshots = await self?.runtime.snapshots() else { return }
             for await snapshot in snapshots {
-                await MainActor.run {
-                    self.snapshot = snapshot
-                    self.recomputeDisplayPresentation()
-                    self.persistHostState(snapshot)
-                    self.onMenuStateChanged?(self.menuBarState)
-                    self.ensureLocalNetworkProbesForSelectedLocalHost(snapshot)
-                    self.refreshVisibleHistoryIfNeeded()
-                    if self.widgetsEnabled == true {
-                        self.publishWidgetSnapshot(snapshot)
-                    }
-                }
+                guard let self else { return }
+                self.processRuntimeSnapshot(snapshot)
             }
         }
         // Alerts arrive on their own non-conflating stream: the snapshot stream
@@ -376,32 +590,77 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
         // busy, which would silently and permanently lose one-shot alerts.
         alertTask?.cancel()
         alertTask = Task { [weak self] in
-            guard let self else { return }
-            let events = await self.runtime.alerts()
+            guard let events = await self?.runtime.alerts() else { return }
             for await event in events {
-                await MainActor.run {
-                    self.deliverAlerts(event.decisions, hosts: event.hosts)
-                }
+                guard let self else { return }
+                self.deliverAlerts(event.decisions, hosts: event.hosts)
             }
         }
-        Task { await runtime.start() }
-        startNetworkMonitoring()
-        startNetworkPathMonitoring()
-        refreshNotificationPermission()
+    }
+
+    private func processRuntimeSnapshot(_ snapshot: RuntimeSnapshot) {
+        #if DEBUG
+        let signpostID = OSSignpostID(log: snapshotPointsOfInterestLog)
+        os_signpost(
+            .begin,
+            log: snapshotPointsOfInterestLog,
+            name: "PingScopeModel.processSnapshot",
+            signpostID: signpostID
+        )
+        defer {
+            os_signpost(
+                .end,
+                log: snapshotPointsOfInterestLog,
+                name: "PingScopeModel.processSnapshot",
+                signpostID: signpostID
+            )
+        }
+        #endif
+        liveDisplay.updateSnapshot(snapshot)
+        updateConfiguredHostsIfNeeded(snapshot)
+        scheduleDisplayPresentationRecompute()
+        persistHostState(snapshot)
+        onMenuStateChanged?(menuBarState)
+        ensureLocalNetworkProbesForSelectedLocalHost(snapshot)
+        refreshVisibleHistoryIfNeeded()
+        if widgetsEnabled == true {
+            publishWidgetSnapshot(snapshot)
+        }
     }
 
     func stop() {
+        cancelModelTasks()
+        Task { await runtime.stop() }
+    }
+
+    /// Termination-path stop: awaits the runtime shutdown (including the history
+    /// write-buffer flush) instead of firing it into a task the process exit
+    /// would abandon, so buffered samples reach SQLite before quit.
+    func stopAndFlush() async {
+        cancelModelTasks()
+        await runtime.stop()
+    }
+
+    private func cancelModelTasks() {
         snapshotTask?.cancel()
         alertTask?.cancel()
         networkTask?.cancel()
         endpointRefreshTask?.cancel()
         historyTask?.cancel()
+        historySurfaceLoadToken += 1
+        historySurfaceTask?.cancel()
+        historySurfaceTask = nil
+        isLoadingHistorySurface = false
+        displayPresentationRecomputeScheduler.cancel()
         overlayFramePersistTask?.cancel()
         notificationRulesTask?.cancel()
         localNetworkProbeTask?.cancel()
         draftTestTask?.cancel()
         pathMonitor.cancel()
-        Task { await runtime.stop() }
+    }
+
+    func applyCadenceInputs(_ inputs: CadenceInputs) async {
+        await runtime.setCadenceInputs(inputs)
     }
 
     func pauseMeasurementsForSleep() {
@@ -460,6 +719,7 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
         editingHostID = nil
         isCreatingHost = false
         showsAdvancedHostFields = false
+        draftHostID = UUID()
         draftHostName = ""
         draftHostAddress = ""
         draftNetworkTier = nil
@@ -471,6 +731,7 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
         draftDownAfterFailures = LatencyThresholds.defaults.downAfterFailures
         draftIsEnabled = true
         draftNotificationPolicy = .inherit
+        draftDisplayColor = nil
         draftTestResultText = nil
     }
 
@@ -482,6 +743,7 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
 
     func useStarlinkDishPreset() {
         loadDraft(from: .defaultStarlinkDish)
+        draftHostID = UUID()
         editingHostID = nil
         isCreatingHost = true
         draftTestResultText = nil
@@ -546,36 +808,30 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
     }
 
     func refreshNotificationPermission() {
-        Task { [notificationDispatcher] in
+        Task { @MainActor [weak self, notificationDispatcher] in
             let state = await notificationDispatcher.permissionState()
-            await MainActor.run {
-                self.notificationPermissionState = state
-            }
+            self?.notificationPermissionState = state
         }
     }
 
     func requestNotificationPermission() {
         notificationPermissionState = .requesting
         notificationRequestMessage = nil
-        Task { [notificationDispatcher] in
+        Task { @MainActor [weak self, notificationDispatcher] in
             let granted = await notificationDispatcher.requestAuthorization()
             let state = await notificationDispatcher.permissionState()
-            await MainActor.run {
-                self.notificationPermissionState = state
-                self.notificationRequestMessage = granted ? "Permission allowed" : "Permission was not granted"
-            }
+            self?.notificationPermissionState = state
+            self?.notificationRequestMessage = granted ? "Permission allowed" : "Permission was not granted"
         }
     }
 
     func sendTestNotification() {
         notificationRequestMessage = "Scheduling test..."
-        Task { [notificationDispatcher] in
+        Task { @MainActor [weak self, notificationDispatcher] in
             let sent = await notificationDispatcher.sendTestNotification()
             let state = await notificationDispatcher.permissionState()
-            await MainActor.run {
-                self.notificationPermissionState = state
-                self.notificationRequestMessage = sent ? "Test notification scheduled" : "Could not schedule test notification"
-            }
+            self?.notificationPermissionState = state
+            self?.notificationRequestMessage = sent ? "Test notification scheduled" : "Could not schedule test notification"
         }
     }
 
@@ -761,13 +1017,61 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
         max(300, min(4_000, Int(range.duration.rounded(.up)) + 300))
     }
 
+    private func scheduleDisplayPresentationRecompute() {
+        displayPresentationRecomputeScheduler.schedule { [weak self] in
+            self?.recomputeDisplayPresentation()
+        }
+    }
+
+    private func updateConfiguredHostsIfNeeded(_ snapshot: RuntimeSnapshot) {
+        if configuredHosts != snapshot.hosts {
+            configuredHosts = snapshot.hosts
+        }
+        if configuredPrimaryHostID != snapshot.primaryHostID {
+            configuredPrimaryHostID = snapshot.primaryHostID
+        }
+    }
+
     private func recomputeDisplayPresentation(visibleHistorySamples: [PingResult]? = nil) {
-        displayPresentation = PingScopeDisplayPresentation(
+        if let visibleHistorySamples {
+            presentationVisibleHistorySamples = visibleHistorySamples
+        }
+        let now = Date()
+        let includesAllHosts = overlayShowsAllHosts || popoverShowsAllHosts
+        let preparation = PingScopeDisplayPreparation(
             snapshot: snapshot,
             selectedRange: selectedRange,
-            visibleHistorySamples: visibleHistorySamples ?? displayPresentation.visibleHistorySamples,
-            includesAllHosts: overlayShowsAllHosts || popoverShowsAllHosts,
-            presenter: presenter
+            visibleHistorySamples: presentationVisibleHistorySamples,
+            includesAllHosts: includesAllHosts,
+            presenter: presenter,
+            now: now
+        )
+        let allHostVisibleSamples: [UUID: [PingResult]]? = if includesAllHosts {
+            Dictionary(uniqueKeysWithValues: preparation.allHostGraphSeries.map { series in
+                (series.host.id, series.samples)
+            })
+        } else {
+            nil
+        }
+        let inputKey = DisplayPresentationInputKey(
+            visibleSamples: preparation.visibleSamples,
+            selectedRange: selectedRange,
+            includesAllHosts: includesAllHosts,
+            primaryHost: snapshot.primaryHost,
+            hosts: snapshot.hosts,
+            healthByHost: snapshot.healthByHost,
+            allHostVisibleSamples: allHostVisibleSamples
+        )
+        guard inputKey != lastDisplayPresentationInputKey else { return }
+        lastDisplayPresentationInputKey = inputKey
+
+        liveDisplay.updateDisplayPresentation(
+            PingScopeDisplayPresentation(
+                snapshot: snapshot,
+                preparation: preparation,
+                includesAllHosts: includesAllHosts,
+                presenter: presenter
+            )
         )
         onPresentationChanged?()
     }
@@ -779,14 +1083,16 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
         } else {
             hosts.append(host)
         }
-        snapshot = RuntimeSnapshot(
-            hosts: hosts,
-            primaryHostID: snapshot.primaryHostID ?? host.id,
-            healthByHost: snapshot.healthByHost,
-            samplesByHost: snapshot.samplesByHost
+        liveDisplay.updateSnapshot(
+            RuntimeSnapshot(
+                hosts: hosts,
+                primaryHostID: snapshot.primaryHostID ?? host.id,
+                healthByHost: snapshot.healthByHost,
+                samplesByHost: snapshot.samplesByHost
+            )
         )
+        updateConfiguredHostsIfNeeded(snapshot)
         recomputeDisplayPresentation()
-        persistHostState(snapshot)
         onMenuStateChanged?(menuBarState)
     }
 
@@ -808,13 +1114,112 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
     }
 
     private func persistHostState(_ snapshot: RuntimeSnapshot) {
-        hostConfigPersistence.persist(snapshot, logger: DebugLog.write)
+        guard let persistedState = hostConfigPersistence.persist(snapshot, logger: DebugLog.write) else { return }
+        guard let cloudSyncService else { return }
+        let persistedHosts = persistedState.hosts
+        let hostsByID = Dictionary(uniqueKeysWithValues: persistedHosts.map { ($0.id, $0) })
+        guard hostsByID != lastCloudSyncHostsByID else { return }
+        let currentIDs = Set(persistedHosts.map(\.id))
+        let deletedIDs = lastCloudSyncHostIDs.subtracting(currentIDs)
+        lastCloudSyncHostIDs = currentIDs
+        lastCloudSyncHostsByID = hostsByID
+        cloudHostUploadObserver(persistedHosts)
+        Task {
+            await cloudSyncService.uploadHosts(persistedHosts)
+            for id in deletedIDs { await cloudSyncService.deleteHost(id: id) }
+        }
     }
 
-    private func performUserHostMutation(_ mutation: @escaping @Sendable (PingRuntime) async -> Void) {
-        hostConfigPersistence.allowUserManagedPersistence()
-        Task { [runtime] in
+    private func configureCloudSync(isAutomaticLaunch: Bool) {
+        guard let cloudSyncActivation else {
+            cloudSyncStatusText = "Unavailable"
+            return
+        }
+        let enabled = isCloudSyncEnabled
+        let hosts = configuredHosts
+        cloudSyncConfigurationGeneration &+= 1
+        let generation = cloudSyncConfigurationGeneration
+        cloudSyncStatusText = enabled ? "Checking iCloud account…" : "Off"
+        Task { @MainActor [weak self] in
+            if let cloudSyncService = self?.cloudSyncService {
+                await cloudSyncService.setAcceptedHostStateHandler { [weak self] state in
+                    await self?.reconcileAcceptedCloudHostState(state)
+                }
+            }
+            let state = if isAutomaticLaunch {
+                await cloudSyncActivation.activatePersisted(hosts: hosts)
+            } else {
+                await cloudSyncActivation.setEnabledByUser(enabled, hosts: hosts)
+            }
+            guard let self, generation == cloudSyncConfigurationGeneration else { return }
+            isApplyingCloudSyncActivationState = true
+            isCloudSyncEnabled = state.isEnabled
+            isApplyingCloudSyncActivationState = false
+            cloudSyncStatusText = state.statusText
+        }
+    }
+
+    func reconcileAcceptedCloudHostState(_ state: SharedHostStoreState) async {
+        await hostMutationCommits.perform { [weak self] in
+            guard let self else { return }
+            let resolvedState = hostConfigPersistence.resolveAcceptedHostState(state)
+            await acceptedHostReconciliationGate()
+
+            let acceptedHosts = HostConfig.sanitizedHosts(resolvedState.hosts)
+            let acceptedSnapshot = await runtime.reconcileAcceptedHostState(
+                SharedHostStoreState(
+                    hosts: acceptedHosts,
+                    primaryHostID: resolvedState.primaryHostID,
+                    selectedHostID: resolvedState.selectedHostID
+                )
+            )
+
+            hostConfigPersistence.commitAcceptedHostState(resolvedState)
+            lastCloudSyncHostIDs = Set(acceptedHosts.map(\.id))
+            lastCloudSyncHostsByID = Dictionary(uniqueKeysWithValues: acceptedHosts.map { ($0.id, $0) })
+            processRuntimeSnapshot(acceptedSnapshot)
+        }
+    }
+
+    func waitForHostMutationCommits() async {
+        await hostMutationCommits.waitForIdle()
+    }
+
+    func performAutomaticHostMutation(
+        _ mutation: @escaping @MainActor @Sendable (PingRuntime) async -> Void
+    ) {
+        performHostMutation(allowsUserManagedPersistence: false, mutation)
+    }
+
+    private func performUserHostMutation(
+        _ mutation: @escaping @MainActor @Sendable (PingRuntime) async -> Void
+    ) {
+        performHostMutation(allowsUserManagedPersistence: true, mutation)
+    }
+
+    private func performHostMutation(
+        allowsUserManagedPersistence: Bool,
+        _ mutation: @escaping @MainActor @Sendable (PingRuntime) async -> Void
+    ) {
+        hostMutationCommits.enqueue { [weak self] in
+            guard let self else { return }
+            if allowsUserManagedPersistence {
+                hostConfigPersistence.allowUserManagedPersistence()
+            }
             await mutation(runtime)
+            let committedSnapshot = await runtime.currentSnapshot()
+            processRuntimeSnapshot(committedSnapshot)
+        }
+    }
+
+    private static func cloudSyncStatusText(for status: PingScopeCloudSyncStatus) -> String {
+        switch status {
+        case .off: "Off"
+        case .checkingAccount: "Checking iCloud account…"
+        case .idle: "Up to date"
+        case .syncing: "Syncing…"
+        case .accountUnavailable: "Private iCloud account unavailable"
+        case let .failed(message): "Sync error: \(message)"
         }
     }
 
@@ -846,9 +1251,25 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
     private func startNetworkMonitoring() {
         networkTask?.cancel()
         networkTask = Task { [weak self] in
+            guard let gatewayDetector = self?.gatewayDetector,
+                  let gatewayEndpointResolver = self?.gatewayEndpointResolver,
+                  let starlinkDetector = self?.starlinkDetector else { return }
             while !Task.isCancelled {
-                await self?.performNetworkEndpointDetection(removeMissingStarlink: true)
-                try? await Task.sleep(for: .seconds(60))
+                let result = await Self.detectNetworkEndpointResult(
+                    gatewayDetector: gatewayDetector,
+                    gatewayEndpointResolver: gatewayEndpointResolver,
+                    starlinkDetector: starlinkDetector,
+                    removeMissingStarlink: true
+                )
+                guard !Task.isCancelled else { return }
+                do {
+                    guard let self else { return }
+                    self.handleGatewayObservation(result.gatewayOutcome, resolvedHost: result.resolvedGateway)
+                    self.reconcileStarlinkDetection(result.starlinkOutcome, removeMissing: result.removeMissingStarlink)
+                }
+                // NWPath changes and wake events trigger immediate refreshes. This
+                // watchdog only covers missed system notifications.
+                try? await Task.sleep(for: .seconds(30 * 60))
             }
         }
     }
@@ -857,7 +1278,17 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
         pathMonitor.pathUpdateHandler = { [weak self] path in
             let status = Self.networkStatus(from: path)
             let signature = Self.networkPathSignature(from: path)
+            let interface = Self.networkInterface(from: path)
+            let capture = NetworkCaptureResolver(
+                activeInterfaceNames: Self.activeNetworkInterfaceNames,
+                wifiName: { nil },
+                cellularRadio: { nil }
+            ).snapshot(interface: interface)
+            self?.networkCaptureStore.update(capture)
             DispatchQueue.main.async { [weak self] in
+                if interface == "wifi", let name = Self.currentWiFiName() {
+                    self?.networkCaptureStore.updateName(name, ifInterfaceMatches: "wifi")
+                }
                 self?.handleNetworkPathUpdate(status: status, signature: signature)
             }
         }
@@ -927,4 +1358,28 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
         }
     }
 
+}
+
+@MainActor
+private final class HostMutationCommitQueue {
+    private var tail: Task<Void, Never>?
+
+    @discardableResult
+    func enqueue(_ operation: @escaping @MainActor () async -> Void) -> Task<Void, Never> {
+        let previous = tail
+        let next = Task { @MainActor in
+            await previous?.value
+            await operation()
+        }
+        tail = next
+        return next
+    }
+
+    func perform(_ operation: @escaping @MainActor () async -> Void) async {
+        await enqueue(operation).value
+    }
+
+    func waitForIdle() async {
+        await tail?.value
+    }
 }

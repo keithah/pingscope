@@ -5,12 +5,35 @@ extension PingScopeModel {
     func refreshNetworkEndpoints(removeMissingStarlink: Bool, retryDelays: [Duration] = []) {
         endpointRefreshTask?.cancel()
         endpointRefreshTask = Task { [weak self] in
-            await self?.performNetworkEndpointDetection(removeMissingStarlink: removeMissingStarlink)
+            guard let gatewayDetector = self?.gatewayDetector,
+                  let gatewayEndpointResolver = self?.gatewayEndpointResolver,
+                  let starlinkDetector = self?.starlinkDetector else { return }
+            let detect = {
+                await Self.detectNetworkEndpointResult(
+                    gatewayDetector: gatewayDetector,
+                    gatewayEndpointResolver: gatewayEndpointResolver,
+                    starlinkDetector: starlinkDetector,
+                    removeMissingStarlink: removeMissingStarlink
+                )
+            }
+            var result = await detect()
+            guard !Task.isCancelled else { return }
+            do {
+                guard let self else { return }
+                self.handleGatewayObservation(result.gatewayOutcome, resolvedHost: result.resolvedGateway)
+                self.reconcileStarlinkDetection(result.starlinkOutcome, removeMissing: result.removeMissingStarlink)
+            }
             for delay in retryDelays {
                 guard !Task.isCancelled else { return }
                 try? await Task.sleep(for: delay.jittered())
                 guard !Task.isCancelled else { return }
-                await self?.performNetworkEndpointDetection(removeMissingStarlink: removeMissingStarlink)
+                result = await detect()
+                guard !Task.isCancelled else { return }
+                do {
+                    guard let self else { return }
+                    self.handleGatewayObservation(result.gatewayOutcome, resolvedHost: result.resolvedGateway)
+                    self.reconcileStarlinkDetection(result.starlinkOutcome, removeMissing: result.removeMissingStarlink)
+                }
             }
         }
     }
@@ -94,7 +117,7 @@ extension PingScopeModel {
         if let existing = snapshot.hosts.first(where: { $0.id == starlinkHost.id }), existing == starlinkHost {
             return
         }
-        Task {
+        performAutomaticHostMutation { runtime in
             await runtime.upsertHost(starlinkHost)
             if let preferredPrimaryID {
                 await runtime.selectPrimaryHost(preferredPrimaryID)
@@ -115,10 +138,10 @@ extension PingScopeModel {
     }
 
     func removeStaleStarlinkHosts() {
-        Task {
+        performAutomaticHostMutation { [weak self] runtime in
             let removedIDs = await runtime.removeStarlinkHosts()
-            if let editingHostID, removedIDs.contains(editingHostID) {
-                clearDraftHost()
+            if let editingHostID = self?.editingHostID, removedIDs.contains(editingHostID) {
+                self?.clearDraftHost()
             }
             DebugLog.write("stale starlink removal completed count=\(removedIDs.count)")
         }
@@ -149,7 +172,7 @@ extension PingScopeModel {
             loadDraft(from: updated)
         }
         let isPrimary = primaryHost?.id == updated.id
-        Task {
+        performAutomaticHostMutation { runtime in
             await runtime.upsertHost(updated)
             if isPrimary {
                 await runtime.selectPrimaryHost(updated.id)

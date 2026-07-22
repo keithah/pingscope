@@ -1,4 +1,5 @@
 import AppKit
+import PingScopeCore
 import SwiftUI
 
 final class OverlayWindow: NSWindow {
@@ -22,6 +23,14 @@ final class OverlayWindow: NSWindow {
         ignoresMouseEvents = false
         hasShadow = true
         minSize = NSSize(width: 150, height: 54)
+        enableFreeformResize()
+    }
+
+    func enableFreeformResize() {
+        styleMask.insert(.resizable)
+        aspectRatio = .zero
+        contentAspectRatio = .zero
+        resizeIncrements = NSSize(width: 1, height: 1)
     }
 
     override var canBecomeKey: Bool { false }

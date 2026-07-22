@@ -8,6 +8,7 @@ public struct WidgetSnapshot: Codable, Equatable, Sendable {
     public var recentSamples: [WidgetSample]
     public var networkStatus: NetworkConnectivityStatus
     public var generatedAt: Date
+    public var monitoring: WidgetMonitoringContext?
 
     public init(
         version: Int = 1,
@@ -16,7 +17,8 @@ public struct WidgetSnapshot: Codable, Equatable, Sendable {
         health: [WidgetHostHealth],
         recentSamples: [WidgetSample],
         networkStatus: NetworkConnectivityStatus,
-        generatedAt: Date = Date()
+        generatedAt: Date = Date(),
+        monitoring: WidgetMonitoringContext? = nil
     ) {
         self.version = version
         self.primaryHostID = primaryHostID
@@ -25,6 +27,7 @@ public struct WidgetSnapshot: Codable, Equatable, Sendable {
         self.recentSamples = recentSamples
         self.networkStatus = networkStatus
         self.generatedAt = generatedAt
+        self.monitoring = monitoring
     }
 
     public static func make(
@@ -33,18 +36,25 @@ public struct WidgetSnapshot: Codable, Equatable, Sendable {
         sampleLimitPerHost: Int = 60,
         generatedAt: Date = Date()
     ) -> WidgetSnapshot {
-        let hosts = snapshot.hosts.map {
+        let enabledHosts = snapshot.hosts.filter(\.isEnabled)
+        let primaryHostID = snapshot.primaryHostID.flatMap { id in
+            enabledHosts.contains { $0.id == id } ? id : nil
+        } ?? enabledHosts.first?.id
+        let hosts = enabledHosts.map {
             WidgetHost(
                 id: $0.id,
                 displayName: $0.displayName,
                 address: $0.address,
                 method: $0.method,
                 port: $0.port,
-                isPrimary: $0.id == snapshot.primaryHostID
+                isPrimary: $0.id == primaryHostID,
+                displayColor: WidgetHostDisplayColor(
+                    resolvedColor: ResolvedHostDisplayColor(hostID: $0.id, displayColor: $0.displayColor)
+                )
             )
         }
 
-        let health = snapshot.hosts.map { host in
+        let health = enabledHosts.map { host in
             let hostHealth = snapshot.healthByHost[host.id] ?? HostHealth(hostID: host.id, thresholds: host.thresholds)
             return WidgetHostHealth(
                 hostID: host.id,
@@ -57,8 +67,8 @@ public struct WidgetSnapshot: Codable, Equatable, Sendable {
         }
 
         let limit = max(1, sampleLimitPerHost)
-        let samples = snapshot.samplesByHost.values.flatMap { series in
-            series.recentSamples(limit: limit).map(WidgetSample.init(result:))
+        let samples = enabledHosts.flatMap { host in
+            snapshot.samplesByHost[host.id]?.recentSamples(limit: limit).map(WidgetSample.init(result:)) ?? []
         }
         .sorted { lhs, rhs in
             if lhs.timestamp == rhs.timestamp {
@@ -68,7 +78,7 @@ public struct WidgetSnapshot: Codable, Equatable, Sendable {
         }
 
         return WidgetSnapshot(
-            primaryHostID: snapshot.primaryHostID,
+            primaryHostID: primaryHostID,
             hosts: hosts,
             health: health,
             recentSamples: samples,
@@ -86,7 +96,7 @@ public struct WidgetSnapshot: Codable, Equatable, Sendable {
     )
 
     public var isStale: Bool {
-        Date().timeIntervalSince(generatedAt) > 15 * 60
+        Date().timeIntervalSince(generatedAt) > 60 * 60
     }
 
     public func hasSameContent(as other: WidgetSnapshot?) -> Bool {
@@ -100,8 +110,25 @@ public struct WidgetSnapshot: Codable, Equatable, Sendable {
         return version == other.version
             && primaryHostID == other.primaryHostID
             && hosts == other.hosts
-            && health == other.health
+            && health.count == other.health.count
+            && zip(health, other.health).allSatisfy { $0.hasSameWidgetState(as: $1) }
             && networkStatus == other.networkStatus
+            && monitoring == other.monitoring
+    }
+}
+
+public enum WidgetMonitoringScope: String, Codable, Equatable, Sendable {
+    case focused
+    case allHosts
+}
+
+public struct WidgetMonitoringContext: Codable, Equatable, Sendable {
+    public var isActive: Bool
+    public var scope: WidgetMonitoringScope
+
+    public init(isActive: Bool, scope: WidgetMonitoringScope) {
+        self.isActive = isActive
+        self.scope = scope
     }
 }
 
@@ -112,6 +139,7 @@ public struct WidgetHost: Codable, Equatable, Sendable {
     public var method: PingMethod
     public var port: UInt16?
     public var isPrimary: Bool
+    public var displayColor: WidgetHostDisplayColor?
 
     public init(
         id: UUID,
@@ -119,7 +147,8 @@ public struct WidgetHost: Codable, Equatable, Sendable {
         address: String,
         method: PingMethod,
         port: UInt16?,
-        isPrimary: Bool
+        isPrimary: Bool,
+        displayColor: WidgetHostDisplayColor? = nil
     ) {
         self.id = id
         self.displayName = displayName
@@ -127,6 +156,22 @@ public struct WidgetHost: Codable, Equatable, Sendable {
         self.method = method
         self.port = port
         self.isPrimary = isPrimary
+        self.displayColor = displayColor
+    }
+}
+
+public struct WidgetHostDisplayColor: Codable, Equatable, Sendable {
+    public var light: HostDisplayColor
+    public var dark: HostDisplayColor
+
+    public init(light: HostDisplayColor, dark: HostDisplayColor) {
+        self.light = light
+        self.dark = dark
+    }
+
+    public init(resolvedColor: ResolvedHostDisplayColor) {
+        light = resolvedColor.components(for: .light)
+        dark = resolvedColor.components(for: .dark)
     }
 }
 
@@ -152,6 +197,16 @@ public struct WidgetHostHealth: Codable, Equatable, Sendable {
         self.consecutiveFailureCount = consecutiveFailureCount
         self.failureReason = failureReason
         self.latestResultAt = latestResultAt
+    }
+
+    /// Equality for publish throttling: ignores the per-ping volatile fields
+    /// (`latencyMilliseconds`, `latestResultAt`, `consecutiveFailureCount`).
+    /// Including them would mark the widget state changed on every ping and
+    /// defeat the heartbeat/timeline-reload throttles entirely.
+    public func hasSameWidgetState(as other: WidgetHostHealth) -> Bool {
+        hostID == other.hostID
+            && status == other.status
+            && failureReason == other.failureReason
     }
 }
 

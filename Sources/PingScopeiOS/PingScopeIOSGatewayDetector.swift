@@ -19,13 +19,12 @@ public struct PingScopeIOSGatewayDetector: Sendable {
             return nil
         }
 
-        let isPrivateOrLinkLocal =
+        let isPrivate =
             octets[0] == 10 ||
             (octets[0] == 172 && (16...31).contains(octets[1])) ||
-            (octets[0] == 192 && octets[1] == 168) ||
-            (octets[0] == 169 && octets[1] == 254)
+            (octets[0] == 192 && octets[1] == 168)
 
-        guard isPrivateOrLinkLocal, octets[3] != 1 else { return nil }
+        guard isPrivate, octets[3] != 1 else { return nil }
         return "\(octets[0]).\(octets[1]).\(octets[2]).1"
     }
 

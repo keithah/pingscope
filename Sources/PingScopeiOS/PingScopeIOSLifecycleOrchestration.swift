@@ -1,0 +1,660 @@
+import Foundation
+import PingScopeCore
+
+public struct PingScopeIOSBackgroundExpirationPlan: Equatable, Sendable {
+    public let cancelRefreshLoop: Bool
+    public let stopMonitoring: Bool
+    public let publishPausedLiveActivity: Bool
+    public let endLiveActivity: Bool
+    public let continueLiveActivityUpdates: Bool
+
+    public static func make(keepAliveActive: Bool) -> Self {
+        if keepAliveActive {
+            return Self(
+                cancelRefreshLoop: false,
+                stopMonitoring: false,
+                publishPausedLiveActivity: false,
+                endLiveActivity: false,
+                continueLiveActivityUpdates: true
+            )
+        }
+        return Self(
+            cancelRefreshLoop: true,
+            stopMonitoring: true,
+            publishPausedLiveActivity: true,
+            endLiveActivity: false,
+            continueLiveActivityUpdates: false
+        )
+    }
+}
+
+public struct PingScopeIOSPausedLiveActivityState: Equatable, Sendable {
+    public static let staleInterval: TimeInterval = 5 * 60
+
+    public let contentState: PingScopeLiveActivityAttributes.ContentState
+    public let staleDate: Date
+
+    public static func make(
+        from state: PingScopeLiveActivityAttributes.ContentState,
+        at date: Date = Date()
+    ) -> Self {
+        let staleRows = state.hostRows.map { row in
+            var row = row
+            row.isStale = true
+            return row
+        }
+        return Self(
+            contentState: PingScopeLiveActivityAttributes.ContentState(
+                latencyMilliseconds: state.latencyMilliseconds,
+                status: state.status,
+                lastUpdatedAt: state.lastUpdatedAt,
+                remainingSeconds: state.remainingSeconds,
+                isStale: true,
+                failureMessage: "Monitoring paused — reopen PingScope to resume",
+                mode: state.mode,
+                hostRows: staleRows,
+                showsDynamicIslandDetails: state.showsDynamicIslandDetails
+            ),
+            staleDate: date.addingTimeInterval(staleInterval)
+        )
+    }
+}
+
+public enum PingScopeIOSLiveActivityStaleness {
+    public static func initialStaleDate(
+        scheduledEndAt: Date?,
+        now: Date = Date()
+    ) -> Date {
+        updateStaleDate(
+            override: nil,
+            scheduledEndAt: scheduledEndAt,
+            now: now
+        )
+    }
+
+    public static func updateStaleDate(
+        override: Date?,
+        scheduledEndAt: Date?,
+        now: Date = Date()
+    ) -> Date {
+        override
+            ?? scheduledEndAt
+            ?? now.addingTimeInterval(PingScopeIOSPausedLiveActivityState.staleInterval)
+    }
+}
+
+public enum PingScopeIOSForegroundLiveActivityDecision: Equatable, Sendable {
+    case none
+    case request
+    case resumeExisting
+    case end
+
+    public static func decide(
+        hasActivity: Bool,
+        wasPausedForBackground: Bool,
+        monitoringResumed: Bool
+    ) -> Self {
+        if hasActivity {
+            return wasPausedForBackground && monitoringResumed ? .resumeExisting : .end
+        }
+        return monitoringResumed ? .request : .none
+    }
+}
+
+@MainActor
+public enum PingScopeIOSLiveActivityRuntimeOrchestrator {
+    public enum RequestedOperation: Equatable, Sendable {
+        case requestOrUpdate
+        case update
+    }
+
+    /// Testable boundary for the ActivityKit request/update decision used by
+    /// the app model.
+    @discardableResult
+    public static func perform<ActivityHandle>(
+        _ operation: RequestedOperation,
+        systemAuthorizationEnabled: Bool,
+        preferences: PingScopeIOSLiveActivityPreferences = .init(),
+        hasOwnedActivity: Bool,
+        request: @escaping @MainActor () async throws -> ActivityHandle,
+        update: @escaping @MainActor () async -> Void,
+        end: @escaping @MainActor () async -> Void
+    ) async rethrows -> ActivityHandle? {
+        guard preferences.lockScreenEnabled else {
+            if hasOwnedActivity {
+                await end()
+            }
+            return nil
+        }
+        guard systemAuthorizationEnabled else { return nil }
+        switch operation {
+        case .requestOrUpdate:
+            if !hasOwnedActivity {
+                return try await request()
+            }
+            await update()
+            return nil
+        case .update:
+            guard hasOwnedActivity else { return nil }
+            await update()
+            return nil
+        }
+    }
+
+    @discardableResult
+    public static func finishSession(
+        reason: MonitorSessionEndReason,
+        endActivity: @escaping @MainActor () async -> Void
+    ) async -> Bool {
+        // No current scope-switch caller invokes finishSession with
+        // .scopeSuspended; keep this defensive guard to prevent future wiring
+        // from tearing down an activity during an ordinary scope change.
+        guard reason != .backgroundRuntimeExpired, reason != .scopeSuspended else { return false }
+        await endActivity()
+        return true
+    }
+
+    public static func expireForBackgroundRuntime(
+        keepAliveActive: Bool,
+        at date: Date,
+        publishContinuous: @escaping @MainActor (_ staleDate: Date) async -> Void,
+        publishPaused: @escaping @MainActor () async -> Void,
+        stopMonitoring: @escaping @MainActor () async -> Void,
+        persistSnapshotAndHistory: @escaping @MainActor () async -> Void
+    ) async {
+        if keepAliveActive {
+            await publishContinuous(
+                date.addingTimeInterval(PingScopeIOSPausedLiveActivityState.staleInterval)
+            )
+            return
+        }
+
+        // UIKit grants only a small expiration budget. Preserve the headline UI
+        // before any SQLite/history work can consume that budget.
+        await publishPaused()
+        await stopMonitoring()
+        await persistSnapshotAndHistory()
+    }
+
+    @discardableResult
+    public static func resumeOnForeground(
+        releaseIfDefunct: @escaping @MainActor () async -> Void,
+        currentActivityID: @escaping @MainActor () -> String?,
+        updateExisting: @escaping @MainActor () async -> Void,
+        requestActivity: @escaping @MainActor () async -> Void
+    ) async -> String? {
+        await releaseIfDefunct()
+        if currentActivityID() != nil {
+            await updateExisting()
+        }
+        if currentActivityID() == nil {
+            await requestActivity()
+        }
+        return currentActivityID()
+    }
+}
+
+/// Main-actor ownership boundary for ActivityKit handles. Preference and
+/// ownership generations prevent writes that suspend from installing or
+/// reviving a handle after settings or session state has invalidated it.
+@MainActor
+public final class PingScopeIOSLiveActivityOwnershipCoordinator<ActivityHandle> {
+    public struct OperationGeneration: Equatable, Sendable {
+        fileprivate let preference: UInt64
+        fileprivate let ownership: UInt64
+    }
+
+    public private(set) var ownedActivity: ActivityHandle?
+    public private(set) var masterEnabled: Bool
+    private var preferenceGeneration: UInt64 = 0
+    private var ownershipGeneration: UInt64 = 0
+
+    public init(masterEnabled: Bool) {
+        self.masterEnabled = masterEnabled
+    }
+
+    @discardableResult
+    public func setMasterEnabled(
+        _ isEnabled: Bool,
+        end: @escaping @MainActor (ActivityHandle) async -> Void
+    ) -> Task<Void, Never>? {
+        guard masterEnabled != isEnabled else { return nil }
+        preferenceGeneration &+= 1
+        masterEnabled = isEnabled
+        guard !isEnabled, let activity = ownedActivity else { return nil }
+        ownedActivity = nil
+        ownershipGeneration &+= 1
+        return Task { @MainActor in
+            await end(activity)
+        }
+    }
+
+    public func isCurrent(_ generation: OperationGeneration) -> Bool {
+        masterEnabled
+            && preferenceGeneration == generation.preference
+            && ownershipGeneration == generation.ownership
+    }
+
+    @discardableResult
+    public func requestIfAllowed(
+        systemAuthorizationEnabled: Bool,
+        prepare: @escaping @MainActor (OperationGeneration) async -> Bool = { _ in true },
+        request: @escaping @MainActor () async throws -> ActivityHandle,
+        end: @escaping @MainActor (ActivityHandle) async -> Void
+    ) async rethrows -> ActivityHandle? {
+        guard masterEnabled, systemAuthorizationEnabled, ownedActivity == nil else { return nil }
+        let generation = currentGeneration
+        guard isCurrent(generation), await prepare(generation), isCurrent(generation) else {
+            return nil
+        }
+        guard ownedActivity == nil else { return nil }
+        let activity = try await request()
+        guard isCurrent(generation), ownedActivity == nil else {
+            await end(activity)
+            return nil
+        }
+        ownedActivity = activity
+        return activity
+    }
+
+    @discardableResult
+    public func updateOwnedIfAllowed(
+        update: @escaping @MainActor (ActivityHandle) async -> Void
+    ) async -> Bool {
+        guard masterEnabled, let activity = ownedActivity else { return false }
+        let generation = currentGeneration
+        guard isCurrent(generation) else { return false }
+        await update(activity)
+        return isCurrent(generation) && ownedActivity != nil
+    }
+
+    @discardableResult
+    public func pauseOwnedIfAllowed(
+        update: @escaping @MainActor (ActivityHandle) async -> Void
+    ) async -> Bool {
+        await updateOwnedIfAllowed(update: update)
+    }
+
+    public func endOwned(
+        end: @escaping @MainActor (ActivityHandle) async -> Void
+    ) async {
+        ownershipGeneration &+= 1
+        guard let activity = ownedActivity else { return }
+        ownedActivity = nil
+        await end(activity)
+    }
+
+    @discardableResult
+    public func discardOwned() -> ActivityHandle? {
+        ownershipGeneration &+= 1
+        defer { ownedActivity = nil }
+        return ownedActivity
+    }
+
+    private var currentGeneration: OperationGeneration {
+        OperationGeneration(
+            preference: preferenceGeneration,
+            ownership: ownershipGeneration
+        )
+    }
+}
+
+public struct PingScopeIOSLiveActivityPreferences: Equatable, Sendable {
+    public static let lockScreenEnabledKey = "PingScope.iOS.lockScreenLiveActivityEnabled"
+    public static let dynamicIslandDetailsEnabledKey = "PingScope.iOS.dynamicIslandDetailsEnabled"
+
+    public var lockScreenEnabled: Bool
+    public var dynamicIslandDetailsEnabled: Bool
+
+    public init(
+        lockScreenEnabled: Bool = false,
+        dynamicIslandDetailsEnabled: Bool = false
+    ) {
+        self.lockScreenEnabled = lockScreenEnabled
+        self.dynamicIslandDetailsEnabled = dynamicIslandDetailsEnabled
+    }
+
+    public init(defaults: UserDefaults) {
+        lockScreenEnabled = defaults.object(forKey: Self.lockScreenEnabledKey) as? Bool ?? false
+        dynamicIslandDetailsEnabled = defaults.object(forKey: Self.dynamicIslandDetailsEnabledKey) as? Bool ?? false
+    }
+
+    public func persist(to defaults: UserDefaults) {
+        defaults.set(lockScreenEnabled, forKey: Self.lockScreenEnabledKey)
+        defaults.set(dynamicIslandDetailsEnabled, forKey: Self.dynamicIslandDetailsEnabledKey)
+    }
+}
+
+public struct PingScopeIOSLiveActivityUpdatePolicy: Sendable {
+    private let minimumUpdateInterval: TimeInterval
+    private var lastPublishedState: PingScopeLiveActivityAttributes.ContentState?
+    private var lastPublishedAt: Date?
+
+    public init(minimumUpdateInterval: TimeInterval = 10) {
+        self.minimumUpdateInterval = max(0, minimumUpdateInterval)
+    }
+
+    public mutating func shouldPublish(
+        _ state: PingScopeLiveActivityAttributes.ContentState,
+        at date: Date = Date()
+    ) -> Bool {
+        guard state != lastPublishedState else { return false }
+        if let previous = lastPublishedState,
+           let lastPublishedAt,
+           !hasPriorityChange(from: previous, to: state),
+           date.timeIntervalSince(lastPublishedAt) < minimumUpdateInterval {
+            return false
+        }
+        lastPublishedState = state
+        lastPublishedAt = date
+        return true
+    }
+
+    public mutating func reset() {
+        lastPublishedState = nil
+        lastPublishedAt = nil
+    }
+
+    private func hasPriorityChange(
+        from previous: PingScopeLiveActivityAttributes.ContentState,
+        to next: PingScopeLiveActivityAttributes.ContentState
+    ) -> Bool {
+        guard previous.status == next.status,
+              previous.isStale == next.isStale,
+              previous.mode == next.mode,
+              previous.showsDynamicIslandDetails == next.showsDynamicIslandDetails else {
+            return true
+        }
+        let previousRows = previous.hostRows
+        let nextRows = next.hostRows
+        guard previousRows.count == nextRows.count else { return true }
+        return zip(previousRows, nextRows).contains { previousRow, nextRow in
+            previousRow.hostID != nextRow.hostID
+                || previousRow.status != nextRow.status
+                || previousRow.isStale != nextRow.isStale
+                || previousRow.identityColor != nextRow.identityColor
+        }
+    }
+}
+
+@MainActor
+public final class PingScopeIOSLifecycleOperationQueue {
+    private var tail: Task<Void, Never>?
+
+    public init() {}
+
+    @discardableResult
+    public func enqueue(_ operation: @escaping @MainActor () async -> Void) -> Task<Void, Never> {
+        let previous = tail
+        let next = Task { @MainActor in
+            await previous?.value
+            await operation()
+        }
+        tail = next
+        return next
+    }
+
+    public func perform(_ operation: @escaping @MainActor () async -> Void) async {
+        await enqueue(operation).value
+    }
+
+    public func waitForIdle() async {
+        await tail?.value
+    }
+}
+
+public struct PingScopeIOSActivityOwnershipLease: Equatable, Sendable {
+    fileprivate let generation: UInt64
+}
+
+public actor PingScopeIOSActivityOwnership {
+    private var generation: UInt64 = 0
+    private var currentLease: PingScopeIOSActivityOwnershipLease?
+
+    public init() {}
+
+    public func claim() -> PingScopeIOSActivityOwnershipLease {
+        generation &+= 1
+        let lease = PingScopeIOSActivityOwnershipLease(generation: generation)
+        currentLease = lease
+        return lease
+    }
+
+    public func clear(ifCurrent lease: PingScopeIOSActivityOwnershipLease) -> Bool {
+        guard currentLease == lease else { return false }
+        currentLease = nil
+        return true
+    }
+
+    public func isCurrent(_ lease: PingScopeIOSActivityOwnershipLease) -> Bool {
+        currentLease == lease
+    }
+}
+
+@MainActor
+public protocol PingScopeIOSLiveActivityDirectory {
+    associatedtype ActivityHandle
+
+    var currentActivities: [ActivityHandle] { get }
+    func end(_ activity: ActivityHandle) async
+}
+
+@MainActor
+public enum PingScopeIOSLiveActivityStartup {
+    public struct InitialContent: Equatable, Sendable {
+        public let state: PingScopeLiveActivityAttributes.ContentState
+        public let staleDate: Date
+    }
+
+    public static func initialContent(
+        state: PingScopeLiveActivityAttributes.ContentState,
+        scheduledEndAt: Date?,
+        now: Date = Date()
+    ) -> InitialContent {
+        InitialContent(
+            state: state,
+            staleDate: PingScopeIOSLiveActivityStaleness.initialStaleDate(
+                scheduledEndAt: scheduledEndAt,
+                now: now
+            )
+        )
+    }
+
+    public static func requestReplacingOrphans<Directory, RequestedActivity>(
+        in directory: Directory,
+        request: () async throws -> RequestedActivity
+    ) async rethrows -> RequestedActivity where Directory: PingScopeIOSLiveActivityDirectory {
+        for orphan in directory.currentActivities {
+            await directory.end(orphan)
+        }
+        return try await request()
+    }
+}
+
+public struct PingScopeIOSLifecycleSessionIdentity: Equatable, Sendable {
+    public let token: UUID
+    public let scope: PingScopeIOSHostScope
+    public let focusedHostID: UUID?
+    public let startedAt: Date
+
+    public init(
+        token: UUID = UUID(),
+        scope: PingScopeIOSHostScope,
+        focusedHostID: UUID?,
+        startedAt: Date
+    ) {
+        self.token = token
+        self.scope = scope
+        self.focusedHostID = focusedHostID
+        self.startedAt = startedAt
+    }
+
+    public func describes(
+        scope: PingScopeIOSHostScope,
+        focusedHostID: UUID?,
+        startedAt: Date
+    ) -> Bool {
+        self.scope == scope && self.focusedHostID == focusedHostID && self.startedAt == startedAt
+    }
+}
+
+public enum PingScopeIOSCoordinatorSessionState: Equatable, Sendable {
+    case idle
+    case active
+    case ended
+}
+
+public enum PingScopeIOSLifecycleScenePhase: Equatable, Sendable {
+    case active
+    case inactive
+    case background
+}
+
+public struct PingScopeIOSLifecycleSceneEpoch: Equatable, Sendable {
+    fileprivate let generation: UInt64
+    public let phase: PingScopeIOSLifecycleScenePhase
+}
+
+@MainActor
+public protocol PingScopeIOSPromptBackgroundProtectionClient: AnyObject {
+    func beginPromptBackgroundProtection()
+    func endPromptBackgroundProtection()
+}
+
+/// ActivityKit-free lifecycle state used by the app model and focused tests.
+/// External callbacks capture identities synchronously, then revalidate them
+/// after entering the FIFO before they are allowed to mutate session state.
+@MainActor
+public final class PingScopeIOSLifecycleHarness {
+    private let operations = PingScopeIOSLifecycleOperationQueue()
+    private let activityOwnership = PingScopeIOSActivityOwnership()
+    private let promptBackgroundProtectionClient: (any PingScopeIOSPromptBackgroundProtectionClient)?
+    private var promptBackgroundProtectionIsActive = false
+    private var sceneGeneration: UInt64 = 0
+    private var refreshedSessionIdentity: PingScopeIOSLifecycleSessionIdentity?
+    private var coordinatorState: PingScopeIOSCoordinatorSessionState = .idle
+
+    public private(set) var currentSessionIdentity: PingScopeIOSLifecycleSessionIdentity?
+    public private(set) var currentSceneEpoch = PingScopeIOSLifecycleSceneEpoch(
+        generation: 0,
+        phase: .inactive
+    )
+
+    public init(promptBackgroundProtectionClient: (any PingScopeIOSPromptBackgroundProtectionClient)? = nil) {
+        self.promptBackgroundProtectionClient = promptBackgroundProtectionClient
+    }
+
+    @discardableResult
+    public func enqueue(_ operation: @escaping @MainActor () async -> Void) -> Task<Void, Never> {
+        operations.enqueue(operation)
+    }
+
+    public func waitForIdle() async {
+        await operations.waitForIdle()
+    }
+
+    public func recordRefresh(
+        sessionIdentity: PingScopeIOSLifecycleSessionIdentity?,
+        coordinatorState: PingScopeIOSCoordinatorSessionState
+    ) {
+        currentSessionIdentity = sessionIdentity
+        refreshedSessionIdentity = sessionIdentity
+        self.coordinatorState = coordinatorState
+    }
+
+    @discardableResult
+    public func enqueueFiniteCompletion(
+        for sessionIdentity: PingScopeIOSLifecycleSessionIdentity,
+        operation: @escaping @MainActor () async -> Void
+    ) -> Task<Void, Never> {
+        enqueue { [weak self] in
+            guard let self,
+                  self.currentSessionIdentity == sessionIdentity,
+                  self.refreshedSessionIdentity == sessionIdentity,
+                  self.coordinatorState == .ended else {
+                return
+            }
+            await operation()
+        }
+    }
+
+    @discardableResult
+    public func transitionScene(to phase: PingScopeIOSLifecycleScenePhase) -> PingScopeIOSLifecycleSceneEpoch {
+        sceneGeneration &+= 1
+        let epoch = PingScopeIOSLifecycleSceneEpoch(generation: sceneGeneration, phase: phase)
+        currentSceneEpoch = epoch
+        if phase == .background {
+            beginPromptBackgroundProtection()
+        } else {
+            endPromptBackgroundProtection()
+        }
+        return epoch
+    }
+
+    public func isCurrentBackground(_ epoch: PingScopeIOSLifecycleSceneEpoch) -> Bool {
+        currentSceneEpoch == epoch && currentSceneEpoch.phase == .background
+    }
+
+    @discardableResult
+    public func enqueueBackgroundWork(
+        originatingAt epoch: PingScopeIOSLifecycleSceneEpoch,
+        operation: @escaping @MainActor () async -> Void
+    ) -> Task<Void, Never> {
+        enqueue { [weak self] in
+            guard let self, self.isCurrentBackground(epoch) else { return }
+            await operation()
+        }
+    }
+
+    @discardableResult
+    public func enqueueBackgroundExpiration(
+        originatingAt epoch: PingScopeIOSLifecycleSceneEpoch,
+        operation: @escaping @MainActor () async -> Void
+    ) -> Task<Void, Never> {
+        enqueueBackgroundWork(originatingAt: epoch, operation: operation)
+    }
+
+    public func finishPromptBackgroundProtection() {
+        endPromptBackgroundProtection()
+    }
+
+    public func claimActivity() async -> PingScopeIOSActivityOwnershipLease {
+        await activityOwnership.claim()
+    }
+
+    public func clearActivity(ifCurrent lease: PingScopeIOSActivityOwnershipLease) async -> Bool {
+        await activityOwnership.clear(ifCurrent: lease)
+    }
+
+    public func isActivityCurrent(_ lease: PingScopeIOSActivityOwnershipLease) async -> Bool {
+        await activityOwnership.isCurrent(lease)
+    }
+
+    private func beginPromptBackgroundProtection() {
+        guard !promptBackgroundProtectionIsActive else { return }
+        promptBackgroundProtectionIsActive = true
+        promptBackgroundProtectionClient?.beginPromptBackgroundProtection()
+    }
+
+    private func endPromptBackgroundProtection() {
+        guard promptBackgroundProtectionIsActive else { return }
+        promptBackgroundProtectionIsActive = false
+        promptBackgroundProtectionClient?.endPromptBackgroundProtection()
+    }
+}
+
+public enum PingScopeIOSLiveActivityAvailabilityDecision: Equatable, Sendable {
+    case none
+    case update
+    case request
+
+    public static func decide(
+        isSessionActive: Bool,
+        hasPlaceholderHost: Bool,
+        hasActivity: Bool
+    ) -> Self {
+        guard isSessionActive else { return .none }
+        if hasActivity { return .update }
+        return hasPlaceholderHost ? .request : .none
+    }
+}

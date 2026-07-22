@@ -5,6 +5,7 @@ public struct PingScopeIOSHostDraft: Equatable, Sendable {
     public var id: UUID
     public var displayName: String
     public var address: String
+    public var tier: NetworkTier?
     public var method: PingMethod
     public var portText: String
     public var intervalMilliseconds: Double
@@ -13,11 +14,13 @@ public struct PingScopeIOSHostDraft: Equatable, Sendable {
     public var downAfterFailures: Int
     public var isEnabled: Bool
     public var notifications: HostNotificationPolicy
+    public var displayColor: HostDisplayColor?
 
     public init(host: HostConfig) {
         self.id = host.id
         self.displayName = host.displayName
         self.address = host.address
+        self.tier = host.tier
         self.method = host.method
         self.portText = host.port.map(String.init) ?? ""
         self.intervalMilliseconds = host.interval.seconds * 1_000
@@ -26,6 +29,7 @@ public struct PingScopeIOSHostDraft: Equatable, Sendable {
         self.downAfterFailures = host.thresholds.downAfterFailures
         self.isEnabled = host.isEnabled
         self.notifications = host.notifications
+        self.displayColor = host.displayColor?.validatedComponents
     }
 
     public var finalizedHost: HostConfig {
@@ -33,6 +37,7 @@ public struct PingScopeIOSHostDraft: Equatable, Sendable {
             id: id,
             displayName: displayName.trimmingCharacters(in: .whitespacesAndNewlines),
             address: address.trimmingCharacters(in: .whitespacesAndNewlines),
+            tier: tier,
             method: method,
             port: UInt16(portText),
             interval: .milliseconds(intervalMilliseconds),
@@ -42,7 +47,8 @@ public struct PingScopeIOSHostDraft: Equatable, Sendable {
                 downAfterFailures: downAfterFailures
             ),
             isEnabled: isEnabled,
-            notifications: notifications
+            notifications: notifications,
+            displayColor: displayColor?.validatedComponents
         )
     }
 
@@ -52,6 +58,10 @@ public struct PingScopeIOSHostDraft: Equatable, Sendable {
 
     public var canSave: Bool {
         validationErrors.isEmpty
+    }
+
+    public var usesAutomaticDisplayColor: Bool {
+        displayColor == nil
     }
 
     public mutating func apply(method: PingMethod) {

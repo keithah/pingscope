@@ -1,8 +1,11 @@
 import PingScopeCore
+import PingScopeHistoryKit
 import SwiftUI
 
 struct StatusPopoverView: View {
     @ObservedObject var viewModel: StatusPopoverPresentationViewModel
+    @ObservedObject var liveDisplay: LiveDisplayModel
+    var onHistory: () -> Void = {}
     var onSettings: () -> Void = {}
     @EnvironmentObject private var softwareUpdateController: SoftwareUpdateController
     @State private var isShareOptionsPresented = false
@@ -14,7 +17,7 @@ struct StatusPopoverView: View {
             VStack(alignment: .leading, spacing: 13) {
                 header
 
-                switch presentation.displayMode.resolvedForHostScope(showsAllHosts: presentation.popoverShowsAllHosts) {
+                switch presentation.displayMode {
                 case .signal:
                     signalDisplay
                 case .ring:
@@ -25,7 +28,9 @@ struct StatusPopoverView: View {
                 }
 
                 if let telemetry = presentation.displayPresentation.latestStarlinkTelemetry {
-                    StarlinkTelemetrySummary(telemetry: telemetry)
+                    StarlinkTelemetrySummary(
+                        presentation: StarlinkTelemetryPresentation(telemetry: telemetry)
+                    )
                 }
                 if presentation.popoverShowsAllHosts {
                     allHostStatusSummary
@@ -77,6 +82,15 @@ struct StatusPopoverView: View {
             .buttonStyle(.plain)
             .help("Share graph")
             .accessibilityLabel("Share graph")
+            Button(action: onHistory) {
+                Image(systemName: "chart.xyaxis.line")
+                    .font(.system(size: 15, weight: .semibold))
+                    .frame(width: 30, height: 30)
+                    .background(Color(hex: "#2c2c2e"), in: Circle())
+            }
+            .buttonStyle(.plain)
+            .help("Open History")
+            .accessibilityLabel("Open History")
             settingsMenu
         }
     }
@@ -110,6 +124,7 @@ struct StatusPopoverView: View {
                 VStack(alignment: .leading, spacing: 1) {
                     Text(presentation.popoverShowsAllHosts ? "All Hosts" : (presentation.primaryHost?.displayName ?? "No Host"))
                         .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(presentation.popoverShowsAllHosts ? Color.primary : identityColor)
                         .lineLimit(1)
                     if !presentation.popoverShowsAllHosts, presentation.displayMode == .ring {
                         Text(hostSubtitle)
@@ -164,6 +179,7 @@ struct StatusPopoverView: View {
                 }
                 Divider()
             }
+            Button("Open History", action: onHistory)
             Button("Open Settings", action: onSettings)
         } label: {
             Image(systemName: "gearshape")
@@ -227,10 +243,11 @@ struct StatusPopoverView: View {
                     VStack(spacing: 2) {
                         Text(latencyNumberText)
                             .font(.system(size: 44, weight: .semibold, design: .monospaced))
+                            .foregroundStyle(ringColor)
                             .minimumScaleFactor(0.7)
                         Text(presentation.selectedRangeStatusLabel)
                             .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(ringColor)
+                            .foregroundStyle(healthColor)
                             .lineLimit(1)
                     }
                 }
@@ -289,7 +306,11 @@ struct StatusPopoverView: View {
                 showsLegend: false
             )
         } else {
-            LatencyGraph(graphData: presentation.displayPresentation.primaryGraphData, showsAxes: true)
+            LatencyGraph(
+                graphData: presentation.displayPresentation.primaryGraphData,
+                showsAxes: true,
+                color: presentation.displayPresentation.focusedGraphColor?.swiftUIColor ?? .accentColor
+            )
         }
     }
 
@@ -343,16 +364,16 @@ struct StatusPopoverView: View {
     private var latencyStatusBadge: some View {
         HStack(alignment: .firstTextBaseline, spacing: 5) {
             Circle()
-                .fill(ringColor)
+                .fill(healthColor)
                 .frame(width: 8, height: 8)
             Text(viewModel.presentation.selectedRangeState.text)
                 .font(.system(size: 14, weight: .semibold, design: .monospaced))
-                .foregroundStyle(ringColor)
+                .foregroundStyle(healthColor)
                 .lineLimit(1)
         }
         .padding(.horizontal, 11)
         .padding(.vertical, 7)
-        .background(ringColor.opacity(0.16), in: Capsule())
+        .background(healthColor.opacity(0.16), in: Capsule())
         .accessibilityLabel(viewModel.presentation.selectedRangeState.accessibilityLabel)
     }
 
@@ -417,6 +438,7 @@ struct StatusPopoverView: View {
         HStack(alignment: .firstTextBaseline, spacing: 3) {
             Text(latencyNumberText)
                 .font(.system(size: size, weight: .semibold, design: .monospaced))
+                .foregroundStyle(identityColor)
                 .minimumScaleFactor(0.75)
             if viewModel.presentation.selectedRangeState.text.hasSuffix("ms") {
                 Text("ms")
@@ -428,16 +450,15 @@ struct StatusPopoverView: View {
     }
 
     private var ringColor: Color {
-        Color(statusColor: viewModel.presentation.selectedRangeState.color)
+        viewModel.presentation.displayPresentation.focusedRingColor?.swiftUIColor ?? healthColor
     }
 
-    private var statusForSelectedRange: HealthStatus {
-        switch viewModel.presentation.selectedRangeState.color {
-        case .green: .healthy
-        case .yellow: .degraded
-        case .red: .down
-        case .gray: .noData
-        }
+    private var identityColor: Color {
+        viewModel.presentation.displayPresentation.focusedIdentityColor?.swiftUIColor ?? .accentColor
+    }
+
+    private var healthColor: Color {
+        Color(statusColor: viewModel.presentation.selectedRangeState.color)
     }
 
     private var endpointCaption: String {
@@ -536,206 +557,4 @@ struct StatusPopoverView: View {
         )
     }
 
-    private var degradationReason: NetworkPerspectiveDiagnosis? {
-        let diagnosis = viewModel.presentation.networkDiagnosis
-        switch diagnosis.scope {
-        case .localNetwork, .upstream, .remoteService, .partialDegradation:
-            return diagnosis
-        case .noData, .allReachable:
-            return nil
-        }
-    }
-}
-
-private struct AllHostStatusRow: View {
-    let summary: HostStatusSummary
-    let graphSeries: HostLatencyGraphSeries?
-
-    var body: some View {
-        HStack(spacing: 10) {
-            Circle()
-                .fill(Color(statusColor: summary.color))
-                .frame(width: 8, height: 8)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(summary.name)
-                    .font(.caption.weight(.semibold))
-                    .lineLimit(1)
-                Text(summary.endpoint)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            }
-            Spacer(minLength: 8)
-            LatencySparkline(graphData: sparklineGraphData, color: sparklineColor)
-                .frame(width: 58, height: 20)
-                .opacity(sparklineGraphData.hasLatencyData ? 1 : 0.18)
-            VStack(alignment: .trailing, spacing: 1) {
-                Text(summary.latencyText)
-                    .font(.system(size: 15, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(Color(statusColor: summary.color))
-                    .lineLimit(1)
-            }
-            .frame(width: 50, alignment: .trailing)
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 9)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(summary.accessibilityLabel)
-        .help(summary.accessibilityLabel)
-    }
-
-    private var sparklineGraphData: LatencyGraphData {
-        LatencyGraphData(samples: graphSeries?.samples ?? [])
-    }
-
-    private var sparklineColor: Color {
-        graphSeries?.color ?? Color(statusColor: summary.color)
-    }
-}
-
-private struct CompactDiagnosisReasonRow: View {
-    let diagnosis: NetworkPerspectiveDiagnosis
-
-    var body: some View {
-        HStack(spacing: 9) {
-            Image(systemName: iconName)
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(tint)
-                .frame(width: 15)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(diagnosis.title)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(tint)
-                    .lineLimit(1)
-                Text(reasonText)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            }
-            Spacer(minLength: 0)
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 7)
-        .background(tint.opacity(0.10), in: RoundedRectangle(cornerRadius: 7))
-        .overlay(
-            RoundedRectangle(cornerRadius: 7)
-                .stroke(tint.opacity(0.24), lineWidth: 1)
-        )
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(accessibilityText)
-        .help(accessibilityText)
-    }
-
-    private var reasonText: String {
-        if let evidenceNote = diagnosis.evidenceNote, !evidenceNote.isEmpty {
-            "\(diagnosis.detail) \(evidenceNote)."
-        } else {
-            diagnosis.detail
-        }
-    }
-
-    private var accessibilityText: String {
-        var parts = [diagnosis.title, diagnosis.detail]
-        if let evidenceNote = diagnosis.evidenceNote {
-            parts.append(evidenceNote)
-        }
-        if diagnosis.confidence == .tentative {
-            parts.append(diagnosis.confidence.displayName)
-        }
-        return parts.joined(separator: ". ")
-    }
-
-    private var iconName: String {
-        switch diagnosis.scope {
-        case .localNetwork:
-            "network.slash"
-        case .upstream:
-            "wifi.exclamationmark"
-        case .remoteService:
-            "exclamationmark.triangle.fill"
-        case .partialDegradation:
-            "speedometer"
-        case .noData:
-            "circle"
-        case .allReachable:
-            "checkmark.circle.fill"
-        }
-    }
-
-    private var tint: Color {
-        switch diagnosis.scope {
-        case .localNetwork:
-            .red
-        case .upstream:
-            .orange
-        case .remoteService, .partialDegradation:
-            .yellow
-        case .noData:
-            .secondary
-        case .allReachable:
-            .green
-        }
-    }
-}
-
-private struct StarlinkTelemetrySummary: View {
-    let telemetry: StarlinkTelemetry
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Starlink")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
-            LazyVGrid(columns: [
-                GridItem(.flexible(), alignment: .leading),
-                GridItem(.flexible(), alignment: .leading),
-                GridItem(.flexible(), alignment: .leading)
-            ], alignment: .leading, spacing: 8) {
-                item("State", telemetry.state ?? "--")
-                item("Drop", percent(telemetry.popPingDropRate))
-                item("Obstructed", percent(telemetry.fractionObstructed))
-                item("Down", throughput(telemetry.downlinkThroughputBps))
-                item("Up", throughput(telemetry.uplinkThroughputBps))
-                item("Uptime", uptime(telemetry.uptimeSeconds))
-            }
-            if !telemetry.activeAlerts.isEmpty {
-                Text(telemetry.activeAlerts.joined(separator: ", "))
-                    .font(.caption)
-                    .foregroundStyle(.orange)
-                    .lineLimit(1)
-            }
-        }
-        .padding(10)
-        .background(Color.secondary.opacity(0.10), in: RoundedRectangle(cornerRadius: 8))
-    }
-
-    private func item(_ label: String, _ value: String) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(label)
-                .font(.caption2.weight(.semibold))
-                .foregroundStyle(.secondary)
-            Text(value)
-                .font(.caption.monospacedDigit())
-                .lineLimit(1)
-        }
-    }
-
-    private func percent(_ value: Double?) -> String {
-        guard let value else { return "--" }
-        return "\(Int((value * 100).rounded()))%"
-    }
-
-    private func throughput(_ value: Double?) -> String {
-        guard let value else { return "--" }
-        return "\(Int((value / 1_000_000).rounded())) Mbps"
-    }
-
-    private func uptime(_ value: Double?) -> String {
-        guard let value else { return "--" }
-        let hours = Int(value / 3_600)
-        if hours >= 24 {
-            return "\(hours / 24)d \(hours % 24)h"
-        }
-        return "\(hours)h"
-    }
 }

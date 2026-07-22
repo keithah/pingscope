@@ -59,6 +59,10 @@ actor HistoryWriteBuffer {
         }
     }
 
+    func diagnosticsForTesting() -> (pendingCount: Int, consecutiveFailureCount: Int) {
+        (pending.count, consecutiveFailureCount)
+    }
+
     private func scheduleFlushIfNeeded() {
         guard flushTask == nil, !pending.isEmpty else { return }
         let scheduledGeneration = generation

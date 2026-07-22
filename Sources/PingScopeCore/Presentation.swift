@@ -51,6 +51,7 @@ public struct HostStatusSummary: Equatable, Sendable {
     public var statusText: String
     public var latencyText: String
     public var color: StatusColor
+    public var resolvedColor: ResolvedHostDisplayColor
     public var accessibilityLabel: String
 
     public init(
@@ -60,6 +61,7 @@ public struct HostStatusSummary: Equatable, Sendable {
         statusText: String,
         latencyText: String,
         color: StatusColor,
+        resolvedColor: ResolvedHostDisplayColor? = nil,
         accessibilityLabel: String
     ) {
         self.id = id
@@ -68,6 +70,8 @@ public struct HostStatusSummary: Equatable, Sendable {
         self.statusText = statusText
         self.latencyText = latencyText
         self.color = color
+        self.resolvedColor = resolvedColor
+            ?? ResolvedHostDisplayColor(hostID: id, displayColor: nil)
         self.accessibilityLabel = accessibilityLabel
     }
 }
@@ -159,6 +163,14 @@ public enum HistoryExportRangeUnit: String, CaseIterable, Identifiable, Sendable
     }
 }
 
+/// The longest History window retained and exposed by first-party PingScope apps.
+/// Derive both store retention and export cutoffs from this policy to keep them aligned.
+public enum PingHistoryRetention {
+    public static let maximumDays: Double = 30
+    public static let maximumDuration: Duration = .days(maximumDays)
+    public static let maximumTimeInterval: TimeInterval = maximumDuration.seconds
+}
+
 public enum HistoryExportRangePreset: String, CaseIterable, Identifiable, Sendable {
     case oneMinute = "1m"
     case fiveMinutes = "5m"
@@ -167,7 +179,7 @@ public enum HistoryExportRangePreset: String, CaseIterable, Identifiable, Sendab
     case max = "Max"
     case custom = "Custom"
 
-    public static let maximumDuration: TimeInterval = 604_800
+    public static let maximumDuration = PingHistoryRetention.maximumTimeInterval
     public static let `default`: Self = .oneHour
 
     public var id: String { rawValue }
@@ -292,6 +304,7 @@ public struct DisplayStatePresenter: Sendable {
                 statusText: statusText,
                 latencyText: latencyText,
                 color: color(for: status),
+                resolvedColor: ResolvedHostDisplayColor(hostID: host.id, displayColor: host.displayColor),
                 accessibilityLabel: "\(host.displayName) \(endpoint) \(statusText) \(latencyText)"
             )
         }

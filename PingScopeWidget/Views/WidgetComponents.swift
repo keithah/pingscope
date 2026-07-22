@@ -1,10 +1,15 @@
 import SwiftUI
-import PingScopeCore
+import PingScopeExtensionSupport
 #if os(iOS)
 import UIKit
+#elseif os(macOS)
+import AppKit
 #endif
 
 enum WidgetStatusStyle {
+    static let degradedThresholdMS = 50.0
+    static let downThresholdMS = 100.0
+
     static var backgroundColor: Color {
         #if os(macOS)
         Color(nsColor: .controlBackgroundColor)
@@ -27,9 +32,19 @@ enum WidgetStatusStyle {
 
     static func color(for result: WidgetData.SimplifiedPingResult) -> Color {
         guard result.isSuccess, let latency = result.latencyMS else { return .red }
-        if latency < 50 { return .green }
-        if latency < 100 { return .yellow }
+        return ringColor(forLatency: latency)
+    }
+
+    static func ringColor(forLatency ms: Double?) -> Color {
+        guard let ms else { return .gray }
+        if ms < degradedThresholdMS { return .green }
+        if ms < downThresholdMS { return .yellow }
         return .red
+    }
+
+    static func ringProgress(forLatency ms: Double?) -> Double {
+        guard let ms, ms > 0 else { return 0 }
+        return min(ms / downThresholdMS, 1)
     }
 
     static func latencyText(for health: WidgetSnapshotData.HostHealth?) -> String {
@@ -37,6 +52,25 @@ enum WidgetStatusStyle {
             return "\(Int(latency.rounded()))ms"
         }
         return health?.failureReason ?? "No sample"
+    }
+}
+
+struct WidgetHealthRing<Center: View>: View {
+    let progress: Double
+    let color: Color
+    var lineWidth: CGFloat = 9
+    @ViewBuilder var center: () -> Center
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .stroke(Color.secondary.opacity(0.18), lineWidth: lineWidth)
+            Circle()
+                .trim(from: 0, to: min(max(progress, 0), 1))
+                .stroke(color, style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
+                .rotationEffect(.degrees(-90))
+            center()
+        }
     }
 }
 
@@ -59,35 +93,113 @@ struct WidgetStaleBadge: View {
     }
 }
 
-struct WidgetLatencySparkline: View {
-    let samples: [WidgetSnapshotData.Sample]
-    var color: Color = .blue
+struct WidgetHostKey: View {
+    let presentation: WidgetMultiHostGraphPresentation
+    let healthByHostID: [UUID: WidgetSnapshotData.HostHealth]
 
     var body: some View {
-        let latencies = samples.compactMap(\.latencyMilliseconds)
+        HStack(alignment: .top, spacing: 6) {
+            ForEach(presentation.legend, id: \.hostID) { entry in
+                let health = healthByHostID[entry.hostID]
+                let identityColor = (entry.displayColor ?? .automatic(for: entry.hostID)).swiftUIColor
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 4) {
+                        Circle()
+                            .fill(identityColor)
+                            .frame(width: 7, height: 7)
 
-        Canvas { context, size in
-            guard latencies.count > 1 else {
+                        Text(entry.displayName)
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(identityColor)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.58)
+                            .truncationMode(.tail)
+                    }
+
+                    Text(WidgetStatusStyle.latencyText(for: health))
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(
+                            (entry.latencyIdentityColor ?? entry.displayColor ?? .automatic(for: entry.hostID)).swiftUIColor
+                        )
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                }
+                .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("\(entry.displayName), \(WidgetStatusStyle.latencyText(for: health))")
+            }
+        }
+    }
+}
+
+struct WidgetMultiHostLatencyGraph: View {
+    let presentation: WidgetMultiHostGraphPresentation
+
+    var body: some View {
+        ZStack {
+            Canvas { context, size in
                 let baselineY = size.height * 0.72
                 var baseline = Path()
                 baseline.move(to: CGPoint(x: 0, y: baselineY))
                 baseline.addLine(to: CGPoint(x: size.width, y: baselineY))
                 context.stroke(baseline, with: .color(.secondary.opacity(0.18)), lineWidth: 1)
-                return
             }
 
-            let maximum = max(latencies.max() ?? 1, 1)
-            let minimum = latencies.min() ?? 0
-            let span = max(maximum - minimum, 1)
-            let points = latencies.enumerated().map { index, latency in
-                let x = size.width * CGFloat(index) / CGFloat(max(latencies.count - 1, 1))
-                let normalized = (latency - minimum) / span
-                let y = size.height - (size.height * CGFloat(normalized))
-                return CGPoint(x: x, y: min(max(y, 1), size.height - 1))
+            ForEach(presentation.series, id: \.hostID) { series in
+                Canvas { context, size in
+                    guard series.pathPoints.count > 1,
+                          let timeWindow = presentation.timeWindow,
+                          let latencyScale = presentation.latencyScale else {
+                        return
+                    }
+                    let timeSpan = max(timeWindow.end.timeIntervalSince(timeWindow.start), 1)
+                    let latencySpan = max(
+                        latencyScale.maximumMilliseconds - latencyScale.minimumMilliseconds,
+                        1
+                    )
+                    let points = series.pathPoints.map { sample in
+                        let elapsed = sample.timestamp.timeIntervalSince(timeWindow.start)
+                        let x = size.width * CGFloat(elapsed / timeSpan)
+                        let latency = sample.latencyMilliseconds ?? latencyScale.minimumMilliseconds
+                        let normalized = (latency - latencyScale.minimumMilliseconds) / latencySpan
+                        let y = size.height - (size.height * CGFloat(normalized))
+                        return CGPoint(x: x, y: min(max(y, 1), size.height - 1))
+                    }
+                    let path = Path(ExtensionLatencyCurve.smoothedPath(points: points, closed: false))
+                    let color = (series.displayColor ?? .automatic(for: series.hostID)).swiftUIColor
+                    context.stroke(path, with: .color(color), lineWidth: 1.6)
+                }
             }
-            let path = Path(LatencyCurve.smoothedPath(points: points, closed: false))
-
-            context.stroke(path, with: .color(color), lineWidth: 1.6)
         }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(presentation.accessibilityLabel)
+    }
+}
+
+private extension WidgetGraphDisplayColor {
+    var swiftUIColor: Color {
+        #if os(macOS)
+        Color(nsColor: NSColor(name: nil) { appearance in
+            let components = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? dark : light
+            return NSColor(
+                srgbRed: components.red,
+                green: components.green,
+                blue: components.blue,
+                alpha: 1
+            )
+        })
+        #elseif os(iOS)
+        Color(uiColor: UIColor { traits in
+            let components = traits.userInterfaceStyle == .dark ? dark : light
+            return UIColor(
+                red: components.red,
+                green: components.green,
+                blue: components.blue,
+                alpha: 1
+            )
+        })
+        #else
+        Color(red: light.red, green: light.green, blue: light.blue)
+        #endif
     }
 }

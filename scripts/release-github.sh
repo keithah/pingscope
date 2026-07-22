@@ -13,6 +13,8 @@ NOTARY_KEY="${NOTARY_KEY:-}"
 NOTARY_KEY_ID="${NOTARY_KEY_ID:-}"
 NOTARY_ISSUER="${NOTARY_ISSUER:-}"
 SIGN_APP_IDENTITY="${CODESIGN_IDENTITY:-Developer ID Application: Keith Herrington (6R7S5GA944)}"
+PROVISIONING_PROFILE="${PING_SCOPE_DEVELOPER_ID_PROFILE:-}"
+WIDGET_PROVISIONING_PROFILE="${PING_SCOPE_WIDGET_DEVELOPER_ID_PROFILE:-}"
 SPARKLE_KEY_ACCOUNT="${SPARKLE_KEY_ACCOUNT:-pingscope-ed25519}"
 RELEASE_NOTES=""
 DRY_RUN=0
@@ -20,6 +22,23 @@ PAGES_BRANCH="${PING_SCOPE_PAGES_BRANCH:-gh-pages}"
 PAGES_APPCAST_PATH="${PING_SCOPE_PAGES_APPCAST_PATH:-appcast.xml}"
 PAGES_BASE_URL="${PING_SCOPE_PAGES_BASE_URL:-https://keithah.github.io/pingscope}"
 PAGES_SITE_DIR="${PING_SCOPE_PAGES_SITE_DIR:-deploy/site}"
+
+stamp_site_release_fallbacks() {
+  local site_dir="$1"
+  local version="$2"
+  local index_file="${site_dir}/index.html"
+  [[ -f "${index_file}" ]] || return 0
+
+  VERSION="${version}" perl -0pi -e '
+    my $version = $ENV{VERSION};
+    s{releases/download/v[0-9.]+/PingScope-v[0-9.]+\\.dmg}{releases/download/v$version/PingScope-v$version.dmg}g;
+    s{releases/tag/v[0-9.]+}{releases/tag/v$version}g;
+    s{Download [0-9.]+(?: DMG)?}{"Download $version" . ($& =~ /DMG/ ? " DMG" : "")}ge;
+    s{(id="release-version">)v[0-9.]+}{$1v$version}g;
+    s{(id="release-asset">)PingScope-v[0-9.]+\\.dmg}{$1PingScope-v$version.dmg}g;
+    s{Latest Developer ID release: v[0-9.]+\\. Download information is fetched from GitHub when available\\.}{Latest Developer ID release: v$version. Download information is fetched from GitHub when available.}g;
+  ' "${index_file}"
+}
 
 retry() {
   local attempts="$1"
@@ -59,12 +78,16 @@ Usage:
   scripts/release-github.sh --version <x.y.z> [--release-notes <file>] [--dry-run]
                             [--notary-profile <profile>]
                             [--notary-key <AuthKey.p8> --notary-key-id <key-id> --notary-issuer <issuer-id>]
+                            --provisioning-profile <DeveloperID.provisionprofile>
+                            --widget-provisioning-profile <WidgetDeveloperID.provisionprofile>
 
 Builds the Developer ID app, signs and notarizes a DMG, generates Sparkle
 appcast.xml, and publishes a GitHub release with gh.
 
 Required local credentials:
   - Developer ID Application certificate in login keychain.
+  - Developer ID provisioning profiles for the app and widget, passed with
+    --provisioning-profile and --widget-provisioning-profile.
   - notarytool keychain profile, default: NotarytoolProfile, or App Store Connect API key auth.
   - Sparkle EdDSA private key in Keychain, default account: pingscope-ed25519.
 
@@ -101,6 +124,7 @@ publish_pages_updates() {
   find "${update_dir}" -maxdepth 1 -type f ! -name appcast.xml -exec ditto {} "${pages_dir}/" \;
   if [[ -d "${PAGES_SITE_DIR}" ]]; then
     ditto "${PAGES_SITE_DIR}" "${pages_dir}"
+    stamp_site_release_fallbacks "${pages_dir}" "${version}"
   fi
 
   git -C "${pages_dir}" add .
@@ -137,6 +161,10 @@ while [[ $# -gt 0 ]]; do
       NOTARY_ISSUER="${2-}"; shift 2 ;;
     --sign-app)
       SIGN_APP_IDENTITY="${2-}"; shift 2 ;;
+    --provisioning-profile)
+      PROVISIONING_PROFILE="${2-}"; shift 2 ;;
+    --widget-provisioning-profile)
+      WIDGET_PROVISIONING_PROFILE="${2-}"; shift 2 ;;
     --release-notes)
       RELEASE_NOTES="${2-}"; shift 2 ;;
     --dry-run)
@@ -158,6 +186,14 @@ fi
 if ! validate_version "${VERSION}"; then
   echo "Invalid release version: ${VERSION}" >&2
   exit 64
+fi
+if [[ -z "${PROVISIONING_PROFILE}" || ! -f "${PROVISIONING_PROFILE}" ]]; then
+  echo "A Developer ID provisioning profile is required; pass --provisioning-profile or set PING_SCOPE_DEVELOPER_ID_PROFILE." >&2
+  exit 66
+fi
+if [[ -z "${WIDGET_PROVISIONING_PROFILE}" || ! -f "${WIDGET_PROVISIONING_PROFILE}" ]]; then
+  echo "A widget Developer ID provisioning profile is required; pass --widget-provisioning-profile or set PING_SCOPE_WIDGET_DEVELOPER_ID_PROFILE." >&2
+  exit 66
 fi
 
 if [[ "${DRY_RUN}" -eq 0 ]]; then
@@ -210,6 +246,8 @@ deploy/sign-notarize.sh \
   --version "${VERSION}" \
   --app "${BUILD_DIR}/PingScope.app" \
   --sign-app "${SIGN_APP_IDENTITY}" \
+  --provisioning-profile "${PROVISIONING_PROFILE}" \
+  --widget-provisioning-profile "${WIDGET_PROVISIONING_PROFILE}" \
   "${NOTARY_ARGS[@]}"
 
 ARTIFACT_DIR="/private/tmp/artifacts/PingScope-v${VERSION}"

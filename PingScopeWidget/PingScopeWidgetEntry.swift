@@ -1,16 +1,18 @@
+import PingScopeExtensionSupport
 import WidgetKit
 
 struct WidgetEntry: TimelineEntry {
     let date: Date
     let data: WidgetData?
     let snapshot: WidgetSnapshotData?
+    let isStale: Bool
 
     var relevance: TimelineEntryRelevance? {
         if let snapshot {
             let hasIssues = snapshot.health.contains { $0.status == "degraded" || $0.status == "down" || $0.failureReason != nil }
             return TimelineEntryRelevance(
                 score: hasIssues ? 100 : 50,
-                duration: 15 * 60
+                duration: WidgetTimelineSchedule.staleInterval
             )
         }
 
@@ -24,7 +26,7 @@ struct WidgetEntry: TimelineEntry {
         )
     }
 
-    var isStale: Bool {
-        snapshot?.isStale ?? data?.isStale ?? false
+    var statusLabel: String {
+        snapshot?.statusLabel(at: date) ?? (isStale ? "Stale" : "Live")
     }
 }

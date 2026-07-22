@@ -1,5 +1,6 @@
 import WidgetKit
 import SwiftUI
+import PingScopeExtensionSupport
 
 struct Provider: TimelineProvider {
     // Must match WidgetSnapshotStore.defaultSuiteName in PingScopeCore (the
@@ -12,7 +13,7 @@ struct Provider: TimelineProvider {
     #endif
 
     func placeholder(in context: Context) -> WidgetEntry {
-        WidgetEntry(date: Date(), data: .placeholder, snapshot: nil)
+        WidgetEntry(date: Date(), data: .placeholder, snapshot: nil, isStale: false)
     }
 
     func getSnapshot(in context: Context, completion: @escaping (WidgetEntry) -> Void) {
@@ -20,18 +21,33 @@ struct Provider: TimelineProvider {
     }
 
     func getTimeline(in context: Context, completion: @escaping (Timeline<WidgetEntry>) -> Void) {
-        let entry = makeEntry()
-
-        // Next update in 10 minutes (respects 40-70/day budget)
-        let nextUpdate = Calendar.current.date(byAdding: .minute, value: 10, to: Date())!
-        let timeline = Timeline(entries: [entry], policy: .after(nextUpdate))
+        let now = Date()
+        let snapshot = loadSnapshotData()
+        let legacyData = snapshot == nil ? loadLegacyData() : nil
+        let entryMappings = WidgetTimelineEntryMapper.entries(
+            now: now,
+            contentGeneratedAt: snapshot?.generatedAt ?? legacyData?.lastUpdate
+        )
+        let entries = entryMappings.map {
+            WidgetEntry(date: $0.date, data: legacyData, snapshot: snapshot, isStale: $0.isStale)
+        }
+        let timeline = Timeline(
+            entries: entries,
+            policy: .after(WidgetTimelineSchedule.reloadDate(after: entryMappings.map(\.date)))
+        )
 
         completion(timeline)
     }
 
     private func makeEntry(date: Date = Date()) -> WidgetEntry {
         let snapshot = loadSnapshotData()
-        return WidgetEntry(date: date, data: snapshot == nil ? loadLegacyData() : nil, snapshot: snapshot)
+        let legacyData = snapshot == nil ? loadLegacyData() : nil
+        return WidgetEntry(
+            date: date,
+            data: legacyData,
+            snapshot: snapshot,
+            isStale: snapshot?.isStale(at: date) ?? legacyData?.isStale(at: date) ?? false
+        )
     }
 
     private func loadSnapshotData() -> WidgetSnapshotData? {

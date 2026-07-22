@@ -115,6 +115,11 @@ struct PingScopeShareGraphImage: View {
                     .foregroundStyle(.secondary)
                 Text(presentation.title)
                     .font(.system(size: 36, weight: .bold))
+                    .foregroundStyle(
+                        presentation.showsAllHosts
+                            ? Color.primary
+                            : presentation.displayPresentation.focusedIdentityColor?.swiftUIColor ?? .accentColor
+                    )
                     .lineLimit(1)
                     .minimumScaleFactor(0.75)
                 Text(presentation.subtitle)
@@ -148,7 +153,8 @@ struct PingScopeShareGraphImage: View {
         } else {
             LatencyGraph(
                 graphData: presentation.displayPresentation.primaryGraphData,
-                showsAxes: true
+                showsAxes: true,
+                color: presentation.displayPresentation.focusedGraphColor?.swiftUIColor ?? .accentColor
             )
         }
     }

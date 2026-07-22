@@ -1,6 +1,6 @@
 import ActivityKit
-import PingScopeCore
-import PingScopeiOS
+import CoreGraphics
+import PingScopeLiveActivitySupport
 import SwiftUI
 import WidgetKit
 
@@ -19,57 +19,143 @@ struct PingScopeLiveActivityWidget: Widget {
                 .activitySystemActionForegroundColor(.blue)
         } dynamicIsland: { context in
             DynamicIsland {
-                DynamicIslandExpandedRegion(.leading) {
-                    hostLabel(context)
-                }
-                DynamicIslandExpandedRegion(.trailing) {
-                    latencyLabel(context)
-                }
                 DynamicIslandExpandedRegion(.bottom) {
-                    statusLabel(context)
+                    switch PingScopeLiveActivityPresentation.dynamicIslandRegionDecisions(contentState: context.state).expanded {
+                    case .rich:
+                        PingScopeLiveActivityRowsView(
+                            rows: dynamicIslandRows(for: context),
+                            sessionText: sessionText(for: context),
+                            aggregateStatus: aggregateStatus(for: context),
+                            density: .expanded
+                        )
+                        .padding(.horizontal, PingScopeLiveActivityLayout.expandedIslandHorizontalPadding)
+                        .padding(.bottom, PingScopeLiveActivityLayout.expandedIslandBottomPadding)
+                    case .statusOnly:
+                        statusOnlyContent(for: context)
+                    }
                 }
             } compactLeading: {
-                latencyLabel(context)
+                switch PingScopeLiveActivityPresentation.dynamicIslandRegionDecisions(contentState: context.state).compactLeading {
+                case .rich:
+                    statusDot(aggregateStatus(for: context), diameter: 7)
+                        .accessibilityLabel("\(aggregateStatusDescription(for: context)) status")
+                case .statusOnly:
+                    statusDot(aggregateStatus(for: context), diameter: 7)
+                        .accessibilityLabel("\(aggregateStatusDescription(for: context)) status")
+                }
             } compactTrailing: {
-                compactSessionLabel(context)
+                switch PingScopeLiveActivityPresentation.dynamicIslandRegionDecisions(contentState: context.state).compactTrailing {
+                case .rich:
+                    PingScopeLiveActivityIdentityText(
+                        text: latencyText(for: context),
+                        displayColor: primaryIdentityColor(for: context)
+                    )
+                        .font(.caption2.monospacedDigit())
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                        .frame(width: 38, alignment: .trailing)
+                        .accessibilityLabel("Latency \(latencyText(for: context))")
+                case .statusOnly:
+                    EmptyView()
+                }
             } minimal: {
-                statusDot(context.state.status)
+                switch PingScopeLiveActivityPresentation.dynamicIslandRegionDecisions(contentState: context.state).minimal {
+                case .rich:
+                    HStack(spacing: 2) {
+                        statusDot(aggregateStatus(for: context), diameter: 6)
+                        PingScopeLiveActivityIdentityText(
+                            text: latencyText(for: context),
+                            displayColor: primaryIdentityColor(for: context)
+                        )
+                            .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.55)
+                            .frame(width: 26, alignment: .leading)
+                    }
+                    .frame(width: 34, height: 22)
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel("\(aggregateStatusDescription(for: context)) status, latency \(latencyText(for: context))")
+                case .statusOnly:
+                    statusDot(aggregateStatus(for: context), diameter: 6)
+                        .accessibilityLabel("\(aggregateStatusDescription(for: context)) status")
+                }
             }
         }
     }
 
-    private func hostLabel(_ context: ActivityViewContext<PingScopeLiveActivityAttributes>) -> some View {
-        Text(context.attributes.hostName)
-            .font(.caption)
-            .lineLimit(1)
+    private func dynamicIslandRows(
+        for context: ActivityViewContext<PingScopeLiveActivityAttributes>
+    ) -> [PingScopeLiveActivityRowPresentation] {
+        PingScopeLiveActivityPresentation.dynamicIslandRows(
+            attributes: context.attributes,
+            contentState: context.state
+        )
     }
 
-    private func latencyLabel(_ context: ActivityViewContext<PingScopeLiveActivityAttributes>) -> some View {
-        Text(latencyText(context.state))
-            .font(.caption.monospacedDigit())
-            .lineLimit(1)
+    private func sessionText(
+        for context: ActivityViewContext<PingScopeLiveActivityAttributes>
+    ) -> String {
+        PingScopeLiveActivityPresentation.sessionText(
+            duration: context.attributes.duration,
+            remainingSeconds: context.state.remainingSeconds,
+            isStale: context.state.isStale
+        )
     }
 
-    private func statusLabel(_ context: ActivityViewContext<PingScopeLiveActivityAttributes>) -> some View {
+    private func latencyText(
+        for context: ActivityViewContext<PingScopeLiveActivityAttributes>
+    ) -> String {
+        dynamicIslandRows(for: context).first?.latencyMilliseconds.map { "\($0)ms" } ?? "--"
+    }
+
+    private func aggregateStatus(
+        for context: ActivityViewContext<PingScopeLiveActivityAttributes>
+    ) -> PingScopeLiveActivityHealthStatus {
+        PingScopeLiveActivityPresentation.dynamicIslandAggregateStatus(contentState: context.state)
+    }
+
+    private func primaryIdentityColor(
+        for context: ActivityViewContext<PingScopeLiveActivityAttributes>
+    ) -> WidgetGraphDisplayColor {
+        dynamicIslandRows(for: context).first?.identityColor ?? context.attributes.identityColor
+    }
+
+    private func aggregateStatusDescription(
+        for context: ActivityViewContext<PingScopeLiveActivityAttributes>
+    ) -> String {
+        PingScopeLiveActivityPresentation.dynamicIslandAggregateStatusAccessibilityDescription(
+            contentState: context.state
+        )
+    }
+
+    private func statusOnlyContent(
+        for context: ActivityViewContext<PingScopeLiveActivityAttributes>
+    ) -> some View {
         HStack(spacing: 6) {
-            statusDot(context.state.status)
-            Text(context.state.isStale ? "Stale" : context.state.status.rawValue.capitalized)
-                .font(.caption)
-            Spacer()
-            Text(remainingText(context))
-                .font(.caption.monospacedDigit())
+            statusDot(aggregateStatus(for: context), diameter: 7)
+            Text(aggregateStatusDescription(for: context))
+                .font(.caption.weight(.semibold))
         }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(aggregateStatusDescription(for: context)) status")
     }
+}
 
-    private func compactSessionLabel(_ context: ActivityViewContext<PingScopeLiveActivityAttributes>) -> some View {
-        HStack(spacing: 3) {
-            statusDot(context.state.status)
-                .frame(width: 7, height: 7)
-            Text(remainingText(context))
-                .font(.caption2.monospacedDigit())
-                .lineLimit(1)
-                .minimumScaleFactor(0.75)
-        }
+private struct PingScopeLiveActivityIdentityText: View {
+    @Environment(\.colorScheme) private var colorScheme
+    let text: String
+    let displayColor: WidgetGraphDisplayColor
+
+    var body: some View {
+        let components = colorScheme == .dark ? displayColor.dark : displayColor.light
+        Text(text)
+            .foregroundStyle(Color(
+                .sRGB,
+                red: components.red,
+                green: components.green,
+                blue: components.blue,
+                opacity: 1
+            ))
     }
 }
 
@@ -77,53 +163,236 @@ private struct PingScopeLiveActivityView: View {
     let context: ActivityViewContext<PingScopeLiveActivityAttributes>
 
     var body: some View {
-        HStack(spacing: 12) {
-            statusDot(context.state.status)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(context.attributes.hostName)
-                    .font(.headline)
-                    .lineLimit(1)
-                Text("\(context.attributes.method.rawValue.uppercased()) \(context.attributes.address)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+        PingScopeLiveActivityRowsView(
+            rows: PingScopeLiveActivityPresentation.rows(
+                attributes: context.attributes,
+                contentState: context.state
+            ),
+            sessionText: PingScopeLiveActivityPresentation.sessionText(
+                duration: context.attributes.duration,
+                remainingSeconds: context.state.remainingSeconds,
+                isStale: context.state.isStale
+            ),
+            aggregateStatus: PingScopeLiveActivityPresentation.aggregateStatus(contentState: context.state),
+            density: .lockScreen
+        )
+        .padding(.horizontal, PingScopeLiveActivityLayout.lockScreenHorizontalPadding)
+        .padding(.vertical, PingScopeLiveActivityLayout.lockScreenVerticalPadding)
+    }
+}
+
+private struct PingScopeLiveActivityRowsView: View {
+    let rows: [PingScopeLiveActivityRowPresentation]
+    let sessionText: String
+    let aggregateStatus: PingScopeLiveActivityHealthStatus
+    let density: PingScopeLiveActivityRowDensity
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: density.rowSpacing) {
+            ForEach(rows.prefix(PingScopeLiveActivityAttributes.ContentState.hostRowLimit), id: \.hostID) { row in
+                PingScopeLiveActivityHostRowView(row: row, density: density)
             }
-            Spacer()
-            VStack(alignment: .trailing, spacing: 2) {
-                Text(latencyText(context.state))
-                    .font(.title3.monospacedDigit())
-                Text(remainingText(context))
-                    .font(.caption)
+            HStack(spacing: 4) {
+                statusDot(aggregateStatus, diameter: density.sessionDotDiameter)
+                Text(sessionText)
+                    .font(density.sessionFont)
+                    .lineLimit(1)
+            }
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 5)
+            .frame(minHeight: density.sessionHeight, maxHeight: density.sessionHeight)
+            .background(Color.secondary.opacity(0.1), in: Capsule())
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Session \(sessionText)")
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+private struct PingScopeLiveActivityHostRowView: View {
+    @Environment(\.colorScheme) private var colorScheme
+    let row: PingScopeLiveActivityRowPresentation
+    let density: PingScopeLiveActivityRowDensity
+
+    var body: some View {
+        HStack(spacing: density.columnSpacing) {
+            statusDot(row.status, diameter: density.dotDiameter)
+                .frame(width: density.dotDiameter, height: density.dotDiameter)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(row.displayName)
+                    .font(density.nameFont)
+                    .foregroundStyle(identityColor(for: row.identityColor))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .minimumScaleFactor(0.8)
+                Text(row.endpointCaption)
+                    .font(density.endpointFont)
                     .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .minimumScaleFactor(0.75)
+            }
+            Spacer(minLength: 8)
+
+            PingScopeLiveActivitySparkline(
+                samples: row.samples,
+                color: identityColor(for: row.identityColor)
+            )
+                .frame(width: density.sparklineWidth, height: density.sparklineHeight)
+
+            Text(row.latencyText)
+                .font(density.latencyFont)
+                .foregroundStyle(
+                    row.latencyIdentityColor.map(identityColor(for:)) ?? color(for: row.status)
+                )
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+                .frame(width: density.latencyWidth, alignment: .trailing)
+        }
+        .frame(height: density.rowHeight)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(row.accessibilityLabel)
+    }
+
+    private func identityColor(for displayColor: WidgetGraphDisplayColor) -> Color {
+        let components = colorScheme == .dark ? displayColor.dark : displayColor.light
+        return Color(
+            .sRGB,
+            red: components.red,
+            green: components.green,
+            blue: components.blue,
+            opacity: 1
+        )
+    }
+}
+
+private struct PingScopeLiveActivitySparkline: View {
+    let samples: [Int]
+    let color: Color
+
+    var body: some View {
+        GeometryReader { proxy in
+            let points = PingScopeLiveActivitySparklinePresentation.points(
+                samples: samples,
+                in: proxy.size
+            )
+            if points.count > 1 {
+                Path(ExtensionLatencyCurve.smoothedPath(points: points, closed: false))
+                    .stroke(
+                        color,
+                        style: StrokeStyle(lineWidth: 1.5, lineCap: .round, lineJoin: .round)
+                    )
             }
         }
-        .padding()
+        .accessibilityHidden(true)
     }
 }
 
-private func remainingText(_ context: ActivityViewContext<PingScopeLiveActivityAttributes>) -> String {
-    if context.attributes.duration == .continuous {
-        return context.state.isStale ? "Stale" : "Live"
+private enum PingScopeLiveActivityRowDensity {
+    case lockScreen
+    case expanded
+
+    var rowHeight: CGFloat {
+        switch self {
+        case .lockScreen: PingScopeLiveActivityLayout.lockScreenRowHeight
+        case .expanded: PingScopeLiveActivityLayout.expandedIslandRowHeight
+        }
     }
-    if context.state.isStale && context.state.remainingSeconds == 0 {
-        return "Ended"
+
+    var rowSpacing: CGFloat {
+        switch self {
+        case .lockScreen: PingScopeLiveActivityLayout.lockScreenStackSpacing
+        case .expanded: PingScopeLiveActivityLayout.expandedIslandStackSpacing
+        }
     }
-    return "\(context.state.remainingSeconds)s"
+
+    var columnSpacing: CGFloat {
+        switch self {
+        case .lockScreen: 10
+        case .expanded: 6
+        }
+    }
+
+    var dotDiameter: CGFloat {
+        switch self {
+        case .lockScreen: 7
+        case .expanded: 7
+        }
+    }
+
+    var sparklineWidth: CGFloat {
+        switch self {
+        case .lockScreen: 58
+        case .expanded: 52
+        }
+    }
+
+    var sparklineHeight: CGFloat {
+        switch self {
+        case .lockScreen: 26
+        case .expanded: 22
+        }
+    }
+
+    var latencyWidth: CGFloat {
+        switch self {
+        case .lockScreen: 48
+        case .expanded: 46
+        }
+    }
+
+    var nameFont: Font {
+        switch self {
+        case .lockScreen: .system(size: 13, weight: .semibold)
+        case .expanded: .system(size: 12, weight: .semibold)
+        }
+    }
+
+    var endpointFont: Font {
+        switch self {
+        case .lockScreen: .system(size: 10, weight: .medium, design: .monospaced)
+        case .expanded: .system(size: 9, weight: .medium, design: .monospaced)
+        }
+    }
+
+    var latencyFont: Font {
+        switch self {
+        case .lockScreen: .system(size: 13, weight: .semibold, design: .monospaced)
+        case .expanded: .system(size: 12, weight: .semibold, design: .monospaced)
+        }
+    }
+
+    var sessionFont: Font {
+        switch self {
+        case .lockScreen: .caption2.monospacedDigit()
+        case .expanded: .caption2.monospacedDigit()
+        }
+    }
+
+    var sessionHeight: CGFloat {
+        switch self {
+        case .lockScreen: PingScopeLiveActivityLayout.lockScreenSessionHeight
+        case .expanded: PingScopeLiveActivityLayout.expandedIslandSessionHeight
+        }
+    }
+
+    var sessionDotDiameter: CGFloat {
+        switch self {
+        case .lockScreen: 5
+        case .expanded: 4
+        }
+    }
 }
 
-private func latencyText(_ state: PingScopeLiveActivityAttributes.ContentState) -> String {
-    if let latencyMilliseconds = state.latencyMilliseconds {
-        return "\(latencyMilliseconds)ms"
-    }
-    return "--ms"
-}
-
-private func statusDot(_ status: HealthStatus) -> some View {
+private func statusDot(_ status: PingScopeLiveActivityHealthStatus, diameter: CGFloat = 10) -> some View {
     Circle()
         .fill(color(for: status))
-        .frame(width: 10, height: 10)
+        .frame(width: diameter, height: diameter)
 }
 
-private func color(for status: HealthStatus) -> Color {
+private func color(for status: PingScopeLiveActivityHealthStatus) -> Color {
     switch status {
     case .noData: .gray
     case .healthy: .green
