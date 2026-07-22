@@ -755,10 +755,7 @@ private final class BackgroundLocationKeepAliveController: NSObject, CLLocationM
     override init() {
         super.init()
         manager.delegate = self
-        manager.desiredAccuracy = kCLLocationAccuracyThreeKilometers
-        manager.distanceFilter = 1_000
         manager.activityType = .other
-        manager.pausesLocationUpdatesAutomatically = false
     }
 
     func requestAlwaysAuthorization() {
@@ -785,7 +782,11 @@ private final class BackgroundLocationKeepAliveController: NSObject, CLLocationM
         isRunning = true
         manager.allowsBackgroundLocationUpdates = true
         manager.showsBackgroundLocationIndicator = true
-        manager.startUpdatingLocation()
+        // Significant-location-change keeps us relaunchable on movement without
+        // the continuous-location battery drain. A stationary device is NOT woken
+        // for background monitoring — restoring that is the deferred BGAppRefreshTask
+        // follow-up (see docs/superpowers/specs/2026-07-21-battery-aware-monitoring-design.md).
+        manager.startMonitoringSignificantLocationChanges()
         notify()
     }
 
@@ -795,7 +796,7 @@ private final class BackgroundLocationKeepAliveController: NSObject, CLLocationM
             return
         }
         isRunning = false
-        manager.stopUpdatingLocation()
+        manager.stopMonitoringSignificantLocationChanges()
         manager.allowsBackgroundLocationUpdates = false
         manager.showsBackgroundLocationIndicator = false
         notify()
