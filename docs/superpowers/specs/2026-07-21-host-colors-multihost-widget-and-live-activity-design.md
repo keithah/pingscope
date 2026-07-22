@@ -83,12 +83,12 @@ The selected host keeps the existing checkmark behavior. Cached peer measurement
 
 ## Live Activity controls
 
-Monitor Settings adds a `Live Activity` section with two rows, both enabled by default:
+Monitor Settings adds a `Live Activity` section with two rows, both disabled by default:
 
 - `Lock Screen Live Activity`: the master ActivityKit preference. Turning it off ends any current Live Activity and prevents future requests. Because ActivityKit owns both system surfaces, disabling this preference also removes the Dynamic Island activity.
 - `Dynamic Island Details`: controls PingScope’s rich Dynamic Island presentation while the master preference remains enabled. Turning it off reduces the Island to the minimum system presence that ActivityKit permits; it does not claim to remove a system-owned surface independently.
 
-The Dynamic Island row is disabled when the master preference is off. Re-enabling the master permits the next active monitoring session/update to request a Live Activity again. Preferences persist locally with backward-compatible defaults of enabled.
+The Dynamic Island row is disabled when the master preference is off. Enabling the master permits the next active monitoring session/update to request a Live Activity. Preferences persist locally and require explicit opt-in.
 
 The settings copy must make the dependency clear and must not promise independent system behavior that ActivityKit does not provide.
 
@@ -136,8 +136,8 @@ Required coverage:
 - Widget graph preparation produces one independent series per visible host on a shared window/scale, including two-, three-, four-, and five-host cases.
 - Widget failure/empty-series behavior never fabricates paths or latency.
 - Switch Host rows expose latest latency and mini-graph data and preserve cached/unavailable semantics.
-- Lock Screen Live Activity defaults on, persists opt-out, blocks requests when off, and ends an existing activity.
-- Dynamic Island Details defaults on, persists independently, is disabled by the master preference, and selects rich versus minimal presentation without claiming to remove the system surface.
+- Lock Screen Live Activity defaults off, persists opt-in, blocks requests when off, and ends an existing activity.
+- Dynamic Island Details defaults off, persists independently, is disabled by the master preference, and selects rich versus minimal presentation without claiming to remove the system surface.
 - Gateway detector rejects `169.254/16`, accepts RFC 1918 candidates, and the app’s network-path shipping wiring continues to refresh and replace the gateway host while preserving identity/order/color.
 
 Final verification includes focused suites, the full Swift test suite, iOS Simulator build, signed physical-device build, install/launch, and visual inspection of light/dark widget, Switch Host, Host Edit, and Live Activity settings. No TestFlight upload occurs until the physical-device build is approved.

@@ -803,7 +803,7 @@ final class BuildGraphOptimizationTests: XCTestCase {
         XCTAssertFalse(marketingVersions.isEmpty)
         XCTAssertTrue(marketingVersions.allSatisfy { $0.contains("MARKETING_VERSION = 0.5.1;") })
         XCTAssertFalse(buildVersions.isEmpty)
-        XCTAssertTrue(buildVersions.allSatisfy { $0.contains("CURRENT_PROJECT_VERSION = 95;") })
+        XCTAssertTrue(buildVersions.allSatisfy { $0.contains("CURRENT_PROJECT_VERSION = 96;") })
     }
 
     func testBatteryAwareLifecycleWiringSeedsInitialStateAndSerializesUpdates() throws {
@@ -963,17 +963,19 @@ final class BuildGraphOptimizationTests: XCTestCase {
         }.sorted()
     }
 
-    func testReleaseNotesMatchBuild95AndCurrentPatchFeatures() throws {
+    func testReleaseNotesMatchBuild96AndCurrentPatchFeatures() throws {
         let root = try repositoryRoot()
         let notes = try String(
             contentsOf: root.appendingPathComponent("RELEASE_NOTES.md"),
             encoding: .utf8
         )
         XCTAssertTrue(notes.contains("Version: 0.5.1"))
-        XCTAssertTrue(notes.contains("Build: 95"))
+        XCTAssertTrue(notes.contains("Build: 96"))
+        XCTAssertTrue(notes.contains("Live Activity and Dynamic Island settings default to off"))
         XCTAssertTrue(notes.contains("battery-aware adaptive monitoring"))
         XCTAssertTrue(notes.contains("outage alert"))
         XCTAssertTrue(notes.contains("CloudKit"))
+        XCTAssertFalse(notes.contains("Build: 95"))
         XCTAssertFalse(notes.contains("Build: 94"))
         XCTAssertFalse(notes.contains("Build: 89"))
         XCTAssertFalse(notes.contains("intentionally not part of this preparation commit"))

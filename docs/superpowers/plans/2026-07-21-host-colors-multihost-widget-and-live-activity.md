@@ -383,7 +383,7 @@ git commit -m "Show telemetry in Switch Host rows" -m "Co-Authored-By: Claude Fa
 - Test: `Tests/PingScopeFreshTests/BuildGraph/BuildGraphOptimizationTests.swift`
 
 **Interfaces:**
-- Produces: persisted `PingScope.iOS.lockScreenLiveActivityEnabled` and `PingScope.iOS.dynamicIslandDetailsEnabled`, both defaulting true; `ContentState.showsDynamicIslandDetails`; request/update gates.
+- Produces: persisted `PingScope.iOS.lockScreenLiveActivityEnabled` and `PingScope.iOS.dynamicIslandDetailsEnabled`, both defaulting false; `ContentState.showsDynamicIslandDetails`; request/update gates.
 
 - [ ] **Step 1: Make the current always-enabled policy observable without changing it**
 
@@ -391,7 +391,7 @@ If the ActivityKit request/update decision is still embedded in private app-mode
 
 - [ ] **Step 2: Write behavioral RED using the extracted shipping orchestration seam**
 
-With a dedicated `UserDefaults` suite, assert missing keys default true. Drive live-activity start/update policy with master false and assert no request; toggle false during an active fake activity and assert it ends. Build content states with Island details true/false and assert rich/minimal presentation decisions differ.
+With a dedicated `UserDefaults` suite, assert missing keys default false. Drive live-activity start/update policy with master false and assert no request; toggle false during an active fake activity and assert it ends. Build content states with Island details true/false and assert rich/minimal presentation decisions differ.
 
 - [ ] **Step 3: Run RED**
 
@@ -407,8 +407,8 @@ Add a small public policy/state type that owns defaults and dependencies:
 
 ```swift
 public struct PingScopeIOSLiveActivityPreferences: Equatable, Sendable {
-    public var lockScreenEnabled: Bool = true
-    public var dynamicIslandDetailsEnabled: Bool = true
+    public var lockScreenEnabled: Bool = false
+    public var dynamicIslandDetailsEnabled: Bool = false
 }
 ```
 
