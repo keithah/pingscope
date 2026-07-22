@@ -149,6 +149,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         settingsWindowController?.showWindow(nil)
         NSApp.activate(ignoringOtherApps: true)
         settingsWindowController?.window?.makeKeyAndOrderFront(nil)
+        updatePowerMonitorUIVisibility()
     }
 
     func openHistory() {
@@ -169,6 +170,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         historyWindowController?.showWindow(nil)
         NSApp.activate(ignoringOtherApps: true)
         historyWindowController?.window?.makeKeyAndOrderFront(nil)
+        updatePowerMonitorUIVisibility()
     }
 
     func showOverlay() {
@@ -574,6 +576,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         let isVisible = overlayController?.window?.isVisible == true
             || popover?.isShown == true
             || detachedPopoverWindow?.isVisible == true
+            || settingsWindowController?.window?.isVisible == true
+            || historyWindowController?.window?.isVisible == true
         powerMonitor?.setUIVisible(isVisible)
     }
 

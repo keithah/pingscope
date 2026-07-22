@@ -15,4 +15,30 @@ final class MacPowerActivityMonitorTests: XCTestCase {
 
         XCTAssertEqual(reported.last?.visibility, .background)
     }
+
+    func testCadenceVisibilityIncludesSettingsAndHistoryWindows() throws {
+        let source = try String(
+            contentsOf: repositoryRoot().appendingPathComponent("Sources/PingScopeApp/PingScopeApp.swift"),
+            encoding: .utf8
+        )
+        let updateStart = try XCTUnwrap(source.range(of: "private func updatePowerMonitorUIVisibility()"))
+        let updateEnd = try XCTUnwrap(
+            source.range(
+                of: "private func showContextMenu(",
+                range: updateStart.upperBound..<source.endIndex
+            )
+        )
+        let update = source[updateStart.lowerBound..<updateEnd.lowerBound]
+
+        XCTAssertTrue(update.contains("settingsWindowController?.window?.isVisible == true"))
+        XCTAssertTrue(update.contains("historyWindowController?.window?.isVisible == true"))
+    }
+}
+
+private func repositoryRoot() -> URL {
+    URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
 }

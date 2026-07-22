@@ -232,7 +232,8 @@ public actor LiveMonitorSessionController {
         session = snapshot.session
         health = snapshot.health
         series = snapshot.series
-        let resumeInterval = snapshot.session?.policy.probeInterval ?? policy.probeInterval
+        let resumeBaseInterval = snapshot.session?.policy.probeInterval ?? policy.probeInterval
+        let resumeInterval = cadenceInputs.effectiveInterval(base: resumeBaseInterval)
         currentNextProbeInterval = resumeInterval
         currentNextProbeDeadline = now().addingTimeInterval(resumeInterval.seconds)
         guard let restoredSession = snapshot.session,

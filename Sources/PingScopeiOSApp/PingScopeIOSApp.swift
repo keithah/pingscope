@@ -1582,7 +1582,9 @@ private final class PingScopeIOSAppModel: ObservableObject {
                 }
                 self.controller = LiveMonitorSessionController(
                     host: host,
+                    policy: MonitorSessionPolicy(probeInterval: host.interval),
                     historyStore: self.historyStore,
+                    cadenceInputs: self.cadenceInputs,
                     historySampleEnricher: self.historyLocationService.snapshotStore.makeHistorySampleEnricher(),
                     measurementObserver: self.notificationMeasurementObserver()
                 )

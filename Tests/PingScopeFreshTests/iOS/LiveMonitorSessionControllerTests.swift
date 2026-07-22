@@ -995,6 +995,46 @@ final class LiveMonitorSessionControllerTests: XCTestCase {
         await controller.stop()
     }
 
+    func testRestoreAfterSupersededReconciliationKeepsAdaptiveCadence() async {
+        let host = HostConfig(
+            id: UUID(),
+            displayName: "Cloudflare",
+            address: "1.1.1.1",
+            interval: .milliseconds(10)
+        )
+        let policy = MonitorSessionPolicy(probeInterval: host.interval)
+        let clock = ManualClock()
+        let controller = LiveMonitorSessionController(
+            host: host,
+            probeFactory: StaticProbeFactory(probe: RecordingProbe(results: [])),
+            policy: policy,
+            clock: clock,
+            now: { clock.currentDate },
+            cadenceInputs: CadenceInputs(
+                visibility: .activeUI,
+                powerSource: .battery,
+                isLowPowerMode: false,
+                thermalTier: .nominal
+            )
+        )
+        let snapshot = LiveMonitorSessionSnapshot(
+            host: host,
+            session: MonitorSessionState(
+                hostID: host.id,
+                duration: .continuous,
+                startedAt: clock.baseDate,
+                policy: policy
+            ),
+            health: HostHealth(hostID: host.id, thresholds: host.thresholds)
+        )
+
+        await controller.restoreAfterSupersededReconciliation(from: snapshot)
+
+        let restoredInterval = await controller.nextProbeInterval()
+        XCTAssertEqual(restoredInterval, .milliseconds(20))
+        await controller.stop()
+    }
+
     func testControllerPublishesMeasuredResultWithTheLiveHealthTransition() async throws {
         let host = HostConfig(
             id: UUID(),

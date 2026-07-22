@@ -572,6 +572,21 @@ final class IOSResourceEfficiencyTests: XCTestCase {
         XCTAssertTrue(source.contains("PingScopeIOSRefreshCadence.interval"))
     }
 
+    func testFocusedHostSwitchBuildsControllerWithHostPolicyAndCurrentCadence() throws {
+        let source = try sourceFile("Sources/PingScopeiOSApp/PingScopeIOSApp.swift")
+        let switchStart = try XCTUnwrap(source.range(of: "private func switchToHostAsync("))
+        let switchEnd = try XCTUnwrap(
+            source.range(
+                of: "private func switchToAllHostsAsync(",
+                range: switchStart.upperBound..<source.endIndex
+            )
+        )
+        let focusedSwitch = source[switchStart.lowerBound..<switchEnd.lowerBound]
+
+        XCTAssertTrue(focusedSwitch.contains("policy: MonitorSessionPolicy(probeInterval: host.interval)"))
+        XCTAssertTrue(focusedSwitch.contains("cadenceInputs: self.cadenceInputs"))
+    }
+
     func testHistoryContentMemoKeepsFourSelections() {
         var memo = PingScopeIOSHistoryContentMemo<HistoryNetworkSelection, Int>()
         let selections: [HistoryNetworkSelection] = [
