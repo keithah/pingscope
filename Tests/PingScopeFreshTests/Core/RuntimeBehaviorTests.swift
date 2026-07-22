@@ -547,6 +547,42 @@ final class RuntimeBehaviorTests: XCTestCase {
         XCTAssertFalse(decisions.contains(.recovered(hostID: hostB.id)), "expected second host recovery to be coalesced in \(decisions)")
     }
 
+    func testRuntimeRepeatInternetOutageInsideCooldownStillSuppressesHostDownTransitions() async throws {
+        let thresholds = LatencyThresholds(degradedMilliseconds: 100, downAfterFailures: 1)
+        let hostA = HostConfig(displayName: "Cloudflare DNS", address: "1.1.1.1", thresholds: thresholds)
+        let hostB = HostConfig(displayName: "Google DNS", address: "8.8.8.8", thresholds: thresholds)
+        let runtime = PingRuntime(
+            hostStore: HostStore(defaultHosts: [hostA, hostB]),
+            scheduler: MeasurementScheduler(probeFactory: HangingProbeFactory()),
+            notificationRules: NotificationRuleSet(
+                cooldown: .seconds(300),
+                alertTypes: [.hostDown, .recovered, .internetLoss],
+                diagnosisSensitivity: .conservative
+            )
+        )
+        let alertStream = await runtime.alerts()
+        let base = Date(timeIntervalSince1970: 11_500)
+
+        await runtime.ingest(.failure(hostID: hostA.id, reason: .timeout, timestamp: base))
+        await runtime.ingest(.failure(hostID: hostB.id, reason: .timeout, timestamp: base.addingTimeInterval(1)))
+        await runtime.ingest(.success(hostID: hostA.id, latency: .milliseconds(5), timestamp: base.addingTimeInterval(10)))
+        await runtime.ingest(.success(hostID: hostB.id, latency: .milliseconds(5), timestamp: base.addingTimeInterval(11)))
+        await runtime.ingest(.failure(hostID: hostA.id, reason: .timeout, timestamp: base.addingTimeInterval(60)))
+        await runtime.ingest(.failure(hostID: hostB.id, reason: .timeout, timestamp: base.addingTimeInterval(61)))
+        await runtime.stop()
+
+        let decisions = await collectDecisions(from: alertStream)
+        XCTAssertEqual(decisions.filter { $0 == .internetLoss }.count, 1, "expected cooldown to suppress the repeated broad alert in \(decisions)")
+        XCTAssertEqual(
+            decisions.filter {
+                if case .hostDown = $0 { return true }
+                return false
+            },
+            [.hostDown(hostID: hostA.id)],
+            "expected only the pre-aggregate first-host edge, not a new host alert from the cooldown-suppressed outage: \(decisions)"
+        )
+    }
+
     func testRuntimeDoesNotSuppressHostTransitionsWhenBroadAlertTypeIsDisabled() async throws {
         let thresholds = LatencyThresholds(degradedMilliseconds: 100, downAfterFailures: 1)
         let hostA = HostConfig(displayName: "Cloudflare DNS", address: "1.1.1.1", thresholds: thresholds)
