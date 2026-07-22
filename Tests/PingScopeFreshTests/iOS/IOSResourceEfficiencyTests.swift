@@ -6,6 +6,25 @@ import CoreGraphics
 import XCTest
 
 final class IOSResourceEfficiencyTests: XCTestCase {
+    func testIOSFailureLogsKeepErrorDetailsPrivate() throws {
+        let root = repositoryRoot()
+        let sources = try [
+            "Sources/PingScopeiOS/PingScopeIOSHostStore.swift",
+            "Sources/PingScopeiOS/LiveMonitorSessionController.swift",
+            "Sources/PingScopeiOSApp/PingScopeIOSApp.swift",
+        ].map { path in
+            try String(contentsOf: root.appendingPathComponent(path), encoding: .utf8)
+        }
+
+        for source in sources {
+            XCTAssertTrue(source.contains("import os"))
+            XCTAssertTrue(source.contains("privacy: .private"))
+        }
+        XCTAssertFalse(sources.joined().contains("NSLog(\"PingScope iOS host encode failed:"))
+        XCTAssertFalse(sources.joined().contains("NSLog(\"PingScope iOS history write failed"))
+        XCTAssertFalse(sources.joined().contains("NSLog(\"PingScope live activity request failed:"))
+    }
+
     func testIOSAllHostsWidgetBuilderFallsBackToFirstEnabledHostWhenRememberedPrimaryIsAbsent() {
         let hosts = (0..<3).map { index in
             HostConfig(
@@ -529,6 +548,31 @@ final class IOSResourceEfficiencyTests: XCTestCase {
         await Task.yield()
 
         XCTAssertNil(weakDriver)
+    }
+
+    func testLiveMonitorControllerDoesNotRetainItselfWhileProbeLoopSleeps() async throws {
+        let host = HostConfig(id: UUID(), displayName: "Lifetime", address: "lifetime.example")
+        let clock = ManualClock()
+        var controller: LiveMonitorSessionController? = LiveMonitorSessionController(
+            host: host,
+            probeFactory: ResourceStaticProbeFactory(
+                probe: ResourceRecordingProbe(results: [.success(hostID: host.id, latency: .milliseconds(8))])
+            ),
+            policy: MonitorSessionPolicy(probeInterval: .seconds(30)),
+            clock: clock,
+            now: { clock.currentDate }
+        )
+        weak var weakController: LiveMonitorSessionController?
+        weakController = controller
+
+        await controller?.start(duration: .continuous, at: clock.baseDate)
+        try await clock.waitForSleepers(atLeast: 1)
+        controller = nil
+
+        for _ in 0..<100 where weakController != nil {
+            await Task.yield()
+        }
+        XCTAssertNil(weakController, "the stored probe-loop task must not keep its controller alive")
     }
 
     func testAllHostRefreshCadenceUsesEarliestControllerDeadline() async {

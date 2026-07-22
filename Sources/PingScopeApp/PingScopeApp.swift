@@ -120,6 +120,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        powerMonitor?.stop()
         removePowerObservers()
         releaseSingleInstanceLock()
     }

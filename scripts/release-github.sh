@@ -23,6 +23,23 @@ PAGES_APPCAST_PATH="${PING_SCOPE_PAGES_APPCAST_PATH:-appcast.xml}"
 PAGES_BASE_URL="${PING_SCOPE_PAGES_BASE_URL:-https://keithah.github.io/pingscope}"
 PAGES_SITE_DIR="${PING_SCOPE_PAGES_SITE_DIR:-deploy/site}"
 
+stamp_site_release_fallbacks() {
+  local site_dir="$1"
+  local version="$2"
+  local index_file="${site_dir}/index.html"
+  [[ -f "${index_file}" ]] || return 0
+
+  VERSION="${version}" perl -0pi -e '
+    my $version = $ENV{VERSION};
+    s{releases/download/v[0-9.]+/PingScope-v[0-9.]+\\.dmg}{releases/download/v$version/PingScope-v$version.dmg}g;
+    s{releases/tag/v[0-9.]+}{releases/tag/v$version}g;
+    s{Download [0-9.]+(?: DMG)?}{"Download $version" . ($& =~ /DMG/ ? " DMG" : "")}ge;
+    s{(id="release-version">)v[0-9.]+}{$1v$version}g;
+    s{(id="release-asset">)PingScope-v[0-9.]+\\.dmg}{$1PingScope-v$version.dmg}g;
+    s{Latest Developer ID release: v[0-9.]+\\. Download information is fetched from GitHub when available\\.}{Latest Developer ID release: v$version. Download information is fetched from GitHub when available.}g;
+  ' "${index_file}"
+}
+
 retry() {
   local attempts="$1"
   local delay="$2"
@@ -107,6 +124,7 @@ publish_pages_updates() {
   find "${update_dir}" -maxdepth 1 -type f ! -name appcast.xml -exec ditto {} "${pages_dir}/" \;
   if [[ -d "${PAGES_SITE_DIR}" ]]; then
     ditto "${PAGES_SITE_DIR}" "${pages_dir}"
+    stamp_site_release_fallbacks "${pages_dir}" "${version}"
   fi
 
   git -C "${pages_dir}" add .

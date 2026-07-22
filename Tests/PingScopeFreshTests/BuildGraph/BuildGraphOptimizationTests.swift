@@ -920,6 +920,23 @@ final class BuildGraphOptimizationTests: XCTestCase {
         }
     }
 
+    func testProductSiteReleaseFallbackIsCurrentAndStampedByReleasePublisher() throws {
+        let root = try repositoryRoot()
+        let site = try String(
+            contentsOf: root.appendingPathComponent("deploy/site/index.html"),
+            encoding: .utf8
+        )
+        let publisher = try String(
+            contentsOf: root.appendingPathComponent("scripts/release-github.sh"),
+            encoding: .utf8
+        )
+
+        XCTAssertFalse(site.contains("v0.4.0"))
+        XCTAssertTrue(site.contains("releases/download/v0.5.0/PingScope-v0.5.0.dmg"))
+        XCTAssertTrue(publisher.contains("stamp_site_release_fallbacks"))
+        XCTAssertTrue(publisher.contains("stamp_site_release_fallbacks \"${pages_dir}\" \"${version}\""))
+    }
+
     private func repositoryRoot() throws -> URL {
         var candidate = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
         while candidate.path != "/" {

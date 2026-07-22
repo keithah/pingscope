@@ -93,10 +93,10 @@ final class LiveDisplayModel: ObservableObject {
             healthByHost: [:],
             samplesByHost: [:]
         ),
-        displayPresentation: PingScopeDisplayPresentation = PingScopeDisplayPresentation()
+        displayPresentation: PingScopeDisplayPresentation? = nil
     ) {
         self.snapshot = snapshot
-        self.displayPresentation = displayPresentation
+        self.displayPresentation = displayPresentation ?? PingScopeDisplayPresentation()
     }
 
     func updateSnapshot(_ snapshot: RuntimeSnapshot) {

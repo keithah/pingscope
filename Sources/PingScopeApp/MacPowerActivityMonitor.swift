@@ -15,12 +15,15 @@ final class MacPowerActivityMonitor {
     private var uiVisible = true
     private var runLoopSource: CFRunLoopSource?
     private var lastReported: CadenceInputs?
+    private var hasStarted = false
 
     init(onChange: @escaping (CadenceInputs) -> Void) {
         self.onChange = onChange
     }
 
     func start() {
+        guard !hasStarted else { return }
+        hasStarted = true
         let workspace = NSWorkspace.shared.notificationCenter
         workspace.addObserver(self, selector: #selector(screenDidSleep), name: NSWorkspace.screensDidSleepNotification, object: nil)
         workspace.addObserver(self, selector: #selector(screenDidWake), name: NSWorkspace.screensDidWakeNotification, object: nil)
@@ -34,6 +37,27 @@ final class MacPowerActivityMonitor {
 
         installPowerSourceObserver()
         report()
+    }
+
+    func stop() {
+        guard hasStarted else { return }
+        hasStarted = false
+
+        NSWorkspace.shared.notificationCenter.removeObserver(self)
+        DistributedNotificationCenter.default().removeObserver(self)
+        NotificationCenter.default.removeObserver(self)
+
+        if let runLoopSource {
+            CFRunLoopRemoveSource(CFRunLoopGetMain(), runLoopSource, .defaultMode)
+            CFRunLoopSourceInvalidate(runLoopSource)
+            self.runLoopSource = nil
+        }
+    }
+
+    deinit {
+        MainActor.assumeIsolated {
+            stop()
+        }
     }
 
     func setUIVisible(_ visible: Bool) {

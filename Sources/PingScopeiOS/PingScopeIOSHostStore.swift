@@ -1,5 +1,11 @@
 import Foundation
 import PingScopeCore
+import os
+
+private let hostStoreLogger = Logger(
+    subsystem: "com.hadm.PingScope",
+    category: "HostStore"
+)
 
 public enum PingScopeIOSHostScope: String, Codable, Sendable {
     case focused
@@ -100,7 +106,9 @@ public final class PingScopeIOSHostStore: @unchecked Sendable {
             defaults.set(hostScope.rawValue, forKey: hostScopeKey)
             lastObservedSharedState = resolved
         } catch {
-            NSLog("PingScope iOS host encode failed: \(error.localizedDescription)")
+            hostStoreLogger.error(
+                "Host persistence failed operation=save error=\(error.localizedDescription, privacy: .private)"
+            )
             return load()
         }
         guard !resolved.hosts.isEmpty else { return load() }
@@ -155,7 +163,9 @@ public final class PingScopeIOSHostStore: @unchecked Sendable {
                     SharedHostStoreState(hosts: defaultHosts, selectedHostID: defaultHosts.first?.id)
                 )
             } catch {
-                NSLog("PingScope iOS default host encode failed: \(error.localizedDescription)")
+                hostStoreLogger.error(
+                    "Host persistence failed operation=saveDefaults error=\(error.localizedDescription, privacy: .private)"
+                )
             }
         }
         return (defaultHosts, nil, nil)

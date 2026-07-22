@@ -42,6 +42,25 @@ final class MacPowerActivityMonitorTests: XCTestCase {
         XCTAssertTrue(update.contains("settingsWindowController?.window?.isVisible == true"))
         XCTAssertTrue(update.contains("historyWindowController?.window?.isVisible == true"))
     }
+
+    func testPowerMonitorOwnsAndTearsDownItsCallbackLifecycle() throws {
+        let source = try String(
+            contentsOf: repositoryRoot().appendingPathComponent("Sources/PingScopeApp/MacPowerActivityMonitor.swift"),
+            encoding: .utf8
+        )
+
+        XCTAssertTrue(source.contains("private var hasStarted = false"))
+        XCTAssertTrue(source.contains("guard !hasStarted else { return }"))
+        XCTAssertTrue(source.contains("func stop()"))
+        XCTAssertTrue(source.contains("CFRunLoopRemoveSource"))
+        XCTAssertTrue(source.contains("CFRunLoopSourceInvalidate"))
+        XCTAssertTrue(source.contains("deinit {\n        MainActor.assumeIsolated {\n            stop()"))
+        let appSource = try String(
+            contentsOf: repositoryRoot().appendingPathComponent("Sources/PingScopeApp/PingScopeApp.swift"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(appSource.contains("func applicationWillTerminate(_ notification: Notification) {\n        powerMonitor?.stop()"))
+    }
 }
 
 private func repositoryRoot() -> URL {

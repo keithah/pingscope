@@ -1,6 +1,12 @@
 import Foundation
 import PingScopeCore
 import PingScopeHistoryKit
+import os
+
+private let liveMonitorHistoryLogger = Logger(
+    subsystem: "com.hadm.PingScope",
+    category: "LiveHistory"
+)
 
 public typealias PingScopeIOSHistorySampleEnricher = @Sendable (PingResult) -> PingResult
 public typealias PingScopeIOSMeasurementObserver = @Sendable (
@@ -201,9 +207,7 @@ public actor LiveMonitorSessionController {
         currentNextProbeInterval = policy.probeInterval
         currentNextProbeDeadline = date
         let generation = loopGeneration
-        loopTask = Task {
-            await runLoop(startedAt: date, generation: generation)
-        }
+        startProbeLoop(startedAt: date, generation: generation)
     }
 
     public func stop(reason: MonitorSessionEndReason = .userStopped) async {
@@ -241,15 +245,11 @@ public actor LiveMonitorSessionController {
             return
         }
         let generation = loopGeneration
-        loopTask = Task {
-            do {
-                try await clock.sleep(for: resumeInterval)
-            } catch {
-                return
-            }
-            guard !Task.isCancelled else { return }
-            await runLoop(startedAt: restoredSession.startedAt, generation: generation)
-        }
+        startProbeLoop(
+            startedAt: restoredSession.startedAt,
+            generation: generation,
+            initialDelay: resumeInterval
+        )
     }
 
     /// Applies presentation-only metadata without disturbing the active probe
@@ -287,40 +287,78 @@ public actor LiveMonitorSessionController {
         task.cancel()
     }
 
-    private func runLoop(startedAt: Date, generation: Int) async {
-        var idleBackoff = ProbeIdleBackoffTracker()
-        while !Task.isCancelled {
-            guard generation == loopGeneration else { break }
-            let now = now()
-            if shouldEndForSelectedDuration(at: now) {
-                finish(reason: .completed, at: now)
-                break
-            }
-            if shouldEndForBackgroundRuntime(startedAt: startedAt, at: now) {
-                finish(reason: .backgroundRuntimeExpired, at: now)
-                break
-            }
+    private struct ProbeLoopStep: Sendable {
+        let idleBackoff: ProbeIdleBackoffTracker
+        let nextInterval: Duration?
+    }
 
-            let probe = await probeFactory.makeProbe(for: host.method)
-            let result = await probe.measure(host)
-            guard !Task.isCancelled, generation == loopGeneration else { break }
-            let statusTransition = await ingest(result)
-            let nextInterval = idleBackoff.interval(
-                after: result,
-                previousStatus: statusTransition.previous,
-                currentStatus: statusTransition.current,
-                baseInterval: policy.probeInterval
-            )
-            let effectiveInterval = cadenceInputs.effectiveInterval(base: nextInterval)
-            currentNextProbeInterval = effectiveInterval
-            currentNextProbeDeadline = self.now().addingTimeInterval(effectiveInterval.seconds)
+    /// The task deliberately holds the controller weakly between iterations.
+    /// A continuous session can sleep for a long time; retaining the actor for
+    /// that sleep would make a dropped scope/controller impossible to release.
+    private func startProbeLoop(
+        startedAt: Date,
+        generation: Int,
+        initialDelay: Duration? = nil
+    ) {
+        let clock = clock
+        loopTask = Task { [weak self, clock] in
+            var idleBackoff = ProbeIdleBackoffTracker()
+            var delay = initialDelay
 
-            do {
-                try await clock.sleep(for: effectiveInterval)
-            } catch {
-                break
+            while !Task.isCancelled {
+                if let delay {
+                    do {
+                        try await clock.sleep(for: delay)
+                    } catch {
+                        return
+                    }
+                }
+                guard !Task.isCancelled,
+                      let step = await self?.runProbeLoopStep(
+                          startedAt: startedAt,
+                          generation: generation,
+                          idleBackoff: idleBackoff
+                      ) else {
+                    return
+                }
+                idleBackoff = step.idleBackoff
+                guard let nextInterval = step.nextInterval else { return }
+                delay = nextInterval
             }
         }
+    }
+
+    private func runProbeLoopStep(
+        startedAt: Date,
+        generation: Int,
+        idleBackoff: ProbeIdleBackoffTracker
+    ) async -> ProbeLoopStep? {
+        guard generation == loopGeneration else { return nil }
+        let now = now()
+        if shouldEndForSelectedDuration(at: now) {
+            finish(reason: .completed, at: now)
+            return nil
+        }
+        if shouldEndForBackgroundRuntime(startedAt: startedAt, at: now) {
+            finish(reason: .backgroundRuntimeExpired, at: now)
+            return nil
+        }
+
+        let probe = await probeFactory.makeProbe(for: host.method)
+        let result = await probe.measure(host)
+        guard !Task.isCancelled, generation == loopGeneration else { return nil }
+        let statusTransition = await ingest(result)
+        var nextIdleBackoff = idleBackoff
+        let nextInterval = nextIdleBackoff.interval(
+            after: result,
+            previousStatus: statusTransition.previous,
+            currentStatus: statusTransition.current,
+            baseInterval: policy.probeInterval
+        )
+        let effectiveInterval = cadenceInputs.effectiveInterval(base: nextInterval)
+        currentNextProbeInterval = effectiveInterval
+        currentNextProbeDeadline = self.now().addingTimeInterval(effectiveInterval.seconds)
+        return ProbeLoopStep(idleBackoff: nextIdleBackoff, nextInterval: effectiveInterval)
     }
 
     private func shouldEndForSelectedDuration(at date: Date) -> Bool {
@@ -459,7 +497,9 @@ private actor LiveHistoryWriteBuffer {
             return
         }
         lastFailureLogAt = now
-        NSLog("PingScope iOS history write failed failures=\(consecutiveFailureCount) pending=\(pending.count) dropped=\(pending.droppedCount) error=\(String(describing: error))")
+        liveMonitorHistoryLogger.error(
+            "History write failed failures=\(self.consecutiveFailureCount, privacy: .public) pending=\(self.pending.count, privacy: .public) dropped=\(self.pending.droppedCount, privacy: .public) error=\(error.localizedDescription, privacy: .private)"
+        )
     }
 
     private func retryBackoff() async {

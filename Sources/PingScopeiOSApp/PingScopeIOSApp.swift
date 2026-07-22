@@ -12,7 +12,13 @@ import PingScopeiOS
 import SwiftUI
 import UIKit
 import WidgetKit
+import os
 @preconcurrency import UserNotifications
+
+private let iOSAppLogger = Logger(
+    subsystem: "com.hadm.PingScope",
+    category: "AppLifecycle"
+)
 
 private final class PingScopeIOSUserNotificationCenter: NSObject, PingScopeIOSNotificationScheduling, UNUserNotificationCenterDelegate, @unchecked Sendable {
     private let center: UNUserNotificationCenter
@@ -42,7 +48,9 @@ private final class PingScopeIOSUserNotificationCenter: NSObject, PingScopeIOSNo
         do {
             return try await center.requestAuthorization(options: [.alert, .sound])
         } catch {
-            NSLog("PingScope iOS notification authorization failed: \(error.localizedDescription)")
+            iOSAppLogger.error(
+                "Notification authorization failed error=\(error.localizedDescription, privacy: .private)"
+            )
             return false
         }
     }
@@ -400,7 +408,9 @@ private final class PingScopeIOSAppModel: ObservableObject {
             loadedHistoryStore = CloudSyncingHistoryStore(destination: sqliteHistoryStore, service: service)
             cloudSyncService = service
         } catch {
-            NSLog("PingScope iOS history store unavailable: \(String(describing: error))")
+            iOSAppLogger.error(
+                "History store unavailable error=\(error.localizedDescription, privacy: .private)"
+            )
             #if DEBUG
             print("PingScope iOS history store unavailable: \(error)")
             #endif
@@ -2228,7 +2238,9 @@ private final class PingScopeIOSAppModel: ObservableObject {
             liveActivityPausedForBackgroundRuntime = false
             _ = liveActivityUpdatePolicy.shouldPublish(state)
         } catch {
-            NSLog("PingScope live activity request failed: \(String(describing: error))")
+            iOSAppLogger.error(
+                "Live Activity request failed error=\(error.localizedDescription, privacy: .private)"
+            )
         }
     }
 

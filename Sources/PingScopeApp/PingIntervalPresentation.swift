@@ -10,7 +10,7 @@ struct PingIntervalOption: Identifiable, Equatable {
 }
 
 enum PingIntervalPresentation {
-    static let options: [PingIntervalOption] = [
+    nonisolated static let options: [PingIntervalOption] = [
         .init(milliseconds: 1_000, label: "1s"),
         .init(milliseconds: 2_000, label: "2s"),
         .init(milliseconds: 5_000, label: "5s"),
@@ -18,11 +18,11 @@ enum PingIntervalPresentation {
         .init(milliseconds: 30_000, label: "30s")
     ]
 
-    static func selection(for interval: Duration) -> Int {
+    nonisolated static func selection(for interval: Duration) -> Int {
         Int(interval.milliseconds.rounded())
     }
 
-    static func commonSelection(for intervals: [Duration]) -> Int? {
+    nonisolated static func commonSelection(for intervals: [Duration]) -> Int? {
         let selections = intervals.map(selection(for:))
         guard let first = selections.first,
               selections.allSatisfy({ $0 == first }) else {
@@ -31,14 +31,14 @@ enum PingIntervalPresentation {
         return first
     }
 
-    static func options(including milliseconds: Int) -> [PingIntervalOption] {
+    nonisolated static func options(including milliseconds: Int) -> [PingIntervalOption] {
         guard !options.contains(where: { $0.milliseconds == milliseconds }) else {
             return options
         }
         return options + [PingIntervalOption(milliseconds: milliseconds, label: label(for: milliseconds))]
     }
 
-    private static func label(for milliseconds: Int) -> String {
+    private nonisolated static func label(for milliseconds: Int) -> String {
         if milliseconds % 1_000 == 0 {
             return "\(milliseconds / 1_000)s"
         }

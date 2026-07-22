@@ -87,7 +87,8 @@ struct MacHistoryLoadingPresentation {
         isLoading: Bool,
         surface: MacHistorySurfacePresentation?
     ) -> Bool {
-        isLoading && surface == nil
+        guard case .none = surface else { return false }
+        return isLoading
     }
 }
 
