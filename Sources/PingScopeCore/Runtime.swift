@@ -672,9 +672,9 @@ public actor PingRuntime {
             await refreshHostCache()
         }
         let resultStream = await scheduler.start(hosts: cachedHosts.filter(\.isEnabled), allowsLocalNetworkProbes: allowsLocalNetworkProbes)
-        streamTask = Task { [self] in
+        streamTask = Task { [weak self] in
             for await result in resultStream {
-                await ingest(result)
+                await self?.ingest(result)
             }
         }
         publishSnapshot()

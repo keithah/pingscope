@@ -675,6 +675,25 @@ final class RuntimeBehaviorTests: XCTestCase {
         await runtime.stop()
     }
 
+    func testRuntimeDeallocatesWhenOwnerReleasesItWhileResultStreamIsOpen() async {
+        weak var weakRuntime: PingRuntime?
+
+        do {
+            var runtime: PingRuntime? = PingRuntime(
+                hostStore: HostStore(defaultHosts: []),
+                scheduler: MeasurementScheduler(probeFactory: HangingProbeFactory())
+            )
+            weakRuntime = runtime
+            await runtime?.start()
+            runtime = nil
+        }
+
+        for _ in 0..<100 where weakRuntime != nil {
+            await Task.yield()
+        }
+        XCTAssertNil(weakRuntime, "the result-ingest task must not keep its owning runtime alive")
+    }
+
     func testRuntimeClearsSamplesWhenHostEndpointChanges() async throws {
         let host = HostConfig(displayName: "Default Gateway", address: "192.168.1.1", method: .tcp, port: 80)
         let runtime = PingRuntime(
