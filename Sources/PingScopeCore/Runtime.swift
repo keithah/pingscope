@@ -352,6 +352,8 @@ public actor MeasurementScheduler {
     private let probeFactory: any ProbeFactory
     private let logger: (@Sendable (String) -> Void)?
     private let probePermits: AsyncPermitPool
+    private let sleepUntil: @Sendable (Duration, Duration) async throws -> Void
+    private var cadenceInputs: CadenceInputs = .default
     private var tasks: [Task<Void, Never>] = []
     private var continuation: AsyncStream<PingResult>.Continuation?
     private var generation = 0
@@ -362,9 +364,33 @@ public actor MeasurementScheduler {
         logger: (@Sendable (String) -> Void)? = nil,
         maxConcurrentProbes: Int = 8
     ) {
+        let clock = ContinuousClock()
         self.probeFactory = probeFactory
         self.logger = logger
         self.probePermits = AsyncPermitPool(permits: max(1, maxConcurrentProbes))
+        self.sleepUntil = { duration, tolerance in
+            try await clock.sleep(until: clock.now.advanced(by: duration), tolerance: tolerance)
+        }
+    }
+
+    public init<C: Clock>(
+        probeFactory: any ProbeFactory,
+        logger: (@Sendable (String) -> Void)? = nil,
+        maxConcurrentProbes: Int = 8,
+        clock: C
+    ) where C.Duration == Duration {
+        self.probeFactory = probeFactory
+        self.logger = logger
+        self.probePermits = AsyncPermitPool(permits: max(1, maxConcurrentProbes))
+        self.sleepUntil = { duration, tolerance in
+            try await clock.sleep(until: clock.now.advanced(by: duration), tolerance: tolerance)
+        }
+    }
+
+    /// Updates the environment inputs that scale probe cadence. Applied on each
+    /// host's next loop iteration; a live scheduler picks it up without restart.
+    public func setCadenceInputs(_ inputs: CadenceInputs) {
+        cadenceInputs = inputs
     }
 
     public func start(hosts: [HostConfig], allowsLocalNetworkProbes: Bool = true) async -> AsyncStream<PingResult> {
@@ -405,15 +431,8 @@ public actor MeasurementScheduler {
         }
         logger?("scheduler start generation=\(runGeneration) hosts=\(hosts.count) measurable=\(measurableHosts.count) disabled=\(disabledCount) localSuppressed=\(localSuppressedCount) allowsLocal=\(allowsLocalNetworkProbes)")
 
-        for (offset, host) in measurableHosts.enumerated() {
+        for host in measurableHosts {
             let task = Task { [weak self] in
-                if offset > 0 {
-                    do {
-                        try await Task.sleep(for: .milliseconds(offset * 250))
-                    } catch {
-                        return
-                    }
-                }
                 guard !Task.isCancelled else { return }
                 await self?.runLoop(for: host, generation: runGeneration)
             }
@@ -470,13 +489,21 @@ public actor MeasurementScheduler {
                 Task { await permitLease.release() }
             }
             guard !Task.isCancelled, await publish(result, for: host, generation: generation) else { return }
+            let effectiveInterval = await currentEffectiveInterval(base: host.interval)
             do {
-                try await Task.sleep(for: host.interval)
+                // Tolerance lets the OS coalesce timer fires across hosts so the
+                // CPU/radio can settle between bursts instead of waking per-host.
+                let tolerance = Duration.seconds(min(max(effectiveInterval.seconds * 0.25, 1), 30))
+                try await sleepUntil(effectiveInterval, tolerance)
             } catch {
                 break
             }
         }
         logger?("scheduler runLoop end generation=\(generation) hostID=\(host.id.uuidString)")
+    }
+
+    private func currentEffectiveInterval(base: Duration) -> Duration {
+        cadenceInputs.effectiveInterval(base: base)
     }
 
     private func publish(_ result: PingResult, for host: HostConfig, generation: Int) -> Bool {

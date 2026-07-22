@@ -183,11 +183,13 @@ final class RuntimeBehaviorTests: XCTestCase {
         let hostA = HostConfig(displayName: "A", address: "a.example", interval: .milliseconds(1))
         let hostB = HostConfig(displayName: "B", address: "b.example", interval: .milliseconds(1))
         let perHost = 150
-        let scheduler = MeasurementScheduler(probeFactory: LimitedBurstProbeFactory(limit: perHost))
+        let scheduler = MeasurementScheduler(
+            probeFactory: LimitedBurstProbeFactory(limit: perHost),
+            clock: ImmediateClock()
+        )
         let stream = await scheduler.start(hosts: [hostA, hostB])
 
-        // Both host loops finish their whole burst (second host starts after
-        // the scheduler's 250ms stagger) before we read a single result.
+        // Both host loops finish their whole burst before we read a single result.
         try await Task.sleep(for: .seconds(1.5))
 
         let expected = perHost * 2
@@ -904,6 +906,31 @@ private actor LimitedBurstProbe: PingProbe {
         }
         countsByHost[host.id, default: 0] += 1
         return .success(hostID: host.id, latency: .milliseconds(5)).withHostMetadata(from: host)
+    }
+}
+
+private final class ImmediateClock: Clock, @unchecked Sendable {
+    struct Instant: InstantProtocol, Comparable {
+        let offset: Duration
+
+        func advanced(by duration: Duration) -> Instant {
+            Instant(offset: offset + duration)
+        }
+
+        func duration(to other: Instant) -> Duration {
+            other.offset - offset
+        }
+
+        static func < (lhs: Instant, rhs: Instant) -> Bool {
+            lhs.offset < rhs.offset
+        }
+    }
+
+    var now: Instant { Instant(offset: .zero) }
+    var minimumResolution: Duration { .zero }
+
+    func sleep(until deadline: Instant, tolerance: Duration?) async throws {
+        try Task.checkCancellation()
     }
 }
 
