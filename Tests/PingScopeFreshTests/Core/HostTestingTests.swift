@@ -75,6 +75,15 @@ final class HostTestingTests: XCTestCase {
         XCTAssertTrue(measuredCandidates.contains(.init(method: .tcp, port: 443)))
     }
 
+    func testGatewayResolverReturnsFastestSuccessfulCandidateWithProbeProvenance() async {
+        let resolver = DefaultGatewayEndpointResolver(probeFactory: GatewayRaceProbeFactory())
+
+        let host = await resolver.resolve(address: "192.168.1.1")
+
+        XCTAssertEqual(host.method, .udp)
+        XCTAssertEqual(host.port, 53)
+    }
+
     func testGatewayEndpointResolverFallsBackToTCP80WhenNothingResponds() async {
         let factory = CandidateProbeFactory(successfulCandidate: nil)
         let resolver = DefaultGatewayEndpointResolver(probeFactory: factory)
@@ -210,6 +219,30 @@ private struct CandidateProbe: PingProbe {
             return .success(hostID: host.id, latency: .milliseconds(5)).withHostMetadata(from: host)
         }
         return .failure(hostID: host.id, reason: .timeout).withHostMetadata(from: host)
+    }
+}
+
+private actor GatewayRaceProbeFactory: ProbeFactory {
+    func makeProbe(for method: PingMethod) async -> any PingProbe {
+        GatewayRaceProbe()
+    }
+}
+
+private struct GatewayRaceProbe: PingProbe {
+    func measure(_ host: HostConfig) async -> PingResult {
+        switch (host.method, host.port) {
+        case (.tcp, 80):
+            do {
+                try await Task.sleep(for: .seconds(60))
+            } catch {
+                return .failure(hostID: host.id, reason: .cancelled).withHostMetadata(from: host)
+            }
+            return .failure(hostID: host.id, reason: .timeout).withHostMetadata(from: host)
+        case (.udp, 53):
+            return .success(hostID: host.id, latency: .milliseconds(5)).withHostMetadata(from: host)
+        default:
+            return .failure(hostID: host.id, reason: .timeout).withHostMetadata(from: host)
+        }
     }
 }
 
