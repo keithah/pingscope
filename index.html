@@ -664,10 +664,10 @@
           <div class="actions">
             <a class="button" href="https://apps.apple.com/us/app/pingscope-keep-connected/id6759278369?mt=12">Mac App Store</a>
             <a class="button secondary" href="https://testflight.apple.com/join/rvBuNjMz">Join External TestFlight</a>
-            <a class="button secondary" id="download-button" href="https://github.com/keithah/pingscope/releases/download/v0.4.0/PingScope-v0.4.0.dmg">Download 0.4.0</a>
+            <a class="button secondary" id="download-button" href="https://github.com/keithah/pingscope/releases/download/v0.5.0/PingScope-v0.5.0.dmg">Download 0.5.1</a>
             <a class="button ghost" href="#support">Get Support</a>
           </div>
-          <p class="release-note" id="release-note">PingScope 0.4.0 introduces the redesigned Signal and Ring monitoring experience.</p>
+          <p class="release-note" id="release-note">Latest Developer ID release: v0.5.0. Download information is fetched from GitHub when available.</p>
         </div>
 
         <div class="device-stage" aria-label="PingScope app preview">
@@ -749,19 +749,19 @@
             <p>The App Store build is the simplest install path. The Developer ID DMG is pulled from the latest public GitHub release and updates automatically on this page.</p>
             <div class="actions">
               <a class="button" href="https://apps.apple.com/us/app/pingscope-keep-connected/id6759278369?mt=12">Open App Store</a>
-              <a class="button secondary" id="download-button-secondary" href="https://github.com/keithah/pingscope/releases/download/v0.4.0/PingScope-v0.4.0.dmg">Download 0.4.0 DMG</a>
+              <a class="button secondary" id="download-button-secondary" href="https://github.com/keithah/pingscope/releases/download/v0.5.0/PingScope-v0.5.0.dmg">Download 0.5.1 DMG</a>
             </div>
           </div>
           <div class="release-box" aria-live="polite">
             <dl>
               <dt>Version</dt>
-              <dd id="release-version">v0.4.0</dd>
+              <dd id="release-version">v0.5.1</dd>
               <dt>Published</dt>
-              <dd id="release-date">July 10, 2026</dd>
+              <dd id="release-date">Available now</dd>
               <dt>Package</dt>
-              <dd id="release-asset">PingScope-v0.4.0.dmg</dd>
+              <dd id="release-asset">PingScope-v0.5.0.dmg</dd>
             </dl>
-            <a class="button secondary" id="release-link" href="https://github.com/keithah/pingscope/releases/tag/v0.4.0">Release notes</a>
+            <a class="button secondary" id="release-link" href="https://github.com/keithah/pingscope/releases/tag/v0.5.1">Release notes</a>
           </div>
         </div>
       </section>
@@ -856,7 +856,7 @@
           document.getElementById("release-link").href = release.html_url;
         })
         .catch(() => {
-          document.getElementById("release-note").textContent = "PingScope 0.4.0 introduces the redesigned Signal and Ring monitoring experience.";
+          document.getElementById("release-note").textContent = "Latest Developer ID release: v0.5.0. Download information is fetched from GitHub when available.";
         });
 
       document.getElementById("support-form").addEventListener("submit", (event) => {
