@@ -780,6 +780,10 @@ public actor PingRuntime {
         await restartScheduler(refreshCache: false)
     }
 
+    public func setCadenceInputs(_ inputs: CadenceInputs) async {
+        await scheduler.setCadenceInputs(inputs)
+    }
+
     public func updateNotificationRules(_ rules: NotificationRuleSet) {
         alertEngine.rules = rules
     }
