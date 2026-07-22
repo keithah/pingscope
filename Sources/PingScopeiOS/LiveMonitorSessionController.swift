@@ -29,6 +29,7 @@ public actor LiveMonitorSessionController {
     private var series: SampleSeries
     private var loopTask: Task<Void, Never>?
     private var loopGeneration = 0
+    private var cadenceInputs: CadenceInputs = .default
 
     /// `clock` paces the probe loop and `now` supplies its wall-clock reads, so
     /// tests can drive the loop deterministically instead of racing real sleeps.
@@ -55,6 +56,10 @@ public actor LiveMonitorSessionController {
 
     public func start(duration: MonitorSessionDuration) async {
         await start(duration: duration, at: now())
+    }
+
+    public func setCadenceInputs(_ inputs: CadenceInputs) {
+        cadenceInputs = inputs
     }
 
     public func start(duration: MonitorSessionDuration, at date: Date) async {
@@ -115,7 +120,7 @@ public actor LiveMonitorSessionController {
             await ingest(result)
 
             do {
-                try await clock.sleep(for: policy.probeInterval)
+                try await clock.sleep(for: cadenceInputs.effectiveInterval(base: policy.probeInterval))
             } catch {
                 break
             }

@@ -113,6 +113,8 @@ private final class PingScopeIOSAppModel: ObservableObject {
     private var lastPublishedWidgetSnapshot: WidgetSnapshot?
     private var lastWidgetTimelineReloadAt: Date?
     private let widgetPublishPolicy = WidgetSnapshotPublishPolicy()
+    private var powerMonitor: PowerActivityMonitor?
+    private var cadenceInputs: CadenceInputs = .default
 
     init() {
         self.hostStore = PingScopeIOSHostStore()
@@ -131,13 +133,22 @@ private final class PingScopeIOSAppModel: ObservableObject {
         let state = hostStore.load()
         let host = state.selectedHost
         self.hosts = state.hosts
-        self.controller = LiveMonitorSessionController(host: host, historyStore: historyStore)
+        self.controller = LiveMonitorSessionController(
+            host: host,
+            policy: MonitorSessionPolicy(probeInterval: host.interval),
+            historyStore: historyStore
+        )
         self.snapshot = LiveMonitorSessionSnapshot(
             host: host,
             session: nil,
             health: HostHealth(hostID: host.id, thresholds: host.thresholds)
         )
         self.graphPresentation = PingScopeIOSGraphPresentation(samples: snapshot.series.samples, range: selectedGraphRange)
+        let powerMonitor = PowerActivityMonitor { [weak self] inputs in
+            self?.applyCadenceInputs(inputs)
+        }
+        powerMonitor.start()
+        self.powerMonitor = powerMonitor
         Task {
             await refreshHistory(force: true)
         }
@@ -264,6 +275,7 @@ private final class PingScopeIOSAppModel: ObservableObject {
     func handleScenePhase(_ phase: ScenePhase) {
         switch phase {
         case .active:
+            powerMonitor?.setBackgrounded(false)
             runLifecycleTask { model, context in
                 await model.backgroundRuntime.end()
                 guard model.isCurrentLifecycle(context) else { return }
@@ -282,17 +294,27 @@ private final class PingScopeIOSAppModel: ObservableObject {
                 model.startInitialSessionIfNeeded()
             }
         case .background:
+            powerMonitor?.setBackgrounded(true)
             applyBackgroundKeepAlive()
             beginBackgroundRuntimeIfNeeded()
             Task {
                 await ensureLiveActivityForCurrentSession()
             }
         case .inactive:
+            powerMonitor?.setBackgrounded(true)
             Task {
                 await ensureLiveActivityForCurrentSession()
             }
         @unknown default:
             break
+        }
+    }
+
+    private func applyCadenceInputs(_ inputs: CadenceInputs) {
+        cadenceInputs = inputs
+        Task { [weak self] in
+            guard let self else { return }
+            await self.controller.setCadenceInputs(inputs)
         }
     }
 
@@ -473,7 +495,12 @@ private final class PingScopeIOSAppModel: ObservableObject {
         guard isCurrentLifecycle(context) else { return }
         await endLiveActivity()
         guard isCurrentLifecycle(context) else { return }
-        controller = LiveMonitorSessionController(host: host, historyStore: historyStore)
+        controller = LiveMonitorSessionController(
+            host: host,
+            policy: MonitorSessionPolicy(probeInterval: host.interval),
+            historyStore: historyStore
+        )
+        await controller.setCadenceInputs(cadenceInputs)
         snapshot = LiveMonitorSessionSnapshot(
             host: host,
             session: nil,

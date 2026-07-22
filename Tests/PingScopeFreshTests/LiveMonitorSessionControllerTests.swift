@@ -85,6 +85,38 @@ final class LiveMonitorSessionControllerTests: XCTestCase {
         XCTAssertEqual(measurementCount, 1)
     }
 
+    func testControllerBatteryCadenceDoublesProbeInterval() async throws {
+        let host = HostConfig(id: UUID(), displayName: "Cloudflare", address: "1.1.1.1", interval: .milliseconds(10))
+        let probe = RecordingProbe(results: [
+            .success(hostID: host.id, latency: .milliseconds(18))
+        ])
+        let clock = ManualClock()
+        let controller = LiveMonitorSessionController(
+            host: host,
+            probeFactory: StaticProbeFactory(probe: probe),
+            policy: MonitorSessionPolicy(probeInterval: host.interval),
+            clock: clock,
+            now: { clock.currentDate }
+        )
+        await controller.setCadenceInputs(
+            CadenceInputs(visibility: .activeUI, powerSource: .battery, isLowPowerMode: false, thermalTier: .nominal)
+        )
+
+        await controller.start(duration: .continuous, at: clock.baseDate)
+        try await clock.waitForSleepers(atLeast: 1)
+
+        clock.advance(by: .milliseconds(10))
+        let countAfter10Milliseconds = await probe.measurementCount
+        XCTAssertEqual(countAfter10Milliseconds, 1)
+
+        clock.advance(by: .milliseconds(10))
+        try await clock.waitForSleepers(atLeast: 1)
+        let countAfter20Milliseconds = await probe.measurementCount
+        XCTAssertEqual(countAfter20Milliseconds, 2)
+
+        await controller.stop()
+    }
+
     func testControllerDefaultStartUsesInjectedDateProvider() async throws {
         let host = HostConfig(id: UUID(), displayName: "Cloudflare", address: "1.1.1.1")
         let probe = RecordingProbe(results: [
