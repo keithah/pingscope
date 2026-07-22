@@ -37,6 +37,8 @@ final class MacPowerActivityMonitorTests: XCTestCase {
 
         XCTAssertTrue(settings.contains("window.delegate = self"))
         XCTAssertTrue(history.contains("window.delegate = self"))
+        XCTAssertTrue(settings.contains("updatePowerMonitorUIVisibility()"))
+        XCTAssertTrue(history.contains("updatePowerMonitorUIVisibility()"))
         XCTAssertTrue(update.contains("settingsWindowController?.window?.isVisible == true"))
         XCTAssertTrue(update.contains("historyWindowController?.window?.isVisible == true"))
     }
