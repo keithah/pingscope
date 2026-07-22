@@ -667,10 +667,10 @@ private actor DrainHardeningBoundary: CloudSyncEngineBoundary {
     private var unknownSampleIDs: Set<UUID> = []
     private var sampleBatchWaiters: [(count: Int, continuation: CheckedContinuation<Void, Never>)] = []
     private var availability: CloudSyncAccountAvailability = .privateAccount
-    private var accountChangeHandler: (@Sendable () async -> Void)?
+    private var accountChangeHandler: (@concurrent @Sendable () async -> Void)?
 
     func accountAvailability() async -> CloudSyncAccountAvailability { availability }
-    func setAccountChangeHandler(_ handler: (@Sendable () async -> Void)?) async {
+    func setAccountChangeHandler(_ handler: (@concurrent @Sendable () async -> Void)?) async {
         accountChangeHandler = handler
     }
     func start() async throws {}
@@ -933,7 +933,7 @@ private actor SuspendedRetryBoundary: CloudSyncEngineBoundary {
 
 private actor RecoveryDrainBoundary: CloudSyncEngineBoundary {
     private var availability: CloudSyncAccountAvailability
-    private var accountChangeHandler: (@Sendable () async -> Void)?
+    private var accountChangeHandler: (@concurrent @Sendable () async -> Void)?
     private var batches: [[UUID]] = []
     private var uploadedHosts: [HostConfig] = []
 
@@ -942,7 +942,7 @@ private actor RecoveryDrainBoundary: CloudSyncEngineBoundary {
     }
 
     func accountAvailability() async -> CloudSyncAccountAvailability { availability }
-    func setAccountChangeHandler(_ handler: (@Sendable () async -> Void)?) async {
+    func setAccountChangeHandler(_ handler: (@concurrent @Sendable () async -> Void)?) async {
         accountChangeHandler = handler
     }
     func start() async throws {}

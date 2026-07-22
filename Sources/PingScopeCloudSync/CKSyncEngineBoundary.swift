@@ -48,7 +48,7 @@ struct CloudKitEngineHandle: Hashable, Sendable {
 protocol CloudKitEngineHosting: Sendable {
     func prepareResources() throws
     func accountAvailability() async throws -> CloudSyncAccountAvailability
-    func setAccountChangeHandler(_ handler: (@Sendable () async -> Void)?)
+    func setAccountChangeHandler(_ handler: (@concurrent @Sendable () async -> Void)?)
     func createEngine(
         stateSerialization: CKSyncEngine.State.Serialization?,
         delegate: any CKSyncEngineDelegate,
@@ -127,7 +127,7 @@ struct DefaultCloudKitContainerProvider: CloudKitContainerProviding, @unchecked 
 private final class CloudKitAccountChangeObserver: @unchecked Sendable {
     private let notificationCenter: NotificationCenter
     private let lock = NSLock()
-    private var handler: (@Sendable () async -> Void)?
+    private var handler: (@concurrent @Sendable () async -> Void)?
     private var observer: NSObjectProtocol?
 
     init(notificationCenter: NotificationCenter = .default) {
@@ -147,7 +147,7 @@ private final class CloudKitAccountChangeObserver: @unchecked Sendable {
         }
     }
 
-    func setHandler(_ handler: (@Sendable () async -> Void)?) {
+    func setHandler(_ handler: (@concurrent @Sendable () async -> Void)?) {
         lock.withLock { self.handler = handler }
     }
 
@@ -272,7 +272,7 @@ final class LiveCloudKitEngineHost: CloudKitEngineHosting, @unchecked Sendable {
         }
     }
 
-    func setAccountChangeHandler(_ handler: (@Sendable () async -> Void)?) {
+    func setAccountChangeHandler(_ handler: (@concurrent @Sendable () async -> Void)?) {
         accountChangeObserver.setHandler(handler)
     }
 
@@ -398,7 +398,7 @@ public actor CKSyncEngineBoundary: CloudSyncEngineBoundary {
     private var resourcesInitialized = false
     private var delegate: PingScopeCKSyncEngineDelegate?
     private var engineHandle: CloudKitEngineHandle?
-    private var accountChangeHandler: (@Sendable () async -> Void)?
+    private var accountChangeHandler: (@concurrent @Sendable () async -> Void)?
     private var isHandlingAccountChange = false
     private var hasPendingAccountChange = false
 
@@ -435,7 +435,7 @@ public actor CKSyncEngineBoundary: CloudSyncEngineBoundary {
         return availability
     }
 
-    public func setAccountChangeHandler(_ handler: (@Sendable () async -> Void)?) async {
+    public func setAccountChangeHandler(_ handler: (@concurrent @Sendable () async -> Void)?) async {
         accountChangeHandler = handler
         // Keep observing after opt-out so an account switch cannot leave the
         // previous account's serialized CKSyncEngine state on disk.

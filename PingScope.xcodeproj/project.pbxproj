@@ -31,14 +31,20 @@
 		53F300000000000000000002 /* PingScopeHistoryKit in Frameworks */ = {isa = PBXBuildFile; productRef = 53F300000000000000000001 /* PingScopeHistoryKit */; };
 		53F300000000000000000003 /* PingScopeHistoryKit in Frameworks */ = {isa = PBXBuildFile; productRef = 53F300000000000000000001 /* PingScopeHistoryKit */; };
 		53F300000000000000000004 /* PingScopeHistoryKit in Frameworks */ = {isa = PBXBuildFile; productRef = 53F300000000000000000001 /* PingScopeHistoryKit */; };
-		53F400000000000000000001 /* PingScopeCore in Frameworks */ = {isa = PBXBuildFile; productRef = 53F100000000000000000002 /* PingScopeCore */; };
-		53F400000000000000000002 /* PingScopeiOS in Frameworks */ = {isa = PBXBuildFile; productRef = 53F100000000000000000005 /* PingScopeiOS */; };
-		53F400000000000000000003 /* PingScopeHistoryKit in Frameworks */ = {isa = PBXBuildFile; productRef = 53F300000000000000000001 /* PingScopeHistoryKit */; };
-		53F400000000000000000004 /* PingScopeCloudSync in Frameworks */ = {isa = PBXBuildFile; productRef = 53F400000000000000000005 /* PingScopeCloudSync */; };
 		53F400000000000000000006 /* PingScopeCloudSync in Frameworks */ = {isa = PBXBuildFile; productRef = 53F400000000000000000005 /* PingScopeCloudSync */; };
 		53F400000000000000000007 /* PingScopeCloudSync in Frameworks */ = {isa = PBXBuildFile; productRef = 53F400000000000000000005 /* PingScopeCloudSync */; };
 		53F400000000000000000008 /* PingScopeCloudSync in Frameworks */ = {isa = PBXBuildFile; productRef = 53F400000000000000000005 /* PingScopeCloudSync */; };
 		53F200000000000000000001 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = 53F200000000000000000003 /* Sparkle */; };
+		54A000000000000000000091 /* PingScopeCore in Frameworks */ = {isa = PBXBuildFile; productRef = 53F100000000000000000002 /* PingScopeCore */; };
+		54A000000000000000000092 /* PingScopeCore in Frameworks */ = {isa = PBXBuildFile; productRef = 53F100000000000000000002 /* PingScopeCore */; };
+		54A000000000000000000093 /* PingScopeHistoryKit in Frameworks */ = {isa = PBXBuildFile; productRef = 53F300000000000000000001 /* PingScopeHistoryKit */; };
+		54A000000000000000000094 /* PingScopeCore in Frameworks */ = {isa = PBXBuildFile; productRef = 53F100000000000000000002 /* PingScopeCore */; };
+		54A000000000000000000095 /* PingScopeCloudSync in Frameworks */ = {isa = PBXBuildFile; productRef = 53F400000000000000000005 /* PingScopeCloudSync */; };
+		54A000000000000000000096 /* PingScopeCore in Frameworks */ = {isa = PBXBuildFile; productRef = 53F100000000000000000002 /* PingScopeCore */; };
+		54A000000000000000000097 /* PingScopeHistoryKit in Frameworks */ = {isa = PBXBuildFile; productRef = 53F300000000000000000001 /* PingScopeHistoryKit */; };
+		54A000000000000000000098 /* PingScopeiOS in Frameworks */ = {isa = PBXBuildFile; productRef = 53F100000000000000000005 /* PingScopeiOS */; };
+		54A000000000000000000099 /* PingScopeCore in Frameworks */ = {isa = PBXBuildFile; productRef = 53F100000000000000000002 /* PingScopeCore */; };
+		54A00000000000000000009A /* PingScopeExtensionSupport in Frameworks */ = {isa = PBXBuildFile; productRef = 53D2B0B82F45A1A300E65EF3 /* PingScopeExtensionSupport */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -127,7 +133,13 @@
 		53AA6F372F441DAB009FEF3A /* PingScope.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = PingScope.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		53E500000000000000000006 /* PingScope-AppStore.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; name = "PingScope-AppStore.app"; path = PingScope.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		53A100000000000000000007 /* PingScope-iOS.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; name = "PingScope-iOS.app"; path = PingScope.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		53AA6F442F441DAD009FEF3A /* PingScopeTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = PingScopeTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		53AA6F442F441DAD009FEF3A /* PingScopeMacAppTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = PingScopeMacAppTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		54A000000000000000000011 /* PingScopeCoreTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = PingScopeCoreTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		54A000000000000000000012 /* PingScopeHistoryKitTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = PingScopeHistoryKitTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		54A000000000000000000013 /* PingScopeCloudSyncTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = PingScopeCloudSyncTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		54A000000000000000000014 /* PingScopeiOSTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = PingScopeiOSTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		54A000000000000000000015 /* PingScopeExtensionSupportTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = PingScopeExtensionSupportTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		54A000000000000000000016 /* PingScopeBuildGraphTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = PingScopeBuildGraphTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		53AA6F4E2F441DAD009FEF3A /* PingScopeUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; name = PingScopeUITests.xctest; path = PingScope.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		53D2B0B22F45A1A300E65EEE /* widgetExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = widgetExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		53A200000000000000000005 /* PingScopeLiveActivityExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = PingScopeLiveActivityExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -149,9 +161,39 @@
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
-		53AA6F472F441DAD009FEF3A /* PingScopeTests */ = {
+		53AA6F472F441DAD009FEF3A /* PingScopeMacAppTests */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			path = Tests/PingScopeFreshTests;
+			path = Tests/PingScopeFreshTests/MacApp;
+			sourceTree = "<group>";
+		};
+		54A000000000000000000001 /* PingScopeCoreTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = Tests/PingScopeFreshTests/Core;
+			sourceTree = "<group>";
+		};
+		54A000000000000000000002 /* PingScopeHistoryKitTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = Tests/PingScopeFreshTests/History;
+			sourceTree = "<group>";
+		};
+		54A000000000000000000003 /* PingScopeCloudSyncTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = Tests/PingScopeFreshTests/Cloud;
+			sourceTree = "<group>";
+		};
+		54A000000000000000000004 /* PingScopeiOSTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = Tests/PingScopeFreshTests/iOS;
+			sourceTree = "<group>";
+		};
+		54A000000000000000000005 /* PingScopeExtensionSupportTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = Tests/PingScopeFreshTests/ExtensionSupport;
+			sourceTree = "<group>";
+		};
+		54A000000000000000000006 /* PingScopeBuildGraphTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = Tests/PingScopeFreshTests/BuildGraph;
 			sourceTree = "<group>";
 		};
 		53AA6F512F441DAD009FEF3A /* PingScopeUITests */ = {
@@ -205,10 +247,6 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				53F400000000000000000004 /* PingScopeCloudSync in Frameworks */,
-				53F400000000000000000001 /* PingScopeCore in Frameworks */,
-				53F400000000000000000003 /* PingScopeHistoryKit in Frameworks */,
-				53F400000000000000000002 /* PingScopeiOS in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -260,6 +298,58 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		54A000000000000000000041 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				54A000000000000000000091 /* PingScopeCore in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		54A000000000000000000042 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				54A000000000000000000092 /* PingScopeCore in Frameworks */,
+				54A000000000000000000093 /* PingScopeHistoryKit in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		54A000000000000000000043 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				54A000000000000000000094 /* PingScopeCore in Frameworks */,
+				54A000000000000000000095 /* PingScopeCloudSync in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		54A000000000000000000044 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				54A000000000000000000096 /* PingScopeCore in Frameworks */,
+				54A000000000000000000097 /* PingScopeHistoryKit in Frameworks */,
+				54A000000000000000000098 /* PingScopeiOS in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		54A000000000000000000045 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				54A000000000000000000099 /* PingScopeCore in Frameworks */,
+				54A00000000000000000009A /* PingScopeExtensionSupport in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		54A000000000000000000046 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -272,7 +362,13 @@
 				53A200000000000000000006 /* PingScopeLiveActivity */,
 				53AA6F662F441E25009FEF3A /* Assets.xcassets */,
 				53E500000000000000000011 /* PrivacyInfo.xcprivacy */,
-				53AA6F472F441DAD009FEF3A /* PingScopeTests */,
+				54A000000000000000000001 /* PingScopeCoreTests */,
+				54A000000000000000000002 /* PingScopeHistoryKitTests */,
+				54A000000000000000000003 /* PingScopeCloudSyncTests */,
+				54A000000000000000000004 /* PingScopeiOSTests */,
+				53AA6F472F441DAD009FEF3A /* PingScopeMacAppTests */,
+				54A000000000000000000005 /* PingScopeExtensionSupportTests */,
+				54A000000000000000000006 /* PingScopeBuildGraphTests */,
 				53AA6F512F441DAD009FEF3A /* PingScopeUITests */,
 				53D2B0B82F45A1A300E65EEE /* PingScopeWidget */,
 				53D2B0B32F45A1A300E65EEE /* Frameworks */,
@@ -286,7 +382,13 @@
 				53AA6F372F441DAB009FEF3A /* PingScope.app */,
 				53E500000000000000000006 /* PingScope-AppStore.app */,
 				53A100000000000000000007 /* PingScope-iOS.app */,
-				53AA6F442F441DAD009FEF3A /* PingScopeTests.xctest */,
+				54A000000000000000000011 /* PingScopeCoreTests.xctest */,
+				54A000000000000000000012 /* PingScopeHistoryKitTests.xctest */,
+				54A000000000000000000013 /* PingScopeCloudSyncTests.xctest */,
+				54A000000000000000000014 /* PingScopeiOSTests.xctest */,
+				53AA6F442F441DAD009FEF3A /* PingScopeMacAppTests.xctest */,
+				54A000000000000000000015 /* PingScopeExtensionSupportTests.xctest */,
+				54A000000000000000000016 /* PingScopeBuildGraphTests.xctest */,
 				53AA6F4E2F441DAD009FEF3A /* PingScopeUITests.xctest */,
 				53D2B0B22F45A1A300E65EEE /* widgetExtension.appex */,
 				53A200000000000000000005 /* PingScopeLiveActivityExtension.appex */,
@@ -335,9 +437,9 @@
 			productReference = 53AA6F372F441DAB009FEF3A /* PingScope.app */;
 			productType = "com.apple.product-type.application";
 		};
-		53AA6F432F441DAD009FEF3A /* PingScopeTests */ = {
+		53AA6F432F441DAD009FEF3A /* PingScopeMacAppTests */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = 53AA6F5B2F441DAD009FEF3A /* Build configuration list for PBXNativeTarget "PingScopeTests" */;
+			buildConfigurationList = 53AA6F5B2F441DAD009FEF3A /* Build configuration list for PBXNativeTarget "PingScopeMacAppTests" */;
 			buildPhases = (
 				53AA6F402F441DAD009FEF3A /* Sources */,
 				53AA6F412F441DAD009FEF3A /* Frameworks */,
@@ -349,17 +451,158 @@
 				53AA6F462F441DAD009FEF3A /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
-				53AA6F472F441DAD009FEF3A /* PingScopeTests */,
+				53AA6F472F441DAD009FEF3A /* PingScopeMacAppTests */,
 			);
-			name = PingScopeTests;
+			name = PingScopeMacAppTests;
 			packageProductDependencies = (
 				53F400000000000000000005 /* PingScopeCloudSync */,
 				53F100000000000000000002 /* PingScopeCore */,
 				53F300000000000000000001 /* PingScopeHistoryKit */,
+			);
+			productName = PingScopeMacAppTests;
+			productReference = 53AA6F442F441DAD009FEF3A /* PingScopeMacAppTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		54A000000000000000000021 /* PingScopeCoreTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 54A000000000000000000061 /* Build configuration list for PBXNativeTarget "PingScopeCoreTests" */;
+			buildPhases = (
+				54A000000000000000000031 /* Sources */,
+				54A000000000000000000041 /* Frameworks */,
+				54A000000000000000000051 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				54A000000000000000000001 /* PingScopeCoreTests */,
+			);
+			name = PingScopeCoreTests;
+			packageProductDependencies = (
+				53F100000000000000000002 /* PingScopeCore */,
+			);
+			productName = PingScopeCoreTests;
+			productReference = 54A000000000000000000011 /* PingScopeCoreTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		54A000000000000000000022 /* PingScopeHistoryKitTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 54A000000000000000000062 /* Build configuration list for PBXNativeTarget "PingScopeHistoryKitTests" */;
+			buildPhases = (
+				54A000000000000000000032 /* Sources */,
+				54A000000000000000000042 /* Frameworks */,
+				54A000000000000000000052 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				54A000000000000000000002 /* PingScopeHistoryKitTests */,
+			);
+			name = PingScopeHistoryKitTests;
+			packageProductDependencies = (
+				53F100000000000000000002 /* PingScopeCore */,
+				53F300000000000000000001 /* PingScopeHistoryKit */,
+			);
+			productName = PingScopeHistoryKitTests;
+			productReference = 54A000000000000000000012 /* PingScopeHistoryKitTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		54A000000000000000000023 /* PingScopeCloudSyncTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 54A000000000000000000063 /* Build configuration list for PBXNativeTarget "PingScopeCloudSyncTests" */;
+			buildPhases = (
+				54A000000000000000000033 /* Sources */,
+				54A000000000000000000043 /* Frameworks */,
+				54A000000000000000000053 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				54A000000000000000000003 /* PingScopeCloudSyncTests */,
+			);
+			name = PingScopeCloudSyncTests;
+			packageProductDependencies = (
+				53F100000000000000000002 /* PingScopeCore */,
+				53F400000000000000000005 /* PingScopeCloudSync */,
+			);
+			productName = PingScopeCloudSyncTests;
+			productReference = 54A000000000000000000013 /* PingScopeCloudSyncTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		54A000000000000000000024 /* PingScopeiOSTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 54A000000000000000000064 /* Build configuration list for PBXNativeTarget "PingScopeiOSTests" */;
+			buildPhases = (
+				54A000000000000000000034 /* Sources */,
+				54A000000000000000000044 /* Frameworks */,
+				54A000000000000000000054 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				54A000000000000000000004 /* PingScopeiOSTests */,
+			);
+			name = PingScopeiOSTests;
+			packageProductDependencies = (
+				53F100000000000000000002 /* PingScopeCore */,
+				53F300000000000000000001 /* PingScopeHistoryKit */,
 				53F100000000000000000005 /* PingScopeiOS */,
 			);
-			productName = PingScopeTests;
-			productReference = 53AA6F442F441DAD009FEF3A /* PingScopeTests.xctest */;
+			productName = PingScopeiOSTests;
+			productReference = 54A000000000000000000014 /* PingScopeiOSTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		54A000000000000000000025 /* PingScopeExtensionSupportTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 54A000000000000000000065 /* Build configuration list for PBXNativeTarget "PingScopeExtensionSupportTests" */;
+			buildPhases = (
+				54A000000000000000000035 /* Sources */,
+				54A000000000000000000045 /* Frameworks */,
+				54A000000000000000000055 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				54A000000000000000000005 /* PingScopeExtensionSupportTests */,
+			);
+			name = PingScopeExtensionSupportTests;
+			packageProductDependencies = (
+				53F100000000000000000002 /* PingScopeCore */,
+				53D2B0B82F45A1A300E65EF3 /* PingScopeExtensionSupport */,
+			);
+			productName = PingScopeExtensionSupportTests;
+			productReference = 54A000000000000000000015 /* PingScopeExtensionSupportTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		54A000000000000000000026 /* PingScopeBuildGraphTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 54A000000000000000000066 /* Build configuration list for PBXNativeTarget "PingScopeBuildGraphTests" */;
+			buildPhases = (
+				54A000000000000000000036 /* Sources */,
+				54A000000000000000000046 /* Frameworks */,
+				54A000000000000000000056 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				54A000000000000000000006 /* PingScopeBuildGraphTests */,
+			);
+			name = PingScopeBuildGraphTests;
+			packageProductDependencies = (
+			);
+			productName = PingScopeBuildGraphTests;
+			productReference = 54A000000000000000000016 /* PingScopeBuildGraphTests.xctest */;
 			productType = "com.apple.product-type.bundle.unit-test";
 		};
 		53E500000000000000000008 /* PingScopeAppStore */ = {
@@ -503,6 +746,12 @@
 						CreatedOnToolsVersion = 26.0.1;
 						TestTargetID = 53AA6F362F441DAB009FEF3A;
 					};
+					54A000000000000000000021 = {CreatedOnToolsVersion = 26.0.1; };
+					54A000000000000000000022 = {CreatedOnToolsVersion = 26.0.1; };
+					54A000000000000000000023 = {CreatedOnToolsVersion = 26.0.1; };
+					54A000000000000000000024 = {CreatedOnToolsVersion = 26.0.1; };
+					54A000000000000000000025 = {CreatedOnToolsVersion = 26.0.1; };
+					54A000000000000000000026 = {CreatedOnToolsVersion = 26.0.1; };
 					53AA6F4D2F441DAD009FEF3A = {
 						CreatedOnToolsVersion = 26.0.1;
 						TestTargetID = 53AA6F362F441DAB009FEF3A;
@@ -543,7 +792,13 @@
 				53E500000000000000000008 /* PingScopeAppStore */,
 				53A10000000000000000000C /* PingScopeiOSApp */,
 				53A20000000000000000000A /* PingScopeLiveActivityExtension */,
-				53AA6F432F441DAD009FEF3A /* PingScopeTests */,
+				54A000000000000000000021 /* PingScopeCoreTests */,
+				54A000000000000000000022 /* PingScopeHistoryKitTests */,
+				54A000000000000000000023 /* PingScopeCloudSyncTests */,
+				54A000000000000000000024 /* PingScopeiOSTests */,
+				53AA6F432F441DAD009FEF3A /* PingScopeMacAppTests */,
+				54A000000000000000000025 /* PingScopeExtensionSupportTests */,
+				54A000000000000000000026 /* PingScopeBuildGraphTests */,
 				53AA6F4D2F441DAD009FEF3A /* PingScopeUITests */,
 				53D2B0B12F45A1A300E65EEE /* widgetExtension */,
 			);
@@ -606,6 +861,12 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		54A000000000000000000051 /* Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		54A000000000000000000052 /* Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		54A000000000000000000053 /* Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		54A000000000000000000054 /* Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		54A000000000000000000055 /* Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		54A000000000000000000056 /* Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
@@ -658,6 +919,12 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		54A000000000000000000031 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		54A000000000000000000032 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		54A000000000000000000033 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		54A000000000000000000034 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		54A000000000000000000035 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		54A000000000000000000036 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -886,7 +1153,9 @@
 				MACOSX_DEPLOYMENT_TARGET = 15.0;
 				MARKETING_VERSION = 0.5.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.hadm.PingScope;
-				PRODUCT_NAME = PingScope;
+				PRODUCT_MODULE_NAME = PingScopeAppStore;
+				PRODUCT_NAME = "PingScope-AppStore";
+				EXECUTABLE_NAME = PingScope;
 				SDKROOT = macosx;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SUPPORTED_PLATFORMS = macosx;
@@ -938,7 +1207,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 15.0;
 				MARKETING_VERSION = 0.5.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.hadm.PingScopeTests;
+				PRODUCT_BUNDLE_IDENTIFIER = com.hadm.PingScopeMacAppTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = macosx;
 				STRING_CATALOG_GENERATE_SYMBOLS = NO;
@@ -961,7 +1230,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 15.0;
 				MARKETING_VERSION = 0.5.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.hadm.PingScopeTests;
+				PRODUCT_BUNDLE_IDENTIFIER = com.hadm.PingScopeMacAppTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = macosx;
 				STRING_CATALOG_GENERATE_SYMBOLS = NO;
@@ -1232,6 +1501,18 @@
 			};
 			name = Release;
 		};
+		54A000000000000000000071 /* Debug */ = {isa = XCBuildConfiguration; buildSettings = {CODE_SIGN_STYLE = Automatic; CURRENT_PROJECT_VERSION = 94; DEVELOPMENT_TEAM = 6R7S5GA944; GENERATE_INFOPLIST_FILE = YES; MACOSX_DEPLOYMENT_TARGET = 15.0; MARKETING_VERSION = 0.5.0; PRODUCT_BUNDLE_IDENTIFIER = com.hadm.PingScopeCoreTests; PRODUCT_NAME = "$(TARGET_NAME)"; SDKROOT = macosx; SKIP_INSTALL = YES; STRING_CATALOG_GENERATE_SYMBOLS = NO; SUPPORTED_PLATFORMS = macosx; SWIFT_APPROACHABLE_CONCURRENCY = YES; SWIFT_EMIT_LOC_STRINGS = NO; SWIFT_VERSION = 6.0; }; name = Debug; };
+		54A000000000000000000081 /* Release */ = {isa = XCBuildConfiguration; buildSettings = {CODE_SIGN_STYLE = Automatic; CURRENT_PROJECT_VERSION = 94; DEVELOPMENT_TEAM = 6R7S5GA944; GENERATE_INFOPLIST_FILE = YES; MACOSX_DEPLOYMENT_TARGET = 15.0; MARKETING_VERSION = 0.5.0; PRODUCT_BUNDLE_IDENTIFIER = com.hadm.PingScopeCoreTests; PRODUCT_NAME = "$(TARGET_NAME)"; SDKROOT = macosx; SKIP_INSTALL = YES; STRING_CATALOG_GENERATE_SYMBOLS = NO; SUPPORTED_PLATFORMS = macosx; SWIFT_APPROACHABLE_CONCURRENCY = YES; SWIFT_EMIT_LOC_STRINGS = NO; SWIFT_VERSION = 6.0; }; name = Release; };
+		54A000000000000000000072 /* Debug */ = {isa = XCBuildConfiguration; buildSettings = {CODE_SIGN_STYLE = Automatic; CURRENT_PROJECT_VERSION = 94; DEVELOPMENT_TEAM = 6R7S5GA944; GENERATE_INFOPLIST_FILE = YES; MACOSX_DEPLOYMENT_TARGET = 15.0; MARKETING_VERSION = 0.5.0; PRODUCT_BUNDLE_IDENTIFIER = com.hadm.PingScopeHistoryKitTests; PRODUCT_NAME = "$(TARGET_NAME)"; SDKROOT = macosx; SKIP_INSTALL = YES; STRING_CATALOG_GENERATE_SYMBOLS = NO; SUPPORTED_PLATFORMS = macosx; SWIFT_APPROACHABLE_CONCURRENCY = YES; SWIFT_EMIT_LOC_STRINGS = NO; SWIFT_VERSION = 6.0; }; name = Debug; };
+		54A000000000000000000082 /* Release */ = {isa = XCBuildConfiguration; buildSettings = {CODE_SIGN_STYLE = Automatic; CURRENT_PROJECT_VERSION = 94; DEVELOPMENT_TEAM = 6R7S5GA944; GENERATE_INFOPLIST_FILE = YES; MACOSX_DEPLOYMENT_TARGET = 15.0; MARKETING_VERSION = 0.5.0; PRODUCT_BUNDLE_IDENTIFIER = com.hadm.PingScopeHistoryKitTests; PRODUCT_NAME = "$(TARGET_NAME)"; SDKROOT = macosx; SKIP_INSTALL = YES; STRING_CATALOG_GENERATE_SYMBOLS = NO; SUPPORTED_PLATFORMS = macosx; SWIFT_APPROACHABLE_CONCURRENCY = YES; SWIFT_EMIT_LOC_STRINGS = NO; SWIFT_VERSION = 6.0; }; name = Release; };
+		54A000000000000000000073 /* Debug */ = {isa = XCBuildConfiguration; buildSettings = {CODE_SIGN_STYLE = Automatic; CURRENT_PROJECT_VERSION = 94; DEVELOPMENT_TEAM = 6R7S5GA944; GENERATE_INFOPLIST_FILE = YES; MACOSX_DEPLOYMENT_TARGET = 15.0; MARKETING_VERSION = 0.5.0; PRODUCT_BUNDLE_IDENTIFIER = com.hadm.PingScopeCloudSyncTests; PRODUCT_NAME = "$(TARGET_NAME)"; SDKROOT = macosx; SKIP_INSTALL = YES; STRING_CATALOG_GENERATE_SYMBOLS = NO; SUPPORTED_PLATFORMS = macosx; SWIFT_APPROACHABLE_CONCURRENCY = YES; SWIFT_EMIT_LOC_STRINGS = NO; SWIFT_VERSION = 6.0; }; name = Debug; };
+		54A000000000000000000083 /* Release */ = {isa = XCBuildConfiguration; buildSettings = {CODE_SIGN_STYLE = Automatic; CURRENT_PROJECT_VERSION = 94; DEVELOPMENT_TEAM = 6R7S5GA944; GENERATE_INFOPLIST_FILE = YES; MACOSX_DEPLOYMENT_TARGET = 15.0; MARKETING_VERSION = 0.5.0; PRODUCT_BUNDLE_IDENTIFIER = com.hadm.PingScopeCloudSyncTests; PRODUCT_NAME = "$(TARGET_NAME)"; SDKROOT = macosx; SKIP_INSTALL = YES; STRING_CATALOG_GENERATE_SYMBOLS = NO; SUPPORTED_PLATFORMS = macosx; SWIFT_APPROACHABLE_CONCURRENCY = YES; SWIFT_EMIT_LOC_STRINGS = NO; SWIFT_VERSION = 6.0; }; name = Release; };
+		54A000000000000000000074 /* Debug */ = {isa = XCBuildConfiguration; buildSettings = {CODE_SIGN_STYLE = Automatic; CURRENT_PROJECT_VERSION = 94; DEVELOPMENT_TEAM = 6R7S5GA944; GENERATE_INFOPLIST_FILE = YES; MACOSX_DEPLOYMENT_TARGET = 15.0; MARKETING_VERSION = 0.5.0; PRODUCT_BUNDLE_IDENTIFIER = com.hadm.PingScopeiOSTests; PRODUCT_NAME = "$(TARGET_NAME)"; SDKROOT = macosx; SKIP_INSTALL = YES; STRING_CATALOG_GENERATE_SYMBOLS = NO; SUPPORTED_PLATFORMS = macosx; SWIFT_APPROACHABLE_CONCURRENCY = YES; SWIFT_EMIT_LOC_STRINGS = NO; SWIFT_VERSION = 6.0; }; name = Debug; };
+		54A000000000000000000084 /* Release */ = {isa = XCBuildConfiguration; buildSettings = {CODE_SIGN_STYLE = Automatic; CURRENT_PROJECT_VERSION = 94; DEVELOPMENT_TEAM = 6R7S5GA944; GENERATE_INFOPLIST_FILE = YES; MACOSX_DEPLOYMENT_TARGET = 15.0; MARKETING_VERSION = 0.5.0; PRODUCT_BUNDLE_IDENTIFIER = com.hadm.PingScopeiOSTests; PRODUCT_NAME = "$(TARGET_NAME)"; SDKROOT = macosx; SKIP_INSTALL = YES; STRING_CATALOG_GENERATE_SYMBOLS = NO; SUPPORTED_PLATFORMS = macosx; SWIFT_APPROACHABLE_CONCURRENCY = YES; SWIFT_EMIT_LOC_STRINGS = NO; SWIFT_VERSION = 6.0; }; name = Release; };
+		54A000000000000000000075 /* Debug */ = {isa = XCBuildConfiguration; buildSettings = {CODE_SIGN_STYLE = Automatic; CURRENT_PROJECT_VERSION = 94; DEVELOPMENT_TEAM = 6R7S5GA944; GENERATE_INFOPLIST_FILE = YES; MACOSX_DEPLOYMENT_TARGET = 15.0; MARKETING_VERSION = 0.5.0; PRODUCT_BUNDLE_IDENTIFIER = com.hadm.PingScopeExtensionSupportTests; PRODUCT_NAME = "$(TARGET_NAME)"; SDKROOT = macosx; SKIP_INSTALL = YES; STRING_CATALOG_GENERATE_SYMBOLS = NO; SUPPORTED_PLATFORMS = macosx; SWIFT_APPROACHABLE_CONCURRENCY = YES; SWIFT_EMIT_LOC_STRINGS = NO; SWIFT_VERSION = 6.0; }; name = Debug; };
+		54A000000000000000000085 /* Release */ = {isa = XCBuildConfiguration; buildSettings = {CODE_SIGN_STYLE = Automatic; CURRENT_PROJECT_VERSION = 94; DEVELOPMENT_TEAM = 6R7S5GA944; GENERATE_INFOPLIST_FILE = YES; MACOSX_DEPLOYMENT_TARGET = 15.0; MARKETING_VERSION = 0.5.0; PRODUCT_BUNDLE_IDENTIFIER = com.hadm.PingScopeExtensionSupportTests; PRODUCT_NAME = "$(TARGET_NAME)"; SDKROOT = macosx; SKIP_INSTALL = YES; STRING_CATALOG_GENERATE_SYMBOLS = NO; SUPPORTED_PLATFORMS = macosx; SWIFT_APPROACHABLE_CONCURRENCY = YES; SWIFT_EMIT_LOC_STRINGS = NO; SWIFT_VERSION = 6.0; }; name = Release; };
+		54A000000000000000000076 /* Debug */ = {isa = XCBuildConfiguration; buildSettings = {CODE_SIGN_STYLE = Automatic; CURRENT_PROJECT_VERSION = 94; DEVELOPMENT_TEAM = 6R7S5GA944; GENERATE_INFOPLIST_FILE = YES; MACOSX_DEPLOYMENT_TARGET = 15.0; MARKETING_VERSION = 0.5.0; PRODUCT_BUNDLE_IDENTIFIER = com.hadm.PingScopeBuildGraphTests; PRODUCT_NAME = "$(TARGET_NAME)"; SDKROOT = macosx; SKIP_INSTALL = YES; STRING_CATALOG_GENERATE_SYMBOLS = NO; SUPPORTED_PLATFORMS = macosx; SWIFT_APPROACHABLE_CONCURRENCY = YES; SWIFT_EMIT_LOC_STRINGS = NO; SWIFT_VERSION = 6.0; }; name = Debug; };
+		54A000000000000000000086 /* Release */ = {isa = XCBuildConfiguration; buildSettings = {CODE_SIGN_STYLE = Automatic; CURRENT_PROJECT_VERSION = 94; DEVELOPMENT_TEAM = 6R7S5GA944; GENERATE_INFOPLIST_FILE = YES; MACOSX_DEPLOYMENT_TARGET = 15.0; MARKETING_VERSION = 0.5.0; PRODUCT_BUNDLE_IDENTIFIER = com.hadm.PingScopeBuildGraphTests; PRODUCT_NAME = "$(TARGET_NAME)"; SDKROOT = macosx; SKIP_INSTALL = YES; STRING_CATALOG_GENERATE_SYMBOLS = NO; SUPPORTED_PLATFORMS = macosx; SWIFT_APPROACHABLE_CONCURRENCY = YES; SWIFT_EMIT_LOC_STRINGS = NO; SWIFT_VERSION = 6.0; }; name = Release; };
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -1253,7 +1534,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		53AA6F5B2F441DAD009FEF3A /* Build configuration list for PBXNativeTarget "PingScopeTests" */ = {
+		53AA6F5B2F441DAD009FEF3A /* Build configuration list for PBXNativeTarget "PingScopeMacAppTests" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				53AA6F5C2F441DAD009FEF3A /* Debug */,
@@ -1262,6 +1543,12 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
+		54A000000000000000000061 /* Build configuration list for PBXNativeTarget "PingScopeCoreTests" */ = {isa = XCConfigurationList; buildConfigurations = (54A000000000000000000071 /* Debug */, 54A000000000000000000081 /* Release */, ); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+		54A000000000000000000062 /* Build configuration list for PBXNativeTarget "PingScopeHistoryKitTests" */ = {isa = XCConfigurationList; buildConfigurations = (54A000000000000000000072 /* Debug */, 54A000000000000000000082 /* Release */, ); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+		54A000000000000000000063 /* Build configuration list for PBXNativeTarget "PingScopeCloudSyncTests" */ = {isa = XCConfigurationList; buildConfigurations = (54A000000000000000000073 /* Debug */, 54A000000000000000000083 /* Release */, ); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+		54A000000000000000000064 /* Build configuration list for PBXNativeTarget "PingScopeiOSTests" */ = {isa = XCConfigurationList; buildConfigurations = (54A000000000000000000074 /* Debug */, 54A000000000000000000084 /* Release */, ); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+		54A000000000000000000065 /* Build configuration list for PBXNativeTarget "PingScopeExtensionSupportTests" */ = {isa = XCConfigurationList; buildConfigurations = (54A000000000000000000075 /* Debug */, 54A000000000000000000085 /* Release */, ); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+		54A000000000000000000066 /* Build configuration list for PBXNativeTarget "PingScopeBuildGraphTests" */ = {isa = XCConfigurationList; buildConfigurations = (54A000000000000000000076 /* Debug */, 54A000000000000000000086 /* Release */, ); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
 		53E50000000000000000000D /* Build configuration list for PBXNativeTarget "PingScopeAppStore" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (

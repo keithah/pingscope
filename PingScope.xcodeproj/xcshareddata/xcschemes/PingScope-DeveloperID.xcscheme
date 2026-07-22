@@ -42,9 +42,75 @@
             parallelizable = "NO">
             <BuildableReference
                BuildableIdentifier = "primary"
+               BlueprintIdentifier = "54A000000000000000000021"
+               BuildableName = "PingScopeCoreTests.xctest"
+               BlueprintName = "PingScopeCoreTests"
+               ReferencedContainer = "container:PingScope.xcodeproj">
+            </BuildableReference>
+         </TestableReference>
+         <TestableReference
+            skipped = "NO"
+            parallelizable = "NO">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "54A000000000000000000022"
+               BuildableName = "PingScopeHistoryKitTests.xctest"
+               BlueprintName = "PingScopeHistoryKitTests"
+               ReferencedContainer = "container:PingScope.xcodeproj">
+            </BuildableReference>
+         </TestableReference>
+         <TestableReference
+            skipped = "NO"
+            parallelizable = "NO">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "54A000000000000000000023"
+               BuildableName = "PingScopeCloudSyncTests.xctest"
+               BlueprintName = "PingScopeCloudSyncTests"
+               ReferencedContainer = "container:PingScope.xcodeproj">
+            </BuildableReference>
+         </TestableReference>
+         <TestableReference
+            skipped = "NO"
+            parallelizable = "NO">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "54A000000000000000000024"
+               BuildableName = "PingScopeiOSTests.xctest"
+               BlueprintName = "PingScopeiOSTests"
+               ReferencedContainer = "container:PingScope.xcodeproj">
+            </BuildableReference>
+         </TestableReference>
+         <TestableReference
+            skipped = "NO"
+            parallelizable = "NO">
+            <BuildableReference
+               BuildableIdentifier = "primary"
                BlueprintIdentifier = "53AA6F432F441DAD009FEF3A"
-               BuildableName = "PingScopeTests.xctest"
-               BlueprintName = "PingScopeTests"
+               BuildableName = "PingScopeMacAppTests.xctest"
+               BlueprintName = "PingScopeMacAppTests"
+               ReferencedContainer = "container:PingScope.xcodeproj">
+            </BuildableReference>
+         </TestableReference>
+         <TestableReference
+            skipped = "NO"
+            parallelizable = "NO">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "54A000000000000000000025"
+               BuildableName = "PingScopeExtensionSupportTests.xctest"
+               BlueprintName = "PingScopeExtensionSupportTests"
+               ReferencedContainer = "container:PingScope.xcodeproj">
+            </BuildableReference>
+         </TestableReference>
+         <TestableReference
+            skipped = "NO"
+            parallelizable = "NO">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "54A000000000000000000026"
+               BuildableName = "PingScopeBuildGraphTests.xctest"
+               BlueprintName = "PingScopeBuildGraphTests"
                ReferencedContainer = "container:PingScope.xcodeproj">
             </BuildableReference>
          </TestableReference>

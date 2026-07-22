@@ -1,4 +1,5 @@
 import Combine
+import Security
 import XCTest
 @testable import PingScope
 import PingScopeCore
@@ -24,7 +25,19 @@ final class PingScopePresentationViewModelTests: XCTestCase {
         XCTAssertNil(weakModel)
         await runtime.stop()
     }
-    func testMacPersistedCloudSyncUsesCrashLoopGuardWhenContainerEntitlementIsAbsent() async {
+    func testMacPersistedCloudSyncUsesCrashLoopGuardWhenContainerEntitlementIsAbsent() async throws {
+        let task = SecTaskCreateFromSelf(nil)
+        let entitlement = task.flatMap {
+            SecTaskCopyValueForEntitlement(
+                $0,
+                "com.apple.developer.icloud-container-identifiers" as CFString,
+                nil
+            ) as? [String]
+        }
+        try XCTSkipIf(
+            entitlement?.contains(PingScopeCloudKitModel.containerIdentifier) == true,
+            "The signed Xcode test host has the CloudKit entitlement; SwiftPM covers the absent-entitlement path."
+        )
         let suiteName = "PingScopePresentationCrashGuardTests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
         defer { defaults.removePersistentDomain(forName: suiteName) }
@@ -444,15 +457,13 @@ final class PingScopePresentationViewModelTests: XCTestCase {
     }
 
     func testSavingDraftHostOptimisticallyUpdatesVisibleSnapshot() {
-        let oldHostConfigs = UserDefaults.standard.hostConfigs
-        let oldPrimaryHostID = UserDefaults.standard.primaryHostID
-        defer {
-            UserDefaults.standard.hostConfigs = oldHostConfigs
-            UserDefaults.standard.primaryHostID = oldPrimaryHostID
-        }
-
-        let model = PingScopeModel()
+        let suiteName = "PingScopeSavingDraftHostTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
         let hostID = HostConfig.defaultInternet.id
+        defaults.hostConfigs = [.defaultInternet]
+        defaults.primaryHostID = hostID
+        let model = PingScopeModel(cloudSyncDefaultsSuiteName: suiteName)
 
         model.selectHostForEditing(hostID)
         model.draftIntervalMilliseconds = 30_000

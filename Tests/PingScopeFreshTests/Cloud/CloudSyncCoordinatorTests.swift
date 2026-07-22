@@ -2793,7 +2793,7 @@ private actor DeferredCancellationGate {
 private actor AccountChangingCloudSyncBoundary: CloudSyncEngineBoundary {
     private var availability: CloudSyncAccountAvailability
     private var isActive = false
-    private var accountChangeHandler: (@Sendable () async -> Void)?
+    private var accountChangeHandler: (@concurrent @Sendable () async -> Void)?
     private var startCount = 0
     private var stopCount = 0
     private var uploadedRecordCount = 0
@@ -2802,7 +2802,7 @@ private actor AccountChangingCloudSyncBoundary: CloudSyncEngineBoundary {
         self.availability = availability
     }
 
-    func setAccountChangeHandler(_ handler: (@Sendable () async -> Void)?) {
+    func setAccountChangeHandler(_ handler: (@concurrent @Sendable () async -> Void)?) {
         accountChangeHandler = handler
     }
 
@@ -2911,7 +2911,7 @@ private final class RecordingCloudKitEngineHost: CloudKitEngineHosting, @uncheck
     private var activeHandles: Set<CloudKitEngineHandle> = []
     private var delegates: [CloudKitEngineHandle: PingScopeCKSyncEngineDelegate] = [:]
     private var pendingSaveIDs: [CloudKitEngineHandle: [CKRecord.ID]] = [:]
-    private var accountChangeHandler: (@Sendable () async -> Void)?
+    private var accountChangeHandler: (@concurrent @Sendable () async -> Void)?
     private var availability: CloudSyncAccountAvailability = .privateAccount
     private var recordedStatePresenceAtEngineCreation: [Bool] = []
 
@@ -2935,7 +2935,7 @@ private final class RecordingCloudKitEngineHost: CloudKitEngineHosting, @uncheck
         lock.withLock { availability }
     }
 
-    func setAccountChangeHandler(_ handler: (@Sendable () async -> Void)?) {
+    func setAccountChangeHandler(_ handler: (@concurrent @Sendable () async -> Void)?) {
         lock.withLock { accountChangeHandler = handler }
     }
 
@@ -3169,12 +3169,12 @@ private actor SuspendingCloudSyncBoundary: CloudSyncEngineBoundary {
 
 private actor GatedInFlightUploadBoundary: CloudSyncEngineBoundary {
     private var availability: CloudSyncAccountAvailability = .privateAccount
-    private var accountChangeHandler: (@Sendable () async -> Void)?
+    private var accountChangeHandler: (@concurrent @Sendable () async -> Void)?
     private var uploadContinuation: CheckedContinuation<Void, Never>?
     private var uploadStartWaiters: [CheckedContinuation<Void, Never>] = []
 
     func accountAvailability() async -> CloudSyncAccountAvailability { availability }
-    func setAccountChangeHandler(_ handler: (@Sendable () async -> Void)?) async {
+    func setAccountChangeHandler(_ handler: (@concurrent @Sendable () async -> Void)?) async {
         accountChangeHandler = handler
     }
     func start() async throws {}
@@ -3212,11 +3212,11 @@ private actor GatedInFlightUploadBoundary: CloudSyncEngineBoundary {
 
 private actor LifecycleRecordingBoundary: CloudSyncEngineBoundary {
     private var availability: CloudSyncAccountAvailability = .privateAccount
-    private var accountChangeHandler: (@Sendable () async -> Void)?
+    private var accountChangeHandler: (@concurrent @Sendable () async -> Void)?
     private var uploads = 0
 
     func accountAvailability() async -> CloudSyncAccountAvailability { availability }
-    func setAccountChangeHandler(_ handler: (@Sendable () async -> Void)?) async {
+    func setAccountChangeHandler(_ handler: (@concurrent @Sendable () async -> Void)?) async {
         accountChangeHandler = handler
     }
     func start() async throws {}
@@ -3283,7 +3283,7 @@ private actor GatedLifecycleBoundary: CloudSyncEngineBoundary {
 
     func accountAvailability() async -> CloudSyncAccountAvailability { .privateAccount }
 
-    func setAccountChangeHandler(_ handler: (@Sendable () async -> Void)?) async {
+    func setAccountChangeHandler(_ handler: (@concurrent @Sendable () async -> Void)?) async {
         guard handler == nil, shouldSuspendHandlerClear else { return }
         handlerClearStarted = true
         let waiters = handlerClearWaiters
@@ -3401,7 +3401,7 @@ private actor DisableTeardownGate {
 
 private actor GatedStartupBoundary: CloudSyncEngineBoundary {
     private let gateInitialStart: Bool
-    private var accountChangeHandler: (@Sendable () async -> Void)?
+    private var accountChangeHandler: (@concurrent @Sendable () async -> Void)?
     private var startContinuation: CheckedContinuation<Void, Never>?
     private var startWaiters: [CheckedContinuation<Void, Never>] = []
     private var starts = 0
@@ -3413,7 +3413,7 @@ private actor GatedStartupBoundary: CloudSyncEngineBoundary {
 
     func accountAvailability() async -> CloudSyncAccountAvailability { .privateAccount }
 
-    func setAccountChangeHandler(_ handler: (@Sendable () async -> Void)?) async {
+    func setAccountChangeHandler(_ handler: (@concurrent @Sendable () async -> Void)?) async {
         accountChangeHandler = handler
     }
 

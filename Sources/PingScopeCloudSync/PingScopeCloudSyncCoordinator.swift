@@ -54,7 +54,7 @@ public struct CloudSyncUploadConfirmation: @unchecked Sendable {
 
 public protocol CloudSyncEngineBoundary: Sendable {
     func accountAvailability() async throws -> CloudSyncAccountAvailability
-    func setAccountChangeHandler(_ handler: (@Sendable () async -> Void)?) async
+    func setAccountChangeHandler(_ handler: (@concurrent @Sendable () async -> Void)?) async
     func start() async throws
     func stop() async
     func upload(
@@ -64,7 +64,7 @@ public protocol CloudSyncEngineBoundary: Sendable {
 }
 
 public extension CloudSyncEngineBoundary {
-    func setAccountChangeHandler(_ handler: (@Sendable () async -> Void)?) async {
+    func setAccountChangeHandler(_ handler: (@concurrent @Sendable () async -> Void)?) async {
         _ = handler
     }
 }
@@ -105,7 +105,7 @@ public actor PingScopeCloudSyncCoordinator {
     private var activeLifecycleWork: LifecycleWork?
     private var nextBoundaryStopID: UInt = 0
     private var activeBoundaryStop: BoundaryStop?
-    private var accountChangeHandler: (@Sendable () async -> Void)?
+    private var accountChangeHandler: (@concurrent @Sendable () async -> Void)?
     private var accountRecoveryAuthorizationHandler: (@Sendable () async -> Bool)?
     private var recoveryHandler: (@Sendable () async -> Void)?
 
@@ -131,7 +131,7 @@ public actor PingScopeCloudSyncCoordinator {
         recoveryHandler = handler
     }
 
-    func setAccountChangeHandler(_ handler: (@Sendable () async -> Void)?) {
+    func setAccountChangeHandler(_ handler: (@concurrent @Sendable () async -> Void)?) {
         accountChangeHandler = handler
     }
 

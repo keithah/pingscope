@@ -488,7 +488,7 @@ final class BuildGraphOptimizationTests: XCTestCase {
 
         XCTAssertFalse(appStoreScheme.contains("BlueprintName = \"PingScopeTests\""))
         XCTAssertFalse(appStoreScheme.contains("BlueprintName = \"PingScopeUITests\""))
-        XCTAssertTrue(developerScheme.contains("BlueprintName = \"PingScopeTests\""))
+        XCTAssertTrue(developerScheme.contains("BlueprintName = \"PingScopeMacAppTests\""))
         XCTAssertTrue(
             developerScheme.contains("buildImplicitDependencies = \"NO\""),
             "The Developer ID test graph must use its explicit PingScopeApp dependency instead of discovering both mac app flavors"
@@ -866,6 +866,58 @@ final class BuildGraphOptimizationTests: XCTestCase {
         XCTAssertFalse(source.contains("IOPSGetPowerSourceDescription"))
         XCTAssertTrue(source.contains("case kIOPMBatteryPowerKey: return .battery"))
         XCTAssertTrue(source.contains("default: return .unknown"))
+    }
+
+    func testXcodeTestTargetsMirrorSwiftPackageModuleBoundaries() throws {
+        let root = try repositoryRoot()
+        let project = try String(
+            contentsOf: root.appendingPathComponent("PingScope.xcodeproj/project.pbxproj"),
+            encoding: .utf8
+        )
+        let targetNames = [
+            "PingScopeCoreTests",
+            "PingScopeHistoryKitTests",
+            "PingScopeCloudSyncTests",
+            "PingScopeiOSTests",
+            "PingScopeMacAppTests",
+            "PingScopeExtensionSupportTests",
+            "PingScopeBuildGraphTests",
+        ]
+        let sourceDirectories = [
+            "Core",
+            "History",
+            "Cloud",
+            "iOS",
+            "MacApp",
+            "ExtensionSupport",
+            "BuildGraph",
+        ]
+
+        for targetName in targetNames {
+            XCTAssertTrue(
+                project.contains("PBXNativeTarget \"\(targetName)\""),
+                "Xcode must preserve the SwiftPM boundary for \(targetName)."
+            )
+        }
+        for directory in sourceDirectories {
+            XCTAssertTrue(project.contains("path = Tests/PingScopeFreshTests/\(directory);"))
+        }
+
+        for schemeName in ["PingScope.xcscheme", "PingScope-DeveloperID.xcscheme"] {
+            let scheme = try String(
+                contentsOf: root
+                    .appendingPathComponent("PingScope.xcodeproj/xcshareddata/xcschemes")
+                    .appendingPathComponent(schemeName),
+                encoding: .utf8
+            )
+            for targetName in targetNames {
+                XCTAssertTrue(scheme.contains("BlueprintName = \"\(targetName)\""))
+            }
+            XCTAssertEqual(
+                scheme.components(separatedBy: "parallelizable = \"NO\"").count - 1,
+                targetNames.count
+            )
+        }
     }
 
     private func repositoryRoot() throws -> URL {
