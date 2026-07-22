@@ -87,6 +87,9 @@ public struct HistoryIncidentLog: Equatable, Sendable {
         endingAt: Date
     ) {
         let chronological = samples.sorted(by: Self.isChronologicallyOrdered)
+        let chronologicalByHost = samplesByHost.mapValues {
+            $0.sorted(by: Self.isChronologicallyOrdered)
+        }
         var previousWasDown = false
         var diagnoses: [UUID: NetworkPerspectiveDiagnosis] = [:]
         let diagnoser = NetworkPerspectiveDiagnoser()
@@ -95,9 +98,8 @@ public struct HistoryIncidentLog: Equatable, Sendable {
             if isDown, !previousWasDown {
                 var healthByHost: [UUID: HostHealth] = [:]
                 for monitoredHost in allHosts {
-                    guard let latest = samplesByHost[monitoredHost.id]?
-                        .filter({ $0.timestamp <= sample.timestamp })
-                        .max(by: Self.isChronologicallyOrdered) else { continue }
+                    guard let hostSamples = chronologicalByHost[monitoredHost.id],
+                          let latest = Self.latestSample(in: hostSamples, through: sample.timestamp) else { continue }
                     var health = HostHealth(hostID: monitoredHost.id, thresholds: monitoredHost.thresholds)
                     health.ingest(latest)
                     healthByHost[monitoredHost.id] = health
@@ -114,6 +116,21 @@ public struct HistoryIncidentLog: Equatable, Sendable {
     private static func isChronologicallyOrdered(_ lhs: PingResult, _ rhs: PingResult) -> Bool {
         if lhs.timestamp != rhs.timestamp { return lhs.timestamp < rhs.timestamp }
         return lhs.id.uuidString < rhs.id.uuidString
+    }
+
+    private static func latestSample(in samples: [PingResult], through timestamp: Date) -> PingResult? {
+        var lowerBound = 0
+        var upperBound = samples.count
+        while lowerBound < upperBound {
+            let middle = lowerBound + (upperBound - lowerBound) / 2
+            if samples[middle].timestamp <= timestamp {
+                lowerBound = middle + 1
+            } else {
+                upperBound = middle
+            }
+        }
+        guard lowerBound > 0 else { return nil }
+        return samples[lowerBound - 1]
     }
 }
 
@@ -155,7 +172,7 @@ public struct HistoryWeeklyDigest: Equatable, Sendable {
             guard let samples = rangedByHost[host.id], !samples.isEmpty else { return nil }
             return (host, samples, HistoryMetrics(samples: samples))
         }
-        let worstHost = hostSummaries.sorted { lhs, rhs in
+        let worstHost = hostSummaries.min { lhs, rhs in
             if lhs.2.uptimePercent != rhs.2.uptimePercent {
                 return lhs.2.uptimePercent < rhs.2.uptimePercent
             }
@@ -163,16 +180,16 @@ public struct HistoryWeeklyDigest: Equatable, Sendable {
             let comparison = lhs.0.displayName.localizedCaseInsensitiveCompare(rhs.0.displayName)
             if comparison != .orderedSame { return comparison == .orderedAscending }
             return lhs.0.id.uuidString < rhs.0.id.uuidString
-        }.first
+        }
 
         let incidentLogs = hostSummaries.map {
             HistoryIncidentLog(samples: $0.1, endingAt: endingAt)
         }
         let incidents = incidentLogs.flatMap(\.incidents)
-        let busiestNetwork = HistoryNetworkBreakdown(samples: allSamples).groups.sorted { lhs, rhs in
+        let busiestNetwork = HistoryNetworkBreakdown(samples: allSamples).groups.min { lhs, rhs in
             if lhs.sampleCount != rhs.sampleCount { return lhs.sampleCount > rhs.sampleCount }
             return lhs.displayLabel.localizedCaseInsensitiveCompare(rhs.displayLabel) == .orderedAscending
-        }.first
+        }
 
         return HistoryWeeklyDigest(
             startDate: startDate,
@@ -237,10 +254,10 @@ public struct HistoryWeeklyDigest: Equatable, Sendable {
         }
         guard metrics.sampleCount > 0 else { return nil }
 
-        let worstHost = hostSummaries.sorted(by: WeeklyDigestHostSummary.isOrderedBefore).first
+        let worstHost = hostSummaries.min(by: WeeklyDigestHostSummary.isOrderedBefore)
         let busiestNetwork = networkCounts.map { key, count in
             WeeklyDigestNetworkSummary(key: key, sampleCount: count)
-        }.sorted(by: WeeklyDigestNetworkSummary.isOrderedBefore).first
+        }.min(by: WeeklyDigestNetworkSummary.isOrderedBefore)
 
         return HistoryWeeklyDigest(
             startDate: startDate,
@@ -401,6 +418,7 @@ public actor HistoryWeeklyDigestLoader {
     private struct CacheKey: Hashable, Sendable {
         let hosts: [HostIdentity]
         let revision: UInt64
+        let mutationRevision: UInt64
         let endingAt: Date
     }
 
@@ -501,11 +519,17 @@ public actor HistoryWeeklyDigestLoader {
         endingAt: Date
     ) async -> HistoryWeeklyDigest? {
         let revision = await store.historyRevision()
+        let mutationRevision = await store.historyMutationRevision()
         guard !Task.isCancelled else {
             releaseReservation(reservationID)
             return nil
         }
-        let key = CacheKey(hosts: identities, revision: revision, endingAt: endingAt)
+        let key = CacheKey(
+            hosts: identities,
+            revision: revision,
+            mutationRevision: mutationRevision,
+            endingAt: endingAt
+        )
         if let cached = cache[key] {
             touch(key)
             releaseReservation(reservationID)
@@ -515,7 +539,7 @@ public actor HistoryWeeklyDigestLoader {
         let cutoff = endingAt.addingTimeInterval(-HistoryWeeklyDigest.windowDuration)
         let compatibleEntries = cache.filter { cachedKey, entry in
             cachedKey.hosts == identities
-                && cachedKey.revision == revision
+                && cachedKey.mutationRevision == mutationRevision
                 && entry.coveredSince <= cutoff
         }
         if let covering = compatibleEntries.first(where: { _, entry in
@@ -716,6 +740,13 @@ public actor HistoryWeeklyDigestLoader {
     }
 
     private func insert(_ entry: CacheEntry, for key: CacheKey) {
+        // A newer window supersedes the nearly-identical raw sample array for the
+        // same host set. Keeping every revision would retain multiple full weeks.
+        let superseded = cache.keys.filter { $0.hosts == key.hosts && $0 != key }
+        for oldKey in superseded {
+            cache[oldKey] = nil
+            recency.removeAll { $0 == oldKey }
+        }
         cache[key] = entry
         touch(key)
         while recency.count > capacity {

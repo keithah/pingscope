@@ -832,7 +832,9 @@ final class BuildGraphOptimizationTests: XCTestCase {
             macApp.range(of: "private func updatePowerMonitorUIVisibility", range: macCadenceStart.upperBound..<macApp.endIndex)
         )
         let macCadence = macApp[macCadenceStart.lowerBound..<macCadenceEnd.lowerBound]
-        XCTAssertTrue(macCadence.contains("await previous?.value"))
+        XCTAssertTrue(macCadence.contains("pendingCadenceInputs = inputs"))
+        XCTAssertTrue(macCadence.contains("guard cadenceUpdateTask == nil"))
+        XCTAssertFalse(macCadence.contains("await previous?.value"))
     }
 
     func testWindowedStatusPresentationRefreshesCadenceVisibility() throws {

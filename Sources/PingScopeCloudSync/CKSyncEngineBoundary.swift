@@ -9,6 +9,32 @@ import Security
 enum CloudSyncBoundaryError: Error, Equatable {
     case inactive
     case missingContainerEntitlement(String)
+    case accountStatusTimedOut
+}
+
+private enum CloudKitAccountStatusOutcome: @unchecked Sendable {
+    case status(CKAccountStatus)
+    case failure(Error)
+    case timedOut
+    case cancelled
+}
+
+private actor CloudKitAccountStatusRace {
+    private var outcome: CloudKitAccountStatusOutcome?
+    private var waiters: [CheckedContinuation<CloudKitAccountStatusOutcome, Never>] = []
+
+    func finish(_ outcome: CloudKitAccountStatusOutcome) {
+        guard self.outcome == nil else { return }
+        self.outcome = outcome
+        let waiters = waiters
+        self.waiters.removeAll()
+        waiters.forEach { $0.resume(returning: outcome) }
+    }
+
+    func value() async -> CloudKitAccountStatusOutcome {
+        if let outcome { return outcome }
+        return await withCheckedContinuation { waiters.append($0) }
+    }
 }
 
 struct CloudKitEngineHandle: Hashable, Sendable {
@@ -135,6 +161,7 @@ final class LiveCloudKitEngineHost: CloudKitEngineHosting, @unchecked Sendable {
     private let containerIdentifier: String
     private let containerProvider: any CloudKitContainerProviding
     private let injectedAccountStatus: (@Sendable () async throws -> CKAccountStatus)?
+    private let accountStatusTimeout: Duration
     private let accountChangeObserver = CloudKitAccountChangeObserver()
     private let lock = NSLock()
     private var resources: Resources?
@@ -148,11 +175,13 @@ final class LiveCloudKitEngineHost: CloudKitEngineHosting, @unchecked Sendable {
     init(
         containerIdentifier: String,
         containerProvider: any CloudKitContainerProviding = DefaultCloudKitContainerProvider(),
-        accountStatus: (@Sendable () async throws -> CKAccountStatus)? = nil
+        accountStatus: (@Sendable () async throws -> CKAccountStatus)? = nil,
+        accountStatusTimeout: Duration = .seconds(10)
     ) {
         self.containerIdentifier = containerIdentifier
         self.containerProvider = containerProvider
         self.injectedAccountStatus = accountStatus
+        self.accountStatusTimeout = accountStatusTimeout
     }
 
     func prepareResources() throws {
@@ -160,19 +189,86 @@ final class LiveCloudKitEngineHost: CloudKitEngineHosting, @unchecked Sendable {
     }
 
     func accountAvailability() async throws -> CloudSyncAccountAvailability {
+        let operation: @Sendable () async throws -> CKAccountStatus
         if let injectedAccountStatus {
+            operation = injectedAccountStatus
+        } else {
+            let resources = try ensureResources()
+            operation = { try await resources.container.accountStatus() }
+        }
+        let status = try await accountStatusWithRetry(operation)
+        return status == .available ? .privateAccount : .unavailable
+    }
+
+    private func accountStatusWithRetry(
+        _ operation: @escaping @Sendable () async throws -> CKAccountStatus
+    ) async throws -> CKAccountStatus {
+        var lastError: Error?
+        for attempt in 0..<3 {
             do {
-                return try await injectedAccountStatus() == .available ? .privateAccount : .unavailable
+                return try await accountStatusWithTimeout(operation)
+            } catch is CancellationError {
+                throw CancellationError()
             } catch {
-                return .unavailable
+                lastError = error
+                guard attempt < 2, Self.isRetryableAccountStatusError(error) else { throw error }
+                let retryAfter = (error as? CKError)?
+                    .userInfo[CKErrorRetryAfterKey] as? TimeInterval
+                let exponential = 0.1 * Double(1 << attempt)
+                let delay = retryAfter ?? exponential + Double.random(in: 0...(exponential * 0.2))
+                try await Task.sleep(for: .seconds(delay))
             }
         }
+        throw lastError ?? CloudSyncBoundaryError.accountStatusTimedOut
+    }
 
-        let resources = try ensureResources()
-        do {
-            return try await resources.container.accountStatus() == .available ? .privateAccount : .unavailable
-        } catch {
-            return .unavailable
+    private func accountStatusWithTimeout(
+        _ operation: @escaping @Sendable () async throws -> CKAccountStatus
+    ) async throws -> CKAccountStatus {
+        let race = CloudKitAccountStatusRace()
+        let operationTask = Task {
+            do {
+                await race.finish(.status(try await operation()))
+            } catch is CancellationError {
+                await race.finish(.cancelled)
+            } catch {
+                await race.finish(.failure(error))
+            }
+        }
+        let timeout = accountStatusTimeout
+        let timeoutTask = Task {
+            do {
+                try await Task.sleep(for: timeout)
+                await race.finish(.timedOut)
+            } catch {
+                // The operation completed or the caller cancelled.
+            }
+        }
+        let outcome = await withTaskCancellationHandler {
+            await race.value()
+        } onCancel: {
+            operationTask.cancel()
+            timeoutTask.cancel()
+            Task { await race.finish(.cancelled) }
+        }
+        operationTask.cancel()
+        timeoutTask.cancel()
+        switch outcome {
+        case let .status(status): return status
+        case let .failure(error): throw error
+        case .timedOut: throw CloudSyncBoundaryError.accountStatusTimedOut
+        case .cancelled: throw CancellationError()
+        }
+    }
+
+    private static func isRetryableAccountStatusError(_ error: Error) -> Bool {
+        guard let error = error as? CKError else { return false }
+        switch error.code {
+        case .networkFailure, .networkUnavailable, .requestRateLimited,
+             .serviceUnavailable, .zoneBusy:
+            return true
+        default:
+            return false
         }
     }
 

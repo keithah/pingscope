@@ -5,12 +5,35 @@ extension PingScopeModel {
     func refreshNetworkEndpoints(removeMissingStarlink: Bool, retryDelays: [Duration] = []) {
         endpointRefreshTask?.cancel()
         endpointRefreshTask = Task { [weak self] in
-            await self?.performNetworkEndpointDetection(removeMissingStarlink: removeMissingStarlink)
+            guard let gatewayDetector = self?.gatewayDetector,
+                  let gatewayEndpointResolver = self?.gatewayEndpointResolver,
+                  let starlinkDetector = self?.starlinkDetector else { return }
+            let detect = {
+                await Self.detectNetworkEndpointResult(
+                    gatewayDetector: gatewayDetector,
+                    gatewayEndpointResolver: gatewayEndpointResolver,
+                    starlinkDetector: starlinkDetector,
+                    removeMissingStarlink: removeMissingStarlink
+                )
+            }
+            var result = await detect()
+            guard !Task.isCancelled else { return }
+            do {
+                guard let self else { return }
+                self.handleGatewayObservation(result.gatewayOutcome, resolvedHost: result.resolvedGateway)
+                self.reconcileStarlinkDetection(result.starlinkOutcome, removeMissing: result.removeMissingStarlink)
+            }
             for delay in retryDelays {
                 guard !Task.isCancelled else { return }
                 try? await Task.sleep(for: delay.jittered())
                 guard !Task.isCancelled else { return }
-                await self?.performNetworkEndpointDetection(removeMissingStarlink: removeMissingStarlink)
+                result = await detect()
+                guard !Task.isCancelled else { return }
+                do {
+                    guard let self else { return }
+                    self.handleGatewayObservation(result.gatewayOutcome, resolvedHost: result.resolvedGateway)
+                    self.reconcileStarlinkDetection(result.starlinkOutcome, removeMissing: result.removeMissingStarlink)
+                }
             }
         }
     }

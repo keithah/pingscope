@@ -800,20 +800,34 @@ public actor PingScopeCloudSyncService {
 
     private func drainPendingHostDeletions() async {
         let pendingIDs = await versions.pendingDeletions().sorted { $0.uuidString < $1.uuidString }
-        for id in pendingIDs where await uploadHostDeletion(id) {
-            await versions.confirmDeletion(id)
+        let batchSize = 200
+        for startIndex in stride(from: 0, to: pendingIDs.count, by: batchSize) {
+            let endIndex = min(pendingIDs.count, startIndex + batchSize)
+            let batch = Array(pendingIDs[startIndex..<endIndex])
+            guard await uploadHostDeletions(batch) else { continue }
+            for id in batch {
+                await versions.confirmDeletion(id)
+            }
         }
     }
 
-    private func uploadHostDeletion(_ id: UUID) async -> Bool {
-        let recordID = CKRecord.ID(recordName: id.uuidString, zoneID: PingScopeCloudKitModel.zoneID)
+    private func uploadHostDeletions(_ ids: [UUID]) async -> Bool {
+        guard !ids.isEmpty else { return true }
+        let recordIDs = ids.map {
+            CKRecord.ID(recordName: $0.uuidString, zoneID: PingScopeCloudKitModel.zoneID)
+        }
         do {
-            return try await coordinator.upload(samples: [], hosts: [], deletions: [recordID])
+            return try await coordinator.upload(samples: [], hosts: [], deletions: recordIDs)
         } catch let error as CKError where error.code == .unknownItem {
+            // CloudKit deletions are idempotent; an already-absent record is success.
             return true
         } catch {
             return false
         }
+    }
+
+    private func uploadHostDeletion(_ id: UUID) async -> Bool {
+        await uploadHostDeletions([id])
     }
 
     public func deleteHost(id: UUID) async {
@@ -875,6 +889,14 @@ public struct CloudSyncingHistoryStore: PingHistoryStore {
         await destination.latestSamples(hostID: hostID, since: since, limit: limit)
     }
 
+    public func latestSamples(
+        hostIDs: [UUID],
+        since: Date,
+        limitPerHost: Int
+    ) async -> [UUID: [PingResult]] {
+        await destination.latestSamples(hostIDs: hostIDs, since: since, limitPerHost: limitPerHost)
+    }
+
     public func weeklyDigestSamples(
         hostIDs: [UUID],
         since: Date,
@@ -885,6 +907,10 @@ public struct CloudSyncingHistoryStore: PingHistoryStore {
 
     public func historyRevision() async -> UInt64 {
         await destination.historyRevision()
+    }
+
+    public func historyMutationRevision() async -> UInt64 {
+        await destination.historyMutationRevision()
     }
 
     public func exportSamples(host: HostConfig, since: Date, format: HistoryExportFormat, to url: URL) async throws -> Int {

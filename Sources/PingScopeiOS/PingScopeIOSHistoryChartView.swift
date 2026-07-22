@@ -236,7 +236,7 @@ public struct PingScopeIOSHistoryChartView: View {
     }
 
     private func incidentsSection(_ log: HistoryIncidentLog) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
+        LazyVStack(alignment: .leading, spacing: 10) {
             Text("Incidents").font(.headline)
             ForEach(log.incidents) { incident in
                 HStack(spacing: 10) {

@@ -53,10 +53,6 @@ public final class PingScopeIOSHistoryLocationSnapshotStore: @unchecked Sendable
         lock.withLock { value.fix = fix }
     }
 
-    public func updateNetworkInterface(_ interface: String?) {
-        lock.withLock { value.networkInterface = interface }
-    }
-
     public func updateNetwork(interface: String?, name: String?, isVPN: Bool) {
         lock.withLock {
             value.networkInterface = interface

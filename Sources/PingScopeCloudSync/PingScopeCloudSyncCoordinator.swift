@@ -75,10 +75,14 @@ public protocol CloudSyncRecordBuilding: Sendable {
 }
 
 public struct DefaultCloudSyncRecordBuilder: CloudSyncRecordBuilding, Sendable {
-    public init() {}
+    private let codingContext: PingSampleRecordCodingContext
+
+    public init() {
+        codingContext = PingSampleRecordCodingContext()
+    }
 
     public func sampleRecord(from sample: PingResult) async -> CKRecord {
-        PingSampleRecordMapper.record(from: sample)
+        PingSampleRecordMapper.record(from: sample, codingContext: codingContext)
     }
 
     public func hostRecord(from host: CloudSyncHostVersion) async throws -> CKRecord {
@@ -384,7 +388,10 @@ public enum CloudSyncRemoteChangeApplier {
         sampleRecords: [CKRecord],
         to store: any PingHistoryStore
     ) async throws {
-        try await store.upsertRemoteSamples(sampleRecords.compactMap(PingSampleRecordMapper.pingResult(from:)))
+        let codingContext = PingSampleRecordCodingContext()
+        try await store.upsertRemoteSamples(sampleRecords.compactMap {
+            PingSampleRecordMapper.pingResult(from: $0, codingContext: codingContext)
+        })
     }
 
     public static func deleteSampleRecordIDs(

@@ -130,12 +130,25 @@ public struct WidgetMultiHostGraphPresentation: Equatable, Sendable {
     public init(hosts: [WidgetGraphHost], samples: [WidgetGraphSample]) {
         let visibleHosts = WidgetHostSelection(hosts: hosts).visibleHosts(maximum: 5)
         let visibleHostIDs = Set(visibleHosts.map(\.id))
-        let visibleSamples = samples.filter { visibleHostIDs.contains($0.hostID) }
+        var samplesByHost: [UUID: [WidgetGraphSample]] = [:]
+        var earliestTimestamp: Date?
+        var latestTimestamp: Date?
+        var minimumLatency: Double?
+        var maximumLatency: Double?
+        for sample in samples where visibleHostIDs.contains(sample.hostID) {
+            samplesByHost[sample.hostID, default: []].append(sample)
+            earliestTimestamp = earliestTimestamp.map { min($0, sample.timestamp) } ?? sample.timestamp
+            latestTimestamp = latestTimestamp.map { max($0, sample.timestamp) } ?? sample.timestamp
+            if let latency = sample.latencyMilliseconds {
+                minimumLatency = minimumLatency.map { min($0, latency) } ?? latency
+                maximumLatency = maximumLatency.map { max($0, latency) } ?? latency
+            }
+        }
         legend = visibleHosts.map {
             LegendEntry(hostID: $0.id, displayName: $0.displayName, displayColor: $0.displayColor)
         }
         series = visibleHosts.map { host in
-            let hostSamples = visibleSamples.filter { $0.hostID == host.id }
+            let hostSamples = samplesByHost[host.id] ?? []
             return Series(
                 hostID: host.id,
                 samples: hostSamples,
@@ -143,13 +156,12 @@ public struct WidgetMultiHostGraphPresentation: Equatable, Sendable {
                 displayColor: host.displayColor
             )
         }
-        if let start = visibleSamples.map(\.timestamp).min(), let end = visibleSamples.map(\.timestamp).max() {
+        if let start = earliestTimestamp, let end = latestTimestamp {
             timeWindow = TimeWindow(start: start, end: end)
         } else {
             timeWindow = nil
         }
-        let latencies = visibleSamples.compactMap(\.latencyMilliseconds)
-        if let minimum = latencies.min(), let maximum = latencies.max() {
+        if let minimum = minimumLatency, let maximum = maximumLatency {
             latencyScale = LatencyScale(minimumMilliseconds: minimum, maximumMilliseconds: maximum)
         } else {
             latencyScale = nil

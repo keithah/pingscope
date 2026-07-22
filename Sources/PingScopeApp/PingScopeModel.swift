@@ -569,14 +569,20 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
     }
 
     func start() {
+        startRuntimeSubscriptions()
+        Task { [runtime] in await runtime.start() }
+        startNetworkMonitoring()
+        startNetworkPathMonitoring()
+        refreshNotificationPermission()
+    }
+
+    func startRuntimeSubscriptions() {
         snapshotTask?.cancel()
         snapshotTask = Task { [weak self] in
-            guard let self else { return }
-            let snapshots = await self.runtime.snapshots()
+            guard let snapshots = await self?.runtime.snapshots() else { return }
             for await snapshot in snapshots {
-                await MainActor.run {
-                    self.processRuntimeSnapshot(snapshot)
-                }
+                guard let self else { return }
+                self.processRuntimeSnapshot(snapshot)
             }
         }
         // Alerts arrive on their own non-conflating stream: the snapshot stream
@@ -584,18 +590,12 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
         // busy, which would silently and permanently lose one-shot alerts.
         alertTask?.cancel()
         alertTask = Task { [weak self] in
-            guard let self else { return }
-            let events = await self.runtime.alerts()
+            guard let events = await self?.runtime.alerts() else { return }
             for await event in events {
-                await MainActor.run {
-                    self.deliverAlerts(event.decisions, hosts: event.hosts)
-                }
+                guard let self else { return }
+                self.deliverAlerts(event.decisions, hosts: event.hosts)
             }
         }
-        Task { await runtime.start() }
-        startNetworkMonitoring()
-        startNetworkPathMonitoring()
-        refreshNotificationPermission()
     }
 
     private func processRuntimeSnapshot(_ snapshot: RuntimeSnapshot) {
@@ -808,36 +808,30 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
     }
 
     func refreshNotificationPermission() {
-        Task { [notificationDispatcher] in
+        Task { @MainActor [weak self, notificationDispatcher] in
             let state = await notificationDispatcher.permissionState()
-            await MainActor.run {
-                self.notificationPermissionState = state
-            }
+            self?.notificationPermissionState = state
         }
     }
 
     func requestNotificationPermission() {
         notificationPermissionState = .requesting
         notificationRequestMessage = nil
-        Task { [notificationDispatcher] in
+        Task { @MainActor [weak self, notificationDispatcher] in
             let granted = await notificationDispatcher.requestAuthorization()
             let state = await notificationDispatcher.permissionState()
-            await MainActor.run {
-                self.notificationPermissionState = state
-                self.notificationRequestMessage = granted ? "Permission allowed" : "Permission was not granted"
-            }
+            self?.notificationPermissionState = state
+            self?.notificationRequestMessage = granted ? "Permission allowed" : "Permission was not granted"
         }
     }
 
     func sendTestNotification() {
         notificationRequestMessage = "Scheduling test..."
-        Task { [notificationDispatcher] in
+        Task { @MainActor [weak self, notificationDispatcher] in
             let sent = await notificationDispatcher.sendTestNotification()
             let state = await notificationDispatcher.permissionState()
-            await MainActor.run {
-                self.notificationPermissionState = state
-                self.notificationRequestMessage = sent ? "Test notification scheduled" : "Could not schedule test notification"
-            }
+            self?.notificationPermissionState = state
+            self?.notificationRequestMessage = sent ? "Test notification scheduled" : "Could not schedule test notification"
         }
     }
 
@@ -1257,9 +1251,25 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
     private func startNetworkMonitoring() {
         networkTask?.cancel()
         networkTask = Task { [weak self] in
+            guard let gatewayDetector = self?.gatewayDetector,
+                  let gatewayEndpointResolver = self?.gatewayEndpointResolver,
+                  let starlinkDetector = self?.starlinkDetector else { return }
             while !Task.isCancelled {
-                await self?.performNetworkEndpointDetection(removeMissingStarlink: true)
-                try? await Task.sleep(for: .seconds(60))
+                let result = await Self.detectNetworkEndpointResult(
+                    gatewayDetector: gatewayDetector,
+                    gatewayEndpointResolver: gatewayEndpointResolver,
+                    starlinkDetector: starlinkDetector,
+                    removeMissingStarlink: true
+                )
+                guard !Task.isCancelled else { return }
+                do {
+                    guard let self else { return }
+                    self.handleGatewayObservation(result.gatewayOutcome, resolvedHost: result.resolvedGateway)
+                    self.reconcileStarlinkDetection(result.starlinkOutcome, removeMissing: result.removeMissingStarlink)
+                }
+                // NWPath changes and wake events trigger immediate refreshes. This
+                // watchdog only covers missed system notifications.
+                try? await Task.sleep(for: .seconds(30 * 60))
             }
         }
     }

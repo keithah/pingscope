@@ -82,6 +82,66 @@ final class CloudSyncCoordinatorTests: XCTestCase {
         XCTAssertEqual(unavailable, .unavailable)
     }
 
+    func testLiveCloudKitHostPropagatesTransientAccountStatusFailure() async {
+        let host = LiveCloudKitEngineHost(
+            containerIdentifier: "iCloud.com.example.Unconstructed",
+            containerProvider: ThrowingCloudKitContainerProvider(),
+            accountStatus: { throw CKError(.networkFailure) }
+        )
+
+        do {
+            _ = try await host.accountAvailability()
+            XCTFail("Expected the transient account-status failure to be retried by the coordinator")
+        } catch let error as CKError {
+            XCTAssertEqual(error.code, .networkFailure)
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+    }
+
+    func testLiveCloudKitHostPropagatesAccountStatusCancellation() async {
+        let host = LiveCloudKitEngineHost(
+            containerIdentifier: "iCloud.com.example.Unconstructed",
+            containerProvider: ThrowingCloudKitContainerProvider(),
+            accountStatus: {
+                try await Task.sleep(for: .seconds(60))
+                return .available
+            }
+        )
+        let task = Task { try await host.accountAvailability() }
+        task.cancel()
+
+        do {
+            _ = try await task.value
+            XCTFail("Expected cancellation")
+        } catch is CancellationError {
+            // Expected: cancellation is not an account-unavailable state.
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+    }
+
+    func testLiveCloudKitHostBoundsUnresponsiveAccountStatusCheck() async {
+        let host = LiveCloudKitEngineHost(
+            containerIdentifier: "iCloud.com.example.Unconstructed",
+            containerProvider: ThrowingCloudKitContainerProvider(),
+            accountStatus: {
+                try await Task.sleep(for: .seconds(60))
+                return .available
+            },
+            accountStatusTimeout: .milliseconds(20)
+        )
+
+        do {
+            _ = try await host.accountAvailability()
+            XCTFail("Expected a bounded account-status timeout")
+        } catch let error as CloudSyncBoundaryError {
+            XCTAssertEqual(error, .accountStatusTimedOut)
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+    }
+
     func testDefaultContainerProviderRejectsMissingEntitlementBeforeConstruction() {
         var didCreateContainer = false
         let provider = DefaultCloudKitContainerProvider(
@@ -2084,6 +2144,24 @@ final class CloudSyncCoordinatorTests: XCTestCase {
         let repeatedDeletionIDs = await fixture.boundary.attemptedDeletionIDs()
         XCTAssertEqual(repeatedDeletionIDs, [])
     }
+
+    func testPendingHostDeletionsAreUploadedInOneBatch() async throws {
+        let hosts = (0..<4).map {
+            HostConfig(displayName: "Deleted \($0)", address: "deleted-\($0).example")
+        }
+        let fixture = makeServiceFixture(hosts: hosts)
+        defer { fixture.cleanup() }
+        try fixture.hostStore.save(SharedHostStoreState(hosts: []))
+
+        for host in hosts {
+            await fixture.service.deleteHost(id: host.id)
+        }
+        await fixture.service.setEnabled(true, hosts: [])
+
+        let batches = await fixture.boundary.attemptedDeletionBatches()
+        XCTAssertEqual(batches.count, 1)
+        XCTAssertEqual(Set(batches[0]), Set(hosts.map(\.id)))
+    }
 }
 
 private struct ThrowingCloudKitContainerProvider: CloudKitContainerProviding {
@@ -2555,6 +2633,12 @@ private actor RecordingCloudSyncBoundary: CloudSyncEngineBoundary {
 
     func attemptedDeletionIDs() -> [UUID] {
         attemptedDeletions.flatMap { $0 }.compactMap { UUID(uuidString: $0.recordName) }
+    }
+
+    func attemptedDeletionBatches() -> [[UUID]] {
+        attemptedDeletions.map { batch in
+            batch.compactMap { UUID(uuidString: $0.recordName) }
+        }.filter { !$0.isEmpty }
     }
 }
 

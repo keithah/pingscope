@@ -1,5 +1,6 @@
 import Foundation
 import PingScopeCore
+import os
 
 public enum PingScopeIOSNotificationAuthorization: Equatable, Sendable {
     case notDetermined
@@ -12,6 +13,11 @@ public enum PingScopeIOSNotificationAuthorization: Equatable, Sendable {
         self == .authorized || self == .provisional
     }
 }
+
+private let notificationLogger = Logger(
+    subsystem: "com.hadm.PingScope",
+    category: "NotificationDelivery"
+)
 
 public struct PingScopeIOSNotificationRequest: Equatable, Sendable {
     public let title: String
@@ -205,7 +211,26 @@ public actor PingScopeIOSNotificationEngine {
         do {
             try await center.schedule(PingScopeIOSNotificationRequest(decision: decision, hosts: hosts))
         } catch {
-            NSLog("PingScope iOS notification delivery failed alert=\(String(describing: decision)) error=\(error.localizedDescription)")
+            notificationLogger.error(
+                "Notification delivery failed category=\(Self.category(for: decision), privacy: .public) error=\(error.localizedDescription, privacy: .private)"
+            )
+        }
+    }
+
+    private static func category(for decision: AlertDecision) -> String {
+        switch decision {
+        case .hostDown: "hostDown"
+        case .recovered: "recovered"
+        case .internetLoss: "internetLoss"
+        case .localNetworkDown: "localNetworkDown"
+        case .ispPathDown: "ispPathDown"
+        case .upstreamDown: "upstreamDown"
+        case .remoteServiceDown: "remoteServiceDown"
+        case .pathDegraded: "pathDegraded"
+        case .pathRecovered: "pathRecovered"
+        case .highLatency: "highLatency"
+        case .networkChange: "networkChange"
+        case .networkStatus: "networkStatus"
         }
     }
 }

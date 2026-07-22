@@ -1040,8 +1040,9 @@ struct RuntimeAlertEventBuffer {
 
     mutating func popFirst() -> RuntimeAlertEvent? {
         guard let first = entries.first else { return nil }
-        let matchingEntries = entries.filter { $0.eventID == first.eventID }
-        entries.removeAll { $0.eventID == first.eventID }
+        let matchingCount = entries.prefix { $0.eventID == first.eventID }.count
+        let matchingEntries = Array(entries.prefix(matchingCount))
+        entries.removeFirst(matchingCount)
         for entry in matchingEntries {
             if let (identity, isActive) = Self.transition(for: entry.decision) {
                 deliveredTransitionState[identity] = isActive

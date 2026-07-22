@@ -65,6 +65,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     private var screenObserver: NSObjectProtocol?
     private var powerMonitor: MacPowerActivityMonitor?
     private var cadenceUpdateTask: Task<Void, Never>?
+    private var pendingCadenceInputs: CadenceInputs?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         Self.shared = self
@@ -558,11 +559,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     }
 
     private func enqueueCadenceInputs(_ inputs: CadenceInputs) {
-        let previous = cadenceUpdateTask
+        pendingCadenceInputs = inputs
+        guard cadenceUpdateTask == nil else { return }
         cadenceUpdateTask = Task { [weak self] in
-            await previous?.value
-            guard let self else { return }
-            await model.applyCadenceInputs(inputs)
+            while let self, let next = self.pendingCadenceInputs {
+                self.pendingCadenceInputs = nil
+                await self.model.applyCadenceInputs(next)
+            }
+            self?.cadenceUpdateTask = nil
         }
     }
 

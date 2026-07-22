@@ -154,7 +154,7 @@ struct HistoryWindowView: View {
 
             if !presentation.incidentLog.incidents.isEmpty {
                 historySection("Incidents") {
-                    VStack(spacing: 0) {
+                    LazyVStack(spacing: 0) {
                         ForEach(presentation.incidentLog.incidents) { incident in
                             HStack(spacing: 10) {
                                 Image(systemName: incident.isOngoing ? "exclamationmark.circle.fill" : "checkmark.circle")
@@ -320,7 +320,7 @@ private struct HistoryLatencyChart: View {
                     RoundedRectangle(cornerRadius: 12).fill(.quaternary.opacity(0.18))
                     if points.count > 1 {
                         let line = Path(LatencyCurve.smoothedPath(points: points, closed: false))
-                        areaPath(points: points, height: geometry.size.height)
+                        areaPath(from: line, points: points, height: geometry.size.height)
                             .fill(LinearGradient(colors: [.green.opacity(0.28), .yellow.opacity(0.10), .clear], startPoint: .top, endPoint: .bottom))
                         line.stroke(
                             LinearGradient(colors: [.green, .yellow, .orange], startPoint: .leading, endPoint: .trailing),
@@ -353,8 +353,8 @@ private struct HistoryLatencyChart: View {
         }
     }
 
-    private func areaPath(points: [CGPoint], height: CGFloat) -> Path {
-        var path = Path(LatencyCurve.smoothedPath(points: points, closed: false))
+    private func areaPath(from line: Path, points: [CGPoint], height: CGFloat) -> Path {
+        var path = line
         path.addLine(to: CGPoint(x: points.last!.x, y: height))
         path.addLine(to: CGPoint(x: points.first!.x, y: height))
         path.closeSubpath()

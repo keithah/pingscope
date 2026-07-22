@@ -373,6 +373,26 @@ final class HistoryIncidentDigestTests: XCTestCase {
         XCTAssertEqual(queryCount, 2)
     }
 
+    func testWeeklyDigestLoaderReusesCachedPrefixAfterAppendOnlyRevisionChange() async throws {
+        let firstEnd = Date(timeIntervalSince1970: 2_850_000)
+        let secondEnd = firstEnd.addingTimeInterval(1)
+        let host = HostConfig(id: UUID(), displayName: "Append", address: "append.example.com")
+        let beforeFirstEnd = success(host.id, at: firstEnd.addingTimeInterval(-30), latency: 10)
+        let betweenEnds = success(host.id, at: firstEnd.addingTimeInterval(0.5), latency: 20)
+        let store = AppendOnlyRevisionWeeklyDigestStore(samples: [beforeFirstEnd, betweenEnds])
+        let loader = HistoryWeeklyDigestLoader()
+
+        _ = await loader.load(store: store, hosts: [host], endingAt: firstEnd)
+        await store.advanceRevision()
+        let second = await loader.load(store: store, hosts: [host], endingAt: secondEnd)
+        let queryRanges = await store.queryRanges
+
+        XCTAssertEqual(second?.sampleCount, 2)
+        XCTAssertEqual(queryRanges.count, 2)
+        XCTAssertEqual(queryRanges[1].since, firstEnd)
+        XCTAssertEqual(queryRanges[1].through, secondEnd)
+    }
+
     func testWeeklyDigestLoaderCoalescesInflightQueryWhenOneWaiterIsCancelled() async throws {
         let endingAt = Date(timeIntervalSince1970: 2_900_000)
         let host = HostConfig(id: UUID(), displayName: "Shared", address: "shared.example.com")
@@ -606,6 +626,39 @@ private actor RangeFilteringWeeklyDigestStore: PingHistoryStore {
     func historyRevision() async -> UInt64 { 1 }
     func prune(olderThan cutoff: Date) async {}
     func deleteAll() async {}
+}
+
+private actor AppendOnlyRevisionWeeklyDigestStore: PingHistoryStore {
+    struct QueryRange: Sendable {
+        let since: Date
+        let through: Date
+    }
+
+    private let inputs: [HistoryWeeklyDigestSample]
+    private var revision: UInt64 = 1
+    private(set) var queryRanges: [QueryRange] = []
+
+    init(samples: [PingResult]) {
+        inputs = samples.map(HistoryWeeklyDigestSample.init)
+    }
+
+    func append(_ result: PingResult) async {}
+    func samples(hostID: UUID, since: Date, limit: Int) async -> [PingResult] { [] }
+    func latestSamples(hostID: UUID, since: Date, limit: Int) async -> [PingResult] { [] }
+    func weeklyDigestSamples(hostIDs: [UUID], since: Date, through: Date) async -> [HistoryWeeklyDigestSample] {
+        queryRanges.append(QueryRange(since: since, through: through))
+        let includedHosts = Set(hostIDs)
+        return inputs.filter {
+            includedHosts.contains($0.hostID) && $0.timestamp >= since && $0.timestamp <= through
+        }
+    }
+    func historyRevision() async -> UInt64 { revision }
+    func prune(olderThan cutoff: Date) async {}
+    func deleteAll() async {}
+
+    func advanceRevision() {
+        revision &+= 1
+    }
 }
 
 private actor RevisionSuspendedWeeklyDigestStore: PingHistoryStore {

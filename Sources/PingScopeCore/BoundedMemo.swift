@@ -12,11 +12,6 @@ public struct BoundedMemo<Key: Hashable, Value> {
         values.count
     }
 
-    public mutating func ensureCapacity(atLeast minimumCapacity: Int) {
-        precondition(minimumCapacity > 0, "BoundedMemo capacity must be positive")
-        capacity = max(capacity, minimumCapacity)
-    }
-
     public mutating func setCapacity(_ newCapacity: Int) {
         precondition(newCapacity > 0, "BoundedMemo capacity must be positive")
         capacity = newCapacity

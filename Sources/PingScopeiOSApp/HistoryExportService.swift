@@ -4,7 +4,14 @@ import PingScopeCore
 import PingScopeHistoryKit
 import PingScopeiOS
 import SwiftUI
-import UIKit
+@preconcurrency import UIKit
+
+private struct HistoryMapRenderInput: @unchecked Sendable {
+    let image: UIImage
+    let plan: HistoryMapDrawingPlan
+    let region: HistoryMapExportRegion
+    let size: CGSize
+}
 
 /// App-target boundary for locally generated History share files. Rendering and
 /// map snapshot formats can be added here later without changing Core exports.
@@ -96,14 +103,15 @@ final class HistoryExportService: HistoryExportServicing {
             return HistoryMapExportPoint(x: point.x, y: point.y)
         }
 
-        let renderer = UIGraphicsImageRenderer(size: options.size)
-        let image = renderer.image { context in
-            snapshot.image.draw(in: bounds)
-            draw(plan, region: request.visibleRegion, in: context.cgContext, size: options.size)
-        }
-        guard let data = image.pngData() else {
-            throw HistoryMapRenderingError.pngEncodingFailed
-        }
+        let renderInput = HistoryMapRenderInput(
+            image: snapshot.image,
+            plan: plan,
+            region: request.visibleRegion,
+            size: options.size
+        )
+        let data = try await Task.detached(priority: .utility) {
+            try Self.renderMapPNG(renderInput)
+        }.value
         return try await mapFileLifecycle.exportAsync(hostName: request.host.displayName) { destination in
             try await HistoryFileWriteOperation.write(data, to: destination)
             try Task.checkCancellation()
@@ -143,7 +151,20 @@ final class HistoryExportService: HistoryExportServicing {
         }
     }
 
-    private func draw(
+    nonisolated private static func renderMapPNG(_ input: HistoryMapRenderInput) throws -> Data {
+        let bounds = CGRect(origin: .zero, size: input.size)
+        let renderer = UIGraphicsImageRenderer(size: input.size)
+        let image = renderer.image { context in
+            input.image.draw(in: bounds)
+            draw(input.plan, region: input.region, in: context.cgContext, size: input.size)
+        }
+        guard let data = image.pngData() else {
+            throw HistoryMapRenderingError.pngEncodingFailed
+        }
+        return data
+    }
+
+    nonisolated private static func draw(
         _ plan: HistoryMapDrawingPlan,
         region: HistoryMapExportRegion,
         in context: CGContext,
@@ -182,16 +203,15 @@ final class HistoryExportService: HistoryExportServicing {
         }
     }
 
-    private func drawFailureCue(center: CGPoint, radius: CGFloat, fill: UIColor, in context: CGContext) {
-        let path = UIBezierPath()
+    nonisolated private static func drawFailureCue(center: CGPoint, radius: CGFloat, fill: UIColor, in context: CGContext) {
+        context.beginPath()
         for index in 0..<8 {
             let angle = CGFloat(index) * .pi / 4 + .pi / 8
             let point = CGPoint(x: center.x + cos(angle) * radius, y: center.y + sin(angle) * radius)
-            index == 0 ? path.move(to: point) : path.addLine(to: point)
+            index == 0 ? context.move(to: point) : context.addLine(to: point)
         }
-        path.close()
+        context.closePath()
         context.setFillColor(fill.cgColor)
-        context.addPath(path.cgPath)
         context.fillPath()
         context.setStrokeColor(UIColor.white.cgColor)
         context.setLineWidth(2.5)
@@ -202,11 +222,11 @@ final class HistoryExportService: HistoryExportServicing {
         context.strokePath()
     }
 
-    private func cgPoint(_ point: HistoryMapExportPoint) -> CGPoint {
+    nonisolated private static func cgPoint(_ point: HistoryMapExportPoint) -> CGPoint {
         CGPoint(x: point.x, y: point.y)
     }
 
-    private func color(for quality: HistoryMapQuality) -> UIColor {
+    nonisolated private static func color(for quality: HistoryMapQuality) -> UIColor {
         switch quality {
         case .fast: .systemGreen
         case .moderate: .systemYellow

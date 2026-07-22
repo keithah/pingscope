@@ -2,6 +2,35 @@ import CloudKit
 import Foundation
 import PingScopeCore
 
+final class PingSampleRecordCodingContext: @unchecked Sendable {
+    private let lock = NSLock()
+    private let encoder: JSONEncoder
+    private let decoder: JSONDecoder
+
+    init() {
+        encoder = JSONEncoder()
+        encoder.nonConformingFloatEncodingStrategy = .convertToString(
+            positiveInfinity: "+Infinity",
+            negativeInfinity: "-Infinity",
+            nan: "NaN"
+        )
+        decoder = JSONDecoder()
+        decoder.nonConformingFloatDecodingStrategy = .convertFromString(
+            positiveInfinity: "+Infinity",
+            negativeInfinity: "-Infinity",
+            nan: "NaN"
+        )
+    }
+
+    func encode(_ metadata: ProbeMetadata) throws -> Data {
+        try lock.withLock { try encoder.encode(metadata) }
+    }
+
+    func decode(_ type: ProbeMetadata.Type, from data: Data) throws -> ProbeMetadata {
+        try lock.withLock { try decoder.decode(type, from: data) }
+    }
+}
+
 public enum PingSampleRecordMapper {
     // These encodings intentionally match SQLiteHistoryStore: enum raw strings,
     // Int64 ports and booleans, Double milliseconds, enum raw strings, and JSON
@@ -11,6 +40,14 @@ public enum PingSampleRecordMapper {
     public static func record(
         from result: PingResult,
         zoneID: CKRecordZone.ID = PingScopeCloudKitModel.zoneID
+    ) -> CKRecord {
+        record(from: result, zoneID: zoneID, codingContext: PingSampleRecordCodingContext())
+    }
+
+    static func record(
+        from result: PingResult,
+        zoneID: CKRecordZone.ID = PingScopeCloudKitModel.zoneID,
+        codingContext: PingSampleRecordCodingContext
     ) -> CKRecord {
         let record = CKRecord(
             recordType: PingScopeCloudKitModel.RecordType.pingSample,
@@ -34,7 +71,7 @@ public enum PingSampleRecordMapper {
             record[fields.metadataNote] = note as CKRecordValue
         }
         if result.metadata.starlink != nil,
-           let data = try? metadataEncoder().encode(result.metadata),
+           let data = try? codingContext.encode(result.metadata),
            let json = String(data: data, encoding: .utf8) {
             record[fields.metadataJSON] = json as CKRecordValue
         }
@@ -62,6 +99,13 @@ public enum PingSampleRecordMapper {
     }
 
     public static func pingResult(from record: CKRecord) -> PingResult? {
+        pingResult(from: record, codingContext: PingSampleRecordCodingContext())
+    }
+
+    static func pingResult(
+        from record: CKRecord,
+        codingContext: PingSampleRecordCodingContext
+    ) -> PingResult? {
         guard record.recordType == PingScopeCloudKitModel.RecordType.pingSample,
               let id = UUID(uuidString: record.recordID.recordName) else {
             return nil
@@ -79,7 +123,7 @@ public enum PingSampleRecordMapper {
         let port = uint16(from: record[fields.port])
         let latency = latency(from: record[fields.latencyMilliseconds])
         let failureReason = (record[fields.failureReason] as? String).flatMap(FailureReason.init(rawValue:))
-        let metadata = metadata(from: record)
+        let metadata = metadata(from: record, codingContext: codingContext)
         let location = location(from: record)
 
         return PingResult(
@@ -115,39 +159,22 @@ public enum PingSampleRecordMapper {
         return .milliseconds(milliseconds)
     }
 
-    private static func metadata(from record: CKRecord) -> ProbeMetadata {
+    private static func metadata(
+        from record: CKRecord,
+        codingContext: PingSampleRecordCodingContext
+    ) -> ProbeMetadata {
         let fields = PingScopeCloudKitModel.PingSampleField.self
         let note = record[fields.metadataNote] as? String
         if let json = record[fields.metadataJSON] as? String,
            let data = json.data(using: .utf8),
-           let metadata = try? metadataDecoder().decode(ProbeMetadata.self, from: data) {
+           let metadata = try? codingContext.decode(ProbeMetadata.self, from: data) {
             return metadata
         }
         if let data = record[fields.metadataJSON] as? Data,
-           let metadata = try? metadataDecoder().decode(ProbeMetadata.self, from: data) {
+           let metadata = try? codingContext.decode(ProbeMetadata.self, from: data) {
             return metadata
         }
         return ProbeMetadata(note: note)
-    }
-
-    private static func metadataEncoder() -> JSONEncoder {
-        let encoder = JSONEncoder()
-        encoder.nonConformingFloatEncodingStrategy = .convertToString(
-            positiveInfinity: "+Infinity",
-            negativeInfinity: "-Infinity",
-            nan: "NaN"
-        )
-        return encoder
-    }
-
-    private static func metadataDecoder() -> JSONDecoder {
-        let decoder = JSONDecoder()
-        decoder.nonConformingFloatDecodingStrategy = .convertFromString(
-            positiveInfinity: "+Infinity",
-            negativeInfinity: "-Infinity",
-            nan: "NaN"
-        )
-        return decoder
     }
 
     private static func location(from record: CKRecord) -> SampleLocation? {

@@ -1045,15 +1045,6 @@ private final class PingScopeIOSAppModel: ObservableObject {
         backgroundKeepAliveStatus = historyLocationService.statusText()
     }
 
-    func setHistoryLocationTaggingEnabled(_ isEnabled: Bool) {
-        historyLocationTaggingEnabled = isEnabled
-        UserDefaults.standard.set(isEnabled, forKey: Self.historyLocationTaggingEnabledKey)
-        if isEnabled {
-            historyLocationService.requestWhenInUseAuthorization()
-        }
-        applyBackgroundKeepAlive()
-    }
-
     func start(duration: MonitorSessionDuration) {
         initialSessionCoordinator.markExplicitSessionAction()
         runLifecycleTask { model, context in
@@ -1962,21 +1953,13 @@ private final class PingScopeIOSAppModel: ObservableObject {
         let requestedHostID = snapshot.host.id
         let enabledHosts = PingScopeIOSHostScopePresentation.enabledHosts(from: hosts)
         let cutoff = Date().addingTimeInterval(-24 * 60 * 60)
-        let samplesByHost = await withTaskGroup(
-            of: (UUID, [PingResult]).self,
-            returning: [UUID: [PingResult]].self
-        ) { group in
-            for host in enabledHosts {
-                group.addTask {
-                    let samples = await historyStore.latestSamples(hostID: host.id, since: cutoff, limit: 100)
-                    return (host.id, samples.sorted { $0.timestamp < $1.timestamp })
-                }
-            }
-            var samplesByHost: [UUID: [PingResult]] = [:]
-            for await (hostID, samples) in group {
-                samplesByHost[hostID] = samples
-            }
-            return samplesByHost
+        let loadedSamples = await historyStore.latestSamples(
+            hostIDs: enabledHosts.map(\.id),
+            since: cutoff,
+            limitPerHost: 100
+        )
+        let samplesByHost = loadedSamples.mapValues { samples in
+            samples.sorted { $0.timestamp < $1.timestamp }
         }
         guard snapshot.host.id == requestedHostID, hostScope == .focused else { return }
 

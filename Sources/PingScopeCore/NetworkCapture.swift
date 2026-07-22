@@ -187,6 +187,14 @@ public struct NetworkCapturedHistoryStore: PingHistoryStore {
         await destination.latestSamples(hostID: hostID, since: since, limit: limit)
     }
 
+    public func latestSamples(
+        hostIDs: [UUID],
+        since: Date,
+        limitPerHost: Int
+    ) async -> [UUID: [PingResult]] {
+        await destination.latestSamples(hostIDs: hostIDs, since: since, limitPerHost: limitPerHost)
+    }
+
     public func weeklyDigestSamples(
         hostIDs: [UUID],
         since: Date,
@@ -197,6 +205,10 @@ public struct NetworkCapturedHistoryStore: PingHistoryStore {
 
     public func historyRevision() async -> UInt64 {
         await destination.historyRevision()
+    }
+
+    public func historyMutationRevision() async -> UInt64 {
+        await destination.historyMutationRevision()
     }
 
     public func exportSamples(host: HostConfig, since: Date, format: HistoryExportFormat, to url: URL) async throws -> Int {

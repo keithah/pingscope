@@ -3581,7 +3581,7 @@ final class LiveMonitorSessionControllerTests: XCTestCase {
 
         let stoppedHostIDs = await factory.stoppedAndFlushedHostIDs
         let snapshots = await coordinator.snapshots()
-        XCTAssertEqual(stoppedHostIDs, [enabledB.id, enabledC.id])
+        XCTAssertEqual(Set(stoppedHostIDs), Set([enabledB.id, enabledC.id]))
         XCTAssertEqual(Set(snapshots.keys), Set([enabledA.id]))
     }
 
@@ -3598,7 +3598,7 @@ final class LiveMonitorSessionControllerTests: XCTestCase {
         let stoppedHostIDs = await factory.stoppedAndFlushedHostIDs
         let stopReasons = await factory.stopReasons
         let session = await coordinator.session()
-        XCTAssertEqual(stoppedHostIDs, [hostA.id, hostB.id])
+        XCTAssertEqual(Set(stoppedHostIDs), Set([hostA.id, hostB.id]))
         XCTAssertEqual(stopReasons, [.backgroundRuntimeExpired, .backgroundRuntimeExpired])
         XCTAssertEqual(session?.endReason, .backgroundRuntimeExpired)
     }

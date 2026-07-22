@@ -68,6 +68,7 @@ public protocol PingHistoryStore: Sendable {
     func markSamplesSynced(ids: [UUID]) async throws
     func samples(hostID: UUID, since: Date, limit: Int) async -> [PingResult]
     func latestSamples(hostID: UUID, since: Date, limit: Int) async -> [PingResult]
+    func latestSamples(hostIDs: [UUID], since: Date, limitPerHost: Int) async -> [UUID: [PingResult]]
     func weeklyDigestSamples(hostIDs: [UUID], since: Date, through: Date) async -> [HistoryWeeklyDigestSample]
     func weeklyDigestSampleStream(
         hostIDs: [UUID],
@@ -75,6 +76,10 @@ public protocol PingHistoryStore: Sendable {
         through: Date
     ) -> AsyncStream<HistoryWeeklyDigestSample>
     func historyRevision() async -> UInt64
+    /// Changes only when existing digest input may have been removed or replaced.
+    /// Append-only writes intentionally leave this value unchanged so consumers can
+    /// reuse an already-loaded prefix and query only the new tail.
+    func historyMutationRevision() async -> UInt64
     func exportSamples(host: HostConfig, since: Date, format: HistoryExportFormat, to url: URL) async throws -> Int
     func prune(olderThan cutoff: Date) async
     func deleteAll() async
@@ -125,6 +130,18 @@ public extension PingHistoryStore {
         return inputs.sorted(by: HistoryWeeklyDigestSample.isOrderedBefore)
     }
 
+    func latestSamples(
+        hostIDs: [UUID],
+        since: Date,
+        limitPerHost: Int
+    ) async -> [UUID: [PingResult]] {
+        var result: [UUID: [PingResult]] = [:]
+        for hostID in Set(hostIDs) {
+            result[hostID] = await latestSamples(hostID: hostID, since: since, limit: limitPerHost)
+        }
+        return result
+    }
+
     func weeklyDigestSampleStream(
         hostIDs: [UUID],
         since: Date,
@@ -147,6 +164,7 @@ public extension PingHistoryStore {
     }
 
     func historyRevision() async -> UInt64 { 0 }
+    func historyMutationRevision() async -> UInt64 { 0 }
 
     func exportSamples(host: HostConfig, since: Date, format: HistoryExportFormat, to url: URL) async throws -> Int {
         let exportedSamples = await samples(hostID: host.id, since: since, limit: 100_000)
@@ -256,6 +274,14 @@ public final class SQLiteHistoryStore: PingHistoryStore, @unchecked Sendable {
         await worker.latestSamples(hostID: hostID, since: since, limit: limit)
     }
 
+    public func latestSamples(
+        hostIDs: [UUID],
+        since: Date,
+        limitPerHost: Int
+    ) async -> [UUID: [PingResult]] {
+        await worker.latestSamples(hostIDs: hostIDs, since: since, limitPerHost: limitPerHost)
+    }
+
     public func weeklyDigestSamples(
         hostIDs: [UUID],
         since: Date,
@@ -274,6 +300,10 @@ public final class SQLiteHistoryStore: PingHistoryStore, @unchecked Sendable {
 
     public func historyRevision() async -> UInt64 {
         await worker.historyRevision()
+    }
+
+    public func historyMutationRevision() async -> UInt64 {
+        await worker.historyMutationRevision()
     }
 
     public func exportSamples(host: HostConfig, since: Date, format: HistoryExportFormat, to url: URL) async throws -> Int {
@@ -303,6 +333,7 @@ private final class SQLiteHistoryWorker: @unchecked Sendable {
     private var lastPruneAttempt: Date?
     private var statementCache: [String: OpaquePointer] = [:]
     private var revision: UInt64 = 0
+    private var mutationRevision: UInt64 = 0
     private let sqliteVariableNumberLimitOverride: Int?
     private let transactionObserver: (@Sendable (SQLiteHistoryTransactionEvent) -> Void)?
     private let remoteUpsertChunkSize: Int
@@ -373,6 +404,7 @@ private final class SQLiteHistoryWorker: @unchecked Sendable {
         }
         revision &+= 1
         if let pruneAttemptTimestamp {
+            mutationRevision &+= 1
             lastPruneAttempt = pruneAttemptTimestamp
         }
     }
@@ -391,6 +423,7 @@ private final class SQLiteHistoryWorker: @unchecked Sendable {
                 try self.openIfNeeded()
                 try self.insert(chunk, synced: true, replacingExisting: true)
                 self.revision &+= 1
+                self.mutationRevision &+= 1
             }
             chunkIndex += 1
         }
@@ -408,14 +441,8 @@ private final class SQLiteHistoryWorker: @unchecked Sendable {
         try await performWithSQLiteRetry {
             try self.openIfNeeded()
             try self.withImmediateTransaction {
-                try self.withStatement("UPDATE ping_samples SET synced = 1 WHERE id = ?;") { statement in
-                    for id in ids {
-                        self.bindText(id.uuidString, to: 1, in: statement)
-                        let result = sqlite3_step(statement)
-                        guard result == SQLITE_DONE else { throw self.sqliteError(.stepFailed, code: result) }
-                        sqlite3_reset(statement)
-                        sqlite3_clear_bindings(statement)
-                    }
+                try self.executeIDBatches(ids: ids) { placeholders in
+                    "UPDATE ping_samples SET synced = 1 WHERE id IN (\(placeholders));"
                 }
             }
         }
@@ -442,6 +469,28 @@ private final class SQLiteHistoryWorker: @unchecked Sendable {
         } catch {
             logger?("history latest query failed: \(error)")
             return []
+        }
+    }
+
+    func latestSamples(
+        hostIDs: [UUID],
+        since: Date,
+        limitPerHost: Int
+    ) async -> [UUID: [PingResult]] {
+        let uniqueHostIDs = Array(Set(hostIDs)).sorted { $0.uuidString < $1.uuidString }
+        guard !uniqueHostIDs.isEmpty else { return [:] }
+        do {
+            return try await performWithSQLiteRetry {
+                try self.openIfNeeded()
+                return try self.queryLatest(
+                    hostIDs: uniqueHostIDs,
+                    since: since,
+                    limitPerHost: max(1, limitPerHost)
+                )
+            }
+        } catch {
+            logger?("history batched latest query failed: \(error)")
+            return [:]
         }
     }
 
@@ -531,6 +580,10 @@ private final class SQLiteHistoryWorker: @unchecked Sendable {
         (try? await perform { self.revision }) ?? 0
     }
 
+    func historyMutationRevision() async -> UInt64 {
+        (try? await perform { self.mutationRevision }) ?? 0
+    }
+
     func exportSamples(host: HostConfig, since: Date, format: HistoryExportFormat, to url: URL) async throws -> Int {
         try await performWithSQLiteRetry {
             try self.openIfNeeded()
@@ -552,6 +605,7 @@ private final class SQLiteHistoryWorker: @unchecked Sendable {
                 try self.pruneSync(olderThan: cutoff)
                 self.lastPruneAttempt = Date()
                 self.revision &+= 1
+                self.mutationRevision &+= 1
             }
         } catch {
             logger?("history prune failed: \(error)")
@@ -565,6 +619,7 @@ private final class SQLiteHistoryWorker: @unchecked Sendable {
                 try self.openIfNeeded()
                 try self.execute("DELETE FROM ping_samples;")
                 self.revision &+= 1
+                self.mutationRevision &+= 1
             }
         } catch {
             logger?("history delete failed: \(error)")
@@ -577,19 +632,12 @@ private final class SQLiteHistoryWorker: @unchecked Sendable {
         try await performWithSQLiteRetry {
             try self.openIfNeeded()
             try self.withImmediateTransaction {
-                try self.withStatement("DELETE FROM ping_samples WHERE id = ?;") { statement in
-                    for id in ids {
-                        self.bindText(id.uuidString, to: 1, in: statement)
-                        let result = sqlite3_step(statement)
-                        guard result == SQLITE_DONE else {
-                            throw self.sqliteError(.stepFailed, code: result)
-                        }
-                        sqlite3_reset(statement)
-                        sqlite3_clear_bindings(statement)
-                    }
+                try self.executeIDBatches(ids: ids) { placeholders in
+                    "DELETE FROM ping_samples WHERE id IN (\(placeholders));"
                 }
             }
             self.revision &+= 1
+            self.mutationRevision &+= 1
         }
     }
 
@@ -668,6 +716,7 @@ private final class SQLiteHistoryWorker: @unchecked Sendable {
             try addColumnIfNeeded(table: "ping_samples", column: "is_vpn", definition: "INTEGER")
             try addColumnIfNeeded(table: "ping_samples", column: "synced", definition: "INTEGER NOT NULL DEFAULT 0")
             try execute("CREATE INDEX IF NOT EXISTS ping_samples_host_time ON ping_samples(host_id, timestamp);")
+            try execute("CREATE INDEX IF NOT EXISTS ping_samples_host_time_id ON ping_samples(host_id, timestamp, id);")
             try execute("CREATE INDEX IF NOT EXISTS ping_samples_timestamp ON ping_samples(timestamp);")
             try execute("CREATE INDEX IF NOT EXISTS ping_samples_unsynced_time ON ping_samples(synced, timestamp DESC);")
         } catch {
@@ -862,6 +911,60 @@ private final class SQLiteHistoryWorker: @unchecked Sendable {
         return results
     }
 
+    private func queryLatest(
+        hostIDs: [UUID],
+        since: Date,
+        limitPerHost: Int
+    ) throws -> [UUID: [PingResult]] {
+        guard let db = connection.db else {
+            throw SQLiteHistoryError.openFailed(message: "database is not open")
+        }
+        let variableLimit = max(3, Int(sqlite3_limit(db, SQLITE_LIMIT_VARIABLE_NUMBER, -1)))
+        let maximumHostsPerQuery = max(1, variableLimit - 2)
+        var results: [UUID: [PingResult]] = [:]
+        for hostID in hostIDs { results[hostID] = [] }
+        for startIndex in stride(from: 0, to: hostIDs.count, by: maximumHostsPerQuery) {
+            let endIndex = min(hostIDs.count, startIndex + maximumHostsPerQuery)
+            let chunk = Array(hostIDs[startIndex..<endIndex])
+            let placeholders = Array(repeating: "?", count: chunk.count).joined(separator: ", ")
+            let sql = """
+            WITH ranked AS (
+                SELECT id, host_id, address, method, port, timestamp, latency_ms, failure_reason,
+                       metadata_note, metadata_json, latitude, longitude, horizontal_accuracy,
+                       network_name, network_interface, network_interface_top, network_name_top,
+                       is_vpn,
+                       ROW_NUMBER() OVER (PARTITION BY host_id ORDER BY timestamp DESC, id DESC) AS row_number
+                FROM ping_samples
+                WHERE host_id IN (\(placeholders)) AND timestamp >= ?
+            )
+            SELECT id, host_id, address, method, port, timestamp, latency_ms, failure_reason,
+                   metadata_note, metadata_json, latitude, longitude, horizontal_accuracy,
+                   network_name, network_interface, network_interface_top, network_name_top, is_vpn
+            FROM ranked
+            WHERE row_number <= ?
+            ORDER BY host_id ASC, timestamp DESC, id DESC;
+            """
+            try withStatement(sql) { statement in
+                for (offset, hostID) in chunk.enumerated() {
+                    bindText(hostID.uuidString, to: Int32(offset + 1), in: statement)
+                }
+                sqlite3_bind_double(statement, Int32(chunk.count + 1), since.timeIntervalSince1970)
+                sqlite3_bind_int64(statement, Int32(chunk.count + 2), Int64(limitPerHost))
+                var stepResult = sqlite3_step(statement)
+                while stepResult == SQLITE_ROW {
+                    if let result = result(from: statement) {
+                        results[result.hostID, default: []].append(result)
+                    }
+                    stepResult = sqlite3_step(statement)
+                }
+                guard stepResult == SQLITE_DONE else {
+                    throw sqliteError(.stepFailed, code: stepResult)
+                }
+            }
+        }
+        return results
+    }
+
     private func queryWeeklyDigestSamples(
         hostIDs: [UUID],
         since: Date,
@@ -897,6 +1000,30 @@ private final class SQLiteHistoryWorker: @unchecked Sendable {
                 through: through,
                 onSample: onSample
             )
+        }
+    }
+
+    private func executeIDBatches(
+        ids: [UUID],
+        statement: (String) -> String
+    ) throws {
+        guard let db = connection.db else {
+            throw SQLiteHistoryError.openFailed(message: "database is not open")
+        }
+        let variableLimit = max(1, Int(sqlite3_limit(db, SQLITE_LIMIT_VARIABLE_NUMBER, -1)))
+        for startIndex in stride(from: 0, to: ids.count, by: variableLimit) {
+            let endIndex = min(ids.count, startIndex + variableLimit)
+            let chunk = ids[startIndex..<endIndex]
+            let placeholders = Array(repeating: "?", count: chunk.count).joined(separator: ", ")
+            try withStatement(statement(placeholders)) { prepared in
+                for (offset, id) in chunk.enumerated() {
+                    bindText(id.uuidString, to: Int32(offset + 1), in: prepared)
+                }
+                let result = sqlite3_step(prepared)
+                guard result == SQLITE_DONE else {
+                    throw sqliteError(.stepFailed, code: result)
+                }
+            }
         }
     }
 

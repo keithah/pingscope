@@ -6,6 +6,24 @@ import PingScopeCloudSync
 
 @MainActor
 final class PingScopePresentationViewModelTests: XCTestCase {
+    func testStartedMacModelDoesNotRetainItselfThroughRuntimeStreams() async {
+        let runtime = PingRuntime(
+            hostStore: HostStore(defaultHosts: []),
+            scheduler: MeasurementScheduler(probeFactory: PresentationNoopProbeFactory())
+        )
+        weak var weakModel: PingScopeModel?
+        do {
+            let model = PingScopeModel(runtimeForTesting: runtime)
+            weakModel = model
+            model.startRuntimeSubscriptions()
+        }
+
+        for _ in 0..<100 where weakModel != nil {
+            await Task.yield()
+        }
+        XCTAssertNil(weakModel)
+        await runtime.stop()
+    }
     func testMacPersistedCloudSyncUsesCrashLoopGuardWhenContainerEntitlementIsAbsent() async {
         let suiteName = "PingScopePresentationCrashGuardTests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
@@ -527,5 +545,17 @@ final class PingScopePresentationViewModelTests: XCTestCase {
             healthByHost: [host.id: health],
             samplesByHost: [host.id: series]
         )
+    }
+}
+
+private struct PresentationNoopProbeFactory: ProbeFactory {
+    func makeProbe(for method: PingMethod) async -> any PingProbe {
+        PresentationNoopProbe()
+    }
+}
+
+private struct PresentationNoopProbe: PingProbe {
+    func measure(_ host: HostConfig) async -> PingResult {
+        .failure(hostID: host.id, reason: .cancelled)
     }
 }
