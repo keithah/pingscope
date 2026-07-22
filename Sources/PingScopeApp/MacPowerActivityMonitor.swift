@@ -10,7 +10,8 @@ import PingScopeCore
 @MainActor
 final class MacPowerActivityMonitor {
     private let onChange: (CadenceInputs) -> Void
-    private var screenObscured = false
+    private var screenAsleep = false
+    private var screenLocked = false
     private var uiVisible = true
     private var runLoopSource: CFRunLoopSource?
     private var lastReported: CadenceInputs?
@@ -21,12 +22,12 @@ final class MacPowerActivityMonitor {
 
     func start() {
         let workspace = NSWorkspace.shared.notificationCenter
-        workspace.addObserver(self, selector: #selector(screenAsleep), name: NSWorkspace.screensDidSleepNotification, object: nil)
-        workspace.addObserver(self, selector: #selector(screenAwake), name: NSWorkspace.screensDidWakeNotification, object: nil)
+        workspace.addObserver(self, selector: #selector(screenDidSleep), name: NSWorkspace.screensDidSleepNotification, object: nil)
+        workspace.addObserver(self, selector: #selector(screenDidWake), name: NSWorkspace.screensDidWakeNotification, object: nil)
 
         let distributed = DistributedNotificationCenter.default()
-        distributed.addObserver(self, selector: #selector(screenLocked), name: .init("com.apple.screenIsLocked"), object: nil)
-        distributed.addObserver(self, selector: #selector(screenUnlocked), name: .init("com.apple.screenIsUnlocked"), object: nil)
+        distributed.addObserver(self, selector: #selector(screenDidLock), name: .init("com.apple.screenIsLocked"), object: nil)
+        distributed.addObserver(self, selector: #selector(screenDidUnlock), name: .init("com.apple.screenIsUnlocked"), object: nil)
 
         NotificationCenter.default.addObserver(self, selector: #selector(environmentChanged), name: ProcessInfo.thermalStateDidChangeNotification, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(environmentChanged), name: Notification.Name.NSProcessInfoPowerStateDidChange, object: nil)
@@ -41,10 +42,10 @@ final class MacPowerActivityMonitor {
         report()
     }
 
-    @objc private func screenAsleep() { screenObscured = true; report() }
-    @objc private func screenAwake() { screenObscured = false; report() }
-    @objc private func screenLocked() { screenObscured = true; report() }
-    @objc private func screenUnlocked() { screenObscured = false; report() }
+    @objc func screenDidSleep() { screenAsleep = true; report() }
+    @objc func screenDidWake() { screenAsleep = false; report() }
+    @objc func screenDidLock() { screenLocked = true; report() }
+    @objc func screenDidUnlock() { screenLocked = false; report() }
     @objc private func environmentChanged() { report() }
 
     private func installPowerSourceObserver() {
@@ -60,13 +61,14 @@ final class MacPowerActivityMonitor {
 
     private func currentPowerSource() -> PowerSource {
         guard let snapshot = IOPSCopyPowerSourcesInfo()?.takeRetainedValue(),
-              let sources = IOPSCopyPowerSourcesList(snapshot)?.takeRetainedValue() as? [CFTypeRef],
-              let first = sources.first,
-              let description = IOPSGetPowerSourceDescription(snapshot, first)?.takeUnretainedValue() as? [String: Any],
-              let state = description[kIOPSPowerSourceStateKey] as? String else {
+              let type = IOPSGetProvidingPowerSourceType(snapshot)?.takeUnretainedValue() as String? else {
             return .unknown
         }
-        return state == kIOPSACPowerValue ? .ac : .battery
+        switch type {
+        case kIOPMACPowerKey, kIOPMUPSPowerKey: return .ac
+        case kIOPMBatteryPowerKey: return .battery
+        default: return .unknown
+        }
     }
 
     private func currentThermalTier() -> ThermalTier {
@@ -81,7 +83,7 @@ final class MacPowerActivityMonitor {
 
     private func report() {
         let inputs = CadenceInputs.combining(
-            screenObscured: screenObscured,
+            screenObscured: screenAsleep || screenLocked,
             uiVisible: uiVisible,
             appBackgrounded: false, // a menu-bar agent is never "backgrounded" in the iOS sense
             powerSource: currentPowerSource(),

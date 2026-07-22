@@ -806,6 +806,66 @@ final class BuildGraphOptimizationTests: XCTestCase {
         XCTAssertTrue(buildVersions.allSatisfy { $0.contains("CURRENT_PROJECT_VERSION = 94;") })
     }
 
+    func testBatteryAwareLifecycleWiringSeedsInitialStateAndSerializesUpdates() throws {
+        let root = try repositoryRoot()
+        let iosApp = try String(
+            contentsOf: root.appendingPathComponent("Sources/PingScopeiOSApp/PingScopeIOSApp.swift"),
+            encoding: .utf8
+        )
+        let macApp = try String(
+            contentsOf: root.appendingPathComponent("Sources/PingScopeApp/PingScopeApp.swift"),
+            encoding: .utf8
+        )
+
+        XCTAssertTrue(iosApp.contains(".onChange(of: scenePhase, initial: true)"))
+
+        let iosCadenceStart = try XCTUnwrap(iosApp.range(of: "private func applyCadenceInputs("))
+        let iosCadenceEnd = try XCTUnwrap(
+            iosApp.range(of: "private struct LifecycleContext", range: iosCadenceStart.upperBound..<iosApp.endIndex)
+        )
+        let iosCadence = iosApp[iosCadenceStart.lowerBound..<iosCadenceEnd.lowerBound]
+        XCTAssertTrue(iosCadence.contains("lifecycleHarness.enqueue"))
+        XCTAssertFalse(iosCadence.contains("Task {"))
+
+        let macCadenceStart = try XCTUnwrap(macApp.range(of: "private func enqueueCadenceInputs("))
+        let macCadenceEnd = try XCTUnwrap(
+            macApp.range(of: "private func updatePowerMonitorUIVisibility", range: macCadenceStart.upperBound..<macApp.endIndex)
+        )
+        let macCadence = macApp[macCadenceStart.lowerBound..<macCadenceEnd.lowerBound]
+        XCTAssertTrue(macCadence.contains("await previous?.value"))
+    }
+
+    func testWindowedStatusPresentationRefreshesCadenceVisibility() throws {
+        let source = try String(
+            contentsOf: try repositoryRoot().appendingPathComponent("Sources/PingScopeApp/PingScopeApp.swift"),
+            encoding: .utf8
+        )
+        let methodStart = try XCTUnwrap(source.range(of: "private func openWindowedStatusInterface()"))
+        let methodEnd = try XCTUnwrap(
+            source.range(of: "private func makeDetachedStatusWindow()", range: methodStart.upperBound..<source.endIndex)
+        )
+        let method = source[methodStart.lowerBound..<methodEnd.lowerBound]
+
+        XCTAssertEqual(
+            method.components(separatedBy: "updatePowerMonitorUIVisibility()").count - 1,
+            2,
+            "Both existing and newly-created detached windows must refresh cadence visibility."
+        )
+    }
+
+    func testMacPowerSourceUsesProvidingSourceAPIWithoutDictionaryCasts() throws {
+        let source = try String(
+            contentsOf: try repositoryRoot().appendingPathComponent("Sources/PingScopeApp/MacPowerActivityMonitor.swift"),
+            encoding: .utf8
+        )
+
+        XCTAssertTrue(source.contains("IOPSGetProvidingPowerSourceType"))
+        XCTAssertFalse(source.contains("IOPSCopyPowerSourcesList"))
+        XCTAssertFalse(source.contains("IOPSGetPowerSourceDescription"))
+        XCTAssertTrue(source.contains("case kIOPMBatteryPowerKey: return .battery"))
+        XCTAssertTrue(source.contains("default: return .unknown"))
+    }
+
     private func repositoryRoot() throws -> URL {
         var candidate = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
         while candidate.path != "/" {

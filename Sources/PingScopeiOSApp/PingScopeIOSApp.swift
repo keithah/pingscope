@@ -236,7 +236,7 @@ struct PingScopeIOSApp: App {
                 model.handlePendingIntentAction()
                 model.startInitialSessionIfNeeded()
             }
-            .onChange(of: scenePhase) { _, phase in
+            .onChange(of: scenePhase, initial: true) { _, phase in
                 model.handleScenePhase(phase)
             }
             .sheet(item: Binding(
@@ -1204,7 +1204,7 @@ private final class PingScopeIOSAppModel: ObservableObject {
 
     private func applyCadenceInputs(_ inputs: CadenceInputs) {
         cadenceInputs = inputs
-        Task { [weak self] in
+        lifecycleHarness.enqueue { @MainActor [weak self] in
             guard let self else { return }
             await self.controller.setCadenceInputs(inputs)
             await self.multiHostCoordinator.setCadenceInputs(inputs)

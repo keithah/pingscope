@@ -1105,18 +1105,6 @@ final class RuntimeBehaviorTests: XCTestCase {
 
 private struct TestTimeout: Error {}
 
-private struct NoopProbeFactory: ProbeFactory {
-    func makeProbe(for method: PingMethod) async -> any PingProbe {
-        NoopProbe()
-    }
-}
-
-private struct NoopProbe: PingProbe {
-    func measure(_ host: HostConfig) async -> PingResult {
-        .failure(hostID: host.id, reason: .cancelled).withHostMetadata(from: host)
-    }
-}
-
 /// Drains the alert stream once the runtime has been stopped (which finishes the
 /// continuation) and flattens the decisions in publish order.
 private func collectDecisions(from stream: AsyncStream<RuntimeAlertEvent>) async -> [AlertDecision] {

@@ -36,26 +36,3 @@ final class SchedulerCadenceTests: XCTestCase {
         await scheduler.stop()
     }
 }
-
-private actor RecordingProbe: PingProbe {
-    private var results: [PingResult]
-    private(set) var measurementCount = 0
-
-    init(results: [PingResult]) {
-        self.results = results
-    }
-
-    func measure(_ host: HostConfig) async -> PingResult {
-        measurementCount += 1
-        let index = min(measurementCount - 1, results.count - 1)
-        return results[index].withHostMetadata(from: host)
-    }
-}
-
-private struct StaticProbeFactory: ProbeFactory {
-    let probe: RecordingProbe
-
-    func makeProbe(for method: PingMethod) async -> any PingProbe {
-        probe
-    }
-}

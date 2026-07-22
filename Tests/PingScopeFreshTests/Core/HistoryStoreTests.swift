@@ -1788,18 +1788,6 @@ final class HistoryStoreTests: XCTestCase {
 
 private let sqliteTransientForTests = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
 
-private struct NoopProbeFactory: ProbeFactory {
-    func makeProbe(for method: PingMethod) async -> any PingProbe {
-        NoopProbe()
-    }
-}
-
-private struct NoopProbe: PingProbe {
-    func measure(_ host: HostConfig) async -> PingResult {
-        .failure(hostID: host.id, reason: .cancelled).withHostMetadata(from: host)
-    }
-}
-
 private actor RecordingHistoryStore: PingHistoryStore {
     private var stored: [PingResult] = []
 

@@ -45,6 +45,17 @@ final class MonitoringCadenceTests: XCTestCase {
         XCTAssertEqual(inputs.effectiveInterval(base: .seconds(60)), .seconds(300))
     }
 
+    func testEffectiveIntervalNeverDropsConfiguredBaseAboveCeiling() {
+        let inputs = CadenceInputs(
+            visibility: .background,
+            powerSource: .battery,
+            isLowPowerMode: true,
+            thermalTier: .critical
+        )
+
+        XCTAssertEqual(inputs.effectiveInterval(base: .seconds(600)), .seconds(600))
+    }
+
     func testCombiningScreenObscuredForcesBackground() {
         let inputs = CadenceInputs.combining(
             screenObscured: true,     // display asleep or locked

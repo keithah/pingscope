@@ -64,6 +64,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     private var sleepObserver: NSObjectProtocol?
     private var screenObserver: NSObjectProtocol?
     private var powerMonitor: MacPowerActivityMonitor?
+    private var cadenceUpdateTask: Task<Void, Never>?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         Self.shared = self
@@ -506,12 +507,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         NSApp.activate(ignoringOtherApps: true)
         if let window = detachedPopoverWindow, window.isVisible {
             window.makeKeyAndOrderFront(nil)
+            updatePowerMonitorUIVisibility()
             return
         }
         let window = makeDetachedStatusWindow()
         detachedPopoverWindow = window
         window.center()
         window.makeKeyAndOrderFront(nil)
+        updatePowerMonitorUIVisibility()
     }
 
     private func makeDetachedStatusWindow() -> NSWindow {
@@ -547,11 +550,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         let monitor = MacPowerActivityMonitor { [weak self] inputs in
             guard let self else { return }
             DebugLog.write("cadence inputs visibility=\(inputs.visibility) power=\(inputs.powerSource) lowPower=\(inputs.isLowPowerMode) thermal=\(inputs.thermalTier) multiplier=\(inputs.multiplier)")
-            Task { await self.model.applyCadenceInputs(inputs) }
+            self.enqueueCadenceInputs(inputs)
         }
         monitor.start()
         powerMonitor = monitor
         updatePowerMonitorUIVisibility()
+    }
+
+    private func enqueueCadenceInputs(_ inputs: CadenceInputs) {
+        let previous = cadenceUpdateTask
+        cadenceUpdateTask = Task { [weak self] in
+            await previous?.value
+            guard let self else { return }
+            await model.applyCadenceInputs(inputs)
+        }
     }
 
     private func updatePowerMonitorUIVisibility() {

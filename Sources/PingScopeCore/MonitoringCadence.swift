@@ -70,11 +70,11 @@ public struct CadenceInputs: Sendable, Equatable {
     }
 
     /// Effective interval for a host whose configured interval is `base`.
-    /// Floored at `base` (never faster than the user asked) and capped at
-    /// `ceiling` (outages still caught).
+    /// Floored at `base` (never faster than the user asked). Adaptive scaling
+    /// is capped at `ceiling` when the configured base does not already exceed it.
     public func effectiveInterval(base: Duration, ceiling: Duration = .seconds(300)) -> Duration {
         let scaled = base.seconds * multiplier
-        let clamped = min(max(scaled, base.seconds), ceiling.seconds)
+        let clamped = max(base.seconds, min(scaled, ceiling.seconds))
         return .seconds(clamped)
     }
 
