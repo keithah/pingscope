@@ -141,6 +141,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
             )
             window.title = "PingScope Settings"
             PingScopePrimaryWindowConfiguration.apply(to: window)
+            window.delegate = self
             window.contentView = NSHostingView(rootView: view)
             window.center()
             settingsWindowController = NSWindowController(window: window)
@@ -163,6 +164,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
             window.title = "PingScope History"
             window.minSize = NSSize(width: 760, height: 580)
             PingScopePrimaryWindowConfiguration.apply(to: window)
+            window.delegate = self
             window.contentView = NSHostingView(rootView: HistoryWindowView(model: model))
             window.center()
             historyWindowController = NSWindowController(window: window)

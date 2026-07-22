@@ -16,11 +16,16 @@ final class MacPowerActivityMonitorTests: XCTestCase {
         XCTAssertEqual(reported.last?.visibility, .background)
     }
 
-    func testCadenceVisibilityIncludesSettingsAndHistoryWindows() throws {
+    func testCadenceVisibilityTracksSettingsAndHistoryWindows() throws {
         let source = try String(
             contentsOf: repositoryRoot().appendingPathComponent("Sources/PingScopeApp/PingScopeApp.swift"),
             encoding: .utf8
         )
+        let settingsStart = try XCTUnwrap(source.range(of: "func openSettings()"))
+        let historyStart = try XCTUnwrap(source.range(of: "func openHistory()"))
+        let showOverlayStart = try XCTUnwrap(source.range(of: "func showOverlay()"))
+        let settings = source[settingsStart.lowerBound..<historyStart.lowerBound]
+        let history = source[historyStart.lowerBound..<showOverlayStart.lowerBound]
         let updateStart = try XCTUnwrap(source.range(of: "private func updatePowerMonitorUIVisibility()"))
         let updateEnd = try XCTUnwrap(
             source.range(
@@ -30,6 +35,8 @@ final class MacPowerActivityMonitorTests: XCTestCase {
         )
         let update = source[updateStart.lowerBound..<updateEnd.lowerBound]
 
+        XCTAssertTrue(settings.contains("window.delegate = self"))
+        XCTAssertTrue(history.contains("window.delegate = self"))
         XCTAssertTrue(update.contains("settingsWindowController?.window?.isVisible == true"))
         XCTAssertTrue(update.contains("historyWindowController?.window?.isVisible == true"))
     }
