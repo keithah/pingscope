@@ -130,12 +130,13 @@ for _ in {1..30}; do
   fi
   sleep 0.1
 done
+killall cfprefsd 2>/dev/null || true
+sleep 0.2
 defaults write com.hadm.PingScope overlayVisible -bool true
 defaults write com.hadm.PingScope overlayCompactMode -bool false
 defaults write com.hadm.PingScope overlayFrame -string '{{240, 620}, {240, 96}}'
 defaults write com.hadm.PingScope widgetsEnabled -bool false
 defaults write com.hadm.PingScope selectedSettingsTab hosts
-killall cfprefsd 2>/dev/null || true
 open "$APP_PATH"
 sleep 2
 
