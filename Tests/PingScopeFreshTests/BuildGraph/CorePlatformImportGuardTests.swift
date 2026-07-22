@@ -65,7 +65,7 @@ final class CorePlatformImportGuardTests: XCTestCase {
         XCTAssertTrue(macApp.contains("historyRetention = PingHistoryRetention.maximumDuration"))
     }
 
-    func testApplicationTargetsDeclareWiFiInfoCapability() throws {
+    func testAppStoreApplicationTargetsDeclareWiFiInfoCapability() throws {
         let repositoryRoot = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
             .deletingLastPathComponent()
@@ -74,7 +74,6 @@ final class CorePlatformImportGuardTests: XCTestCase {
         for filename in [
             "PingScope-iOS.entitlements",
             "PingScope-AppStore.entitlements",
-            "PingScope-DeveloperID.entitlements",
         ] {
             let data = try Data(contentsOf: repositoryRoot
                 .appendingPathComponent("Configuration")
@@ -88,6 +87,25 @@ final class CorePlatformImportGuardTests: XCTestCase {
                 filename
             )
         }
+    }
+
+    func testDeveloperIDEntitlementsOmitCapabilitiesUnavailableToItsProvisioningProfile() throws {
+        let repositoryRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let data = try Data(contentsOf: repositoryRoot
+            .appendingPathComponent("Configuration/PingScope-DeveloperID.entitlements"))
+        let plist = try XCTUnwrap(
+            PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any]
+        )
+
+        XCTAssertNil(plist["com.apple.developer.networking.wifi-info"])
+        XCTAssertEqual(
+            plist["com.apple.developer.icloud-container-identifiers"] as? [String],
+            ["iCloud.com.hadm.PingScope"]
+        )
     }
 
     func testIOSAppWiresPersistedNotificationRulesAndRefreshesAuthorization() throws {

@@ -1,7 +1,7 @@
 apps:
   pingscope:
     display_name: PingScope
-    scenario_app: Pingscope
+    scenario_app: PingScope
     surface: menubar
     repo: ~/src/pingscope
     build:

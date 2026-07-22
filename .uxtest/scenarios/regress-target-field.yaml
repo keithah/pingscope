@@ -1,6 +1,6 @@
 # Regression example from spec §7. Regression loop is stubbed in Phase 1;
 # this file documents the schema so Phase 2 has a concrete target.
-app: Pingscope
+app: PingScope
 mode: regress
 menubar_match:
   ax_identifier: null

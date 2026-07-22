@@ -9,6 +9,7 @@ Usage:
     --app <path/to/PingScope.app> \
     --sign-app "Developer ID Application: ..." \
     --provisioning-profile <DeveloperID.provisionprofile> \
+    --widget-provisioning-profile <WidgetDeveloperID.provisionprofile> \
     [--sign-installer "Developer ID Installer: ..."] \
     [--notary-profile "NotarytoolProfile"] \
     [--notary-key <AuthKey.p8> --notary-key-id <key-id> --notary-issuer <issuer-id>]
@@ -28,6 +29,7 @@ NOTARY_KEY=""
 NOTARY_KEY_ID=""
 NOTARY_ISSUER=""
 PROVISIONING_PROFILE="${PING_SCOPE_DEVELOPER_ID_PROFILE:-}"
+WIDGET_PROVISIONING_PROFILE="${PING_SCOPE_WIDGET_DEVELOPER_ID_PROFILE:-}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -39,6 +41,8 @@ while [[ $# -gt 0 ]]; do
       SIGN_APP_IDENTITY="$2"; shift 2 ;;
     --provisioning-profile)
       PROVISIONING_PROFILE="$2"; shift 2 ;;
+    --widget-provisioning-profile)
+      WIDGET_PROVISIONING_PROFILE="$2"; shift 2 ;;
     --sign-installer)
       SIGN_INSTALLER_IDENTITY="$2"; shift 2 ;;
     --notary-profile)
@@ -62,6 +66,10 @@ done
 if [[ -z "${VERSION}" || -z "${APP_PATH}" || -z "${SIGN_APP_IDENTITY}" || -z "${PROVISIONING_PROFILE}" ]]; then
   usage
   exit 2
+fi
+if [[ -z "${WIDGET_PROVISIONING_PROFILE}" || ! -f "${WIDGET_PROVISIONING_PROFILE}" ]]; then
+  echo "A widget Developer ID provisioning profile is required; pass --widget-provisioning-profile or set PING_SCOPE_WIDGET_DEVELOPER_ID_PROFILE." >&2
+  exit 66
 fi
 if [[ ! "${VERSION}" =~ ^[0-9]+[.][0-9]+[.][0-9]+([-.][0-9A-Za-z]+)*$ ]]; then
   echo "Invalid version: ${VERSION}" >&2
@@ -120,7 +128,8 @@ PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 source "${PROJECT_ROOT}/scripts/lib/codesign-macos.sh"
 # shellcheck source=../scripts/lib/developer-id-profile.sh
 source "${PROJECT_ROOT}/scripts/lib/developer-id-profile.sh"
-validate_developer_id_profile "${PROVISIONING_PROFILE}" "com.hadm.PingScope"
+validate_developer_id_profile "${PROVISIONING_PROFILE}" "com.hadm.PingScope" "${SIGN_APP_IDENTITY}" 1 "${PROJECT_ROOT}/Configuration/PingScope-DeveloperID.entitlements"
+validate_developer_id_profile "${WIDGET_PROVISIONING_PROFILE}" "com.hadm.PingScope.widget" "${SIGN_APP_IDENTITY}" 0 "${PROJECT_ROOT}/PingScopeWidget/PingScopeWidget.entitlements"
 ARTIFACT_DIR="/private/tmp/artifacts/PingScope-v${VERSION}"
 case "${ARTIFACT_DIR}" in
   /private/tmp/artifacts/PingScope-v*) ;;
@@ -145,6 +154,7 @@ echo "Signing app: ${SIGN_APP_IDENTITY}"
 SIGN_COMMON=("--force" "--options" "runtime" "--timestamp" "--sign" "${SIGN_APP_IDENTITY}")
 
 embed_developer_id_profile "${PROVISIONING_PROFILE}" "PingScope.app"
+embed_developer_id_profile "${WIDGET_PROVISIONING_PROFILE}" "PingScope.app/Contents/PlugIns/widgetExtension.appex"
 codesign_sign_macos_bundle_contents "PingScope.app" "${PROJECT_ROOT}"
 
 codesign_run --identifier "com.hadm.PingScope" --entitlements "${PROJECT_ROOT}/Configuration/PingScope-DeveloperID.entitlements" "PingScope.app"

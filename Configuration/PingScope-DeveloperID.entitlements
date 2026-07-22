@@ -14,11 +14,6 @@
 	<key>com.apple.security.cs.allow-dyld-environment-variables</key>
 	<false/>
 
-	<!-- Access WiFi Information: read current Wi-Fi SSID for per-network history labels
-	     (requires location permission at runtime; capture is opt-in). -->
-	<key>com.apple.developer.networking.wifi-info</key>
-	<true/>
-
 	<!-- Opt-in history and host sync uses only the user's private CloudKit database. -->
 	<key>com.apple.developer.icloud-container-identifiers</key>
 	<array>

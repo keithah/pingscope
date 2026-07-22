@@ -510,9 +510,12 @@ final class BuildGraphOptimizationTests: XCTestCase {
         let profileLibrary = try String(contentsOf: profileLibraryURL, encoding: .utf8)
 
         XCTAssertTrue(releaseScript.contains("--provisioning-profile"))
+        XCTAssertTrue(releaseScript.contains("--widget-provisioning-profile"))
         XCTAssertTrue(signingScript.contains("--provisioning-profile"))
+        XCTAssertTrue(signingScript.contains("--widget-provisioning-profile"))
         XCTAssertTrue(signingScript.contains("validate_developer_id_profile"))
         XCTAssertTrue(signingScript.contains("embed_developer_id_profile"))
+        XCTAssertTrue(signingScript.contains("PingScope.app/Contents/PlugIns/widgetExtension.appex"))
         XCTAssertLessThan(
             try XCTUnwrap(signingScript.range(of: "embed_developer_id_profile")?.lowerBound),
             try XCTUnwrap(signingScript.range(of: "codesign_sign_macos_bundle_contents")?.lowerBound),
@@ -521,6 +524,98 @@ final class BuildGraphOptimizationTests: XCTestCase {
         XCTAssertTrue(profileLibrary.contains("com.hadm.PingScope"))
         XCTAssertTrue(profileLibrary.contains("ProvisionsAllDevices"))
         XCTAssertTrue(profileLibrary.contains("ExpirationDate"))
+    }
+
+    func testDeveloperIDProfileValidatorAcceptsMacOSIdentifiersAndWildcardCloudKitService() throws {
+        let result = try runDeveloperIDProfileValidation(
+            entitlements: [
+                "com.apple.application-identifier": "6R7S5GA944.com.hadm.PingScope",
+                "com.apple.developer.icloud-container-identifiers": ["iCloud.com.hadm.PingScope"],
+                "com.apple.developer.icloud-services": "*",
+            ],
+            embeddedCertificate: Data("test-certificate".utf8),
+            identityFingerprint: "968B0DEF46BC735A13350F430A46F9FDA546FE01"
+        )
+
+        XCTAssertEqual(result.status, 0, result.output)
+    }
+
+    func testDeveloperIDProfileValidatorRejectsCertificateThatDoesNotMatchSigningIdentity() throws {
+        let result = try runDeveloperIDProfileValidation(
+            entitlements: [
+                "application-identifier": "6R7S5GA944.com.hadm.PingScope",
+                "com.apple.developer.icloud-container-identifiers": ["iCloud.com.hadm.PingScope"],
+                "com.apple.developer.icloud-services": ["CloudKit"],
+            ],
+            embeddedCertificate: Data("different-certificate".utf8),
+            identityFingerprint: "968B0DEF46BC735A13350F430A46F9FDA546FE01"
+        )
+
+        XCTAssertNotEqual(result.status, 0, result.output)
+        XCTAssertTrue(result.output.contains("does not authorize signing identity"), result.output)
+    }
+
+    func testDeveloperIDReleaseEntryPointsRequireWidgetProfileBeforeReleaseWork() throws {
+        let temporaryRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("pingscope-widget-profile-gate-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: temporaryRoot) }
+        try FileManager.default.createDirectory(at: temporaryRoot, withIntermediateDirectories: true)
+        let mainProfile = temporaryRoot.appendingPathComponent("main.provisionprofile")
+        try Data("main-profile-placeholder".utf8).write(to: mainProfile)
+        let app = temporaryRoot.appendingPathComponent("PingScope.app", isDirectory: true)
+        try FileManager.default.createDirectory(at: app, withIntermediateDirectories: true)
+        let root = try repositoryRoot()
+
+        let releaseResult = try runShellCommand(
+            executable: root.appendingPathComponent("scripts/release-github.sh"),
+            arguments: [
+                "--version", "0.5.0",
+                "--dry-run",
+                "--provisioning-profile", mainProfile.path,
+            ]
+        )
+        XCTAssertNotEqual(releaseResult.status, 0, releaseResult.output)
+        XCTAssertTrue(releaseResult.output.contains("widget Developer ID provisioning profile is required"), releaseResult.output)
+
+        let signingResult = try runShellCommand(
+            executable: root.appendingPathComponent("deploy/sign-notarize.sh"),
+            arguments: [
+                "--version", "0.5.0",
+                "--app", app.path,
+                "--sign-app", "Developer ID Application: Test (6R7S5GA944)",
+                "--provisioning-profile", mainProfile.path,
+            ]
+        )
+        XCTAssertNotEqual(signingResult.status, 0, signingResult.output)
+        XCTAssertTrue(signingResult.output.contains("widget Developer ID provisioning profile is required"), signingResult.output)
+    }
+
+    func testDeveloperIDProfileValidatorRejectsSignedEntitlementOutsideProfileAuthorization() throws {
+        let temporaryRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("pingscope-unauthorized-entitlement-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: temporaryRoot) }
+        try FileManager.default.createDirectory(at: temporaryRoot, withIntermediateDirectories: true)
+        let signedEntitlementsURL = temporaryRoot.appendingPathComponent("signed-entitlements.plist")
+        let signedEntitlementsData = try PropertyListSerialization.data(
+            fromPropertyList: ["com.apple.developer.networking.wifi-info": true],
+            format: .xml,
+            options: 0
+        )
+        try signedEntitlementsData.write(to: signedEntitlementsURL)
+        let result = try runDeveloperIDProfileValidation(
+            entitlements: [
+                "com.apple.application-identifier": "6R7S5GA944.com.hadm.PingScope",
+                "com.apple.developer.icloud-container-identifiers": ["iCloud.com.hadm.PingScope"],
+                "com.apple.developer.icloud-services": "*",
+                "com.apple.security.application-groups": ["group.com.hadm.pingscope", "6R7S5GA944.*"],
+            ],
+            embeddedCertificate: Data("test-certificate".utf8),
+            identityFingerprint: "968B0DEF46BC735A13350F430A46F9FDA546FE01",
+            signedEntitlementsURL: signedEntitlementsURL
+        )
+
+        XCTAssertNotEqual(result.status, 0, result.output)
+        XCTAssertTrue(result.output.contains("com.apple.developer.networking.wifi-info is not authorized"), result.output)
     }
 
     func testSparkleToolDiscoveryFindsResolvedXcodeArtifactsByDefault() throws {
@@ -637,6 +732,86 @@ final class BuildGraphOptimizationTests: XCTestCase {
         XCTAssertTrue(notes.contains("Live Activity"))
         XCTAssertFalse(notes.contains("Build: 89"))
         XCTAssertFalse(notes.contains("intentionally not part of this preparation commit"))
+    }
+
+    private func runDeveloperIDProfileValidation(
+        entitlements: [String: Any],
+        embeddedCertificate: Data,
+        identityFingerprint: String,
+        signedEntitlementsURL: URL? = nil
+    ) throws -> (status: Int32, output: String) {
+        let temporaryRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("pingscope-profile-validation-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: temporaryRoot) }
+        try FileManager.default.createDirectory(at: temporaryRoot, withIntermediateDirectories: true)
+
+        let profileURL = temporaryRoot.appendingPathComponent("profile.provisionprofile")
+        try Data("profile-placeholder".utf8).write(to: profileURL)
+        let decodedURL = temporaryRoot.appendingPathComponent("decoded.plist")
+        let decodedProfile: [String: Any] = [
+            "Name": "Behavioral Developer ID Profile",
+            "ExpirationDate": Date(timeIntervalSinceNow: 86_400),
+            "ProvisionsAllDevices": true,
+            "DeveloperCertificates": [embeddedCertificate],
+            "Entitlements": entitlements,
+        ]
+        let decodedData = try PropertyListSerialization.data(
+            fromPropertyList: decodedProfile,
+            format: .xml,
+            options: 0
+        )
+        try decodedData.write(to: decodedURL)
+
+        let securityURL = temporaryRoot.appendingPathComponent("security")
+        let securityShim = """
+        #!/bin/bash
+        if [[ "$1" == "cms" ]]; then
+          cat "$PING_SCOPE_TEST_DECODED_PROFILE"
+          exit 0
+        fi
+        if [[ "$1" == "find-certificate" ]]; then
+          echo "SHA-1 hash: \(identityFingerprint)"
+          exit 0
+        fi
+        exit 64
+        """
+        try Data(securityShim.utf8).write(to: securityURL)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: securityURL.path)
+
+        let process = Process()
+        let output = Pipe()
+        process.executableURL = URL(fileURLWithPath: "/bin/bash")
+        process.arguments = [
+            "-c",
+            "source \"$1\"; validate_developer_id_profile \"$2\" com.hadm.PingScope 'Developer ID Application: Test (6R7S5GA944)' 1 \"$3\"",
+            "pingscope-test",
+            try repositoryRoot().appendingPathComponent("scripts/lib/developer-id-profile.sh").path,
+            profileURL.path,
+            signedEntitlementsURL?.path ?? "",
+        ]
+        var environment = ProcessInfo.processInfo.environment
+        environment["PATH"] = "\(temporaryRoot.path):/usr/bin:/bin"
+        environment["PING_SCOPE_TEST_DECODED_PROFILE"] = decodedURL.path
+        process.environment = environment
+        process.standardOutput = output
+        process.standardError = output
+        try process.run()
+        process.waitUntilExit()
+        let message = String(decoding: output.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        return (process.terminationStatus, message)
+    }
+
+    private func runShellCommand(executable: URL, arguments: [String]) throws -> (status: Int32, output: String) {
+        let process = Process()
+        let output = Pipe()
+        process.executableURL = executable
+        process.arguments = arguments
+        process.standardOutput = output
+        process.standardError = output
+        try process.run()
+        process.waitUntilExit()
+        let message = String(decoding: output.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        return (process.terminationStatus, message)
     }
 
     private struct PBXObject {
