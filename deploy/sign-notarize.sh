@@ -10,6 +10,7 @@ Usage:
     --sign-app "Developer ID Application: ..." \
     --provisioning-profile <DeveloperID.provisionprofile> \
     --widget-provisioning-profile <WidgetDeveloperID.provisionprofile> \
+    [--prepare-only] \
     [--sign-installer "Developer ID Installer: ..."] \
     [--notary-profile "NotarytoolProfile"] \
     [--notary-key <AuthKey.p8> --notary-key-id <key-id> --notary-issuer <issuer-id>]
@@ -17,6 +18,7 @@ Usage:
 Notes:
   - Produces a DMG and (optionally) a PKG in /private/tmp/artifacts.
   - If --sign-installer is omitted, the PKG step is skipped.
+  - --prepare-only stops after profile embedding, signing, and signature verification.
 EOF
 }
 
@@ -30,6 +32,7 @@ NOTARY_KEY_ID=""
 NOTARY_ISSUER=""
 PROVISIONING_PROFILE="${PING_SCOPE_DEVELOPER_ID_PROFILE:-}"
 WIDGET_PROVISIONING_PROFILE="${PING_SCOPE_WIDGET_DEVELOPER_ID_PROFILE:-}"
+PREPARE_ONLY=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -43,6 +46,8 @@ while [[ $# -gt 0 ]]; do
       PROVISIONING_PROFILE="$2"; shift 2 ;;
     --widget-provisioning-profile)
       WIDGET_PROVISIONING_PROFILE="$2"; shift 2 ;;
+    --prepare-only)
+      PREPARE_ONLY=1; shift ;;
     --sign-installer)
       SIGN_INSTALLER_IDENTITY="$2"; shift 2 ;;
     --notary-profile)
@@ -161,6 +166,11 @@ codesign_run --identifier "com.hadm.PingScope" --entitlements "${PROJECT_ROOT}/C
 
 echo "Verifying signature..."
 codesign --verify --deep --strict --verbose=2 "PingScope.app"
+
+if [[ "${PREPARE_ONLY}" -eq 1 ]]; then
+  echo "Prepared signed app: ${ARTIFACT_DIR}/PingScope.app"
+  exit 0
+fi
 
 echo "Creating DMG..."
 rm -rf dmg_staging

@@ -618,6 +618,118 @@ final class BuildGraphOptimizationTests: XCTestCase {
         XCTAssertTrue(result.output.contains("com.apple.developer.networking.wifi-info is not authorized"), result.output)
     }
 
+    func testDeveloperIDSigningCLIEmbedsBothProfilesAndSignsNestedBundleBeforePrepareOnlyExit() throws {
+        let temporaryRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("pingscope-signing-cli-\(UUID().uuidString)", isDirectory: true)
+        let version = "0.0.0-test\(UUID().uuidString.replacingOccurrences(of: "-", with: ""))"
+        let artifactRoot = URL(fileURLWithPath: "/private/tmp/artifacts/PingScope-v\(version)", isDirectory: true)
+        defer {
+            try? FileManager.default.removeItem(at: temporaryRoot)
+            try? FileManager.default.removeItem(at: artifactRoot)
+        }
+        try FileManager.default.createDirectory(at: temporaryRoot, withIntermediateDirectories: true)
+
+        let app = temporaryRoot.appendingPathComponent("PingScope.app", isDirectory: true)
+        let widget = app.appendingPathComponent("Contents/PlugIns/widgetExtension.appex", isDirectory: true)
+        try createTestBundle(
+            at: app,
+            identifier: "com.hadm.PingScope",
+            executable: "PingScope"
+        )
+        try createTestBundle(
+            at: widget,
+            identifier: "com.hadm.PingScope.widget",
+            executable: "widgetExtension"
+        )
+
+        let certificate = Data("test-certificate".utf8)
+        let mainProfile = temporaryRoot.appendingPathComponent("main.provisionprofile")
+        let widgetProfile = temporaryRoot.appendingPathComponent("widget.provisionprofile")
+        try Data("main-profile".utf8).write(to: mainProfile)
+        try Data("widget-profile".utf8).write(to: widgetProfile)
+        let mainDecoded = temporaryRoot.appendingPathComponent("main-decoded.plist")
+        let widgetDecoded = temporaryRoot.appendingPathComponent("widget-decoded.plist")
+        try writeTestProfile(
+            to: mainDecoded,
+            certificate: certificate,
+            entitlements: [
+                "com.apple.application-identifier": "6R7S5GA944.com.hadm.PingScope",
+                "com.apple.developer.icloud-container-identifiers": ["iCloud.com.hadm.PingScope"],
+                "com.apple.developer.icloud-services": "*",
+                "com.apple.security.application-groups": ["6R7S5GA944.group.com.hadm.PingScope"],
+            ]
+        )
+        try writeTestProfile(
+            to: widgetDecoded,
+            certificate: certificate,
+            entitlements: [
+                "com.apple.application-identifier": "6R7S5GA944.com.hadm.PingScope.widget",
+                "com.apple.security.application-groups": ["6R7S5GA944.group.com.hadm.PingScope"],
+            ]
+        )
+
+        let codesignLog = temporaryRoot.appendingPathComponent("codesign.log")
+        let securityShim = temporaryRoot.appendingPathComponent("security")
+        let securityScript = """
+        #!/bin/bash
+        if [[ "$1" == "cms" ]]; then
+          if [[ "$4" == *widget.provisionprofile ]]; then
+            cat "$PING_SCOPE_TEST_WIDGET_PROFILE"
+          else
+            cat "$PING_SCOPE_TEST_MAIN_PROFILE"
+          fi
+          exit 0
+        fi
+        if [[ "$1" == "find-certificate" ]]; then
+          echo "SHA-1 hash: 968B0DEF46BC735A13350F430A46F9FDA546FE01"
+          exit 0
+        fi
+        exit 64
+        """
+        try Data(securityScript.utf8).write(to: securityShim)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: securityShim.path)
+        let codesignShim = temporaryRoot.appendingPathComponent("codesign")
+        let codesignScript = """
+        #!/bin/bash
+        printf '%s\\n' "$*" >> "$PING_SCOPE_TEST_CODESIGN_LOG"
+        exit 0
+        """
+        try Data(codesignScript.utf8).write(to: codesignShim)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: codesignShim.path)
+
+        var environment = ProcessInfo.processInfo.environment
+        environment["PATH"] = "\(temporaryRoot.path):/usr/bin:/bin"
+        environment["PING_SCOPE_TEST_MAIN_PROFILE"] = mainDecoded.path
+        environment["PING_SCOPE_TEST_WIDGET_PROFILE"] = widgetDecoded.path
+        environment["PING_SCOPE_TEST_CODESIGN_LOG"] = codesignLog.path
+        let result = try runShellCommand(
+            executable: try repositoryRoot().appendingPathComponent("deploy/sign-notarize.sh"),
+            arguments: [
+                "--version", version,
+                "--app", app.path,
+                "--sign-app", "Developer ID Application: Test (6R7S5GA944)",
+                "--provisioning-profile", mainProfile.path,
+                "--widget-provisioning-profile", widgetProfile.path,
+                "--prepare-only",
+            ],
+            environment: environment
+        )
+
+        XCTAssertEqual(result.status, 0, result.output)
+        XCTAssertEqual(
+            try Data(contentsOf: artifactRoot.appendingPathComponent("PingScope.app/Contents/embedded.provisionprofile")),
+            try Data(contentsOf: mainProfile)
+        )
+        XCTAssertEqual(
+            try Data(contentsOf: artifactRoot.appendingPathComponent("PingScope.app/Contents/PlugIns/widgetExtension.appex/Contents/embedded.provisionprofile")),
+            try Data(contentsOf: widgetProfile)
+        )
+        let signingCommands = try String(contentsOf: codesignLog, encoding: .utf8)
+        XCTAssertTrue(signingCommands.contains("widgetExtension.appex"), signingCommands)
+        XCTAssertTrue(signingCommands.contains("--identifier com.hadm.PingScope"), signingCommands)
+        XCTAssertTrue(signingCommands.contains("--verify --deep --strict"), signingCommands)
+    }
+
     func testSparkleToolDiscoveryFindsResolvedXcodeArtifactsByDefault() throws {
         let temporaryRoot = FileManager.default.temporaryDirectory
             .appendingPathComponent("pingscope-sparkle-discovery-\(UUID().uuidString)", isDirectory: true)
@@ -801,11 +913,54 @@ final class BuildGraphOptimizationTests: XCTestCase {
         return (process.terminationStatus, message)
     }
 
-    private func runShellCommand(executable: URL, arguments: [String]) throws -> (status: Int32, output: String) {
+    private func createTestBundle(at bundle: URL, identifier: String, executable: String) throws {
+        let contents = bundle.appendingPathComponent("Contents", isDirectory: true)
+        let executableDirectory = contents.appendingPathComponent("MacOS", isDirectory: true)
+        try FileManager.default.createDirectory(at: executableDirectory, withIntermediateDirectories: true)
+        let infoData = try PropertyListSerialization.data(
+            fromPropertyList: [
+                "CFBundleIdentifier": identifier,
+                "CFBundleExecutable": executable,
+            ],
+            format: .xml,
+            options: 0
+        )
+        try infoData.write(to: contents.appendingPathComponent("Info.plist"))
+        let executableURL = executableDirectory.appendingPathComponent(executable)
+        try Data("#!/bin/bash\\nexit 0\\n".utf8).write(to: executableURL)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: executableURL.path)
+    }
+
+    private func writeTestProfile(
+        to url: URL,
+        certificate: Data,
+        entitlements: [String: Any]
+    ) throws {
+        let profile: [String: Any] = [
+            "Name": "Behavioral Developer ID Profile",
+            "ExpirationDate": Date(timeIntervalSinceNow: 86_400),
+            "ProvisionsAllDevices": true,
+            "DeveloperCertificates": [certificate],
+            "Entitlements": entitlements,
+        ]
+        let data = try PropertyListSerialization.data(
+            fromPropertyList: profile,
+            format: .xml,
+            options: 0
+        )
+        try data.write(to: url)
+    }
+
+    private func runShellCommand(
+        executable: URL,
+        arguments: [String],
+        environment: [String: String]? = nil
+    ) throws -> (status: Int32, output: String) {
         let process = Process()
         let output = Pipe()
         process.executableURL = executable
         process.arguments = arguments
+        process.environment = environment
         process.standardOutput = output
         process.standardError = output
         try process.run()
