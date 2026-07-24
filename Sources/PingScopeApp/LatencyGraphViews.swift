@@ -47,7 +47,7 @@ struct RecentSamplesView: View {
                     .foregroundStyle(.secondary)
             }
         }
-        .frame(height: 140)
+        .frame(minHeight: 140, maxHeight: .infinity)
     }
 
     private var emptyMessage: String {
