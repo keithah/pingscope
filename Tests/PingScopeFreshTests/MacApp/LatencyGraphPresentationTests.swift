@@ -39,6 +39,31 @@ final class LatencyGraphPresentationTests: XCTestCase {
         }
     }
 
+    func testGraphCardSurfaceColorsMatchLegacyDarkAppearanceAndAreDistinctInLight() {
+        // Dark values must match the previous hardcoded literals (Color.black and
+        // #111827) so dark mode is visually unchanged by the light-mode fix.
+        let darkTop = PingScopeSurfaceColors.graphCardTop.components(for: .dark)
+        XCTAssertEqual(darkTop.red, 0, accuracy: 0.001)
+        XCTAssertEqual(darkTop.green, 0, accuracy: 0.001)
+        XCTAssertEqual(darkTop.blue, 0, accuracy: 0.001)
+
+        let darkBottom = PingScopeSurfaceColors.graphCardBottom.components(for: .dark)
+        XCTAssertEqual(darkBottom.red, 17.0 / 255.0, accuracy: 0.01)
+        XCTAssertEqual(darkBottom.green, 24.0 / 255.0, accuracy: 0.01)
+        XCTAssertEqual(darkBottom.blue, 39.0 / 255.0, accuracy: 0.01)
+
+        // Light values must actually be light (not another dark shade), so the
+        // card reads as a light surface under the system light appearance.
+        let lightTop = PingScopeSurfaceColors.graphCardTop.components(for: .light)
+        let lightBottom = PingScopeSurfaceColors.graphCardBottom.components(for: .light)
+        for component in [lightTop.red, lightTop.green, lightTop.blue, lightBottom.red, lightBottom.green, lightBottom.blue] {
+            XCTAssertGreaterThan(component, 0.85)
+        }
+
+        XCTAssertNotEqual(darkTop, lightTop)
+        XCTAssertNotEqual(darkBottom, lightBottom)
+    }
+
     @MainActor
     func testDisabledCustomColorReachesAllHostStatusRowWithoutGraphSeries() {
         let custom = HostDisplayColor(red: 0.75, green: 0.15, blue: 0.65)

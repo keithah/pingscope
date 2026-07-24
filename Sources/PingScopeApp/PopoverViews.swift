@@ -38,18 +38,19 @@ struct StatusPopoverView: View {
                 RecentSamplesView(samples: presentation.displayPresentation.recentVisibleSamples, range: presentation.selectedRange)
             }
             .padding(16)
-            .frame(maxWidth: MenuBarPresentationMode.statusContentSize.width, alignment: .topLeading)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
         }
+        .scrollIndicators(.automatic)
         .frame(
             minWidth: MenuBarPresentationMode.statusContentMinimumSize.width,
             idealWidth: MenuBarPresentationMode.statusContentSize.width,
-            maxWidth: MenuBarPresentationMode.statusContentSize.width,
+            maxWidth: .infinity,
             minHeight: 430,
             idealHeight: 500,
             maxHeight: .infinity,
             alignment: .top
         )
-        .background(Color(hex: "#1c1c1e"))
+        .background(Color(nsColor: .windowBackgroundColor))
         .popover(isPresented: $isShareOptionsPresented, arrowEdge: .top) {
             ShareGraphOptionsPopover(
                 options: $shareOptions,
@@ -77,7 +78,7 @@ struct StatusPopoverView: View {
                 Image(systemName: "square.and.arrow.up")
                     .font(.system(size: 15, weight: .semibold))
                     .frame(width: 30, height: 30)
-                    .background(Color(hex: "#2c2c2e"), in: Circle())
+                    .background(.thinMaterial, in: Circle())
             }
             .buttonStyle(.plain)
             .help("Share graph")
@@ -86,7 +87,7 @@ struct StatusPopoverView: View {
                 Image(systemName: "chart.xyaxis.line")
                     .font(.system(size: 15, weight: .semibold))
                     .frame(width: 30, height: 30)
-                    .background(Color(hex: "#2c2c2e"), in: Circle())
+                    .background(.thinMaterial, in: Circle())
             }
             .buttonStyle(.plain)
             .help("Open History")
@@ -139,7 +140,7 @@ struct StatusPopoverView: View {
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
-            .background(Color(hex: "#2c2c2e"), in: Capsule())
+            .background(.thinMaterial, in: Capsule())
         }
         .buttonStyle(.plain)
     }
@@ -185,7 +186,7 @@ struct StatusPopoverView: View {
             Image(systemName: "gearshape")
                 .font(.system(size: 15, weight: .semibold))
                 .frame(width: 30, height: 30)
-                .background(Color(hex: "#2c2c2e"), in: Circle())
+                .background(.thinMaterial, in: Circle())
         }
         .menuStyle(.button)
         .buttonStyle(.plain)
@@ -286,13 +287,13 @@ struct StatusPopoverView: View {
         .padding(10)
         .background(
             LinearGradient(
-                colors: [Color.black, Color(hex: "#111827")],
+                colors: [PingScopeSurfaceColors.graphCardTop.swiftUIColor, PingScopeSurfaceColors.graphCardBottom.swiftUIColor],
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
             ),
             in: RoundedRectangle(cornerRadius: 12)
         )
-        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.white.opacity(0.08), lineWidth: 1))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.primary.opacity(0.08), lineWidth: 1))
     }
 
     @ViewBuilder
@@ -550,10 +551,10 @@ struct StatusPopoverView: View {
                 }
             }
         }
-        .background(Color(hex: "#2c2c2e").opacity(0.78), in: RoundedRectangle(cornerRadius: 12))
+        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12))
         .overlay(
             RoundedRectangle(cornerRadius: 12)
-                .stroke(Color.white.opacity(0.05), lineWidth: 1)
+                .stroke(Color.primary.opacity(0.05), lineWidth: 1)
         )
     }
 

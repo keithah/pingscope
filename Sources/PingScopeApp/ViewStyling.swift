@@ -1,3 +1,4 @@
+import AppKit
 import PingScopeCore
 import SwiftUI
 
@@ -24,6 +25,50 @@ extension Color {
     }
 }
 
+/// A color that resolves distinct RGB components per appearance, so a surface
+/// that was previously a hardcoded dark hex value (and therefore stayed dark
+/// under a light system appearance) adapts correctly. Mirrors the dynamic
+/// `NSColor(name:)` pattern already used by `ResolvedHostDisplayColor`.
+struct PingScopeAdaptiveColor: Equatable {
+    struct Components: Equatable {
+        let red: Double
+        let green: Double
+        let blue: Double
+    }
+
+    let light: Components
+    let dark: Components
+
+    func components(for appearance: HostDisplayColorAppearance) -> Components {
+        appearance == .dark ? dark : light
+    }
+
+    var swiftUIColor: Color {
+        Color(nsColor: NSColor(name: nil) { [self] appearance in
+            let resolved: HostDisplayColorAppearance =
+                appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? .dark : .light
+            let value = components(for: resolved)
+            return NSColor(srgbRed: value.red, green: value.green, blue: value.blue, alpha: 1)
+        })
+    }
+}
+
+/// Adaptive surfaces for the status popover/standalone window UI. Dark values
+/// match the previous hardcoded literals exactly so dark mode is visually
+/// unchanged; light values are genuinely light so the UI stays legible when
+/// the system appearance is light.
+enum PingScopeSurfaceColors {
+    static let graphCardTop = PingScopeAdaptiveColor(
+        light: .init(red: 0.973, green: 0.976, blue: 0.984),
+        dark: .init(red: 0, green: 0, blue: 0)
+    )
+
+    static let graphCardBottom = PingScopeAdaptiveColor(
+        light: .init(red: 0.906, green: 0.925, blue: 0.957),
+        dark: .init(red: 17.0 / 255.0, green: 24.0 / 255.0, blue: 39.0 / 255.0)
+    )
+}
+
 extension HealthStatus {
     var statusColor: StatusColor {
         switch self {
@@ -39,7 +84,7 @@ struct PulseHealthRing: View {
     var progress: Double
     var color: Color
     var lineWidth: CGFloat
-    var trackColor: Color = Color(hex: "#2c2c2e")
+    var trackColor: Color = Color.primary.opacity(0.12)
 
     var body: some View {
         ZStack {
