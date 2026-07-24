@@ -1,6 +1,20 @@
 import PingScopeCore
 import SwiftUI
 
+/// Minimum column widths for `RecentSamplesView`'s table, kept narrow enough
+/// that the table never needs its own horizontal scrollbar even at the
+/// status window's smallest allowed width (see the corresponding test in
+/// MenuBarPresentationModeTests).
+enum RecentSamplesColumnLayout {
+    static let timeMinWidth: CGFloat = 60
+    static let resultMinWidth: CGFloat = 60
+    static let statusMinWidth: CGFloat = 50
+
+    static var totalMinimumWidth: CGFloat {
+        timeMinWidth + resultMinWidth + statusMinWidth
+    }
+}
+
 struct RecentSamplesView: View {
     let samples: [PingResult]
     var range: TimeRange? = nil
@@ -11,6 +25,7 @@ struct RecentSamplesView: View {
                 TableColumn("Time") { result in
                     Text(result.timestamp, style: .time)
                 }
+                .width(min: RecentSamplesColumnLayout.timeMinWidth, ideal: 80)
                 TableColumn("Result") { result in
                     if let latency = result.latency {
                         Text("\(Int(latency.milliseconds.rounded()))ms")
@@ -19,9 +34,11 @@ struct RecentSamplesView: View {
                             .foregroundStyle(.red)
                     }
                 }
+                .width(min: RecentSamplesColumnLayout.resultMinWidth, ideal: 85)
                 TableColumn("Status") { result in
                     Text(result.isSuccess ? "OK" : "Failed")
                 }
+                .width(min: RecentSamplesColumnLayout.statusMinWidth, ideal: 65)
             }
 
             if samples.isEmpty {

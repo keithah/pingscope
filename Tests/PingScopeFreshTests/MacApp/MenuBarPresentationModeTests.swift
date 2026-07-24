@@ -72,6 +72,17 @@ final class MenuBarPresentationModeTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(MenuBarPresentationMode.statusGraphMinimumHeight, 150)
     }
 
+    func testRecentSamplesTableColumnsFitWithinStatusContentMinimumWidthWithoutHorizontalOverflow() {
+        // The status content view pads on each side; the table's column
+        // minimums must fit inside what remains at the window's declared
+        // minimum width, or the Table shows a permanent horizontal scrollbar
+        // whenever the window is narrowed toward that minimum.
+        let horizontalContentPadding = MenuBarPresentationMode.statusContentPadding * 2
+        let availableWidth = MenuBarPresentationMode.statusContentMinimumSize.width - horizontalContentPadding
+
+        XCTAssertLessThanOrEqual(RecentSamplesColumnLayout.totalMinimumWidth, availableWidth)
+    }
+
     func testPingIntervalOptionsIncludeReadableSlowerChoices() {
         XCTAssertEqual(PingIntervalPresentation.options.map(\.label), ["1s", "2s", "5s", "10s", "30s"])
         XCTAssertEqual(PingIntervalPresentation.options.map(\.milliseconds), [1_000, 2_000, 5_000, 10_000, 30_000])

@@ -23,17 +23,7 @@ struct HostLatencyGraphSeries: Identifiable {
 
 extension ResolvedHostDisplayColor {
     var swiftUIColor: Color {
-        Color(nsColor: NSColor(name: nil) { appearance in
-            let displayAppearance: HostDisplayColorAppearance =
-                appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? .dark : .light
-            let components = components(for: displayAppearance)
-            return NSColor(
-                srgbRed: components.red,
-                green: components.green,
-                blue: components.blue,
-                alpha: 1
-            )
-        })
+        Color.pingScopeAdaptive(light: components(for: .light), dark: components(for: .dark))
     }
 }
 

@@ -46,7 +46,7 @@ enum PingScopeShareGraphAppearance: String, CaseIterable, Identifiable {
     }
 
     static func resolvedColorScheme(for appearance: NSAppearance) -> ColorScheme {
-        appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? .dark : .light
+        appearance.pingScopeAppearance == .dark ? .dark : .light
     }
 }
 
