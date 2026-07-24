@@ -1163,6 +1163,9 @@ public struct PingScopeIOSRootView: View {
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             } else {
+                Text("Not currently monitored. Tap a host to switch focus, or switch to All Hosts above.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 ForEach(Array(others)) { host in
                     Button {
                         onSelectHost(host.id)
@@ -1561,7 +1564,7 @@ public struct PingScopeIOSRootView: View {
             .swiftUIColor
         return HStack(spacing: 10) {
             Circle()
-                .fill(color)
+                .fill(isActive ? color : Color.secondary.opacity(0.35))
                 .frame(width: 9, height: 9)
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {
@@ -1589,13 +1592,21 @@ public struct PingScopeIOSRootView: View {
                     color: color
                 )
                     .frame(width: 58, height: 28)
+                    .opacity(isActive ? 1 : 0.18)
             }
-            Text(isActive ? latencyValue(health.latestResult?.latency?.milliseconds) : "--")
-                .font(.system(size: 14, weight: .semibold, design: .monospaced))
-                .foregroundStyle(color)
+            if isActive {
+                Text(latencyValue(health.latestResult?.latency?.milliseconds))
+                    .font(.system(size: 14, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(color)
+            } else {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.tertiary)
+            }
         }
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
+        .accessibilityHint(isActive ? "" : "Not currently monitored. Double tap to switch to this host.")
     }
 
     private func allHostsRow(
@@ -1605,6 +1616,7 @@ public struct PingScopeIOSRootView: View {
         isSelected: Bool = false
     ) -> some View {
         let color = presentation.resolvedColor.swiftUIColor
+        let hasData = !row.samples.isEmpty
         let graphData: PingScopeIOSLatencyGraphData
         if hostScope == .focused, let firstSample = row.samples.first, let lastSample = row.samples.last {
             graphData = PingScopeIOSLatencyGraphData(
@@ -1621,7 +1633,7 @@ public struct PingScopeIOSRootView: View {
         }
         return HStack(spacing: 10) {
             Circle()
-                .fill(color)
+                .fill(hasData ? color : Color.secondary.opacity(0.35))
                 .frame(width: 8, height: 8)
             VStack(alignment: .leading, spacing: 2) {
                 Text(presentation.displayName)
@@ -1647,10 +1659,19 @@ public struct PingScopeIOSRootView: View {
                         .padding(.horizontal, 5)
                         .padding(.vertical, 2)
                         .background(Color.secondary.opacity(0.12), in: Capsule())
+                } else if !hasData {
+                    Text("Idle")
+                        .font(.system(size: 9, weight: .bold))
+                        .textCase(.uppercase)
+                        .tracking(0.4)
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 2)
+                        .background(Color.secondary.opacity(0.12), in: Capsule())
                 }
                 Text(presentation.latencyText)
                     .font(.system(size: 15, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(color)
+                    .foregroundStyle(hasData ? color : Color.secondary)
                     .lineLimit(1)
                     .minimumScaleFactor(0.75)
             }
