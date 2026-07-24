@@ -44,7 +44,7 @@ struct StatusPopoverView: View {
             minWidth: MenuBarPresentationMode.statusContentMinimumSize.width,
             idealWidth: MenuBarPresentationMode.statusContentSize.width,
             maxWidth: .infinity,
-            minHeight: 430,
+            minHeight: MenuBarPresentationMode.statusContentMinimumSize.height,
             idealHeight: 500,
             maxHeight: .infinity,
             alignment: .top
