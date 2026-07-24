@@ -73,11 +73,11 @@ final class MenuBarPresentationModeTests: XCTestCase {
     }
 
     func testRecentSamplesTableColumnsFitWithinStatusContentMinimumWidthWithoutHorizontalOverflow() {
-        // The status content view pads 16pt on each side; the table's column
+        // The status content view pads on each side; the table's column
         // minimums must fit inside what remains at the window's declared
         // minimum width, or the Table shows a permanent horizontal scrollbar
         // whenever the window is narrowed toward that minimum.
-        let horizontalContentPadding: CGFloat = 32
+        let horizontalContentPadding = MenuBarPresentationMode.statusContentPadding * 2
         let availableWidth = MenuBarPresentationMode.statusContentMinimumSize.width - horizontalContentPadding
 
         XCTAssertLessThanOrEqual(RecentSamplesColumnLayout.totalMinimumWidth, availableWidth)

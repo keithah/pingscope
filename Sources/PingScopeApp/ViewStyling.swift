@@ -25,31 +25,40 @@ extension Color {
     }
 }
 
+/// Resolves an `NSAppearance` (as reported to a dynamic `NSColor` provider)
+/// to the two-case appearance already used to key host-identity colors, so
+/// every adaptive-color call site shares one definition of "is this dark".
+extension NSAppearance {
+    var pingScopeAppearance: HostDisplayColorAppearance {
+        bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? .dark : .light
+    }
+}
+
+extension Color {
+    /// Builds a `Color` that resolves distinct RGB components per system
+    /// appearance via the same dynamic `NSColor(name:)` mechanism used by
+    /// host-identity colors, so static UI surfaces can adapt the same way.
+    static func pingScopeAdaptive(light: HostDisplayColor, dark: HostDisplayColor) -> Color {
+        Color(nsColor: NSColor(name: nil) { appearance in
+            let components = appearance.pingScopeAppearance == .dark ? dark : light
+            return NSColor(srgbRed: components.red, green: components.green, blue: components.blue, alpha: 1)
+        })
+    }
+}
+
 /// A color that resolves distinct RGB components per appearance, so a surface
 /// that was previously a hardcoded dark hex value (and therefore stayed dark
-/// under a light system appearance) adapts correctly. Mirrors the dynamic
-/// `NSColor(name:)` pattern already used by `ResolvedHostDisplayColor`.
+/// under a light system appearance) adapts correctly.
 struct PingScopeAdaptiveColor: Equatable {
-    struct Components: Equatable {
-        let red: Double
-        let green: Double
-        let blue: Double
-    }
+    let light: HostDisplayColor
+    let dark: HostDisplayColor
 
-    let light: Components
-    let dark: Components
-
-    func components(for appearance: HostDisplayColorAppearance) -> Components {
+    func components(for appearance: HostDisplayColorAppearance) -> HostDisplayColor {
         appearance == .dark ? dark : light
     }
 
     var swiftUIColor: Color {
-        Color(nsColor: NSColor(name: nil) { [self] appearance in
-            let resolved: HostDisplayColorAppearance =
-                appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? .dark : .light
-            let value = components(for: resolved)
-            return NSColor(srgbRed: value.red, green: value.green, blue: value.blue, alpha: 1)
-        })
+        Color.pingScopeAdaptive(light: light, dark: dark)
     }
 }
 
@@ -66,6 +75,15 @@ enum PingScopeSurfaceColors {
     static let graphCardBottom = PingScopeAdaptiveColor(
         light: .init(red: 0.906, green: 0.925, blue: 0.957),
         dark: .init(red: 17.0 / 255.0, green: 24.0 / 255.0, blue: 39.0 / 255.0)
+    )
+
+    /// `PulseHealthRing`'s track. Dark matches the ring's previous hardcoded
+    /// `#2c2c2e` literal exactly (opaque), so overlay/popover rings that don't
+    /// pass an explicit `trackColor` stay visually unchanged in dark mode;
+    /// light is a legible opaque gray instead of the same dark literal.
+    static let ringTrack = PingScopeAdaptiveColor(
+        light: .init(red: 0.847, green: 0.847, blue: 0.867),
+        dark: .init(red: 44.0 / 255.0, green: 44.0 / 255.0, blue: 46.0 / 255.0)
     )
 }
 
@@ -84,7 +102,7 @@ struct PulseHealthRing: View {
     var progress: Double
     var color: Color
     var lineWidth: CGFloat
-    var trackColor: Color = Color.primary.opacity(0.12)
+    var trackColor: Color = PingScopeSurfaceColors.ringTrack.swiftUIColor
 
     var body: some View {
         ZStack {

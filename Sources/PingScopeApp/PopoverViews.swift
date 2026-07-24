@@ -37,10 +37,9 @@ struct StatusPopoverView: View {
                 }
                 RecentSamplesView(samples: presentation.displayPresentation.recentVisibleSamples, range: presentation.selectedRange)
             }
-            .padding(16)
+            .padding(MenuBarPresentationMode.statusContentPadding)
             .frame(maxWidth: .infinity, alignment: .topLeading)
         }
-        .scrollIndicators(.automatic)
         .frame(
             minWidth: MenuBarPresentationMode.statusContentMinimumSize.width,
             idealWidth: MenuBarPresentationMode.statusContentSize.width,

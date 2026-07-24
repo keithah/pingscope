@@ -64,6 +64,26 @@ final class LatencyGraphPresentationTests: XCTestCase {
         XCTAssertNotEqual(darkBottom, lightBottom)
     }
 
+    func testRingTrackColorMatchesLegacyDarkAppearanceAndIsOpaqueInBothAppearances() {
+        // PulseHealthRing's track is shared by the popover ring and the
+        // always-visible menu-bar overlay ring, which this commit does not
+        // intend to change in dark mode: the dark value must match the
+        // previous hardcoded #2c2c2e literal exactly, and stay fully opaque
+        // (not a translucent primary-opacity value) in both appearances so
+        // the ring's backdrop doesn't fade into whatever material sits under it.
+        let dark = PingScopeSurfaceColors.ringTrack.components(for: .dark)
+        XCTAssertEqual(dark.red, 44.0 / 255.0, accuracy: 0.001)
+        XCTAssertEqual(dark.green, 44.0 / 255.0, accuracy: 0.001)
+        XCTAssertEqual(dark.blue, 46.0 / 255.0, accuracy: 0.001)
+
+        let light = PingScopeSurfaceColors.ringTrack.components(for: .light)
+        XCTAssertGreaterThan(light.red, 0.7)
+        XCTAssertGreaterThan(light.green, 0.7)
+        XCTAssertGreaterThan(light.blue, 0.7)
+
+        XCTAssertNotEqual(dark, light)
+    }
+
     @MainActor
     func testDisabledCustomColorReachesAllHostStatusRowWithoutGraphSeries() {
         let custom = HostDisplayColor(red: 0.75, green: 0.15, blue: 0.65)
