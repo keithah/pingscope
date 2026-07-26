@@ -3312,7 +3312,10 @@ final class LiveMonitorSessionControllerTests: XCTestCase {
         let startedDurations = await factory.startedDurations
         let snapshots = await coordinator.snapshots()
         XCTAssertEqual(createdHostIDs, [enabledA.id, enabledC.id])
-        XCTAssertEqual(startedHostIDs, [enabledA.id, enabledC.id])
+        // startTransaction fans out via withTaskGroup, so completion order across
+        // concurrently-started controllers isn't guaranteed to match submission order.
+        XCTAssertEqual(startedHostIDs.count, 2)
+        XCTAssertEqual(Set(startedHostIDs), Set([enabledA.id, enabledC.id]))
         XCTAssertEqual(startedDurations, [.oneMinute, .oneMinute])
         XCTAssertEqual(snapshots[enabledA.id]?.host.id, enabledA.id)
         XCTAssertEqual(snapshots[enabledC.id]?.host.id, enabledC.id)
