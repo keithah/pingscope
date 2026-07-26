@@ -197,7 +197,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
                 showsLegend: { [weak self] in self?.overlayViewModel.presentation.showsLegend ?? false },
                 onToggleLegend: { [weak self] in
                     self?.overlayViewModel.toggleLegend()
-                }
+                },
+                primaryAddress: { [weak self] in self?.overlayViewModel.presentation.primaryHostAddress ?? "" },
+                capturesGraphClicks: { [weak self] in (self?.overlayViewModel.presentation.displayMode ?? .signal) == .signal }
             )
             window.delegate = model
             overlayController = NSWindowController(window: window)
@@ -342,7 +344,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
             showsLegend: { [weak self] in self?.overlayViewModel.presentation.showsLegend ?? false },
             onToggleLegend: { [weak self] in
                 self?.overlayViewModel.toggleLegend()
-            }
+            },
+            primaryAddress: { [weak self] in self?.overlayViewModel.presentation.primaryHostAddress ?? "" },
+            capturesGraphClicks: { [weak self] in (self?.overlayViewModel.presentation.displayMode ?? .signal) == .signal }
         )
         applyOverlayBehavior()
     }

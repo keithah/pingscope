@@ -87,13 +87,23 @@ struct OverlayView: View {
             PulseHealthRing(progress: ringProgress, color: focusedRingColor, lineWidth: 6)
                 .frame(width: 58, height: 58)
             VStack(alignment: .leading, spacing: 2) {
-                HStack(alignment: .firstTextBaseline, spacing: 2) {
-                    Text(latencyNumberText)
-                        .font(.system(size: 24, weight: .semibold, design: .monospaced))
+                if presentation.showsAllHosts {
+                    HStack(alignment: .firstTextBaseline, spacing: 2) {
+                        Text(latencyNumberText)
+                            .font(.system(size: 24, weight: .semibold, design: .monospaced))
+                            .foregroundStyle(focusedRingColor)
+                        Text("ms")
+                            .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                    }
+                } else {
+                    Text(presentation.primaryHostAddress)
+                        .underline()
+                        .font(.system(size: 13, weight: .semibold, design: .monospaced))
                         .foregroundStyle(focusedRingColor)
-                    Text("ms")
-                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .copyableAddress(presentation.primaryHostAddress)
                 }
                 Text(presentation.showsAllHosts ? "All Hosts" : presentation.primaryHostName)
                     .font(.system(size: 11, weight: .medium))
@@ -117,15 +127,25 @@ struct OverlayView: View {
             PulseHealthRing(progress: ringProgress, color: focusedRingColor, lineWidth: 8)
                 .frame(width: 76, height: 76)
             VStack(alignment: .leading, spacing: 5) {
-                HStack(alignment: .firstTextBaseline, spacing: 2) {
-                    Text(latencyNumberText)
-                        .font(.system(size: 28, weight: .semibold, design: .monospaced))
-                        .foregroundStyle(focusedRingColor)
-                    if presentation.menuBarState.text.hasSuffix("ms") {
-                        Text("ms")
-                            .font(.system(size: 12, weight: .semibold, design: .monospaced))
-                            .foregroundStyle(.secondary)
+                if presentation.showsAllHosts {
+                    HStack(alignment: .firstTextBaseline, spacing: 2) {
+                        Text(latencyNumberText)
+                            .font(.system(size: 28, weight: .semibold, design: .monospaced))
+                            .foregroundStyle(focusedRingColor)
+                        if presentation.menuBarState.text.hasSuffix("ms") {
+                            Text("ms")
+                                .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                                .foregroundStyle(.secondary)
+                        }
                     }
+                } else {
+                    Text(presentation.primaryHostAddress)
+                        .underline()
+                        .font(.system(size: 15, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(focusedRingColor)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .copyableAddress(presentation.primaryHostAddress)
                 }
                 Text(presentation.showsAllHosts ? "All Hosts" : presentation.primaryHostName)
                     .font(.system(size: 12, weight: .medium))
@@ -186,37 +206,49 @@ struct OverlayView: View {
     @ViewBuilder
     private var overlayHostSelector: some View {
         let presentation = viewModel.presentation
-        if presentation.hostOptions.count > 1 {
-            Menu {
-                Button("All Hosts") {
-                    viewModel.selectAllHosts()
-                }
-                Divider()
-                ForEach(presentation.hostOptions) { host in
-                    Button(host.name) {
-                        viewModel.selectHost(host.id)
+        HStack(spacing: 6) {
+            if presentation.hostOptions.count > 1 {
+                Menu {
+                    Button("All Hosts") {
+                        viewModel.selectAllHosts()
                     }
+                    Divider()
+                    ForEach(presentation.hostOptions) { host in
+                        Button(host.name) {
+                            viewModel.selectHost(host.id)
+                        }
+                    }
+                } label: {
+                    HStack(spacing: 3) {
+                        Text(presentation.showsAllHosts ? "All Hosts" : presentation.primaryHostName)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                        Image(systemName: "chevron.down")
+                            .font(.system(size: 8, weight: .semibold))
+                            .foregroundStyle(.tertiary)
+                    }
+                    .font(.system(size: 10.5, weight: .medium))
+                    .foregroundStyle(presentation.showsAllHosts ? Color.secondary : focusedIdentityColor)
                 }
-            } label: {
-                HStack(spacing: 3) {
-                    Text(presentation.showsAllHosts ? "All Hosts" : presentation.primaryHostName)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                    Image(systemName: "chevron.down")
-                        .font(.system(size: 8, weight: .semibold))
-                        .foregroundStyle(.tertiary)
-                }
-                .font(.system(size: 10.5, weight: .medium))
-                .foregroundStyle(presentation.showsAllHosts ? Color.secondary : focusedIdentityColor)
+                .buttonStyle(.plain)
+                .fixedSize(horizontal: false, vertical: true)
+            } else {
+                Text(presentation.primaryHostName)
+                    .font(.system(size: 10.5, weight: .medium))
+                    .foregroundStyle(focusedIdentityColor)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
             }
-            .buttonStyle(.plain)
-            .fixedSize(horizontal: false, vertical: true)
-        } else {
-            Text(presentation.primaryHostName)
-                .font(.system(size: 10.5, weight: .medium))
-                .foregroundStyle(focusedIdentityColor)
-                .lineLimit(1)
-                .truncationMode(.tail)
+
+            if !presentation.showsAllHosts {
+                Text(presentation.primaryHostAddress)
+                    .underline()
+                    .font(.system(size: 9.5, weight: .medium, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .copyableAddress(presentation.primaryHostAddress)
+            }
         }
     }
 

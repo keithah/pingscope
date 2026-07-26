@@ -205,10 +205,11 @@ struct StatusPopoverView: View {
                 HStack(alignment: .top, spacing: 12) {
                     VStack(alignment: .leading, spacing: 5) {
                         latencyReading(size: 44)
-                        Text(endpointCaption)
+                        Text.endpointCaption(endpointCaption, underliningAddress: presentation.primaryHost?.address ?? "")
                             .font(.system(size: 12, weight: .medium, design: .monospaced))
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
+                            .copyableAddress(presentation.primaryHost?.address ?? "")
                     }
                     Spacer(minLength: 8)
                     latencyStatusBadge
@@ -257,10 +258,11 @@ struct StatusPopoverView: View {
                 }
 
             VStack(alignment: .leading, spacing: 13) {
-                Text(endpointCaption)
+                Text.endpointCaption(endpointCaption, underliningAddress: presentation.primaryHost?.address ?? "")
                     .font(.system(size: 12, weight: .medium, design: .monospaced))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
+                    .copyableAddress(presentation.primaryHost?.address ?? "")
                 statRow(["Min", "Avg", "Max"], [
                     latency(presentation.displayPresentation.primaryStats.minimumMilliseconds),
                     latency(presentation.displayPresentation.primaryStats.averageMilliseconds),

@@ -257,6 +257,7 @@ struct MultiHostLatencyGraph: View {
                 }
                 .font(.system(size: 9, weight: hostSeries.isPrimary ? .semibold : .regular))
                 .foregroundStyle(.secondary)
+                .copyableAddress(hostSeries.host.address)
             }
         }
         .padding(.horizontal, 7)

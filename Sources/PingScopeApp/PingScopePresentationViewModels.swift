@@ -29,6 +29,7 @@ struct OverlayPresentation {
     var menuBarState: MenuBarState
     var hostOptions: [OverlayHostOption]
     var primaryHostName: String
+    var primaryHostAddress: String
     var primaryDegradedThresholdMilliseconds: Double
     var showsAllHosts: Bool
     var showsLegend: Bool
@@ -48,6 +49,7 @@ struct OverlayPresentation {
             )
         }
         primaryHostName = model.primaryHost?.displayName ?? "No Host"
+        primaryHostAddress = model.primaryHost?.address ?? ""
         primaryDegradedThresholdMilliseconds = model.primaryHost?.thresholds.degradedMilliseconds ?? LatencyThresholds.defaults.degradedMilliseconds
         showsAllHosts = model.overlayShowsAllHosts
         showsLegend = model.overlayShowsLegend

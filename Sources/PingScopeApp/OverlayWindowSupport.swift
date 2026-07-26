@@ -50,6 +50,20 @@ private protocol OverlayContextMenuPresenting: AnyObject {
     func presentOverlayContextMenu(with event: NSEvent)
 }
 
+/// The overlay window returns `false` from `canBecomeKey`, so every click in
+/// it is a "first mouse" click. AppKit discards those unless the view under
+/// the cursor opts in, and `NSHostingView` does not by default — without this
+/// no SwiftUI control inside the overlay (host menu, copyable address) can
+/// ever receive a click.
+///
+/// Concrete `AnyView` (not generic over `Content`) because a generic subclass
+/// of `NSHostingView` crashes the Swift 6.2 optimizer in Release builds.
+private final class OverlayHostingView: NSHostingView<AnyView> {
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+        true
+    }
+}
+
 final class OverlayContainerView: NSView {
     private let hostingView: NSHostingView<AnyView>
     private let isCompact: () -> Bool
@@ -63,6 +77,7 @@ final class OverlayContainerView: NSView {
     private let showsAllHosts: () -> Bool
     private let showsLegend: () -> Bool
     private let onToggleLegend: () -> Void
+    private let primaryAddress: () -> String
     private let graphClickView: OverlayGraphClickView
     private var compactButton: NSButton?
     private var settingsButton: NSButton?
@@ -80,9 +95,11 @@ final class OverlayContainerView: NSView {
         onSelectAllHosts: @escaping () -> Void,
         showsAllHosts: @escaping () -> Bool,
         showsLegend: @escaping () -> Bool,
-        onToggleLegend: @escaping () -> Void
+        onToggleLegend: @escaping () -> Void,
+        primaryAddress: @escaping () -> String = { "" },
+        capturesGraphClicks: @escaping () -> Bool = { true }
     ) {
-        self.hostingView = NSHostingView(rootView: AnyView(rootView))
+        self.hostingView = OverlayHostingView(rootView: AnyView(rootView))
         self.isCompact = isCompact
         self.hostOptions = hostOptions
         self.onToggleCompact = onToggleCompact
@@ -94,6 +111,7 @@ final class OverlayContainerView: NSView {
         self.showsAllHosts = showsAllHosts
         self.showsLegend = showsLegend
         self.onToggleLegend = onToggleLegend
+        self.primaryAddress = primaryAddress
         self.graphClickView = OverlayGraphClickView(onClick: onDetails)
         super.init(frame: .zero)
 
@@ -119,6 +137,7 @@ final class OverlayContainerView: NSView {
         graphClickView.onRightClick = { [weak self] event in
             self?.presentOverlayContextMenu(with: event)
         }
+        graphClickView.capturesClicks = capturesGraphClicks
 
         if !isCompact() {
             let compactButton = makeButton(
@@ -169,6 +188,12 @@ final class OverlayContainerView: NSView {
 
     private func contextMenu() -> NSMenu {
         let menu = NSMenu()
+        let address = primaryAddress()
+        if !address.isEmpty, !showsAllHosts() {
+            menu.addItem(NSMenuItem(title: "Copy \(address)", action: #selector(copyAddress), keyEquivalent: ""))
+            menu.addItem(NSMenuItem(title: "Open \(address)", action: #selector(openAddress), keyEquivalent: ""))
+            menu.addItem(.separator())
+        }
         let compactTitle = isCompact() ? "Expanded Overlay" : "Compact Overlay"
         menu.addItem(NSMenuItem(title: compactTitle, action: #selector(toggleCompact), keyEquivalent: ""))
         let hosts = hostOptions()
@@ -227,6 +252,16 @@ final class OverlayContainerView: NSView {
         return button
     }
 
+    @objc private func copyAddress() {
+        DebugLog.write("overlay context copy address fired")
+        PingScopeAddressActions.copyToClipboard(primaryAddress())
+    }
+
+    @objc private func openAddress() {
+        DebugLog.write("overlay context open address fired")
+        PingScopeAddressActions.open(primaryAddress())
+    }
+
     @objc private func toggleCompact() {
         DebugLog.write("overlay context compact fired")
         onToggleCompact()
@@ -274,6 +309,9 @@ extension OverlayContainerView: OverlayContextMenuPresenting {
 final class OverlayGraphClickView: NSView {
     private let onClick: () -> Void
     var onRightClick: ((NSEvent) -> Void)?
+    /// Ring mode has no graph under this zone; capturing there would steal
+    /// clicks from the SwiftUI content (e.g. the copyable address button).
+    var capturesClicks: () -> Bool = { true }
     private var mouseDownLocation: NSPoint?
     private var hasHandledMouseUp = false
 
@@ -284,6 +322,11 @@ final class OverlayGraphClickView: NSView {
 
     required init?(coder: NSCoder) {
         nil
+    }
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        guard capturesClicks() else { return nil }
+        return super.hitTest(point)
     }
 
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool {

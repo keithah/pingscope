@@ -146,3 +146,92 @@ struct PingScopeStatusPill: View {
         }
     }
 }
+
+/// Click-to-copy, right-click-to-open behavior for a host address, shared by
+/// every surface that displays one (overlay ring/signal modes, all-hosts
+/// legend). Left click copies the bare address; the context menu offers
+/// opening it as an http:// URL for hosts like a router's admin page.
+enum PingScopeAddressActions {
+    @discardableResult
+    static func copyToClipboard(_ address: String) -> Bool {
+        guard !address.isEmpty else { return false }
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        let didCopy = pasteboard.setString(address, forType: .string)
+        DebugLog.write("overlay address copy address=\(address) succeeded=\(didCopy)")
+        return didCopy
+    }
+
+    static func open(_ address: String) {
+        guard !address.isEmpty, let url = URL(string: "http://\(address)") else { return }
+        NSWorkspace.shared.open(url)
+    }
+}
+
+extension Text {
+    /// Renders an endpoint caption like "ICMP · 1.1.1.1" underlining only the
+    /// address portion — the copyable part — never the protocol prefix.
+    static func endpointCaption(_ caption: String, underliningAddress address: String) -> Text {
+        guard !address.isEmpty, caption.hasSuffix(address) else { return Text(caption) }
+        return Text(caption.dropLast(address.count)) + Text(address).underline()
+    }
+}
+
+private struct CopyableAddressModifier: ViewModifier {
+    let address: String
+    @State private var copiedFeedbackGeneration = 0
+    @State private var showsCopiedFeedback = false
+
+    func body(content: Content) -> some View {
+        // A real Button (not onTapGesture) so clicks win over the overlay
+        // window's background-drag hit testing.
+        Button {
+            guard PingScopeAddressActions.copyToClipboard(address) else { return }
+            copiedFeedbackGeneration += 1
+            let generation = copiedFeedbackGeneration
+            withAnimation(.easeIn(duration: 0.1)) { showsCopiedFeedback = true }
+            Task { @MainActor in
+                try? await Task.sleep(for: .seconds(1.2))
+                guard generation == copiedFeedbackGeneration else { return }
+                withAnimation(.easeOut(duration: 0.2)) { showsCopiedFeedback = false }
+            }
+        } label: {
+            content
+                .opacity(showsCopiedFeedback ? 0 : 1)
+                .overlay(alignment: .leading) {
+                    if showsCopiedFeedback {
+                        HStack(spacing: 3) {
+                            Image(systemName: "checkmark")
+                            Text("Copied")
+                        }
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(.green)
+                        .lineLimit(1)
+                        .fixedSize()
+                        .transition(.opacity)
+                    }
+                }
+        }
+        .buttonStyle(.plain)
+        .contextMenu {
+            Button("Copy Address") {
+                PingScopeAddressActions.copyToClipboard(address)
+            }
+            Button("Open Address") {
+                PingScopeAddressActions.open(address)
+            }
+        }
+        .help("Click to copy \"\(address)\". Right-click to copy or open it.")
+        .accessibilityLabel("Address \(address)")
+        .accessibilityHint("Double tap to copy. Use the context menu to open it.")
+    }
+}
+
+extension View {
+    /// Makes this view copy `address` to the clipboard on click, with a
+    /// right-click fallback to also open it as a URL. A no-op when `address`
+    /// is empty.
+    func copyableAddress(_ address: String) -> some View {
+        modifier(CopyableAddressModifier(address: address))
+    }
+}

@@ -16,10 +16,11 @@ struct AllHostStatusRow: View {
                 Text(summary.name)
                     .font(.caption.weight(.semibold))
                     .lineLimit(1)
-                Text(summary.endpoint)
+                Text.endpointCaption(summary.endpoint, underliningAddress: hostAddress)
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
+                    .copyableAddress(hostAddress)
             }
             Spacer(minLength: 8)
             LatencySparkline(graphData: graphData, color: sparklineColor)
@@ -38,6 +39,14 @@ struct AllHostStatusRow: View {
         .accessibilityElement(children: .combine)
         .accessibilityLabel(summary.accessibilityLabel)
         .help(summary.accessibilityLabel)
+    }
+
+    /// The summary only carries a formatted "METHOD address" endpoint string;
+    /// prefer the series' raw host address and fall back to the last token.
+    private var hostAddress: String {
+        graphSeries?.host.address
+            ?? summary.endpoint.split(separator: " ").last.map(String.init)
+            ?? ""
     }
 
     private var sparklineColor: Color {
