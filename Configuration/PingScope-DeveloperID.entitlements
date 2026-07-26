@@ -14,6 +14,14 @@
 	<key>com.apple.security.cs.allow-dyld-environment-variables</key>
 	<false/>
 
+	<!-- CloudKit outside the App Store needs the app identity spelled out;
+	     App Store signing injects these but Developer ID signing does not,
+	     and without them CKContainer.default() resolves nil and throws. -->
+	<key>com.apple.application-identifier</key>
+	<string>6R7S5GA944.com.hadm.PingScope</string>
+	<key>com.apple.developer.team-identifier</key>
+	<string>6R7S5GA944</string>
+
 	<!-- Opt-in history and host sync uses only the user's private CloudKit database. -->
 	<key>com.apple.developer.icloud-container-identifiers</key>
 	<array>
@@ -23,6 +31,11 @@
 	<array>
 		<string>CloudKit</string>
 	</array>
+	<!-- Required outside the App Store: CKContainer throws (and CloudKit's
+	     dispatch_once makes it uncatchable) when a Developer ID build omits
+	     the container environment. -->
+	<key>com.apple.developer.icloud-container-environment</key>
+	<string>Production</string>
 
 	<!-- App Groups for widget data sharing -->
 	<key>com.apple.security.application-groups</key>
