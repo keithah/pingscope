@@ -13,33 +13,37 @@ struct StatusPopoverView: View {
 
     var body: some View {
         let presentation = viewModel.presentation
-        ScrollView(.vertical) {
-            VStack(alignment: .leading, spacing: 13) {
-                header
+        VStack(alignment: .leading, spacing: 13) {
+            ScrollView(.vertical) {
+                VStack(alignment: .leading, spacing: 13) {
+                    header
 
-                switch presentation.displayMode {
-                case .signal:
-                    signalDisplay
-                case .ring:
-                    ringDisplay
-                    sparkline
-                        .frame(height: 58)
-                    rangePicker
-                }
+                    switch presentation.displayMode {
+                    case .signal:
+                        signalDisplay
+                    case .ring:
+                        ringDisplay
+                        sparkline
+                            .frame(height: 58)
+                        rangePicker
+                    }
 
-                if let telemetry = presentation.displayPresentation.latestStarlinkTelemetry {
-                    StarlinkTelemetrySummary(
-                        presentation: StarlinkTelemetryPresentation(telemetry: telemetry)
-                    )
+                    if let telemetry = presentation.displayPresentation.latestStarlinkTelemetry {
+                        StarlinkTelemetrySummary(
+                            presentation: StarlinkTelemetryPresentation(telemetry: telemetry)
+                        )
+                    }
+                    if presentation.popoverShowsAllHosts {
+                        allHostStatusSummary
+                    }
                 }
-                if presentation.popoverShowsAllHosts {
-                    allHostStatusSummary
-                }
-                RecentSamplesView(samples: presentation.displayPresentation.recentVisibleSamples, range: presentation.selectedRange)
+                .frame(maxWidth: .infinity, alignment: .topLeading)
             }
-            .padding(MenuBarPresentationMode.statusContentPadding)
-            .frame(maxWidth: .infinity, alignment: .topLeading)
+            .fixedSize(horizontal: false, vertical: true)
+
+            RecentSamplesView(samples: presentation.displayPresentation.recentVisibleSamples, range: presentation.selectedRange)
         }
+        .padding(MenuBarPresentationMode.statusContentPadding)
         .frame(
             minWidth: MenuBarPresentationMode.statusContentMinimumSize.width,
             idealWidth: MenuBarPresentationMode.statusContentSize.width,

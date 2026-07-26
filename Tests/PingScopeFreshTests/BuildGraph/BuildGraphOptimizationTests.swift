@@ -801,9 +801,9 @@ final class BuildGraphOptimizationTests: XCTestCase {
             .filter { $0.contains("CURRENT_PROJECT_VERSION =") }
 
         XCTAssertFalse(marketingVersions.isEmpty)
-        XCTAssertTrue(marketingVersions.allSatisfy { $0.contains("MARKETING_VERSION = 0.5.1;") })
+        XCTAssertTrue(marketingVersions.allSatisfy { $0.contains("MARKETING_VERSION = 0.5.2;") })
         XCTAssertFalse(buildVersions.isEmpty)
-        XCTAssertTrue(buildVersions.allSatisfy { $0.contains("CURRENT_PROJECT_VERSION = 96;") })
+        XCTAssertTrue(buildVersions.allSatisfy { $0.contains("CURRENT_PROJECT_VERSION = 97;") })
     }
 
     func testBatteryAwareLifecycleWiringSeedsInitialStateAndSerializesUpdates() throws {
