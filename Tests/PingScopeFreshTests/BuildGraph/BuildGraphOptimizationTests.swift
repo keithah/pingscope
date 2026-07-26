@@ -654,8 +654,10 @@ final class BuildGraphOptimizationTests: XCTestCase {
             certificate: certificate,
             entitlements: [
                 "com.apple.application-identifier": "6R7S5GA944.com.hadm.PingScope",
+                "com.apple.developer.team-identifier": "6R7S5GA944",
                 "com.apple.developer.icloud-container-identifiers": ["iCloud.com.hadm.PingScope"],
                 "com.apple.developer.icloud-services": "*",
+                "com.apple.developer.icloud-container-environment": "Production",
                 "com.apple.security.application-groups": ["6R7S5GA944.group.com.hadm.PingScope"],
             ]
         )
@@ -801,9 +803,9 @@ final class BuildGraphOptimizationTests: XCTestCase {
             .filter { $0.contains("CURRENT_PROJECT_VERSION =") }
 
         XCTAssertFalse(marketingVersions.isEmpty)
-        XCTAssertTrue(marketingVersions.allSatisfy { $0.contains("MARKETING_VERSION = 0.5.2;") })
+        XCTAssertTrue(marketingVersions.allSatisfy { $0.contains("MARKETING_VERSION = 0.5.3;") })
         XCTAssertFalse(buildVersions.isEmpty)
-        XCTAssertTrue(buildVersions.allSatisfy { $0.contains("CURRENT_PROJECT_VERSION = 97;") })
+        XCTAssertTrue(buildVersions.allSatisfy { $0.contains("CURRENT_PROJECT_VERSION = 98;") })
     }
 
     func testBatteryAwareLifecycleWiringSeedsInitialStateAndSerializesUpdates() throws {
