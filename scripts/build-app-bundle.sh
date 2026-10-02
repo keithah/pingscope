@@ -118,7 +118,10 @@ fi
 if [[ "${FLAVOR}" == "app-store" ]]; then
   ENTITLEMENTS="${APP_ENTITLEMENTS:-Configuration/PingScope-AppStore.entitlements}"
   SIGN_ARGS+=("--entitlements" "${ENTITLEMENTS}")
-elif [[ "${FLAVOR}" == "developer-id" ]]; then
+elif [[ "${FLAVOR}" == "developer-id" && "${SIGN_IDENTITY}" != "-" ]]; then
+  # Not for the ad-hoc fallback: the iCloud and app group entitlements are
+  # restricted, and without a provisioning profile behind them macOS kills the
+  # app at launch ("Launchd job spawn failed", POSIX error 163).
   ENTITLEMENTS="${APP_ENTITLEMENTS:-Configuration/PingScope-DeveloperID.entitlements}"
   SIGN_ARGS+=("--entitlements" "${ENTITLEMENTS}")
 elif [[ -n "${APP_ENTITLEMENTS:-}" ]]; then
