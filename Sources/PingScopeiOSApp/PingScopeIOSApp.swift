@@ -48,7 +48,7 @@ private final class PingScopeIOSUserNotificationCenter: NSObject, PingScopeIOSNo
         do {
             return try await center.requestAuthorization(options: [.alert, .sound])
         } catch {
-            iOSAppLogger.error(
+            Logger(subsystem: "com.hadm.PingScope", category: "AppLifecycle").error(
                 "Notification authorization failed error=\(error.localizedDescription, privacy: .private)"
             )
             return false

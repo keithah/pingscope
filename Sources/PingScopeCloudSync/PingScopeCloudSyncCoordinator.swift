@@ -55,6 +55,7 @@ public struct CloudSyncUploadConfirmation: @unchecked Sendable {
 public protocol CloudSyncEngineBoundary: Sendable {
     func accountAvailability() async throws -> CloudSyncAccountAvailability
     func setAccountChangeHandler(_ handler: (@concurrent @Sendable () async -> Void)?) async
+    func setFailureHandler(_ handler: (@Sendable (any Error) async -> Void)?) async
     func start() async throws
     func stop() async
     func upload(
@@ -65,6 +66,10 @@ public protocol CloudSyncEngineBoundary: Sendable {
 
 public extension CloudSyncEngineBoundary {
     func setAccountChangeHandler(_ handler: (@concurrent @Sendable () async -> Void)?) async {
+        _ = handler
+    }
+
+    func setFailureHandler(_ handler: (@Sendable (any Error) async -> Void)?) async {
         _ = handler
     }
 }
@@ -202,11 +207,19 @@ public actor PingScopeCloudSyncCoordinator {
 
     private func performEnable(transition: UInt, workID: UInt) async {
         defer { finishLifecycleWork(id: workID) }
+        await installBoundaryFailureHandler(transition: transition)
         await boundary.setAccountChangeHandler { [weak self] in
             await self?.recoverAfterAccountChange()
         }
         guard transition == lifecycleGeneration, isEnabled else { return }
         _ = await startAfterAccountRevalidation(transition: transition)
+    }
+
+    private func boundaryDidFail(_ error: any Error, transition: UInt) {
+        guard transition == lifecycleGeneration, isEnabled else { return }
+        lifecycleGeneration &+= 1
+        hasStarted = false
+        status = .failed(String(describing: error))
     }
 
     private func performRecovery(transition: UInt, workID: UInt) async {
@@ -218,8 +231,16 @@ public actor PingScopeCloudSyncCoordinator {
         await stop.task.value
         finishBoundaryStop(id: stop.id)
         guard transition == lifecycleGeneration, isEnabled else { return }
+        await installBoundaryFailureHandler(transition: transition)
+        guard transition == lifecycleGeneration, isEnabled else { return }
         guard await startAfterAccountRevalidation(transition: transition) else { return }
         await recoveryHandler?()
+    }
+
+    private func installBoundaryFailureHandler(transition: UInt) async {
+        await boundary.setFailureHandler { [weak self] error in
+            await self?.boundaryDidFail(error, transition: transition)
+        }
     }
 
     private func beginLifecycleWork(
@@ -288,6 +309,7 @@ public actor PingScopeCloudSyncCoordinator {
             task: Task { [boundary] in
                 if clearingAccountChangeHandler {
                     await boundary.setAccountChangeHandler(nil)
+                    await boundary.setFailureHandler(nil)
                 }
                 await boundary.stop()
             }
