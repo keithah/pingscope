@@ -5,6 +5,16 @@ import SwiftUI
 struct AllHostStatusRow: View {
     let summary: HostStatusSummary
     let graphSeries: HostLatencyGraphSeries?
+    var sparklineWidth = AllHostStatusRow.minimumSparklineWidth
+
+    static let minimumSparklineWidth: CGFloat = 58
+    static let maximumSparklineWidth: CGFloat = 240
+
+    /// A share of the row, not whatever the host name leaves over: the width
+    /// must be the same in every row or the sparklines start at different x.
+    static func sparklineWidth(rowWidth: CGFloat) -> CGFloat {
+        min(max((rowWidth * 0.3).rounded(), minimumSparklineWidth), maximumSparklineWidth)
+    }
 
     var body: some View {
         let graphData = LatencyGraphData(samples: graphSeries?.samples ?? [])
@@ -23,7 +33,7 @@ struct AllHostStatusRow: View {
             }
             Spacer(minLength: 8)
             LatencySparkline(graphData: graphData, color: sparklineColor)
-                .frame(width: 58, height: 20)
+                .frame(width: sparklineWidth, height: 20)
                 .opacity(graphData.hasLatencyData ? 1 : 0.18)
             VStack(alignment: .trailing, spacing: 1) {
                 Text(summary.latencyText)

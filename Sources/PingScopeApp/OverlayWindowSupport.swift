@@ -3,6 +3,15 @@ import PingScopeCore
 import SwiftUI
 
 final class OverlayWindow: NSWindow {
+    /// Pointer travel before a press becomes a drag rather than a click.
+    static let dragThreshold: CGFloat = 4
+
+    /// Screen position of the pointer. Event locations are relative to a window
+    /// that is itself moving, so they cannot drive the drag.
+    var mouseLocation: () -> NSPoint = { NSEvent.mouseLocation }
+    private var press: (mouse: NSPoint, origin: NSPoint)?
+    private var isDragging = false
+
     init(contentRect: NSRect) {
         super.init(
             contentRect: contentRect,
@@ -19,7 +28,7 @@ final class OverlayWindow: NSWindow {
         standardWindowButton(.zoomButton)?.isHidden = true
         level = .normal
         collectionBehavior = [.fullScreenAuxiliary]
-        isMovableByWindowBackground = true
+        isMovableByWindowBackground = false
         ignoresMouseEvents = false
         hasShadow = true
         minSize = NSSize(width: 150, height: 54)
@@ -41,7 +50,58 @@ final class OverlayWindow: NSWindow {
             presenter.presentOverlayContextMenu(with: event)
             return
         }
+        guard !moveWindow(with: event) else { return }
         super.sendEvent(event)
+    }
+
+    /// Drags the overlay from anywhere in its content. The content is a SwiftUI
+    /// hosting view full of tap targets, which never counts as window
+    /// background, so AppKit's own background dragging does not start there.
+    /// Presses AppKit tracks itself (buttons, resize edges) never get this far:
+    /// their mouse-down swallows the drag events.
+    private func moveWindow(with event: NSEvent) -> Bool {
+        switch event.type {
+        case .leftMouseDown:
+            press = (mouseLocation(), frame.origin)
+            isDragging = false
+            return false
+        case .leftMouseDragged:
+            guard let press else { return false }
+            let mouse = mouseLocation()
+            let offset = NSPoint(x: mouse.x - press.mouse.x, y: mouse.y - press.mouse.y)
+            guard isDragging || hypot(offset.x, offset.y) >= Self.dragThreshold else { return false }
+            isDragging = true
+            setFrameOrigin(NSPoint(x: press.origin.x + offset.x, y: press.origin.y + offset.y))
+            return true
+        case .leftMouseUp:
+            defer {
+                press = nil
+                isDragging = false
+            }
+            guard isDragging else { return false }
+            endPressWithoutClick(event)
+            return true
+        default:
+            return false
+        }
+    }
+
+    /// The window followed the pointer, so to the content the release looks like
+    /// it landed where the press began: a click. Deliver it far outside instead,
+    /// which ends the press for AppKit views and SwiftUI gestures alike.
+    private func endPressWithoutClick(_ event: NSEvent) {
+        guard let release = NSEvent.mouseEvent(
+            with: .leftMouseUp,
+            location: NSPoint(x: -10_000, y: -10_000),
+            modifierFlags: event.modifierFlags,
+            timestamp: event.timestamp,
+            windowNumber: windowNumber,
+            context: nil,
+            eventNumber: event.eventNumber,
+            clickCount: 0,
+            pressure: 0
+        ) else { return }
+        super.sendEvent(release)
     }
 }
 
@@ -293,10 +353,6 @@ final class OverlayGraphClickView: NSView {
     override func mouseDown(with event: NSEvent) {
         mouseDownLocation = event.locationInWindow
         hasHandledMouseUp = false
-    }
-
-    override func mouseDragged(with event: NSEvent) {
-        window?.performDrag(with: event)
     }
 
     override func mouseUp(with event: NSEvent) {

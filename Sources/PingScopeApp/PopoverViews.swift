@@ -4,7 +4,6 @@ import SwiftUI
 
 struct StatusPopoverView: View {
     @ObservedObject var viewModel: StatusPopoverPresentationViewModel
-    @ObservedObject var liveDisplay: LiveDisplayModel
     var onHistory: () -> Void = {}
     var onSettings: () -> Void = {}
     @EnvironmentObject private var softwareUpdateController: SoftwareUpdateController
@@ -13,32 +12,44 @@ struct StatusPopoverView: View {
 
     var body: some View {
         let presentation = viewModel.presentation
-        ScrollView(.vertical) {
-            VStack(alignment: .leading, spacing: 13) {
-                header
+        // The content is stretched to at least the viewport, so the graph and
+        // the sample rows absorb whatever height the window has. The scroll
+        // view is only a fallback for when even their minimums do not fit, and
+        // it is the only scrollable region in the window.
+        GeometryReader { viewport in
+            ScrollView(.vertical) {
+                VStack(alignment: .leading, spacing: 13) {
+                    header
 
-                switch presentation.displayMode {
-                case .signal:
-                    signalDisplay
-                case .ring:
-                    ringDisplay
-                    sparkline
-                        .frame(height: 58)
-                    rangePicker
-                }
+                    switch presentation.displayMode {
+                    case .signal:
+                        signalDisplay
+                    case .ring:
+                        ringDisplay
+                        sparkline
+                            .frame(minHeight: 58, idealHeight: 58, maxHeight: .infinity)
+                        rangePicker
+                    }
 
-                if let telemetry = presentation.displayPresentation.latestStarlinkTelemetry {
-                    StarlinkTelemetrySummary(
-                        presentation: StarlinkTelemetryPresentation(telemetry: telemetry)
-                    )
+                    if let telemetry = presentation.displayPresentation.latestStarlinkTelemetry {
+                        StarlinkTelemetrySummary(
+                            presentation: StarlinkTelemetryPresentation(telemetry: telemetry)
+                        )
+                    }
+                    if presentation.popoverShowsAllHosts {
+                        allHostStatusSummary(
+                            rowWidth: viewport.size.width - 2 * MenuBarPresentationMode.statusContentPadding
+                        )
+                    }
+                    // Spare height goes to sample rows first; once every row is
+                    // showing, the graph takes the rest.
+                    RecentSamplesView(samples: presentation.displayPresentation.recentVisibleSamples, range: presentation.selectedRange)
+                        .layoutPriority(1)
                 }
-                if presentation.popoverShowsAllHosts {
-                    allHostStatusSummary
-                }
-                RecentSamplesView(samples: presentation.displayPresentation.recentVisibleSamples, range: presentation.selectedRange)
+                .padding(MenuBarPresentationMode.statusContentPadding)
+                .frame(maxWidth: .infinity, minHeight: viewport.size.height, alignment: .topLeading)
             }
-            .padding(MenuBarPresentationMode.statusContentPadding)
-            .frame(maxWidth: .infinity, alignment: .topLeading)
+            .scrollBounceBehavior(.basedOnSize)
         }
         .frame(
             minWidth: MenuBarPresentationMode.statusContentMinimumSize.width,
@@ -107,18 +118,12 @@ struct StatusPopoverView: View {
 
     private var hostChip: some View {
         let presentation = viewModel.presentation
-        return Menu {
-            if presentation.snapshot.hosts.count > 1 {
-                Button("All Hosts") {
-                    viewModel.selectAllHosts()
-                }
-                Divider()
-            }
-            ForEach(presentation.snapshot.hosts) { host in
-                Button(host.displayName) {
-                    viewModel.selectHost(host.id)
-                }
-            }
+        return PopUpMenuButton {
+            StatusPopoverMenus.hosts(
+                viewModel.presentation.snapshot.hosts.map { (id: $0.id, name: $0.displayName) },
+                selectAllHosts: { viewModel.selectAllHosts() },
+                selectHost: { viewModel.selectHost($0) }
+            )
         } label: {
             HStack(spacing: 7) {
                 VStack(alignment: .leading, spacing: 1) {
@@ -140,8 +145,8 @@ struct StatusPopoverView: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
             .background(.thinMaterial, in: Capsule())
+            .contentShape(Capsule())
         }
-        .buttonStyle(.plain)
     }
 
     private var monitoredHostsAccessibilitySummary: String {
@@ -154,41 +159,27 @@ struct StatusPopoverView: View {
             .joined(separator: ". ")
     }
 
-    @ViewBuilder
     private var settingsMenu: some View {
-        let presentation = viewModel.presentation
-        Menu {
-            Picker("Display style", selection: Binding(
-                get: { presentation.displayMode },
-                set: { viewModel.setDisplayMode($0) }
-            )) {
-                ForEach(PingScopeDisplayMode.allCases) { mode in
-                    Text(mode.displayName).tag(mode)
-                }
-            }
-            Divider()
-            if !presentation.popoverShowsAllHosts, let host = presentation.primaryHost {
-                let selectedMilliseconds = PingIntervalPresentation.selection(for: host.interval)
-                Picker("Ping interval", selection: Binding(
-                    get: { selectedMilliseconds },
-                    set: { milliseconds in viewModel.setPingInterval(milliseconds, for: host.id) }
-                )) {
-                    ForEach(PingIntervalPresentation.options(including: selectedMilliseconds)) { option in
-                        Text(option.label).tag(option.milliseconds)
-                    }
-                }
-                Divider()
-            }
-            Button("Open History", action: onHistory)
-            Button("Open Settings", action: onSettings)
+        PopUpMenuButton {
+            let presentation = viewModel.presentation
+            return StatusPopoverMenus.settings(
+                displayMode: presentation.displayMode,
+                intervalHost: presentation.popoverShowsAllHosts ? nil : presentation.primaryHost,
+                actions: .init(
+                    setDisplayMode: { viewModel.setDisplayMode($0) },
+                    setPingInterval: { viewModel.setPingInterval($0, for: $1) },
+                    openHistory: onHistory,
+                    openSettings: onSettings,
+                    quit: { NSApp.terminate(nil) }
+                )
+            )
         } label: {
             Image(systemName: "gearshape")
                 .font(.system(size: 15, weight: .semibold))
                 .frame(width: 30, height: 30)
                 .background(.thinMaterial, in: Circle())
+                .contentShape(Circle())
         }
-        .menuStyle(.button)
-        .buttonStyle(.plain)
         .help("Settings")
         .accessibilityLabel("Settings")
     }
@@ -219,7 +210,11 @@ struct StatusPopoverView: View {
             }
 
             signalGraphCard
-                .frame(height: 130)
+                .frame(
+                    minHeight: MenuBarPresentationMode.statusGraphMinimumHeight,
+                    idealHeight: MenuBarPresentationMode.statusGraphMinimumHeight,
+                    maxHeight: .infinity
+                )
 
             HStack(spacing: 0) {
                 compactStat("TX", "\(presentation.displayPresentation.primaryStats.transmitted)")
@@ -536,13 +531,14 @@ struct StatusPopoverView: View {
         }
     }
 
-    private var allHostStatusSummary: some View {
+    private func allHostStatusSummary(rowWidth: CGFloat) -> some View {
         let presentation = viewModel.presentation
         return VStack(spacing: 0) {
             ForEach(Array(presentation.displayPresentation.hostStatusSummaries.enumerated()), id: \.element.id) { index, summary in
                 AllHostStatusRow(
                     summary: summary,
-                    graphSeries: presentation.displayPresentation.allHostGraphSeries.first { $0.id == summary.id }
+                    graphSeries: presentation.displayPresentation.allHostGraphSeries.first { $0.id == summary.id },
+                    sparklineWidth: AllHostStatusRow.sparklineWidth(rowWidth: rowWidth)
                 )
                 if index < presentation.displayPresentation.hostStatusSummaries.count - 1 {
                     Divider()

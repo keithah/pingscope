@@ -1,17 +1,49 @@
 import PingScopeCore
 import SwiftUI
 
-/// Minimum column widths for `RecentSamplesView`'s table, kept narrow enough
-/// that the table never needs its own horizontal scrollbar even at the
-/// status window's smallest allowed width (see the corresponding test in
-/// MenuBarPresentationModeTests).
-enum RecentSamplesColumnLayout {
-    static let timeMinWidth: CGFloat = 60
-    static let resultMinWidth: CGFloat = 60
-    static let statusMinWidth: CGFloat = 50
+/// Vertical budget for `RecentSamplesView`. The list is plain rows rather than
+/// a `Table` so it never brings scrollbars of its own into the status
+/// content's scroll view; instead it shows however many whole rows fit.
+enum RecentSamplesLayout {
+    static let headerHeight: CGFloat = 24
+    static let rowHeight: CGFloat = 22
+    static let minimumVisibleRows = 3
+    /// Samples arrive seconds apart, so a time without seconds reads the same
+    /// on every row.
+    static let timeFormat = Date.FormatStyle(date: .omitted, time: .standard)
 
-    static var totalMinimumWidth: CGFloat {
-        timeMinWidth + resultMinWidth + statusMinWidth
+    /// Row slots to lay out for `availableHeight` (nil when the parent asks
+    /// for the ideal size). Never fewer than `minimumVisibleRows`, so the list
+    /// keeps its footprint while the first samples arrive, and never more than
+    /// there are samples to show.
+    static func visibleRowCount(availableHeight: CGFloat?, sampleCount: Int) -> Int {
+        let maximumRows = max(sampleCount, minimumVisibleRows)
+        guard let availableHeight else { return minimumVisibleRows }
+        guard availableHeight.isFinite else { return maximumRows }
+        return min(max(Int(availableHeight / rowHeight), minimumVisibleRows), maximumRows)
+    }
+}
+
+/// Stacks fixed-height rows and only ever claims a whole number of them, so a
+/// parent stack can offer it leftover space without a half-cut last row. Rows
+/// past the claimed height are laid out below the bounds for the caller to clip.
+private struct WholeRowStack: Layout {
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let rows = RecentSamplesLayout.visibleRowCount(availableHeight: proposal.height, sampleCount: subviews.count)
+        return CGSize(
+            width: proposal.replacingUnspecifiedDimensions().width,
+            height: CGFloat(rows) * RecentSamplesLayout.rowHeight
+        )
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let rowProposal = ProposedViewSize(width: bounds.width, height: RecentSamplesLayout.rowHeight)
+        for (index, subview) in subviews.enumerated() {
+            subview.place(
+                at: CGPoint(x: bounds.minX, y: bounds.minY + CGFloat(index) * RecentSamplesLayout.rowHeight),
+                proposal: rowProposal
+            )
+        }
     }
 }
 
@@ -20,34 +52,72 @@ struct RecentSamplesView: View {
     var range: TimeRange? = nil
 
     var body: some View {
-        ZStack {
-            Table(samples) {
-                TableColumn("Time") { result in
-                    Text(result.timestamp, style: .time)
-                }
-                .width(min: RecentSamplesColumnLayout.timeMinWidth, ideal: 80)
-                TableColumn("Result") { result in
-                    if let latency = result.latency {
-                        Text("\(Int(latency.milliseconds.rounded()))ms")
-                    } else {
-                        Text(result.failureReason?.userMessage ?? "Failed")
-                            .foregroundStyle(.red)
-                    }
-                }
-                .width(min: RecentSamplesColumnLayout.resultMinWidth, ideal: 85)
-                TableColumn("Status") { result in
-                    Text(result.isSuccess ? "OK" : "Failed")
-                }
-                .width(min: RecentSamplesColumnLayout.statusMinWidth, ideal: 65)
+        VStack(spacing: 0) {
+            columns {
+                Text("Time")
+                Text("Result")
+                Text("Status")
             }
+            .font(.system(size: 10, weight: .semibold))
+            .textCase(.uppercase)
+            .tracking(0.5)
+            .foregroundStyle(.secondary)
+            .frame(height: RecentSamplesLayout.headerHeight)
 
-            if samples.isEmpty {
-                Text(emptyMessage)
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
+            Divider()
+
+            WholeRowStack {
+                ForEach(Array(samples.enumerated()), id: \.element.id) { index, result in
+                    row(result)
+                        .background(index.isMultiple(of: 2) ? Color.clear : Color.primary.opacity(0.04))
+                }
+            }
+            .clipped()
+            .overlay {
+                if samples.isEmpty {
+                    Text(emptyMessage)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
             }
         }
-        .frame(height: 140)
+        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(Color.primary.opacity(0.05), lineWidth: 1)
+        )
+    }
+
+    private func row(_ result: PingResult) -> some View {
+        columns {
+            Text(result.timestamp, format: RecentSamplesLayout.timeFormat)
+            if let latency = result.latency {
+                Text("\(Int(latency.milliseconds.rounded()))ms")
+            } else {
+                Text(result.failureReason?.userMessage ?? "Failed")
+                    .foregroundStyle(.red)
+            }
+            Text(result.isSuccess ? "OK" : "Failed")
+        }
+        .font(.system(size: 12).monospacedDigit())
+        .frame(height: RecentSamplesLayout.rowHeight)
+        .accessibilityElement(children: .combine)
+    }
+
+    /// Equal flexible columns: they track the window width, so unlike table
+    /// columns they can never overflow it.
+    private func columns(@ViewBuilder _ cells: () -> some View) -> some View {
+        HStack(spacing: 8) {
+            Group(subviews: cells()) { subviews in
+                ForEach(subviews) { cell in
+                    cell
+                        .lineLimit(1)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+        }
+        .padding(.horizontal, 12)
     }
 
     private var emptyMessage: String {
@@ -217,33 +287,40 @@ struct MultiHostLatencyGraph: View {
     }
 
     var body: some View {
-        HStack(spacing: showsAxes ? 6 : 0) {
-            if showsAxes {
-                LatencyGraphAxisLabels(scale: graphData.scale, hasData: graphData.hasLatencyData)
-            }
-
-            ZStack(alignment: .bottomLeading) {
-                graphCanvas(graphData: graphData)
-
-                if graphData.isEmpty {
-                    Text("No samples in range")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // The legend gets a row of its own under the plot. Healthy latency lines
+        // hug the bottom of the plot, so a legend laid over it hides exactly the
+        // part of the graph that is in use.
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: axisSpacing) {
+                if showsAxes {
+                    LatencyGraphAxisLabels(scale: graphData.scale, hasData: graphData.hasLatencyData)
                 }
 
-                if showsLegend {
-                    legend
-                        .padding(8)
+                ZStack {
+                    graphCanvas(graphData: graphData)
+
+                    if graphData.isEmpty {
+                        Text("No samples in range")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel("All hosts latency graph")
+
+                if showsAxes {
+                    LatencyGraphRightTicks(scale: graphData.scale)
                 }
             }
 
-            if showsAxes {
-                LatencyGraphRightTicks(scale: graphData.scale)
+            if showsLegend {
+                legend
+                    .padding(.leading, showsAxes ? LatencyGraphAxisLabels.width + axisSpacing : 0)
             }
         }
-        .accessibilityLabel("All hosts latency graph")
     }
+
+    private var axisSpacing: CGFloat { showsAxes ? 6 : 0 }
 
     private var legend: some View {
         HStack(spacing: 8) {
@@ -259,9 +336,6 @@ struct MultiHostLatencyGraph: View {
                 .foregroundStyle(.secondary)
             }
         }
-        .padding(.horizontal, 7)
-        .padding(.vertical, 4)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 6))
     }
 
     private func graphCanvas(graphData: MultiHostLatencyGraphData) -> some View {
@@ -320,6 +394,8 @@ struct MultiHostLatencyGraph: View {
 }
 
 private struct LatencyGraphAxisLabels: View {
+    static let width: CGFloat = 34
+
     let scale: LatencyGraphScale
     let hasData: Bool
 
@@ -336,7 +412,7 @@ private struct LatencyGraphAxisLabels: View {
         .font(.system(size: 9, weight: .regular, design: .monospaced))
         .monospacedDigit()
         .foregroundStyle(.secondary)
-        .frame(width: 34)
+        .frame(width: Self.width)
     }
 }
 

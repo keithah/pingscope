@@ -3,7 +3,6 @@ import SwiftUI
 
 struct OverlayView: View {
     @ObservedObject var viewModel: OverlayPresentationViewModel
-    @ObservedObject var liveDisplay: LiveDisplayModel
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -187,16 +186,12 @@ struct OverlayView: View {
     private var overlayHostSelector: some View {
         let presentation = viewModel.presentation
         if presentation.hostOptions.count > 1 {
-            Menu {
-                Button("All Hosts") {
-                    viewModel.selectAllHosts()
-                }
-                Divider()
-                ForEach(presentation.hostOptions) { host in
-                    Button(host.name) {
-                        viewModel.selectHost(host.id)
-                    }
-                }
+            PopUpMenuButton {
+                StatusPopoverMenus.hosts(
+                    viewModel.presentation.hostOptions.map { (id: $0.id, name: $0.name) },
+                    selectAllHosts: { viewModel.selectAllHosts() },
+                    selectHost: { viewModel.selectHost($0) }
+                )
             } label: {
                 HStack(spacing: 3) {
                     Text(presentation.showsAllHosts ? "All Hosts" : presentation.primaryHostName)
@@ -208,8 +203,8 @@ struct OverlayView: View {
                 }
                 .font(.system(size: 10.5, weight: .medium))
                 .foregroundStyle(presentation.showsAllHosts ? Color.secondary : focusedIdentityColor)
+                .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
             .fixedSize(horizontal: false, vertical: true)
         } else {
             Text(presentation.primaryHostName)

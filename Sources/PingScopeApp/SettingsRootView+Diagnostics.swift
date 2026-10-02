@@ -36,7 +36,7 @@ private struct SettingsDiagnosticsView: View {
                         .truncationMode(.middle)
                 }
                 SettingsRow(systemImage: "wrench.and.screwdriver", tint: .orange, title: "Actions") {
-                    HStack(spacing: 10) {
+                    WrappingHStack {
                         Button("Reveal Log") {
                             model.revealDiagnosticsLog()
                         }

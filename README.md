@@ -64,7 +64,7 @@ For App Store builds, install through the App Store once published.
 ## Usage
 
 - Left-click the menu bar item to open the live popover.
-- Right-click the menu bar item for overlay, update, settings, and quit actions.
+- Right-click the menu bar item for overlay, update, settings, and quit actions. Quit is also in the popover's gear menu.
 - In the overlay, click the graph to open the popover.
 - Right-click the overlay for compact mode, host selection, popover, settings, or close.
 - Use Settings to add/edit hosts, select the primary host, configure notifications, export history, and control display behavior.

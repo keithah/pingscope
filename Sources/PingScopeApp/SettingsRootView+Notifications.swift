@@ -6,29 +6,12 @@ extension SettingsRootView {
         SettingsPane {
             SettingsSection("Delivery") {
                 SettingsRow(systemImage: "bell.badge", tint: .red, title: "Permission") {
-                    HStack(spacing: 10) {
-                        Text(model.notificationPermissionState.displayName)
-                            .foregroundStyle(model.notificationPermissionState == .denied ? .red : .secondary)
-                        Button("Request") {
-                            model.requestNotificationPermission()
-                        }
-                        .help("Request notification permission")
-                        .disabled([
-                            .authorized,
-                            .provisional,
-                            .requesting,
-                            .unavailable
-                        ].contains(model.notificationPermissionState))
-                        Button("Test") {
-                            model.sendTestNotification()
-                        }
-                        .help("Send a test notification")
-                        .disabled(model.notificationPermissionState == .requesting || model.notificationPermissionState == .unavailable)
-                        Button("Settings") {
-                            model.openNotificationSettings()
-                        }
-                        .help("Open macOS notification settings")
-                    }
+                    NotificationPermissionControls(
+                        state: model.notificationPermissionState,
+                        onRequest: { model.requestNotificationPermission() },
+                        onTest: { model.sendTestNotification() },
+                        onOpenSettings: { model.openNotificationSettings() }
+                    )
                 }
                 if let message = model.notificationRequestMessage {
                     Text(message)
@@ -262,4 +245,47 @@ extension SettingsRootView {
         )
     }
 
+}
+
+/// Permission state and its actions, on one line when the pane is wide enough
+/// and stacked when it is not. Nothing in it may be squeezed: compressed, the
+/// state wrapped mid-word and the buttons truncated to "Req…" and "Setti…".
+struct NotificationPermissionControls: View {
+    let state: NotificationPermissionState
+    var onRequest: () -> Void = {}
+    var onTest: () -> Void = {}
+    var onOpenSettings: () -> Void = {}
+
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 10) {
+                stateLabel
+                buttons
+            }
+            VStack(alignment: .leading, spacing: 6) {
+                stateLabel
+                buttons
+            }
+        }
+    }
+
+    private var stateLabel: some View {
+        Text(state.displayName)
+            .foregroundStyle(state == .denied ? .red : .secondary)
+            .fixedSize()
+    }
+
+    private var buttons: some View {
+        HStack(spacing: 10) {
+            Button("Request", action: onRequest)
+                .help("Request notification permission")
+                .disabled([.authorized, .provisional, .requesting, .unavailable].contains(state))
+            Button("Test", action: onTest)
+                .help("Send a test notification")
+                .disabled(state == .requesting || state == .unavailable)
+            Button("Settings", action: onOpenSettings)
+                .help("Open macOS notification settings")
+        }
+        .fixedSize()
+    }
 }

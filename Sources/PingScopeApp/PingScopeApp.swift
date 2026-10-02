@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import Darwin
 import PingScopeCore
 import SwiftUI
@@ -44,7 +45,7 @@ struct PingScopeApp: App {
 }
 
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSWindowDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     static weak var shared: AppDelegate?
 
     let model = PingScopeModel()
@@ -53,7 +54,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     private lazy var statusPopoverViewModel = StatusPopoverPresentationViewModel(model: model)
     private var statusItem: NSStatusItem?
     private var statusItemView: MenuBarStatusView?
-    private var popover: NSPopover?
+    private lazy var statusPopover = makeStatusPopoverController()
     private var detachedPopoverWindow: NSWindow?
     private var overlayController: NSWindowController?
     private var settingsWindowController: NSWindowController?
@@ -66,6 +67,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     private var powerMonitor: MacPowerActivityMonitor?
     private var cadenceUpdateTask: Task<Void, Never>?
     private var pendingCadenceInputs: CadenceInputs?
+    private var isPresentationRefreshDeferred = false
+    private var hostRowCountObserver: AnyCancellable?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         Self.shared = self
@@ -87,6 +90,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         model.onOverlayGraphClicked = { [weak self] in
             self?.openPopoverFromOverlay()
         }
+        observeStatusHostRowCount()
         if Self.launchesWindowed {
             DispatchQueue.main.async { [weak self] in
                 self?.openWindowedStatusInterface()
@@ -179,7 +183,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     func showOverlay() {
         DebugLog.write("AppDelegate.showOverlay called overlayControllerNil=\(overlayController == nil)")
         if overlayController == nil {
-            let view = OverlayView(viewModel: overlayViewModel, liveDisplay: model.liveDisplay)
+            let view = OverlayView(viewModel: overlayViewModel)
             let window = OverlayWindow(contentRect: model.overlayFrame)
             window.contentView = OverlayContainerView(
                 rootView: view,
@@ -266,7 +270,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     func applyWindowOpacity() {
         let alpha = CGFloat(model.overlayOpacity)
         overlayController?.window?.alphaValue = alpha
-        popover?.contentViewController?.view.window?.alphaValue = alpha
+        statusPopover.window?.alphaValue = alpha
         DebugLog.write("window opacity applied value=\(model.overlayOpacity)")
     }
 
@@ -327,7 +331,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
 
     private func refreshOverlayContent() {
         overlayController?.window?.contentView = OverlayContainerView(
-            rootView: OverlayView(viewModel: overlayViewModel, liveDisplay: model.liveDisplay),
+            rootView: OverlayView(viewModel: overlayViewModel),
             isCompact: { [weak self] in self?.overlayViewModel.presentation.compactMode ?? false },
             hostOptions: { [weak self] in self?.overlayHostOptions() ?? [] },
             onToggleCompact: { [weak self] in self?.toggleOverlayCompactMode() },
@@ -354,11 +358,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     }
 
     private func refreshPresentationViewModels() {
+        // Probe results keep arriving on the main queue while a menu is open,
+        // and re-rendering a SwiftUI Menu replaces the items of its open NSMenu
+        // under the pointer (a highlighted submenu blinks on every result). Hold
+        // tick-driven refreshes until the run loop leaves event tracking.
+        guard RunLoop.main.currentMode != .eventTracking else {
+            deferPresentationRefreshUntilTrackingEnds()
+            return
+        }
         if overlayController?.window?.isVisible == true {
             overlayViewModel.refresh()
         }
-        if popover?.isShown == true || detachedPopoverWindow?.isVisible == true {
+        if statusPopover.isShown || detachedPopoverWindow?.isVisible == true {
             statusPopoverViewModel.refresh()
+        }
+    }
+
+    private func deferPresentationRefreshUntilTrackingEnds() {
+        guard !isPresentationRefreshDeferred else { return }
+        isPresentationRefreshDeferred = true
+        RunLoop.main.perform(inModes: [.default]) { [weak self] in
+            MainActor.assumeIsolated {
+                self?.isPresentationRefreshDeferred = false
+                self?.refreshPresentationViewModels()
+            }
         }
     }
 
@@ -379,20 +402,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         // label + identifier so it can be found and opened programmatically.
         button.setAccessibilityLabel("PingScope")
         button.setAccessibilityIdentifier("pingscope.statusItem")
-        // Wire the button's accessibility action to the popover toggle. Real
-        // mouse clicks are handled by MenuBarStatusView below; this makes the
-        // item respond to an AXPress (how automation and assistive tech open
-        // it) instead of routing solely through raw mouse events.
+        // Clicks and AXPress (how automation and assistive tech open the item)
+        // all go through the button's own action. MenuBarStatusView only draws
+        // and opts out of hit testing: when it handled mouseDown itself while
+        // the button kept this action, one click had two routes to the toggle.
         button.target = self
         button.action = #selector(togglePopover)
+        button.sendAction(on: .leftMouseDown)
+        // The button never sends its action for the right mouse button.
+        let secondaryClick = NSClickGestureRecognizer(target: self, action: #selector(showContextMenuFromStatusItem))
+        secondaryClick.buttonMask = 0x2
+        button.addGestureRecognizer(secondaryClick)
         let view = MenuBarStatusView(frame: NSRect(x: 0, y: 0, width: defaultContent.itemWidth, height: NSStatusBar.system.thickness))
         view.autoresizingMask = [.width, .height]
         view.onPrimaryClick = { [weak self] in
             self?.togglePopover()
-        }
-        view.onSecondaryClick = { [weak self, weak view] in
-            guard let view else { return }
-            self?.showContextMenu(from: view)
         }
         button.addSubview(view)
         statusItemView = view
@@ -414,17 +438,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         guard let anchorView = statusItemView else { return }
 
         let event = NSApp.currentEvent
-        if event?.type == .rightMouseUp {
+        if MenuBarPresentationMode.isControlClick(type: event?.type, modifierFlags: event?.modifierFlags ?? []) {
             showContextMenu(from: anchorView)
             return
         }
 
-        if popover?.isShown == true {
-            popover?.performClose(nil)
-            return
-        }
-
-        showPopoverFromStatusItem()
+        statusPopover.toggle(relativeTo: anchorView)
     }
 
     private func showPopoverFromStatusItem() {
@@ -438,7 +457,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         let controller = NSHostingController(
             rootView: StatusPopoverView(
                 viewModel: statusPopoverViewModel,
-                liveDisplay: model.liveDisplay,
                 onHistory: { [weak self] in
                     self?.openHistoryFromStatusContent()
                 },
@@ -457,7 +475,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     }
 
     private func openSettingsFromStatusContent() {
-        popover?.performClose(nil)
+        statusPopover.close()
         if detachedPopoverWindow?.isVisible == true {
             detachedPopoverWindow?.close()
         }
@@ -465,7 +483,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     }
 
     private func openHistoryFromStatusContent() {
-        popover?.performClose(nil)
+        statusPopover.close()
         if detachedPopoverWindow?.isVisible == true {
             detachedPopoverWindow?.close()
         }
@@ -473,42 +491,61 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     }
 
     private func showPopover(relativeTo anchorView: NSView) {
-        let popover = NSPopover()
-        popover.behavior = .transient
-        popover.contentSize = MenuBarPresentationMode.statusContentSize
-        popover.contentViewController = makeStatusContentController()
-        popover.delegate = self
-        popover.show(relativeTo: anchorView.bounds, of: anchorView, preferredEdge: .minY)
-        self.popover = popover
-        updatePowerMonitorUIVisibility()
-        applyWindowOpacity()
-        DispatchQueue.main.async { [weak self, weak popover] in
-            guard self?.popover === popover else { return }
-            self?.applyWindowOpacity()
+        statusPopover.show(relativeTo: anchorView)
+    }
+
+    private func makeStatusPopoverController() -> StatusPopoverController {
+        let controller = StatusPopoverController(
+            makeContent: { [unowned self] in makeStatusContentController() },
+            contentSize: { [unowned self] screen in preferredStatusContentSize(on: screen) }
+        )
+        controller.hasOtherVisibleWindow = { [unowned self] in hasVisiblePrimaryWindow }
+        controller.makeDetachedWindow = { [unowned self] in
+            let window = makeDetachedStatusWindow()
+            detachedPopoverWindow = window
+            return window
         }
+        controller.onVisibilityChange = { [unowned self] in
+            updatePowerMonitorUIVisibility()
+            applyWindowOpacity()
+            // The popover's window only exists once the show has gone through.
+            DispatchQueue.main.async { [weak self] in
+                self?.applyWindowOpacity()
+            }
+        }
+        return controller
     }
 
-    func popoverShouldDetach(_ popover: NSPopover) -> Bool {
-        MenuBarPresentationMode.shouldAllowUserDetachForMenuPopover()
+    /// Refreshes first: the view model is not kept current while hidden.
+    private func preferredStatusContentSize(on screen: NSScreen?) -> NSSize {
+        statusPopoverViewModel.refresh()
+        return statusContentSize(hostRowCount: statusPopoverViewModel.presentation.hostRowCount, on: screen)
     }
 
-    func popoverDidDetach(_ popover: NSPopover) {
-        DebugLog.write("menu popover detached to window")
-        updatePowerMonitorUIVisibility()
+    private func statusContentSize(hostRowCount: Int, on screen: NSScreen?) -> NSSize {
+        let visibleHeight = (screen ?? NSScreen.main)?.visibleFrame.height ?? .greatestFiniteMagnitude
+        return MenuBarPresentationMode.statusContentSize(
+            hostRowCount: hostRowCount,
+            availableHeight: visibleHeight - MenuBarPresentationMode.statusContentScreenMargin
+        )
     }
 
-    func popoverDidClose(_ notification: Notification) {
-        updatePowerMonitorUIVisibility()
-    }
-
-    func detachableWindow(for popover: NSPopover) -> NSWindow? {
-        let window = makeDetachedStatusWindow()
-        detachedPopoverWindow = window
-        return window
+    /// Keeps an open popover sized to its host rows when the selection switches
+    /// between one host and All Hosts.
+    private func observeStatusHostRowCount() {
+        hostRowCountObserver = statusPopoverViewModel.$presentation
+            .map(\.hostRowCount)
+            .removeDuplicates()
+            .sink { [weak self] hostRowCount in
+                guard let self else { return }
+                statusPopover.resize { screen in
+                    self.statusContentSize(hostRowCount: hostRowCount, on: screen)
+                }
+            }
     }
 
     private func openWindowedStatusInterface() {
-        popover?.performClose(nil)
+        statusPopover.close()
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
         if let window = detachedPopoverWindow, window.isVisible {
@@ -524,8 +561,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     }
 
     private func makeDetachedStatusWindow() -> NSWindow {
+        let contentSize = preferredStatusContentSize(on: NSScreen.main)
         let window = NSWindow(
-            contentRect: NSRect(origin: .zero, size: MenuBarPresentationMode.statusContentSize),
+            contentRect: NSRect(origin: .zero, size: contentSize),
             styleMask: MenuBarPresentationMode.detachedPopoverWindowStyleMask,
             backing: .buffered,
             defer: false
@@ -541,7 +579,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         window.isReleasedWhenClosed = false
         window.delegate = self
         DispatchQueue.main.async { [weak window] in
-            window?.setContentSize(MenuBarPresentationMode.statusContentSize)
+            window?.setContentSize(contentSize)
         }
         return window
     }
@@ -575,13 +613,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         }
     }
 
-    private func updatePowerMonitorUIVisibility() {
-        let isVisible = overlayController?.window?.isVisible == true
-            || popover?.isShown == true
-            || detachedPopoverWindow?.isVisible == true
+    /// Windows that can hold keyboard focus; the overlay never becomes key.
+    private var hasVisiblePrimaryWindow: Bool {
+        detachedPopoverWindow?.isVisible == true
             || settingsWindowController?.window?.isVisible == true
             || historyWindowController?.window?.isVisible == true
+    }
+
+    private func updatePowerMonitorUIVisibility() {
+        let isVisible = overlayController?.window?.isVisible == true
+            || statusPopover.isShown
+            || hasVisiblePrimaryWindow
         powerMonitor?.setUIVisible(isVisible)
+    }
+
+    @objc private func showContextMenuFromStatusItem() {
+        guard let anchorView = statusItemView else { return }
+        showContextMenu(from: anchorView)
     }
 
     private func showContextMenu(from view: NSView) {
@@ -705,7 +753,6 @@ final class MenuBarStatusView: NSView {
     private var cachedLatencyText: NSAttributedString
 
     var onPrimaryClick: (() -> Void)?
-    var onSecondaryClick: (() -> Void)?
 
     override init(frame frameRect: NSRect) {
         cachedLatencyText = Self.makeLatencyText(for: content)
@@ -753,12 +800,8 @@ final class MenuBarStatusView: NSView {
         )
     }
 
-    override func mouseDown(with event: NSEvent) {
-        onPrimaryClick?()
-    }
-
-    override func rightMouseDown(with event: NSEvent) {
-        onSecondaryClick?()
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        nil
     }
 
     override func accessibilityPerformPress() -> Bool {

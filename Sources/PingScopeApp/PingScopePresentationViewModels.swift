@@ -123,6 +123,11 @@ struct StatusPopoverPresentation {
         displayPresentation = model.displayPresentation
         networkDiagnosis = model.networkDiagnosis
     }
+
+    /// Rows in the All Hosts summary card; zero while a single host is focused.
+    var hostRowCount: Int {
+        popoverShowsAllHosts ? displayPresentation.hostStatusSummaries.count : 0
+    }
 }
 
 @MainActor
