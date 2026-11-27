@@ -136,6 +136,33 @@ final class RuntimeBehaviorTests: XCTestCase {
         XCTAssertEqual(primaryID, gateway.id)
     }
 
+    func testEditingOnlyInternetHostKeepsExplicitGatewayPrimary() async {
+        let gateway = HostConfig.defaultGatewayHost(address: "192.168.42.1")
+        var internet = HostConfig(id: UUID(), displayName: "Quad9", address: "9.9.9.9")
+        let store = HostStore(defaultHosts: [internet, gateway], primaryHostID: gateway.id)
+        internet.displayColor = HostDisplayColor(red: 0, green: 0, blue: 1)
+        await store.upsert(internet)
+        let primaryID = await store.primaryHostID()
+        XCTAssertEqual(primaryID, gateway.id)
+    }
+
+    func testEnablingDisabledInternetHostTakesOverGatewayOnlyPrimary() async {
+        let gateway = HostConfig.defaultGatewayHost(address: "192.168.42.1")
+        var internet = HostConfig(id: UUID(), displayName: "Quad9", address: "9.9.9.9")
+        internet.isEnabled = false
+        let store = HostStore(defaultHosts: [gateway, internet], primaryHostID: gateway.id)
+        internet.isEnabled = true
+        await store.upsert(internet)
+        let primaryID = await store.primaryHostID()
+        XCTAssertEqual(primaryID, internet.id)
+    }
+
+    func testPrivateAddressWithExplicitRemoteTierIsNotPreferredAsPrimary() {
+        let nas = HostConfig(id: UUID(), displayName: "NAS", address: "192.168.42.2", tier: .remoteService)
+        let internet = HostConfig(id: UUID(), displayName: "Quad9", address: "9.9.9.9")
+        XCTAssertEqual(HostConfig.preferredPrimary(in: [nas, internet])?.id, internet.id)
+    }
+
     func testUntieredPrivateRouterIsNotPreferredAsPrimary() {
         let router = HostConfig(id: UUID(), displayName: "Router", address: "192.168.1.1")
         let internet = HostConfig(id: UUID(), displayName: "Quad9", address: "9.9.9.9")

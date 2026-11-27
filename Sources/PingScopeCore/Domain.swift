@@ -330,7 +330,8 @@ public extension HostConfig {
     /// and other private-address hosts, whatever their stored tier. Starlink
     /// reports the dish's PoP latency, so it counts as an internet path.
     var measuresOnlyLocalNetwork: Bool {
-        method != .starlink && (isManagedDefaultGateway || effectiveNetworkTier == .localGateway)
+        method != .starlink
+            && (isManagedDefaultGateway || requiresLocalNetworkPermission || effectiveNetworkTier == .localGateway)
     }
 
     /// The host to use as primary when none has been chosen, or the chosen one

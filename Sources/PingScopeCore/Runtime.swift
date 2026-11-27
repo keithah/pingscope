@@ -283,7 +283,7 @@ public actor HostStore {
         // real choice between paths, so the first internet host added takes
         // over. Once one exists, an explicitly chosen router is kept.
         let hadInternetHost = orderedHosts.contains {
-            $0.id != host.id && $0.isEnabled && !$0.measuresOnlyLocalNetwork
+            $0.isEnabled && !$0.measuresOnlyLocalNetwork
         }
         if let index = orderedHosts.firstIndex(where: { $0.id == host.id }) {
             orderedHosts[index] = host

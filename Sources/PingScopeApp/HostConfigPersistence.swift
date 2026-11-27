@@ -24,6 +24,7 @@ final class HostConfigPersistence {
     private var lastObservedSharedState: SharedHostStoreState?
     private var preservedSelectedHostID: UUID?
     private var preservesUndecodableData = false
+    private var pendingPrimaryMigrationRecord = false
     private let seededDefaultsKey = "didSeedDefaultHosts"
     static let undecodableBackupKey = "hostConfigsUndecodableBackup"
     static let movedPrimaryOffGatewayKey = "didMovePrimaryOffDefaultGateway"
@@ -87,13 +88,16 @@ final class HostConfigPersistence {
         guard !hosts.isEmpty, !defaults.bool(forKey: Self.movedPrimaryOffGatewayKey) else {
             return primaryHostID
         }
-        defaults.set(true, forKey: Self.movedPrimaryOffGatewayKey)
         guard let primary = hosts.first(where: { $0.id == primaryHostID }),
               primary.isManagedDefaultGateway,
               let replacement = HostConfig.preferredPrimary(in: hosts),
               !replacement.measuresOnlyLocalNetwork else {
+            defaults.set(true, forKey: Self.movedPrimaryOffGatewayKey)
             return primaryHostID
         }
+        // Recorded by persist() once the moved primary is saved, so a failed
+        // save retries the move on the next launch.
+        pendingPrimaryMigrationRecord = true
         logger("primary host moved off default gateway to \(replacement.displayName)")
         return replacement.id
     }
@@ -128,6 +132,10 @@ final class HostConfigPersistence {
             return nil
         }
         lastPersistedHostState = hostState
+        if pendingPrimaryMigrationRecord {
+            defaults.set(true, forKey: Self.movedPrimaryOffGatewayKey)
+            pendingPrimaryMigrationRecord = false
+        }
         lastObservedSharedState = resolved
         preservedSelectedHostID = resolved.selectedHostID
         return resolved
