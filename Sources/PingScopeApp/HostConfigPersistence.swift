@@ -27,7 +27,7 @@ final class HostConfigPersistence {
     private let seededDefaultsKey = "didSeedDefaultHosts"
     static let undecodableBackupKey = "hostConfigsUndecodableBackup"
 
-    init(defaults: UserDefaults = .standard) {
+    init(defaults: UserDefaults = UITestingEnvironment.defaults) {
         self.defaults = defaults
         sharedStore = UserDefaultsSharedHostStore(defaults: defaults, legacyPlatform: .macOS)
     }

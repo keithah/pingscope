@@ -1,0 +1,43 @@
+name: UI Tests
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: ui-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  macos-ui-tests:
+    name: macOS XCUITest (PingScope-UITests)
+    runs-on: macos-26
+    timeout-minutes: 40
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Show toolchain
+        run: |
+          xcodebuild -version
+          sw_vers
+
+      - name: Run UI tests
+        # Ad-hoc signing: the runner has no team certificate, and macOS will
+        # not launch the app with restricted iCloud/App Group entitlements
+        # without a provisioning profile. The UI-test launch mode does not
+        # use either.
+        run: scripts/test-ui.sh --adhoc --result-bundle "$RUNNER_TEMP/PingScopeUITests.xcresult"
+
+      - name: Upload result bundle
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: PingScopeUITests-xcresult
+          path: ${{ runner.temp }}/PingScopeUITests.xcresult
+          if-no-files-found: warn
+          retention-days: 14

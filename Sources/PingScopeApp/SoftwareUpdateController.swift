@@ -28,7 +28,7 @@ final class SoftwareUpdateController: ObservableObject {
         bundleVersion = bundle.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "Unknown"
 
         #if canImport(Sparkle) && !APPSTORE
-        if Self.isConfigured(feedURL: feedURL, publicKey: publicKey) {
+        if !UITestingEnvironment.isActive, Self.isConfigured(feedURL: feedURL, publicKey: publicKey) {
             updaterController = SPUStandardUpdaterController(
                 startingUpdater: true,
                 updaterDelegate: nil,

@@ -236,7 +236,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         DebugLog.write("overlay frame off-screen; constrained to \(frame)")
         window.setFrame(frame, display: true)
         model.overlayFrame = frame
-        UserDefaults.standard.overlayFrame = frame
+        UITestingEnvironment.defaults.overlayFrame = frame
     }
 
     func hideOverlay() {
@@ -402,6 +402,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         // label + identifier so it can be found and opened programmatically.
         button.setAccessibilityLabel("PingScope")
         button.setAccessibilityIdentifier("pingscope.statusItem")
+        button.setAccessibilityValue("closed")
         // Clicks and AXPress (how automation and assistive tech open the item)
         // all go through the button's own action. MenuBarStatusView only draws
         // and opts out of hit testing: when it handled mouseDown itself while
@@ -506,6 +507,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             return window
         }
         controller.onVisibilityChange = { [unowned self] in
+            updateStatusItemAccessibilityState()
             updatePowerMonitorUIVisibility()
             applyWindowOpacity()
             // The popover's window only exists once the show has gone through.
@@ -514,6 +516,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             }
         }
         return controller
+    }
+
+    /// Reports whether the popover is open on the status item itself. The
+    /// popover window of an accessory app is not reachable from the app's
+    /// accessibility root, so assistive tech and UI tests read it here.
+    private func updateStatusItemAccessibilityState() {
+        guard let button = statusItem?.button else { return }
+        let isOpen = statusPopover.isShown
+        button.setAccessibilityExpanded(isOpen)
+        button.setAccessibilityValue(isOpen ? "open" : "closed")
     }
 
     /// Refreshes first: the view model is not kept current while hidden.
@@ -671,6 +683,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     private func acquireSingleInstanceLock() -> Bool {
+        if UITestingEnvironment.isActive {
+            return UITestingEnvironment.ownsInstanceLock
+        }
         let path = (NSTemporaryDirectory() as NSString).appendingPathComponent("com.pingscope.fresh.lock")
         instanceLockFD = open(path, O_CREAT | O_RDWR, S_IRUSR | S_IWUSR)
         guard instanceLockFD >= 0 else { return true }

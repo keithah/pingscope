@@ -1,0 +1,12 @@
+schemaVersion: 1
+enabledWorkflows: ["macos", "simulator", "ui-automation"]
+sessionDefaults:
+  projectPath: PingScope.xcodeproj
+  scheme: PingScope
+  configuration: Debug
+sessionDefaultsProfiles:
+  # `test_macos` with this profile runs the XCUITest suite (PingScopeUITests).
+  ui-tests:
+    projectPath: PingScope.xcodeproj
+    scheme: PingScope-UITests
+    configuration: Debug

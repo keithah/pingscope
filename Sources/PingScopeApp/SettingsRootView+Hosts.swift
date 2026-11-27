@@ -10,6 +10,7 @@ extension SettingsRootView {
                     Text("\(model.configuredHosts.count) configured")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                        .accessibilityIdentifier("settings.hosts.count")
                     Spacer()
                     Button {
                         model.addDefaultGatewayHost()
@@ -28,6 +29,7 @@ extension SettingsRootView {
                         Label("Add Host", systemImage: "plus")
                     }
                     .keyboardShortcut("n", modifiers: [.command])
+                    .accessibilityIdentifier("settings.hosts.add")
                 }
                 .controlSize(.small)
 
@@ -67,10 +69,12 @@ extension SettingsRootView {
                 HStack(alignment: .top, spacing: 14) {
                     SettingsField("Name") {
                         TextField("Name", text: $model.draftHostName)
+                            .accessibilityIdentifier("settings.hostEditor.name")
                             .frame(maxWidth: .infinity)
                     }
                     SettingsField("Address") {
                         TextField("Address", text: $model.draftHostAddress)
+                            .accessibilityIdentifier("settings.hostEditor.address")
                             .frame(maxWidth: .infinity)
                     }
                 }
@@ -202,6 +206,7 @@ extension SettingsRootView {
                     Label(model.draftActionTitle, systemImage: model.editingHostID == nil ? "plus" : "checkmark")
                 }
                 .disabled(!model.canAddDraftHost)
+                .accessibilityIdentifier("settings.hostEditor.save")
                 Button {
                     displayColorEditor.cancel {
                         model.clearDraftHost()
@@ -264,6 +269,8 @@ private struct LiveHostSettingsList: View {
                     onMakePrimary: { onMakePrimary(host.id) },
                     onDelete: { onDelete(host.id) }
                 )
+                .accessibilityElement(children: .contain)
+                .accessibilityIdentifier("settings.hosts.row")
             }
         }
     }

@@ -801,9 +801,9 @@ final class BuildGraphOptimizationTests: XCTestCase {
             .filter { $0.contains("CURRENT_PROJECT_VERSION =") }
 
         XCTAssertFalse(marketingVersions.isEmpty)
-        XCTAssertTrue(marketingVersions.allSatisfy { $0.contains("MARKETING_VERSION = 0.5.1;") })
+        XCTAssertTrue(marketingVersions.allSatisfy { $0.contains("MARKETING_VERSION = 0.5.2;") })
         XCTAssertFalse(buildVersions.isEmpty)
-        XCTAssertTrue(buildVersions.allSatisfy { $0.contains("CURRENT_PROJECT_VERSION = 96;") })
+        XCTAssertTrue(buildVersions.allSatisfy { $0.contains("CURRENT_PROJECT_VERSION = 97;") })
     }
 
     func testBatteryAwareLifecycleWiringSeedsInitialStateAndSerializesUpdates() throws {
@@ -866,6 +866,48 @@ final class BuildGraphOptimizationTests: XCTestCase {
         XCTAssertFalse(source.contains("IOPSGetPowerSourceDescription"))
         XCTAssertTrue(source.contains("case kIOPMBatteryPowerKey: return .battery"))
         XCTAssertTrue(source.contains("default: return .unknown"))
+    }
+
+    func testUITestSchemeRunsOnlyTheXCUITestTargetAgainstTheDebugApp() throws {
+        let root = try repositoryRoot()
+        let scheme = try String(
+            contentsOf: root.appendingPathComponent("PingScope.xcodeproj/xcshareddata/xcschemes/PingScope-UITests.xcscheme"),
+            encoding: .utf8
+        )
+        let project = try String(
+            contentsOf: root.appendingPathComponent("PingScope.xcodeproj/project.pbxproj"),
+            encoding: .utf8
+        )
+
+        XCTAssertTrue(scheme.contains("BlueprintName = \"PingScopeUITests\""))
+        XCTAssertEqual(scheme.components(separatedBy: "<TestableReference").count - 1, 1)
+        XCTAssertTrue(scheme.contains("BlueprintName = \"PingScopeApp\""))
+        XCTAssertTrue(project.contains("path = Tests/PingScopeUITests;"))
+        XCTAssertTrue(project.contains("path = PingScopeUITests.xctest;"))
+        XCTAssertTrue(project.contains("productType = \"com.apple.product-type.bundle.ui-testing\";"))
+    }
+
+    func testUITestingModeIsDebugOnlyAndIsolatesUserData() throws {
+        let source = try String(
+            contentsOf: try repositoryRoot().appendingPathComponent("Sources/PingScopeApp/UITestingEnvironment.swift"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(source.contains("#if DEBUG"))
+        XCTAssertTrue(source.contains("removePersistentDomain(forName: defaultsSuiteName)"))
+
+        // Mac app code reads and writes settings through the UI-test-aware store.
+        let appSources = try FileManager.default.contentsOfDirectory(
+            at: try repositoryRoot().appendingPathComponent("Sources/PingScopeApp"),
+            includingPropertiesForKeys: nil
+        ).filter { $0.pathExtension == "swift" && $0.lastPathComponent != "UITestingEnvironment.swift" }
+        XCTAssertFalse(appSources.isEmpty)
+        for file in appSources {
+            let contents = try String(contentsOf: file, encoding: .utf8)
+            XCTAssertFalse(
+                contents.contains("UserDefaults.standard"),
+                "\(file.lastPathComponent) bypasses UITestingEnvironment.defaults"
+            )
+        }
     }
 
     func testXcodeTestTargetsMirrorSwiftPackageModuleBoundaries() throws {

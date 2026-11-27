@@ -140,7 +140,7 @@
 		54A000000000000000000014 /* PingScopeiOSTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = PingScopeiOSTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		54A000000000000000000015 /* PingScopeExtensionSupportTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = PingScopeExtensionSupportTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		54A000000000000000000016 /* PingScopeBuildGraphTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = PingScopeBuildGraphTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-		53AA6F4E2F441DAD009FEF3A /* PingScopeUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; name = PingScopeUITests.xctest; path = PingScope.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		53AA6F4E2F441DAD009FEF3A /* PingScopeUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; name = PingScopeUITests.xctest; path = PingScopeUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		53D2B0B22F45A1A300E65EEE /* widgetExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = widgetExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		53A200000000000000000005 /* PingScopeLiveActivityExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = PingScopeLiveActivityExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		53D2B0B42F45A1A300E65EEE /* WidgetKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WidgetKit.framework; path = System/Library/Frameworks/WidgetKit.framework; sourceTree = SDKROOT; };
@@ -198,7 +198,7 @@
 		};
 		53AA6F512F441DAD009FEF3A /* PingScopeUITests */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			path = PingScopeUITests;
+			path = Tests/PingScopeUITests;
 			sourceTree = "<group>";
 		};
 		53AA6F652F441E20009FEF3A /* Sources */ = {
@@ -1253,7 +1253,7 @@
 				MACOSX_DEPLOYMENT_TARGET = 15.0;
 				MARKETING_VERSION = 0.5.2;
 				PRODUCT_BUNDLE_IDENTIFIER = com.hadm.PingScopeUITests;
-				PRODUCT_NAME = PingScope;
+				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = macosx;
 				STRING_CATALOG_GENERATE_SYMBOLS = NO;
 				SUPPORTED_PLATFORMS = macosx;
@@ -1261,7 +1261,7 @@
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
-				TEST_TARGET_NAME = PingScope;
+				TEST_TARGET_NAME = PingScopeApp;
 			};
 			name = Debug;
 		};
@@ -1275,7 +1275,7 @@
 				MACOSX_DEPLOYMENT_TARGET = 15.0;
 				MARKETING_VERSION = 0.5.2;
 				PRODUCT_BUNDLE_IDENTIFIER = com.hadm.PingScopeUITests;
-				PRODUCT_NAME = PingScope;
+				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = macosx;
 				STRING_CATALOG_GENERATE_SYMBOLS = NO;
 				SUPPORTED_PLATFORMS = macosx;
@@ -1283,7 +1283,7 @@
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
-				TEST_TARGET_NAME = PingScope;
+				TEST_TARGET_NAME = PingScopeApp;
 			};
 			name = Release;
 		};
