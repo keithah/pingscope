@@ -626,16 +626,17 @@ public actor HistoryWeeklyDigestLoader {
     ) {
         let flightID = UUID()
         let task = Task.detached(priority: .userInitiated) {
-            let queried = plan.store.weeklyDigestSampleStream(
+            // Await the read itself rather than iterating its stream: a cancelled
+            // stream returns at once while the store keeps reading, which would
+            // free this flight's slot early and let queued reads exceed capacity.
+            let collector = WeeklyDigestSampleCollector(plan.baseSamples)
+            await plan.store.forEachWeeklyDigestSample(
                 hostIDs: plan.hostIDs,
                 since: plan.querySince,
-                through: plan.queryThrough
+                through: plan.queryThrough,
+                onSample: { collector.insert($0) }
             )
-            var samplesByID = Dictionary(uniqueKeysWithValues: plan.baseSamples.map { ($0.id, $0) })
-            for await sample in queried {
-                samplesByID[sample.id] = sample
-            }
-            let samples = samplesByID.values.sorted(by: Self.isSampleOrderedBefore)
+            let samples = collector.samples().sorted(by: Self.isSampleOrderedBefore)
             let result = LoadResult(
                 digest: HistoryWeeklyDigest.make(
                     hosts: plan.hosts,
@@ -752,5 +753,28 @@ public actor HistoryWeeklyDigestLoader {
         while recency.count > capacity {
             cache[recency.removeFirst()] = nil
         }
+    }
+}
+
+/// Gathers samples delivered by a store read, keyed by sample ID so a retried
+/// read cannot duplicate them.
+private final class WeeklyDigestSampleCollector: @unchecked Sendable {
+    private let lock = NSLock()
+    private var samplesByID: [UUID: HistoryWeeklyDigestSample]
+
+    init(_ baseSamples: [HistoryWeeklyDigestSample]) {
+        samplesByID = Dictionary(uniqueKeysWithValues: baseSamples.map { ($0.id, $0) })
+    }
+
+    func insert(_ sample: HistoryWeeklyDigestSample) {
+        lock.lock()
+        defer { lock.unlock() }
+        samplesByID[sample.id] = sample
+    }
+
+    func samples() -> [HistoryWeeklyDigestSample] {
+        lock.lock()
+        defer { lock.unlock() }
+        return Array(samplesByID.values)
     }
 }

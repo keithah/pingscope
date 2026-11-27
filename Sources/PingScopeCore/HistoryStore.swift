@@ -75,6 +75,16 @@ public protocol PingHistoryStore: Sendable {
         since: Date,
         through: Date
     ) -> AsyncStream<HistoryWeeklyDigestSample>
+    /// Reads the weekly digest window, passing each sample to `onSample`, and
+    /// returns only once the store has finished the read. Unlike the stream,
+    /// a cancelled caller still waits for the underlying read to return, so a
+    /// caller can bound how many reads actually run at once.
+    func forEachWeeklyDigestSample(
+        hostIDs: [UUID],
+        since: Date,
+        through: Date,
+        onSample: @escaping @Sendable (HistoryWeeklyDigestSample) -> Void
+    ) async
     func historyRevision() async -> UInt64
     /// Changes only when existing digest input may have been removed or replaced.
     /// Append-only writes intentionally leave this value unchanged so consumers can
@@ -140,6 +150,18 @@ public extension PingHistoryStore {
             result[hostID] = await latestSamples(hostID: hostID, since: since, limit: limitPerHost)
         }
         return result
+    }
+
+    func forEachWeeklyDigestSample(
+        hostIDs: [UUID],
+        since: Date,
+        through: Date,
+        onSample: @escaping @Sendable (HistoryWeeklyDigestSample) -> Void
+    ) async {
+        let samples = await weeklyDigestSamples(hostIDs: hostIDs, since: since, through: through)
+        for sample in samples where !Task.isCancelled {
+            onSample(sample)
+        }
     }
 
     func weeklyDigestSampleStream(
@@ -296,6 +318,15 @@ public final class SQLiteHistoryStore: PingHistoryStore, @unchecked Sendable {
         through: Date
     ) -> AsyncStream<HistoryWeeklyDigestSample> {
         worker.weeklyDigestSampleStream(hostIDs: hostIDs, since: since, through: through)
+    }
+
+    public func forEachWeeklyDigestSample(
+        hostIDs: [UUID],
+        since: Date,
+        through: Date,
+        onSample: @escaping @Sendable (HistoryWeeklyDigestSample) -> Void
+    ) async {
+        await worker.forEachWeeklyDigestSample(hostIDs: hostIDs, since: since, through: through, onSample: onSample)
     }
 
     public func historyRevision() async -> UInt64 {
@@ -539,40 +570,56 @@ private final class SQLiteHistoryWorker: @unchecked Sendable {
         }
         return AsyncStream { continuation in
             let task = Task {
-                do {
-                    try await self.performWithSQLiteRetry {
-                        try self.openIfNeeded()
-                        guard let db = self.connection.db else {
-                            throw SQLiteHistoryError.openFailed(message: "database is not open")
-                        }
-                        if let override = self.sqliteVariableNumberLimitOverride {
-                            let priorLimit = sqlite3_limit(
-                                db,
-                                SQLITE_LIMIT_VARIABLE_NUMBER,
-                                Int32(max(3, override))
-                            )
-                            defer { sqlite3_limit(db, SQLITE_LIMIT_VARIABLE_NUMBER, priorLimit) }
-                            try self.streamWeeklyDigestSamples(
-                                hostIDs: uniqueHostIDs,
-                                since: since,
-                                through: through,
-                                onSample: { continuation.yield($0) }
-                            )
-                        } else {
-                            try self.streamWeeklyDigestSamples(
-                                hostIDs: uniqueHostIDs,
-                                since: since,
-                                through: through,
-                                onSample: { continuation.yield($0) }
-                            )
-                        }
-                    }
-                } catch {
-                    self.logger?("history weekly digest stream failed: \(error)")
-                }
+                await self.forEachWeeklyDigestSample(
+                    hostIDs: uniqueHostIDs,
+                    since: since,
+                    through: through,
+                    onSample: { continuation.yield($0) }
+                )
                 continuation.finish()
             }
             continuation.onTermination = { _ in task.cancel() }
+        }
+    }
+
+    func forEachWeeklyDigestSample(
+        hostIDs: [UUID],
+        since: Date,
+        through: Date,
+        onSample: @escaping @Sendable (HistoryWeeklyDigestSample) -> Void
+    ) async {
+        let uniqueHostIDs = Array(Set(hostIDs)).sorted { $0.uuidString < $1.uuidString }
+        guard !uniqueHostIDs.isEmpty else { return }
+        do {
+            try await performWithSQLiteRetry {
+                try self.openIfNeeded()
+                guard let db = self.connection.db else {
+                    throw SQLiteHistoryError.openFailed(message: "database is not open")
+                }
+                if let override = self.sqliteVariableNumberLimitOverride {
+                    let priorLimit = sqlite3_limit(
+                        db,
+                        SQLITE_LIMIT_VARIABLE_NUMBER,
+                        Int32(max(3, override))
+                    )
+                    defer { sqlite3_limit(db, SQLITE_LIMIT_VARIABLE_NUMBER, priorLimit) }
+                    try self.streamWeeklyDigestSamples(
+                        hostIDs: uniqueHostIDs,
+                        since: since,
+                        through: through,
+                        onSample: onSample
+                    )
+                } else {
+                    try self.streamWeeklyDigestSamples(
+                        hostIDs: uniqueHostIDs,
+                        since: since,
+                        through: through,
+                        onSample: onSample
+                    )
+                }
+            }
+        } catch {
+            logger?("history weekly digest stream failed: \(error)")
         }
     }
 
