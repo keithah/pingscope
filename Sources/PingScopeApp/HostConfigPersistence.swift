@@ -91,7 +91,7 @@ final class HostConfigPersistence {
         guard let primary = hosts.first(where: { $0.id == primaryHostID }),
               primary.isManagedDefaultGateway,
               let replacement = HostConfig.preferredPrimary(in: hosts),
-              !replacement.isDefaultGateway else {
+              !replacement.measuresOnlyLocalNetwork else {
             return primaryHostID
         }
         logger("primary host moved off default gateway to \(replacement.displayName)")

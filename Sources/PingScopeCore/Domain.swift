@@ -326,13 +326,21 @@ public extension HostConfig {
         tier == .localGateway || displayName == "Default Gateway"
     }
 
+    /// True for hosts whose latency stops at the local network: the router
+    /// and other private-address hosts, whatever their stored tier. Starlink
+    /// reports the dish's PoP latency, so it counts as an internet path.
+    var measuresOnlyLocalNetwork: Bool {
+        method != .starlink && (isManagedDefaultGateway || effectiveNetworkTier == .localGateway)
+    }
+
     /// The host to use as primary when none has been chosen, or the chosen one
     /// is gone. Prefers an enabled host past the local router so the menu bar
-    /// shows real internet latency rather than the LAN hop; the router is used
-    /// only when nothing else is configured.
+    /// shows real internet latency rather than the LAN hop; an enabled router
+    /// still beats a disabled host, which would never be measured.
     static func preferredPrimary(in hosts: [HostConfig]) -> HostConfig? {
-        hosts.first { $0.isEnabled && !$0.isDefaultGateway }
-            ?? hosts.first { !$0.isDefaultGateway }
+        hosts.first { $0.isEnabled && !$0.measuresOnlyLocalNetwork }
+            ?? hosts.first(where: \.isEnabled)
+            ?? hosts.first { !$0.measuresOnlyLocalNetwork }
             ?? hosts.first
     }
 }

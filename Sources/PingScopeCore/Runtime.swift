@@ -250,10 +250,6 @@ public struct StarlinkDishDetector: Sendable {
 public actor HostStore {
     private var orderedHosts: [HostConfig]
     private var primaryID: UUID?
-    /// True while the primary came from `HostConfig.preferredPrimary` rather
-    /// than an explicit choice, so a router picked only because nothing else
-    /// existed yields to the first internet host added later.
-    private var primaryIsFallback: Bool
 
     public init(defaultHosts: [HostConfig] = HostConfig.defaultHosts(), primaryHostID: UUID? = nil) {
         let normalized = Self.coalescingManagedDefaultGatewayHosts(
@@ -261,8 +257,9 @@ public actor HostStore {
             primaryID: primaryHostID ?? HostConfig.preferredPrimary(in: defaultHosts)?.id
         )
         self.orderedHosts = normalized.hosts
-        self.primaryID = normalized.primaryID
-        self.primaryIsFallback = primaryHostID == nil
+        self.primaryID = normalized.primaryID.flatMap { candidate in
+            normalized.hosts.contains { $0.id == candidate } ? candidate : nil
+        } ?? HostConfig.preferredPrimary(in: normalized.hosts)?.id
     }
 
     public func hosts() -> [HostConfig] {
@@ -282,6 +279,12 @@ public actor HostStore {
     }
 
     public func upsert(_ host: HostConfig) {
+        // A local-only primary with no internet host beside it was never a
+        // real choice between paths, so the first internet host added takes
+        // over. Once one exists, an explicitly chosen router is kept.
+        let hadInternetHost = orderedHosts.contains {
+            $0.id != host.id && $0.isEnabled && !$0.measuresOnlyLocalNetwork
+        }
         if let index = orderedHosts.firstIndex(where: { $0.id == host.id }) {
             orderedHosts[index] = host
         } else if let index = orderedHosts.firstIndex(where: { Self.isManagedDefaultGateway($0) && Self.isManagedDefaultGateway(host) }) {
@@ -293,9 +296,10 @@ public actor HostStore {
         } else {
             orderedHosts.append(host)
         }
-        if primaryID == nil || (primaryIsFallback && currentPrimaryIsGateway && !host.isDefaultGateway) {
+        let primaryIsLocalOnly = orderedHosts.first { $0.id == primaryID }?.measuresOnlyLocalNetwork ?? false
+        if primaryID == nil
+            || (primaryIsLocalOnly && !hadInternetHost && host.isEnabled && !host.measuresOnlyLocalNetwork) {
             primaryID = HostConfig.preferredPrimary(in: orderedHosts)?.id
-            primaryIsFallback = true
         }
         coalesceManagedDefaultGatewayHosts()
     }
@@ -304,20 +308,17 @@ public actor HostStore {
         orderedHosts.removeAll { $0.id == id }
         if primaryID == id {
             primaryID = HostConfig.preferredPrimary(in: orderedHosts)?.id
-            primaryIsFallback = true
         }
     }
 
     public func selectPrimaryHost(_ id: UUID) {
         guard orderedHosts.contains(where: { $0.id == id }) else { return }
         primaryID = id
-        primaryIsFallback = false
     }
 
     public func reset(defaultHosts: [HostConfig] = HostConfig.defaultHosts()) {
         orderedHosts = defaultHosts
         primaryID = HostConfig.preferredPrimary(in: defaultHosts)?.id
-        primaryIsFallback = true
         coalesceManagedDefaultGatewayHosts()
     }
 
@@ -328,17 +329,9 @@ public actor HostStore {
             primaryID: requestedPrimaryID
         )
         orderedHosts = normalized.hosts
-        if let kept = normalized.primaryID, orderedHosts.contains(where: { $0.id == kept }) {
-            primaryID = kept
-            if primaryHostID != nil { primaryIsFallback = false }
-        } else {
-            primaryID = HostConfig.preferredPrimary(in: orderedHosts)?.id
-            primaryIsFallback = true
-        }
-    }
-
-    private var currentPrimaryIsGateway: Bool {
-        orderedHosts.first { $0.id == primaryID }?.isDefaultGateway ?? false
+        primaryID = normalized.primaryID.flatMap { candidate in
+            orderedHosts.contains { $0.id == candidate } ? candidate : nil
+        } ?? HostConfig.preferredPrimary(in: orderedHosts)?.id
     }
 
     private static func isManagedDefaultGateway(_ host: HostConfig) -> Bool {
@@ -933,7 +926,7 @@ public actor PingRuntime {
         cachedHosts = HostConfig.sanitizedHosts(await hostStore.hosts())
         hostByID = Dictionary(uniqueKeysWithValues: cachedHosts.map { ($0.id, $0) })
         let primaryID = await hostStore.primaryHostID()
-        cachedPrimaryHostID = cachedHosts.contains { $0.id == primaryID } ? primaryID : cachedHosts.first?.id
+        cachedPrimaryHostID = cachedHosts.contains { $0.id == primaryID } ? primaryID : HostConfig.preferredPrimary(in: cachedHosts)?.id
         alertEngine.prune(activeHostIDs: Set(cachedHosts.map(\.id)))
     }
 

@@ -119,13 +119,40 @@ final class RuntimeBehaviorTests: XCTestCase {
         XCTAssertEqual(primaryID, internet.id)
     }
 
-    func testExplicitGatewayPrimarySurvivesAddingInternetHost() async {
+    func testRelaunchedGatewayOnlyPrimaryYieldsToFirstInternetHostAdded() async {
         let gateway = HostConfig.defaultGatewayHost(address: "192.168.42.1")
-        let store = HostStore(defaultHosts: [gateway])
-        await store.selectPrimaryHost(gateway.id)
+        let store = HostStore(defaultHosts: [gateway], primaryHostID: gateway.id)
+        let internet = HostConfig(id: UUID(), displayName: "Quad9", address: "9.9.9.9")
+        await store.upsert(internet)
+        let primaryID = await store.primaryHostID()
+        XCTAssertEqual(primaryID, internet.id)
+    }
+
+    func testExplicitGatewayPrimarySurvivesAddingAnotherInternetHost() async {
+        let gateway = HostConfig.defaultGatewayHost(address: "192.168.42.1")
+        let store = HostStore(defaultHosts: [.defaultInternet, gateway], primaryHostID: gateway.id)
         await store.upsert(HostConfig(id: UUID(), displayName: "Quad9", address: "9.9.9.9"))
         let primaryID = await store.primaryHostID()
         XCTAssertEqual(primaryID, gateway.id)
+    }
+
+    func testUntieredPrivateRouterIsNotPreferredAsPrimary() {
+        let router = HostConfig(id: UUID(), displayName: "Router", address: "192.168.1.1")
+        let internet = HostConfig(id: UUID(), displayName: "Quad9", address: "9.9.9.9")
+        XCTAssertNil(router.tier)
+        XCTAssertEqual(HostConfig.preferredPrimary(in: [router, internet])?.id, internet.id)
+    }
+
+    func testEnabledRouterBeatsDisabledInternetHostAsPrimary() {
+        let gateway = HostConfig.defaultGatewayHost(address: "192.168.42.1")
+        var internet = HostConfig(id: UUID(), displayName: "Quad9", address: "9.9.9.9")
+        internet.isEnabled = false
+        XCTAssertEqual(HostConfig.preferredPrimary(in: [gateway, internet])?.id, gateway.id)
+    }
+
+    func testStarlinkCountsAsInternetPathForPrimary() {
+        XCTAssertFalse(HostConfig.defaultStarlinkDish.measuresOnlyLocalNetwork)
+        XCTAssertTrue(HostConfig.defaultGatewayHost(address: "192.168.42.1").measuresOnlyLocalNetwork)
     }
 
     func testHostStoreKeepsExplicitGatewayPrimary() async {
