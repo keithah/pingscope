@@ -163,6 +163,18 @@ final class RuntimeBehaviorTests: XCTestCase {
         XCTAssertEqual(HostConfig.preferredPrimary(in: [nas, internet])?.id, internet.id)
     }
 
+    func testPublicHostNamedGatewayCountsAsInternetPath() {
+        let apiGateway = HostConfig(id: UUID(), displayName: "AWS API Gateway", address: "api.example.com")
+        XCTAssertFalse(apiGateway.measuresOnlyLocalNetwork)
+    }
+
+    func testWidgetFallbackPrimarySkipsRouter() {
+        let gateway = HostConfig.defaultGatewayHost(address: "192.168.42.1")
+        let internet = HostConfig(id: UUID(), displayName: "Quad9", address: "9.9.9.9")
+        let snapshot = RuntimeSnapshot(hosts: [gateway, internet], primaryHostID: nil, healthByHost: [:], samplesByHost: [:])
+        XCTAssertEqual(WidgetSnapshot.make(from: snapshot).primaryHostID, internet.id)
+    }
+
     func testUntieredPrivateRouterIsNotPreferredAsPrimary() {
         let router = HostConfig(id: UUID(), displayName: "Router", address: "192.168.1.1")
         let internet = HostConfig(id: UUID(), displayName: "Quad9", address: "9.9.9.9")

@@ -327,11 +327,13 @@ public extension HostConfig {
     }
 
     /// True for hosts whose latency stops at the local network: the router
-    /// and other private-address hosts, whatever their stored tier. Starlink
-    /// reports the dish's PoP latency, so it counts as an internet path.
+    /// and other private-address hosts, whatever their stored tier. Judged by
+    /// address and stored tier, not by name, so a public "API Gateway" host
+    /// still counts as internet. Starlink reports the dish's PoP latency, so
+    /// it counts as an internet path.
     var measuresOnlyLocalNetwork: Bool {
         method != .starlink
-            && (isManagedDefaultGateway || requiresLocalNetworkPermission || effectiveNetworkTier == .localGateway)
+            && (isManagedDefaultGateway || requiresLocalNetworkPermission || tier == .localGateway)
     }
 
     /// The host to use as primary when none has been chosen, or the chosen one

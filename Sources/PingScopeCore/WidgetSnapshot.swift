@@ -39,7 +39,7 @@ public struct WidgetSnapshot: Codable, Equatable, Sendable {
         let enabledHosts = snapshot.hosts.filter(\.isEnabled)
         let primaryHostID = snapshot.primaryHostID.flatMap { id in
             enabledHosts.contains { $0.id == id } ? id : nil
-        } ?? enabledHosts.first?.id
+        } ?? HostConfig.preferredPrimary(in: enabledHosts)?.id
         let hosts = enabledHosts.map {
             WidgetHost(
                 id: $0.id,
