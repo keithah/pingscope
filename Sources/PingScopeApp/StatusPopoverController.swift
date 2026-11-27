@@ -71,14 +71,17 @@ final class StatusPopoverController: NSObject, NSPopoverDelegate {
     private var closedByOutsideClick = false
     private var applicationBeforePopover: NSRunningApplication?
 
+    // The defaults are built in the body: `System` and `OutsideClickMonitor`
+    // are main-actor isolated, and default-argument expressions are evaluated
+    // in a nonisolated context, which Swift 6.3 (Xcode 27) rejects.
     init(
-        system: System = System(),
-        outsideClickMonitor: OutsideClickMonitor = OutsideClickMonitor(),
+        system: System? = nil,
+        outsideClickMonitor: OutsideClickMonitor? = nil,
         makeContent: @escaping () -> NSViewController,
         contentSize: @escaping (NSScreen?) -> NSSize
     ) {
-        self.system = system
-        self.outsideClickMonitor = outsideClickMonitor
+        self.system = system ?? System()
+        self.outsideClickMonitor = outsideClickMonitor ?? OutsideClickMonitor()
         self.makeContent = makeContent
         self.contentSize = contentSize
     }

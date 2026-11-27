@@ -124,6 +124,17 @@ scripts/build-xcode-app-bundle.sh release /private/tmp/pingscope-appstore app-st
 scripts/build-app-bundle.sh debug /private/tmp/pingscope-swiftpm developer-id
 ```
 
+UI tests (XCUITest, `PingScopeUITests` target, `PingScope-UITests` scheme):
+
+```bash
+scripts/test-ui.sh            # local, team signing
+scripts/test-ui.sh --adhoc    # no team certificate (this is what CI runs)
+```
+
+With XcodeBuildMCP, `test_macos` (CLI: `xcodebuildmcp macos test --profile ui-tests`) uses the `ui-tests` profile in `.xcodebuildmcp/config.yaml`. The `UI Tests` GitHub Actions workflow runs the same scheme on every pull request and uploads the `.xcresult` bundle.
+
+UI tests launch a DEBUG build with `PINGSCOPE_UI_TESTING=1`. That mode (`Sources/PingScopeApp/UITestingEnvironment.swift`) gives each launch a wiped defaults suite, a temporary history database, its own single-instance lock, and no iCloud sync or Sparkle updater, so a run never touches an installed PingScope's hosts, history, or iCloud data and can run while it is open. Release builds ignore the variable. Tests find controls by accessibility identifier (`popover.*`, `settings.*`, `history.*`); add one when you add a control a test needs. The first local run asks macOS to allow Xcode's test runner to control the computer (Accessibility).
+
 Validation coverage:
 
 - Domain tests for health, thresholds, stats, alerts, menu bar formatting, and graph scaling.

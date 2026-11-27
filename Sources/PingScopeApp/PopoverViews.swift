@@ -80,6 +80,7 @@ struct StatusPopoverView: View {
         HStack(alignment: .center, spacing: 10) {
             hostChip
                 .accessibilityHint(monitoredHostsAccessibilitySummary)
+                .accessibilityIdentifier("popover.hostChip")
             Spacer()
             Button {
                 shareOptions = viewModel.defaultShareOptions()
@@ -93,6 +94,7 @@ struct StatusPopoverView: View {
             .buttonStyle(.plain)
             .help("Share graph")
             .accessibilityLabel("Share graph")
+            .accessibilityIdentifier("popover.shareGraph")
             Button(action: onHistory) {
                 Image(systemName: "chart.xyaxis.line")
                     .font(.system(size: 15, weight: .semibold))
@@ -102,6 +104,7 @@ struct StatusPopoverView: View {
             .buttonStyle(.plain)
             .help("Open History")
             .accessibilityLabel("Open History")
+            .accessibilityIdentifier("popover.openHistory")
             settingsMenu
         }
     }
@@ -182,6 +185,7 @@ struct StatusPopoverView: View {
         }
         .help("Settings")
         .accessibilityLabel("Settings")
+        .accessibilityIdentifier("popover.settingsMenu")
     }
 
     @ViewBuilder

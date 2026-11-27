@@ -10,7 +10,7 @@ struct SettingsRootView: View {
 
     init(model: PingScopeModel) {
         self.model = model
-        _selectedSettingsTab = State(initialValue: UserDefaults.standard.string(forKey: "selectedSettingsTab") ?? "hosts")
+        _selectedSettingsTab = State(initialValue: UITestingEnvironment.defaults.string(forKey: "selectedSettingsTab") ?? "hosts")
     }
 
     var body: some View {
@@ -51,7 +51,7 @@ struct SettingsRootView: View {
         }
         .frame(minWidth: 680, minHeight: 500)
         .onChange(of: selectedSettingsTab) { _, tab in
-            UserDefaults.standard.set(tab, forKey: "selectedSettingsTab")
+            UITestingEnvironment.defaults.set(tab, forKey: "selectedSettingsTab")
         }
     }
 
@@ -104,6 +104,8 @@ struct SettingsRootView: View {
             RoundedRectangle(cornerRadius: 8)
                 .fill(selectedSettingsTab == tab.id ? Color.accentColor : Color.clear)
         )
+        .accessibilityIdentifier("settings.tab.\(tab.id)")
+        .accessibilityAddTraits(selectedSettingsTab == tab.id ? .isSelected : [])
     }
 
     private var selectedSettingsHeader: some View {
@@ -114,6 +116,7 @@ struct SettingsRootView: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text(selectedTab.title)
                     .font(.system(size: 24, weight: .bold))
+                    .accessibilityIdentifier("settings.header.title")
                 Text(selectedTab.subtitle)
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(.secondary)
@@ -153,6 +156,7 @@ struct SettingsRootView: View {
             Button("Done") {
                 NSApp.keyWindow?.close()
             }
+            .accessibilityIdentifier("settings.done")
             .keyboardShortcut(.defaultAction)
         }
     }

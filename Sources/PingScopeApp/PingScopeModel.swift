@@ -150,77 +150,77 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
     @Published private(set) var gatewayDetectionText: String?
     @Published var notificationRules: NotificationRuleSet {
         didSet {
-            UserDefaults.standard.notificationRules = notificationRules
+            UITestingEnvironment.defaults.notificationRules = notificationRules
             scheduleNotificationRuleUpdate()
         }
     }
     @Published var enabledNetworkStatusAlerts: Set<NetworkConnectivityStatus> {
         didSet {
-            UserDefaults.standard.enabledNetworkStatusAlerts = enabledNetworkStatusAlerts
+            UITestingEnvironment.defaults.enabledNetworkStatusAlerts = enabledNetworkStatusAlerts
         }
     }
     @Published var overlayVisible: Bool {
         didSet {
-            UserDefaults.standard.overlayVisible = overlayVisible
+            UITestingEnvironment.defaults.overlayVisible = overlayVisible
         }
     }
     @Published var overlayAlwaysOnTop: Bool {
         didSet {
-            UserDefaults.standard.overlayAlwaysOnTop = overlayAlwaysOnTop
+            UITestingEnvironment.defaults.overlayAlwaysOnTop = overlayAlwaysOnTop
         }
     }
     @Published var overlayOpacity: Double {
         didSet {
-            UserDefaults.standard.overlayOpacity = overlayOpacity
+            UITestingEnvironment.defaults.overlayOpacity = overlayOpacity
         }
     }
     @Published var overlayCompactMode: Bool {
         didSet {
-            UserDefaults.standard.overlayCompactMode = overlayCompactMode
+            UITestingEnvironment.defaults.overlayCompactMode = overlayCompactMode
             onPresentationChanged?()
         }
     }
     @Published var displayMode: PingScopeDisplayMode {
         didSet {
-            UserDefaults.standard.pingScopeDisplayMode = displayMode
+            UITestingEnvironment.defaults.pingScopeDisplayMode = displayMode
             onPresentationChanged?()
         }
     }
     @Published var overlayShowsAllHosts: Bool {
         didSet {
-            UserDefaults.standard.overlayShowsAllHosts = overlayShowsAllHosts
+            UITestingEnvironment.defaults.overlayShowsAllHosts = overlayShowsAllHosts
             recomputeDisplayPresentation()
         }
     }
     @Published var popoverShowsAllHosts: Bool {
         didSet {
-            UserDefaults.standard.popoverShowsAllHosts = popoverShowsAllHosts
+            UITestingEnvironment.defaults.popoverShowsAllHosts = popoverShowsAllHosts
             recomputeDisplayPresentation()
         }
     }
     @Published var overlayShowsLegend: Bool {
         didSet {
-            UserDefaults.standard.overlayShowsLegend = overlayShowsLegend
+            UITestingEnvironment.defaults.overlayShowsLegend = overlayShowsLegend
             onPresentationChanged?()
         }
     }
     @Published var allowsLocalNetworkProbes: Bool {
         didSet {
-            UserDefaults.standard.allowsLocalNetworkProbes = allowsLocalNetworkProbes
+            UITestingEnvironment.defaults.allowsLocalNetworkProbes = allowsLocalNetworkProbes
             scheduleLocalNetworkProbeUpdate()
         }
     }
     @Published var startsAtLogin: Bool {
         didSet {
             guard !isApplyingStartAtLoginChange else { return }
-            UserDefaults.standard.startsAtLogin = startsAtLogin
+            UITestingEnvironment.defaults.startsAtLogin = startsAtLogin
             configureStartAtLogin(startsAtLogin)
         }
     }
     @Published var widgetsEnabled: Bool {
         didSet {
-            UserDefaults.standard.widgetSharingOptedIn = widgetsEnabled
-            UserDefaults.standard.widgetsEnabled = widgetsEnabled
+            UITestingEnvironment.defaults.widgetSharingOptedIn = widgetsEnabled
+            UITestingEnvironment.defaults.widgetsEnabled = widgetsEnabled
             if widgetsEnabled {
                 publishWidgetSnapshot(snapshot)
             } else {
@@ -248,8 +248,8 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
     @Published private(set) var historyExportMessage: String?
     @Published private(set) var isExportingHistory = false
     @Published var historySurfaceHostID: UUID?
-    @Published var historySurfaceRange = UserDefaults.standard.pingScopeMacHistoryRange {
-        didSet { UserDefaults.standard.pingScopeMacHistoryRange = historySurfaceRange }
+    @Published var historySurfaceRange = UITestingEnvironment.defaults.pingScopeMacHistoryRange {
+        didSet { UITestingEnvironment.defaults.pingScopeMacHistoryRange = historySurfaceRange }
     }
     @Published var historySurfacePresentation: MacHistorySurfacePresentation?
     @Published var isLoadingHistorySurface = false
@@ -326,7 +326,7 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
         acceptedHostReconciliationGate: @escaping @Sendable () async -> Void = {},
         cloudHostUploadObserver: @escaping @Sendable ([HostConfig]) -> Void = { _ in }
     ) {
-        let cloudSyncDefaults = cloudSyncDefaultsSuiteName.flatMap(UserDefaults.init(suiteName:)) ?? .standard
+        let cloudSyncDefaults = cloudSyncDefaultsSuiteName.flatMap(UserDefaults.init(suiteName:)) ?? UITestingEnvironment.defaults
         let hostConfigPersistence = HostConfigPersistence(defaults: cloudSyncDefaults)
         let loadedHosts = hostConfigPersistence.loadInitialConfiguration { message in
             DebugLog.write(message)
@@ -347,29 +347,38 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
         let cloudSyncService: PingScopeCloudSyncService?
         do {
             let sqliteHistoryStore = try SQLiteHistoryStore(
-                url: SQLiteHistoryStore.defaultURL(),
+                url: UITestingEnvironment.historyDatabaseURL(),
                 retention: Self.historyRetention,
                 logger: { message in
                     DebugLog.write(message)
                 }
             )
-            let service = PingScopeCloudSyncService(
-                historyStore: sqliteHistoryStore,
-                hostStore: UserDefaultsSharedHostStore(legacyPlatform: .macOS)
-            )
-            historyStore = NetworkCapturedHistoryStore(
-                destination: CloudSyncingHistoryStore(destination: sqliteHistoryStore, service: service),
-                networkCaptureStore: networkCaptureStore
-            )
-            cloudSyncService = service
+            if UITestingEnvironment.isActive {
+                // UI tests must never reach the developer's iCloud account.
+                historyStore = NetworkCapturedHistoryStore(
+                    destination: sqliteHistoryStore,
+                    networkCaptureStore: networkCaptureStore
+                )
+                cloudSyncService = nil
+            } else {
+                let service = PingScopeCloudSyncService(
+                    historyStore: sqliteHistoryStore,
+                    hostStore: UserDefaultsSharedHostStore(legacyPlatform: .macOS)
+                )
+                historyStore = NetworkCapturedHistoryStore(
+                    destination: CloudSyncingHistoryStore(destination: sqliteHistoryStore, service: service),
+                    networkCaptureStore: networkCaptureStore
+                )
+                cloudSyncService = service
+            }
         } catch {
             DebugLog.write("history store unavailable: \(error)")
             historyStore = nil
             cloudSyncService = nil
         }
-        let allowsLocalNetworkProbes = UserDefaults.standard.allowsLocalNetworkProbes
-        UserDefaults.standard.migrateNoisyNetworkStatusAlertDefaults()
-        let notificationRules = UserDefaults.standard.notificationRules ?? NotificationRuleSet()
+        let allowsLocalNetworkProbes = UITestingEnvironment.defaults.allowsLocalNetworkProbes
+        UITestingEnvironment.defaults.migrateNoisyNetworkStatusAlertDefaults()
+        let notificationRules = UITestingEnvironment.defaults.notificationRules ?? NotificationRuleSet()
         self.runtime = runtimeOverride ?? PingRuntime(
             hostStore: hostStore,
             scheduler: MeasurementScheduler(probeFactory: probeFactory, logger: { message in
@@ -398,26 +407,26 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
         self.hostTester = HostTester(probeFactory: probeFactory)
         self.gatewayEndpointResolver = DefaultGatewayEndpointResolver(probeFactory: probeFactory)
         self.notificationRules = notificationRules
-        self.enabledNetworkStatusAlerts = UserDefaults.standard.enabledNetworkStatusAlerts
-        self.overlayVisible = UserDefaults.standard.overlayVisible
-        self.overlayAlwaysOnTop = UserDefaults.standard.overlayAlwaysOnTop
-        self.overlayOpacity = UserDefaults.standard.overlayOpacity
-        self.overlayCompactMode = UserDefaults.standard.overlayCompactMode
-        self.displayMode = UserDefaults.standard.pingScopeDisplayMode
-        self.overlayShowsAllHosts = UserDefaults.standard.overlayShowsAllHosts
-        self.popoverShowsAllHosts = UserDefaults.standard.popoverShowsAllHosts
-        self.overlayShowsLegend = UserDefaults.standard.overlayShowsLegend
+        self.enabledNetworkStatusAlerts = UITestingEnvironment.defaults.enabledNetworkStatusAlerts
+        self.overlayVisible = UITestingEnvironment.defaults.overlayVisible
+        self.overlayAlwaysOnTop = UITestingEnvironment.defaults.overlayAlwaysOnTop
+        self.overlayOpacity = UITestingEnvironment.defaults.overlayOpacity
+        self.overlayCompactMode = UITestingEnvironment.defaults.overlayCompactMode
+        self.displayMode = UITestingEnvironment.defaults.pingScopeDisplayMode
+        self.overlayShowsAllHosts = UITestingEnvironment.defaults.overlayShowsAllHosts
+        self.popoverShowsAllHosts = UITestingEnvironment.defaults.popoverShowsAllHosts
+        self.overlayShowsLegend = UITestingEnvironment.defaults.overlayShowsLegend
         self.allowsLocalNetworkProbes = allowsLocalNetworkProbes
-        self.startsAtLogin = UserDefaults.standard.startsAtLogin ?? (SMAppService.mainApp.status == .enabled)
-        let widgetsEnabled = UserDefaults.standard.widgetSharingOptedIn == true && UserDefaults.standard.widgetsEnabled
-        if !widgetsEnabled, UserDefaults.standard.widgetsEnabled {
-            UserDefaults.standard.widgetsEnabled = false
+        self.startsAtLogin = UITestingEnvironment.defaults.startsAtLogin ?? (SMAppService.mainApp.status == .enabled)
+        let widgetsEnabled = UITestingEnvironment.defaults.widgetSharingOptedIn == true && UITestingEnvironment.defaults.widgetsEnabled
+        if !widgetsEnabled, UITestingEnvironment.defaults.widgetsEnabled {
+            UITestingEnvironment.defaults.widgetsEnabled = false
         }
         self.widgetsEnabled = widgetsEnabled
         self.isCloudSyncEnabled = PingScopeCloudSyncPreference.isEnabled(in: cloudSyncDefaults)
         self.lastCloudSyncHostIDs = Set(loadedHosts.hosts.map(\.id))
         self.lastCloudSyncHostsByID = Dictionary(uniqueKeysWithValues: loadedHosts.hosts.map { ($0.id, $0) })
-        self.overlayFrame = UserDefaults.standard.overlayFrame ?? NSRect(x: 80, y: 620, width: 240, height: 96)
+        self.overlayFrame = UITestingEnvironment.defaults.overlayFrame ?? NSRect(x: 80, y: 620, width: 240, height: 96)
         super.init()
         configureCloudSync(isAutomaticLaunch: true)
     }
@@ -963,7 +972,7 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
 
     func resetOverlayFrame() {
         overlayFrame = NSRect(x: 80, y: 620, width: 240, height: 96)
-        UserDefaults.standard.overlayFrame = overlayFrame
+        UITestingEnvironment.defaults.overlayFrame = overlayFrame
     }
 
     func openOverlayDetails() {
@@ -1108,7 +1117,7 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
             try? await Task.sleep(for: .milliseconds(250))
             guard !Task.isCancelled else { return }
             await MainActor.run {
-                UserDefaults.standard.overlayFrame = frame
+                UITestingEnvironment.defaults.overlayFrame = frame
             }
         }
     }
@@ -1236,7 +1245,7 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
                 isApplyingStartAtLoginChange = true
                 startsAtLogin = !isEnabled
                 isApplyingStartAtLoginChange = false
-                UserDefaults.standard.startsAtLogin = startsAtLogin
+                UITestingEnvironment.defaults.startsAtLogin = startsAtLogin
             }
         }
     }
