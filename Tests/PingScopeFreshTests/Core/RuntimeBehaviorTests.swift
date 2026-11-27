@@ -163,6 +163,22 @@ final class RuntimeBehaviorTests: XCTestCase {
         XCTAssertEqual(HostConfig.preferredPrimary(in: [nas, internet])?.id, internet.id)
     }
 
+    func testHostnameStartingWithFdIsNotLocalIPv6() {
+        let hostname = HostConfig(id: UUID(), displayName: "API", address: "fd.api.example.com")
+        let ula = HostConfig(id: UUID(), displayName: "ULA", address: "fd12:3456::1")
+        XCTAssertFalse(hostname.requiresLocalNetworkPermission)
+        XCTAssertFalse(hostname.measuresOnlyLocalNetwork)
+        XCTAssertTrue(ula.requiresLocalNetworkPermission)
+    }
+
+    func testStarlinkTakesOverGatewayOnlyPrimary() async {
+        let gateway = HostConfig.defaultGatewayHost(address: "192.168.1.1")
+        let store = HostStore(defaultHosts: [gateway], primaryHostID: gateway.id)
+        await store.upsert(.defaultStarlinkDish)
+        let primaryID = await store.primaryHostID()
+        XCTAssertEqual(primaryID, HostConfig.defaultStarlinkDish.id)
+    }
+
     func testPublicHostNamedGatewayCountsAsInternetPath() {
         let apiGateway = HostConfig(id: UUID(), displayName: "AWS API Gateway", address: "api.example.com")
         XCTAssertFalse(apiGateway.measuresOnlyLocalNetwork)

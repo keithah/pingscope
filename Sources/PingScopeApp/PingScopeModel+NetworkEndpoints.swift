@@ -132,7 +132,10 @@ extension PingScopeModel {
             return nil
         }
         if let primary = snapshot.primaryHost, primary.method != .starlink {
-            return primary.id
+            // A local-only primary is left to HostStore's takeover rule, which
+            // keeps an explicit router once an internet host exists but lets the
+            // first internet path (this dish) replace a router-only primary.
+            return primary.measuresOnlyLocalNetwork ? nil : primary.id
         }
         return HostConfig.preferredPrimary(in: snapshot.hosts)?.id
     }

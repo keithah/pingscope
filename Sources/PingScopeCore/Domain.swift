@@ -308,7 +308,9 @@ public struct HostConfig: Identifiable, Codable, Equatable, Sendable {
         let literal = address.trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
         if literal == "::1" { return true }
         if literal.hasPrefix("fe80:") { return true }
-        if literal.hasPrefix("fc") || literal.hasPrefix("fd") { return true }
+        // Unique-local prefixes only apply to IPv6 literals; a DNS name such
+        // as fd.api.example.com never contains a colon.
+        if literal.contains(":"), literal.hasPrefix("fc") || literal.hasPrefix("fd") { return true }
         return false
     }
 }
