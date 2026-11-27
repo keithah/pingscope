@@ -3,7 +3,8 @@ import WidgetKit
 
 extension PingScopeModel {
     func publishWidgetSnapshot(_ snapshot: RuntimeSnapshot) {
-        guard widgetsEnabled else { return }
+        // The app group is shared with the installed app's widget.
+        guard widgetsEnabled, !UITestingEnvironment.isActive else { return }
         if widgetSnapshotStore == nil {
             widgetSnapshotStore = WidgetSnapshotStore()
         }

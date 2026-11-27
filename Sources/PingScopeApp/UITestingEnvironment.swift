@@ -35,7 +35,11 @@ enum UITestingEnvironment {
         guard isActive, let suite = UserDefaults(suiteName: defaultsSuiteName) else {
             return .standard
         }
-        suite.removePersistentDomain(forName: defaultsSuiteName)
+        // Only the instance holding the lock resets state; a second launch
+        // must not wipe a running test's storage before it is turned away.
+        if ownsInstanceLock {
+            suite.removePersistentDomain(forName: defaultsSuiteName)
+        }
         return suite
     }()
 
@@ -47,14 +51,22 @@ enum UITestingEnvironment {
         guard isActive else { return try SQLiteHistoryStore.defaultURL() }
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("PingScope-UITests", isDirectory: true)
-        try? FileManager.default.removeItem(at: directory)
+        if ownsInstanceLock {
+            try? FileManager.default.removeItem(at: directory)
+        }
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         return directory.appendingPathComponent("History.sqlite")
     }
 
     /// UI-test launches take their own lock so they run beside an installed,
-    /// running PingScope instead of terminating at launch.
-    static var singleInstanceLockName: String {
-        isActive ? "com.pingscope.fresh.uitests.lock" : "com.pingscope.fresh.lock"
-    }
+    /// running PingScope instead of terminating at launch. The lock is taken
+    /// on first use, before any test state is reset, and held for the life of
+    /// the process; `AppDelegate` reads the result instead of locking again.
+    static let ownsInstanceLock: Bool = {
+        guard isActive else { return false }
+        let path = (NSTemporaryDirectory() as NSString).appendingPathComponent("com.pingscope.fresh.uitests.lock")
+        let fd = open(path, O_CREAT | O_RDWR, S_IRUSR | S_IWUSR)
+        guard fd >= 0 else { return true }
+        return flock(fd, LOCK_EX | LOCK_NB) == 0
+    }()
 }

@@ -683,7 +683,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     private func acquireSingleInstanceLock() -> Bool {
-        let path = (NSTemporaryDirectory() as NSString).appendingPathComponent(UITestingEnvironment.singleInstanceLockName)
+        if UITestingEnvironment.isActive {
+            return UITestingEnvironment.ownsInstanceLock
+        }
+        let path = (NSTemporaryDirectory() as NSString).appendingPathComponent("com.pingscope.fresh.lock")
         instanceLockFD = open(path, O_CREAT | O_RDWR, S_IRUSR | S_IWUSR)
         guard instanceLockFD >= 0 else { return true }
         return flock(instanceLockFD, LOCK_EX | LOCK_NB) == 0

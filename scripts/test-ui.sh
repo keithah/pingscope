@@ -34,7 +34,14 @@ if [[ $adhoc -eq 1 ]]; then
   )
 fi
 
-rm -rf "$result_bundle"
+if [[ -e "$result_bundle" ]]; then
+  # Only ever replace a previous result bundle, never an arbitrary path.
+  if [[ "$result_bundle" != *.xcresult || ! -f "$result_bundle/Info.plist" ]]; then
+    echo "refusing to overwrite $result_bundle: not an .xcresult bundle" >&2
+    exit 65
+  fi
+  rm -rf "$result_bundle"
+fi
 xcodebuild test \
   -project PingScope.xcodeproj \
   -scheme PingScope-UITests \

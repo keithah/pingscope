@@ -223,7 +223,7 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
             UITestingEnvironment.defaults.widgetsEnabled = widgetsEnabled
             if widgetsEnabled {
                 publishWidgetSnapshot(snapshot)
-            } else {
+            } else if !UITestingEnvironment.isActive {
                 // Remove what was already written to the shared app-group
                 // container, so opting out stops exposing data to the widget
                 // rather than only stopping future publishes.

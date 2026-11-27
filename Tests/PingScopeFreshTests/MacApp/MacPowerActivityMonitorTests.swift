@@ -26,7 +26,9 @@ final class MacPowerActivityMonitorTests: XCTestCase {
         let showOverlayStart = try XCTUnwrap(source.range(of: "func showOverlay()"))
         let settings = source[settingsStart.lowerBound..<historyStart.lowerBound]
         let history = source[historyStart.lowerBound..<showOverlayStart.lowerBound]
-        let updateStart = try XCTUnwrap(source.range(of: "private func updatePowerMonitorUIVisibility()"))
+        // The window checks live in `hasVisiblePrimaryWindow`, which sits
+        // directly above `updatePowerMonitorUIVisibility()`.
+        let updateStart = try XCTUnwrap(source.range(of: "private var hasVisiblePrimaryWindow: Bool"))
         let updateEnd = try XCTUnwrap(
             source.range(
                 of: "private func showContextMenu(",
@@ -39,6 +41,7 @@ final class MacPowerActivityMonitorTests: XCTestCase {
         XCTAssertTrue(history.contains("window.delegate = self"))
         XCTAssertTrue(settings.contains("updatePowerMonitorUIVisibility()"))
         XCTAssertTrue(history.contains("updatePowerMonitorUIVisibility()"))
+        XCTAssertTrue(update.contains("|| hasVisiblePrimaryWindow"))
         XCTAssertTrue(update.contains("settingsWindowController?.window?.isVisible == true"))
         XCTAssertTrue(update.contains("historyWindowController?.window?.isVisible == true"))
     }
