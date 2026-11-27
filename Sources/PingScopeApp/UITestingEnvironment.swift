@@ -6,8 +6,7 @@ import PingScopeCore
 /// UI tests launch the real app bundle, which shares `com.hadm.PingScope` with
 /// the developer's installed copy. Without isolation a test run would read and
 /// rewrite the developer's hosts and settings, append to their history
-/// database, push test hosts to their iCloud account, and lose the
-/// single-instance lock to an already-running PingScope.
+/// database, and push test hosts to their iCloud account.
 ///
 /// The mode is active only in DEBUG builds launched with
 /// `PINGSCOPE_UI_TESTING=1` in the environment, which `XCUIApplication`
@@ -58,8 +57,9 @@ enum UITestingEnvironment {
         return directory.appendingPathComponent("History.sqlite")
     }
 
-    /// UI-test launches take their own lock so they run beside an installed,
-    /// running PingScope instead of terminating at launch. The lock is taken
+    /// UI-test launches take their own lock, separate from the app's. (XCTest
+    /// itself quits a running app with the same bundle ID before it launches
+    /// the test host, so this does not keep the installed app open.) The lock is taken
     /// on first use, before any test state is reset, and held for the life of
     /// the process; `AppDelegate` reads the result instead of locking again.
     static let ownsInstanceLock: Bool = {
