@@ -626,16 +626,23 @@ public actor HistoryWeeklyDigestLoader {
     ) {
         let flightID = UUID()
         let task = Task.detached(priority: .userInitiated) {
-            let queried = plan.store.weeklyDigestSampleStream(
+            // Await the read itself rather than iterating its stream: a cancelled
+            // stream returns at once while the store keeps reading, which would
+            // free this flight's slot early and let queued reads exceed capacity.
+            let collector = WeeklyDigestSampleCollector(plan.baseSamples)
+            await plan.store.forEachWeeklyDigestSample(
                 hostIDs: plan.hostIDs,
                 since: plan.querySince,
-                through: plan.queryThrough
+                through: plan.queryThrough,
+                onSample: { collector.insert($0) }
             )
-            var samplesByID = Dictionary(uniqueKeysWithValues: plan.baseSamples.map { ($0.id, $0) })
-            for await sample in queried {
-                samplesByID[sample.id] = sample
+            // A cancelled flight's result is discarded by finishFlight, so skip
+            // building a digest from the full week; the slot is still released.
+            guard !Task.isCancelled else {
+                await self.finishCancelledFlight(flightID, for: key)
+                return
             }
-            let samples = samplesByID.values.sorted(by: Self.isSampleOrderedBefore)
+            let samples = collector.samples().sorted(by: Self.isSampleOrderedBefore)
             let result = LoadResult(
                 digest: HistoryWeeklyDigest.make(
                     hosts: plan.hosts,
@@ -663,6 +670,17 @@ public actor HistoryWeeklyDigestLoader {
                 coveredThrough: result.through
             ), for: key)
             flight.waiters.values.forEach { $0.resume(returning: result.digest) }
+        }
+        startPendingFlights()
+    }
+
+    private func finishCancelledFlight(_ flightID: UUID, for key: CacheKey) {
+        guard activeTasks.removeValue(forKey: flightID) != nil else { return }
+        // Cancellation normally clears the flight first; if it did not, do not
+        // leave its waiters suspended.
+        if let flight = inFlight[key], flight.id == flightID {
+            inFlight[key] = nil
+            flight.waiters.values.forEach { $0.resume(returning: nil) }
         }
         startPendingFlights()
     }
@@ -752,5 +770,28 @@ public actor HistoryWeeklyDigestLoader {
         while recency.count > capacity {
             cache[recency.removeFirst()] = nil
         }
+    }
+}
+
+/// Gathers samples delivered by a store read, keyed by sample ID so a retried
+/// read cannot duplicate them.
+private final class WeeklyDigestSampleCollector: @unchecked Sendable {
+    private let lock = NSLock()
+    private var samplesByID: [UUID: HistoryWeeklyDigestSample]
+
+    init(_ baseSamples: [HistoryWeeklyDigestSample]) {
+        samplesByID = Dictionary(uniqueKeysWithValues: baseSamples.map { ($0.id, $0) })
+    }
+
+    func insert(_ sample: HistoryWeeklyDigestSample) {
+        lock.lock()
+        defer { lock.unlock() }
+        samplesByID[sample.id] = sample
+    }
+
+    func samples() -> [HistoryWeeklyDigestSample] {
+        lock.lock()
+        defer { lock.unlock() }
+        return Array(samplesByID.values)
     }
 }

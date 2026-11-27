@@ -39,8 +39,16 @@ final class MacPowerActivityMonitorTests: XCTestCase {
         XCTAssertTrue(history.contains("window.delegate = self"))
         XCTAssertTrue(settings.contains("updatePowerMonitorUIVisibility()"))
         XCTAssertTrue(history.contains("updatePowerMonitorUIVisibility()"))
-        XCTAssertTrue(update.contains("settingsWindowController?.window?.isVisible == true"))
-        XCTAssertTrue(update.contains("historyWindowController?.window?.isVisible == true"))
+        // Settings and History visibility live in hasVisiblePrimaryWindow,
+        // which the power-monitor update consults.
+        let primaryWindowStart = try XCTUnwrap(source.range(of: "private var hasVisiblePrimaryWindow: Bool {"))
+        let primaryWindowEnd = try XCTUnwrap(
+            source.range(of: "\n    }\n", range: primaryWindowStart.upperBound..<source.endIndex)
+        )
+        let primaryWindow = source[primaryWindowStart.lowerBound..<primaryWindowEnd.upperBound]
+        XCTAssertTrue(update.contains("hasVisiblePrimaryWindow"))
+        XCTAssertTrue(primaryWindow.contains("settingsWindowController?.window?.isVisible == true"))
+        XCTAssertTrue(primaryWindow.contains("historyWindowController?.window?.isVisible == true"))
     }
 
     func testPowerMonitorOwnsAndTearsDownItsCallbackLifecycle() throws {
