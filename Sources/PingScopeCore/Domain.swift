@@ -308,7 +308,9 @@ public struct HostConfig: Identifiable, Codable, Equatable, Sendable {
         let literal = address.trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
         if literal == "::1" { return true }
         if literal.hasPrefix("fe80:") { return true }
-        if literal.hasPrefix("fc") || literal.hasPrefix("fd") { return true }
+        // Unique-local prefixes only apply to IPv6 literals; a DNS name such
+        // as fd.api.example.com never contains a colon.
+        if literal.contains(":"), literal.hasPrefix("fc") || literal.hasPrefix("fd") { return true }
         return false
     }
 }
@@ -324,6 +326,27 @@ public extension HostConfig {
     /// Stable gateway classification for UI scopes that intentionally omit the router.
     var isDefaultGateway: Bool {
         tier == .localGateway || displayName == "Default Gateway"
+    }
+
+    /// True for hosts whose latency stops at the local network: the router
+    /// and other private-address hosts, whatever their stored tier. Judged by
+    /// address and stored tier, not by name, so a public "API Gateway" host
+    /// still counts as internet. Starlink reports the dish's PoP latency, so
+    /// it counts as an internet path.
+    var measuresOnlyLocalNetwork: Bool {
+        method != .starlink
+            && (isManagedDefaultGateway || requiresLocalNetworkPermission || tier == .localGateway)
+    }
+
+    /// The host to use as primary when none has been chosen, or the chosen one
+    /// is gone. Prefers an enabled host past the local router so the menu bar
+    /// shows real internet latency rather than the LAN hop; an enabled router
+    /// still beats a disabled host, which would never be measured.
+    static func preferredPrimary(in hosts: [HostConfig]) -> HostConfig? {
+        hosts.first { $0.isEnabled && !$0.measuresOnlyLocalNetwork }
+            ?? hosts.first(where: \.isEnabled)
+            ?? hosts.first { !$0.measuresOnlyLocalNetwork }
+            ?? hosts.first
     }
 }
 

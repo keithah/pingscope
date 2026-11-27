@@ -83,6 +83,141 @@ final class RuntimeBehaviorTests: XCTestCase {
         XCTAssertEqual(enabledHostNames, ["Cloudflare DNS", "Router"])
     }
 
+    func testHostStoreFallbackPrimarySkipsDefaultGateway() async {
+        let gateway = HostConfig.defaultGatewayHost(address: "192.168.42.1")
+        let internet = HostConfig(id: UUID(), displayName: "Cloudflare DNS", address: "1.1.1.1")
+
+        let store = HostStore(defaultHosts: [gateway, internet])
+        let initialPrimaryID = await store.primaryHostID()
+        XCTAssertEqual(initialPrimaryID, internet.id)
+
+        let other = HostConfig(id: UUID(), displayName: "Google DNS", address: "8.8.8.8")
+        await store.upsert(other)
+        await store.delete(internet.id)
+        let afterDeleteID = await store.primaryHostID()
+        XCTAssertEqual(afterDeleteID, other.id)
+
+        await store.reconcile(hosts: [gateway, other], primaryHostID: UUID())
+        let afterReconcileID = await store.primaryHostID()
+        XCTAssertEqual(afterReconcileID, other.id)
+    }
+
+    func testHostStoreUsesGatewayAsPrimaryOnlyWhenNothingElseExists() async {
+        let gateway = HostConfig.defaultGatewayHost(address: "192.168.42.1")
+        let store = HostStore(defaultHosts: [gateway])
+        let primaryID = await store.primaryHostID()
+        XCTAssertEqual(primaryID, gateway.id)
+    }
+
+    func testFallbackGatewayPrimaryYieldsToFirstInternetHostAdded() async {
+        let gateway = HostConfig.defaultGatewayHost(address: "192.168.42.1")
+        let store = HostStore(defaultHosts: [])
+        await store.upsert(gateway)
+        let internet = HostConfig(id: UUID(), displayName: "Quad9", address: "9.9.9.9")
+        await store.upsert(internet)
+        let primaryID = await store.primaryHostID()
+        XCTAssertEqual(primaryID, internet.id)
+    }
+
+    func testRelaunchedGatewayOnlyPrimaryYieldsToFirstInternetHostAdded() async {
+        let gateway = HostConfig.defaultGatewayHost(address: "192.168.42.1")
+        let store = HostStore(defaultHosts: [gateway], primaryHostID: gateway.id)
+        let internet = HostConfig(id: UUID(), displayName: "Quad9", address: "9.9.9.9")
+        await store.upsert(internet)
+        let primaryID = await store.primaryHostID()
+        XCTAssertEqual(primaryID, internet.id)
+    }
+
+    func testExplicitGatewayPrimarySurvivesAddingAnotherInternetHost() async {
+        let gateway = HostConfig.defaultGatewayHost(address: "192.168.42.1")
+        let store = HostStore(defaultHosts: [.defaultInternet, gateway], primaryHostID: gateway.id)
+        await store.upsert(HostConfig(id: UUID(), displayName: "Quad9", address: "9.9.9.9"))
+        let primaryID = await store.primaryHostID()
+        XCTAssertEqual(primaryID, gateway.id)
+    }
+
+    func testEditingOnlyInternetHostKeepsExplicitGatewayPrimary() async {
+        let gateway = HostConfig.defaultGatewayHost(address: "192.168.42.1")
+        var internet = HostConfig(id: UUID(), displayName: "Quad9", address: "9.9.9.9")
+        let store = HostStore(defaultHosts: [internet, gateway], primaryHostID: gateway.id)
+        internet.displayColor = HostDisplayColor(red: 0, green: 0, blue: 1)
+        await store.upsert(internet)
+        let primaryID = await store.primaryHostID()
+        XCTAssertEqual(primaryID, gateway.id)
+    }
+
+    func testEnablingDisabledInternetHostTakesOverGatewayOnlyPrimary() async {
+        let gateway = HostConfig.defaultGatewayHost(address: "192.168.42.1")
+        var internet = HostConfig(id: UUID(), displayName: "Quad9", address: "9.9.9.9")
+        internet.isEnabled = false
+        let store = HostStore(defaultHosts: [gateway, internet], primaryHostID: gateway.id)
+        internet.isEnabled = true
+        await store.upsert(internet)
+        let primaryID = await store.primaryHostID()
+        XCTAssertEqual(primaryID, internet.id)
+    }
+
+    func testPrivateAddressWithExplicitRemoteTierIsNotPreferredAsPrimary() {
+        let nas = HostConfig(id: UUID(), displayName: "NAS", address: "192.168.42.2", tier: .remoteService)
+        let internet = HostConfig(id: UUID(), displayName: "Quad9", address: "9.9.9.9")
+        XCTAssertEqual(HostConfig.preferredPrimary(in: [nas, internet])?.id, internet.id)
+    }
+
+    func testHostnameStartingWithFdIsNotLocalIPv6() {
+        let hostname = HostConfig(id: UUID(), displayName: "API", address: "fd.api.example.com")
+        let ula = HostConfig(id: UUID(), displayName: "ULA", address: "fd12:3456::1")
+        XCTAssertFalse(hostname.requiresLocalNetworkPermission)
+        XCTAssertFalse(hostname.measuresOnlyLocalNetwork)
+        XCTAssertTrue(ula.requiresLocalNetworkPermission)
+    }
+
+    func testStarlinkTakesOverGatewayOnlyPrimary() async {
+        let gateway = HostConfig.defaultGatewayHost(address: "192.168.1.1")
+        let store = HostStore(defaultHosts: [gateway], primaryHostID: gateway.id)
+        await store.upsert(.defaultStarlinkDish)
+        let primaryID = await store.primaryHostID()
+        XCTAssertEqual(primaryID, HostConfig.defaultStarlinkDish.id)
+    }
+
+    func testPublicHostNamedGatewayCountsAsInternetPath() {
+        let apiGateway = HostConfig(id: UUID(), displayName: "AWS API Gateway", address: "api.example.com")
+        XCTAssertFalse(apiGateway.measuresOnlyLocalNetwork)
+    }
+
+    func testWidgetFallbackPrimarySkipsRouter() {
+        let gateway = HostConfig.defaultGatewayHost(address: "192.168.42.1")
+        let internet = HostConfig(id: UUID(), displayName: "Quad9", address: "9.9.9.9")
+        let snapshot = RuntimeSnapshot(hosts: [gateway, internet], primaryHostID: nil, healthByHost: [:], samplesByHost: [:])
+        XCTAssertEqual(WidgetSnapshot.make(from: snapshot).primaryHostID, internet.id)
+    }
+
+    func testUntieredPrivateRouterIsNotPreferredAsPrimary() {
+        let router = HostConfig(id: UUID(), displayName: "Router", address: "192.168.1.1")
+        let internet = HostConfig(id: UUID(), displayName: "Quad9", address: "9.9.9.9")
+        XCTAssertNil(router.tier)
+        XCTAssertEqual(HostConfig.preferredPrimary(in: [router, internet])?.id, internet.id)
+    }
+
+    func testEnabledRouterBeatsDisabledInternetHostAsPrimary() {
+        let gateway = HostConfig.defaultGatewayHost(address: "192.168.42.1")
+        var internet = HostConfig(id: UUID(), displayName: "Quad9", address: "9.9.9.9")
+        internet.isEnabled = false
+        XCTAssertEqual(HostConfig.preferredPrimary(in: [gateway, internet])?.id, gateway.id)
+    }
+
+    func testStarlinkCountsAsInternetPathForPrimary() {
+        XCTAssertFalse(HostConfig.defaultStarlinkDish.measuresOnlyLocalNetwork)
+        XCTAssertTrue(HostConfig.defaultGatewayHost(address: "192.168.42.1").measuresOnlyLocalNetwork)
+    }
+
+    func testHostStoreKeepsExplicitGatewayPrimary() async {
+        let gateway = HostConfig.defaultGatewayHost(address: "192.168.42.1")
+        let store = HostStore(defaultHosts: [.defaultInternet, gateway])
+        await store.selectPrimaryHost(gateway.id)
+        let primaryID = await store.primaryHostID()
+        XCTAssertEqual(primaryID, gateway.id)
+    }
+
     func testHostStoreCoalescesDefaultGatewayUpsertsByName() async {
         let existingGateway = HostConfig(
             id: UUID(),

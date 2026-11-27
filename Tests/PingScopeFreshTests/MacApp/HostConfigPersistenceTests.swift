@@ -34,6 +34,67 @@ final class HostConfigPersistenceTests: XCTestCase {
         XCTAssertNotNil(defaults.data(forKey: SharedHostStoreKeys.macHosts))
     }
 
+    func testPersistedDefaultGatewayPrimaryMovesToInternetHostOnce() throws {
+        let suiteName = "HostConfigPersistenceTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let gateway = HostConfig.defaultGatewayHost(address: "192.168.42.1")
+        let internet = HostConfig(id: UUID(), displayName: "Quad9", address: "9.9.9.9")
+        let hosts = [gateway, internet]
+        try UserDefaultsSharedHostStore(defaults: defaults, legacyPlatform: .macOS).save(SharedHostStoreState(hosts: hosts, primaryHostID: gateway.id))
+
+        let firstPersistence = HostConfigPersistence(defaults: defaults)
+        let first = firstPersistence.loadInitialConfiguration { _ in }
+        XCTAssertEqual(first.primaryHostID, internet.id)
+        XCTAssertFalse(defaults.bool(forKey: HostConfigPersistence.movedPrimaryOffGatewayKey))
+        firstPersistence.persist(
+            RuntimeSnapshot(hosts: first.hosts, primaryHostID: first.primaryHostID, healthByHost: [:], samplesByHost: [:])
+        ) { _ in }
+        XCTAssertTrue(defaults.bool(forKey: HostConfigPersistence.movedPrimaryOffGatewayKey))
+
+        // A user who picks the router afterwards keeps it.
+        try UserDefaultsSharedHostStore(defaults: defaults, legacyPlatform: .macOS).save(SharedHostStoreState(hosts: hosts, primaryHostID: gateway.id))
+        let second = HostConfigPersistence(defaults: defaults).loadInitialConfiguration { _ in }
+        XCTAssertEqual(second.primaryHostID, gateway.id)
+    }
+
+    func testSavingRestoredRouterPrimaryDoesNotCompleteMigration() throws {
+        let suiteName = "HostConfigPersistenceTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let gateway = HostConfig.defaultGatewayHost(address: "192.168.42.1")
+        let internet = HostConfig(id: UUID(), displayName: "Quad9", address: "9.9.9.9")
+        try UserDefaultsSharedHostStore(defaults: defaults, legacyPlatform: .macOS)
+            .save(SharedHostStoreState(hosts: [gateway, internet], primaryHostID: gateway.id))
+        let persistence = HostConfigPersistence(defaults: defaults)
+        let loaded = persistence.loadInitialConfiguration { _ in }
+        XCTAssertEqual(loaded.primaryHostID, internet.id)
+
+        // A cloud reconcile put the router back before the first save.
+        persistence.persist(
+            RuntimeSnapshot(hosts: loaded.hosts, primaryHostID: gateway.id, healthByHost: [:], samplesByHost: [:])
+        ) { _ in }
+
+        XCTAssertFalse(defaults.bool(forKey: HostConfigPersistence.movedPrimaryOffGatewayKey))
+        let next = HostConfigPersistence(defaults: defaults).loadInitialConfiguration { _ in }
+        XCTAssertEqual(next.primaryHostID, internet.id)
+    }
+
+    func testUnsavedPrimaryMoveIsRetriedOnNextLaunch() throws {
+        let suiteName = "HostConfigPersistenceTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let gateway = HostConfig.defaultGatewayHost(address: "192.168.42.1")
+        let internet = HostConfig(id: UUID(), displayName: "Quad9", address: "9.9.9.9")
+        try UserDefaultsSharedHostStore(defaults: defaults, legacyPlatform: .macOS)
+            .save(SharedHostStoreState(hosts: [gateway, internet], primaryHostID: gateway.id))
+
+        _ = HostConfigPersistence(defaults: defaults).loadInitialConfiguration { _ in }
+        let retried = HostConfigPersistence(defaults: defaults).loadInitialConfiguration { _ in }
+
+        XCTAssertEqual(retried.primaryHostID, internet.id)
+    }
+
     func testLegacyDefaultHostsGainGoogleDNSOnce() throws {
         let suiteName = "HostConfigPersistenceTests.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))

@@ -119,8 +119,7 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
     @Published private(set) var configuredPrimaryHostID: UUID? = HostConfig.defaultInternet.id
 
     var configuredPrimaryHost: HostConfig? {
-        guard let configuredPrimaryHostID else { return configuredHosts.first }
-        return configuredHosts.first { $0.id == configuredPrimaryHostID } ?? configuredHosts.first
+        configuredHosts.first { $0.id == configuredPrimaryHostID } ?? HostConfig.preferredPrimary(in: configuredHosts)
     }
 
     @Published var selectedRange: TimeRange = .fiveMinutes {
@@ -334,7 +333,7 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
         self.liveDisplay = LiveDisplayModel(
             snapshot: RuntimeSnapshot(
                 hosts: loadedHosts.hosts,
-                primaryHostID: loadedHosts.primaryHostID ?? loadedHosts.hosts.first?.id,
+                primaryHostID: loadedHosts.primaryHostID ?? HostConfig.preferredPrimary(in: loadedHosts.hosts)?.id,
                 healthByHost: [:],
                 samplesByHost: [:]
             )
@@ -947,7 +946,6 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
                 let savedGatewayHost = gatewayHost
                 self.performUserHostMutation { runtime in
                     await runtime.upsertHost(savedGatewayHost)
-                    await runtime.selectPrimaryHost(savedGatewayHost.id)
                 }
             }
         }
