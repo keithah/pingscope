@@ -34,6 +34,24 @@ final class HostConfigPersistenceTests: XCTestCase {
         XCTAssertNotNil(defaults.data(forKey: SharedHostStoreKeys.macHosts))
     }
 
+    func testPersistedDefaultGatewayPrimaryMovesToInternetHostOnce() throws {
+        let suiteName = "HostConfigPersistenceTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let gateway = HostConfig.defaultGatewayHost(address: "192.168.42.1")
+        let internet = HostConfig(id: UUID(), displayName: "Quad9", address: "9.9.9.9")
+        let hosts = [gateway, internet]
+        try UserDefaultsSharedHostStore(defaults: defaults, legacyPlatform: .macOS).save(SharedHostStoreState(hosts: hosts, primaryHostID: gateway.id))
+
+        let first = HostConfigPersistence(defaults: defaults).loadInitialConfiguration { _ in }
+        XCTAssertEqual(first.primaryHostID, internet.id)
+
+        // A user who picks the router afterwards keeps it.
+        try UserDefaultsSharedHostStore(defaults: defaults, legacyPlatform: .macOS).save(SharedHostStoreState(hosts: hosts, primaryHostID: gateway.id))
+        let second = HostConfigPersistence(defaults: defaults).loadInitialConfiguration { _ in }
+        XCTAssertEqual(second.primaryHostID, gateway.id)
+    }
+
     func testLegacyDefaultHostsGainGoogleDNSOnce() throws {
         let suiteName = "HostConfigPersistenceTests.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))

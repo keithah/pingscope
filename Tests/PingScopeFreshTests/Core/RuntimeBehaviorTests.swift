@@ -83,6 +83,59 @@ final class RuntimeBehaviorTests: XCTestCase {
         XCTAssertEqual(enabledHostNames, ["Cloudflare DNS", "Router"])
     }
 
+    func testHostStoreFallbackPrimarySkipsDefaultGateway() async {
+        let gateway = HostConfig.defaultGatewayHost(address: "192.168.42.1")
+        let internet = HostConfig(id: UUID(), displayName: "Cloudflare DNS", address: "1.1.1.1")
+
+        let store = HostStore(defaultHosts: [gateway, internet])
+        let initialPrimaryID = await store.primaryHostID()
+        XCTAssertEqual(initialPrimaryID, internet.id)
+
+        let other = HostConfig(id: UUID(), displayName: "Google DNS", address: "8.8.8.8")
+        await store.upsert(other)
+        await store.delete(internet.id)
+        let afterDeleteID = await store.primaryHostID()
+        XCTAssertEqual(afterDeleteID, other.id)
+
+        await store.reconcile(hosts: [gateway, other], primaryHostID: UUID())
+        let afterReconcileID = await store.primaryHostID()
+        XCTAssertEqual(afterReconcileID, other.id)
+    }
+
+    func testHostStoreUsesGatewayAsPrimaryOnlyWhenNothingElseExists() async {
+        let gateway = HostConfig.defaultGatewayHost(address: "192.168.42.1")
+        let store = HostStore(defaultHosts: [gateway])
+        let primaryID = await store.primaryHostID()
+        XCTAssertEqual(primaryID, gateway.id)
+    }
+
+    func testFallbackGatewayPrimaryYieldsToFirstInternetHostAdded() async {
+        let gateway = HostConfig.defaultGatewayHost(address: "192.168.42.1")
+        let store = HostStore(defaultHosts: [])
+        await store.upsert(gateway)
+        let internet = HostConfig(id: UUID(), displayName: "Quad9", address: "9.9.9.9")
+        await store.upsert(internet)
+        let primaryID = await store.primaryHostID()
+        XCTAssertEqual(primaryID, internet.id)
+    }
+
+    func testExplicitGatewayPrimarySurvivesAddingInternetHost() async {
+        let gateway = HostConfig.defaultGatewayHost(address: "192.168.42.1")
+        let store = HostStore(defaultHosts: [gateway])
+        await store.selectPrimaryHost(gateway.id)
+        await store.upsert(HostConfig(id: UUID(), displayName: "Quad9", address: "9.9.9.9"))
+        let primaryID = await store.primaryHostID()
+        XCTAssertEqual(primaryID, gateway.id)
+    }
+
+    func testHostStoreKeepsExplicitGatewayPrimary() async {
+        let gateway = HostConfig.defaultGatewayHost(address: "192.168.42.1")
+        let store = HostStore(defaultHosts: [.defaultInternet, gateway])
+        await store.selectPrimaryHost(gateway.id)
+        let primaryID = await store.primaryHostID()
+        XCTAssertEqual(primaryID, gateway.id)
+    }
+
     func testHostStoreCoalescesDefaultGatewayUpsertsByName() async {
         let existingGateway = HostConfig(
             id: UUID(),

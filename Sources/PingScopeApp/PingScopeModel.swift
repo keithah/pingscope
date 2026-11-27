@@ -947,7 +947,6 @@ final class PingScopeModel: NSObject, ObservableObject, NSWindowDelegate {
                 let savedGatewayHost = gatewayHost
                 self.performUserHostMutation { runtime in
                     await runtime.upsertHost(savedGatewayHost)
-                    await runtime.selectPrimaryHost(savedGatewayHost.id)
                 }
             }
         }

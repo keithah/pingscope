@@ -26,6 +26,7 @@ final class HostConfigPersistence {
     private var preservesUndecodableData = false
     private let seededDefaultsKey = "didSeedDefaultHosts"
     static let undecodableBackupKey = "hostConfigsUndecodableBackup"
+    static let movedPrimaryOffGatewayKey = "didMovePrimaryOffDefaultGateway"
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -70,14 +71,38 @@ final class HostConfigPersistence {
         }
         let hosts = sanitizedHosts
         lastObservedSharedState = sharedStore.load().state.map(Self.sanitizedSharedState)
-        return LoadedHostConfiguration(hosts: hosts, primaryHostID: primaryHostID)
+        let resolvedPrimaryID = movePrimaryOffDefaultGatewayIfNeeded(primaryHostID, hosts: hosts, logger: logger)
+        return LoadedHostConfiguration(hosts: hosts, primaryHostID: resolvedPrimaryID)
+    }
+
+    /// Earlier builds could leave the router as the primary host (adding the
+    /// gateway selected it, and several fallbacks picked it), so the menu bar
+    /// showed only LAN latency. Move such a primary to an internet host once;
+    /// a later explicit choice of the router is kept.
+    private func movePrimaryOffDefaultGatewayIfNeeded(
+        _ primaryHostID: UUID?,
+        hosts: [HostConfig],
+        logger: (String) -> Void
+    ) -> UUID? {
+        guard !hosts.isEmpty, !defaults.bool(forKey: Self.movedPrimaryOffGatewayKey) else {
+            return primaryHostID
+        }
+        defaults.set(true, forKey: Self.movedPrimaryOffGatewayKey)
+        guard let primary = hosts.first(where: { $0.id == primaryHostID }),
+              primary.isManagedDefaultGateway,
+              let replacement = HostConfig.preferredPrimary(in: hosts),
+              !replacement.isDefaultGateway else {
+            return primaryHostID
+        }
+        logger("primary host moved off default gateway to \(replacement.displayName)")
+        return replacement.id
     }
 
     @discardableResult
     func persist(_ snapshot: RuntimeSnapshot, logger: (String) -> Void) -> SharedHostStoreState? {
         guard !preservesUndecodableData else { return nil }
         let hosts = HostConfig.sanitizedHosts(snapshot.hosts)
-        let primaryHostID = hosts.contains { $0.id == snapshot.primaryHostID } ? snapshot.primaryHostID : hosts.first?.id
+        let primaryHostID = hosts.contains { $0.id == snapshot.primaryHostID } ? snapshot.primaryHostID : HostConfig.preferredPrimary(in: hosts)?.id
         let hostState = PersistedHostState(hosts: hosts, primaryHostID: primaryHostID)
         let latest = sharedStore.load().state.map(Self.sanitizedSharedState)
         let desired = SharedHostStoreState(
@@ -194,7 +219,7 @@ final class HostConfigPersistence {
             try sharedStore.save(
                 SharedHostStoreState(
                     hosts: hosts,
-                    primaryHostID: hosts.first?.id,
+                    primaryHostID: HostConfig.preferredPrimary(in: hosts)?.id,
                     selectedHostID: preservedSelectedHostID
                 )
             )

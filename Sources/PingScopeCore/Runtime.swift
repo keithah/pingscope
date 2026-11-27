@@ -250,14 +250,19 @@ public struct StarlinkDishDetector: Sendable {
 public actor HostStore {
     private var orderedHosts: [HostConfig]
     private var primaryID: UUID?
+    /// True while the primary came from `HostConfig.preferredPrimary` rather
+    /// than an explicit choice, so a router picked only because nothing else
+    /// existed yields to the first internet host added later.
+    private var primaryIsFallback: Bool
 
     public init(defaultHosts: [HostConfig] = HostConfig.defaultHosts(), primaryHostID: UUID? = nil) {
         let normalized = Self.coalescingManagedDefaultGatewayHosts(
             defaultHosts,
-            primaryID: primaryHostID ?? defaultHosts.first?.id
+            primaryID: primaryHostID ?? HostConfig.preferredPrimary(in: defaultHosts)?.id
         )
         self.orderedHosts = normalized.hosts
         self.primaryID = normalized.primaryID
+        self.primaryIsFallback = primaryHostID == nil
     }
 
     public func hosts() -> [HostConfig] {
@@ -269,12 +274,11 @@ public actor HostStore {
     }
 
     public func primaryHostID() -> UUID? {
-        primaryID ?? orderedHosts.first?.id
+        primaryID ?? HostConfig.preferredPrimary(in: orderedHosts)?.id
     }
 
     public func primaryHost() -> HostConfig? {
-        let selectedID = primaryID ?? orderedHosts.first?.id
-        return orderedHosts.first { $0.id == selectedID } ?? orderedHosts.first
+        orderedHosts.first { $0.id == primaryID } ?? HostConfig.preferredPrimary(in: orderedHosts)
     }
 
     public func upsert(_ host: HostConfig) {
@@ -289,8 +293,9 @@ public actor HostStore {
         } else {
             orderedHosts.append(host)
         }
-        if primaryID == nil {
-            primaryID = host.id
+        if primaryID == nil || (primaryIsFallback && currentPrimaryIsGateway && !host.isDefaultGateway) {
+            primaryID = HostConfig.preferredPrimary(in: orderedHosts)?.id
+            primaryIsFallback = true
         }
         coalesceManagedDefaultGatewayHosts()
     }
@@ -298,18 +303,21 @@ public actor HostStore {
     public func delete(_ id: UUID) {
         orderedHosts.removeAll { $0.id == id }
         if primaryID == id {
-            primaryID = orderedHosts.first?.id
+            primaryID = HostConfig.preferredPrimary(in: orderedHosts)?.id
+            primaryIsFallback = true
         }
     }
 
     public func selectPrimaryHost(_ id: UUID) {
         guard orderedHosts.contains(where: { $0.id == id }) else { return }
         primaryID = id
+        primaryIsFallback = false
     }
 
     public func reset(defaultHosts: [HostConfig] = HostConfig.defaultHosts()) {
         orderedHosts = defaultHosts
-        primaryID = defaultHosts.first?.id
+        primaryID = HostConfig.preferredPrimary(in: defaultHosts)?.id
+        primaryIsFallback = true
         coalesceManagedDefaultGatewayHosts()
     }
 
@@ -320,9 +328,17 @@ public actor HostStore {
             primaryID: requestedPrimaryID
         )
         orderedHosts = normalized.hosts
-        primaryID = normalized.primaryID.flatMap { candidate in
-            orderedHosts.contains { $0.id == candidate } ? candidate : nil
-        } ?? orderedHosts.first?.id
+        if let kept = normalized.primaryID, orderedHosts.contains(where: { $0.id == kept }) {
+            primaryID = kept
+            if primaryHostID != nil { primaryIsFallback = false }
+        } else {
+            primaryID = HostConfig.preferredPrimary(in: orderedHosts)?.id
+            primaryIsFallback = true
+        }
+    }
+
+    private var currentPrimaryIsGateway: Bool {
+        orderedHosts.first { $0.id == primaryID }?.isDefaultGateway ?? false
     }
 
     private static func isManagedDefaultGateway(_ host: HostConfig) -> Bool {
@@ -1139,8 +1155,7 @@ public struct RuntimeSnapshot: Sendable, Equatable {
     }
 
     public var primaryHost: HostConfig? {
-        guard let primaryHostID else { return hosts.first }
-        return hosts.first { $0.id == primaryHostID } ?? hosts.first
+        hosts.first { $0.id == primaryHostID } ?? HostConfig.preferredPrimary(in: hosts)
     }
 
     public var primaryHealth: HostHealth? {

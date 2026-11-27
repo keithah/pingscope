@@ -134,7 +134,7 @@ extension PingScopeModel {
         if let primary = snapshot.primaryHost, primary.method != .starlink {
             return primary.id
         }
-        return gatewayHost?.id ?? snapshot.hosts.first(where: { $0.method != .starlink })?.id
+        return HostConfig.preferredPrimary(in: snapshot.hosts)?.id
     }
 
     func removeStaleStarlinkHosts() {

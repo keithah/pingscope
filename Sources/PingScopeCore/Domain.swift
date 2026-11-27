@@ -325,6 +325,16 @@ public extension HostConfig {
     var isDefaultGateway: Bool {
         tier == .localGateway || displayName == "Default Gateway"
     }
+
+    /// The host to use as primary when none has been chosen, or the chosen one
+    /// is gone. Prefers an enabled host past the local router so the menu bar
+    /// shows real internet latency rather than the LAN hop; the router is used
+    /// only when nothing else is configured.
+    static func preferredPrimary(in hosts: [HostConfig]) -> HostConfig? {
+        hosts.first { $0.isEnabled && !$0.isDefaultGateway }
+            ?? hosts.first { !$0.isDefaultGateway }
+            ?? hosts.first
+    }
 }
 
 public struct NetworkTierClassifier: Sendable {
