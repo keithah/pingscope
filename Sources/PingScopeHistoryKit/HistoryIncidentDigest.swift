@@ -636,6 +636,12 @@ public actor HistoryWeeklyDigestLoader {
                 through: plan.queryThrough,
                 onSample: { collector.insert($0) }
             )
+            // A cancelled flight's result is discarded by finishFlight, so skip
+            // building a digest from the full week; the slot is still released.
+            guard !Task.isCancelled else {
+                await self.finishCancelledFlight(flightID, for: key)
+                return
+            }
             let samples = collector.samples().sorted(by: Self.isSampleOrderedBefore)
             let result = LoadResult(
                 digest: HistoryWeeklyDigest.make(
@@ -664,6 +670,17 @@ public actor HistoryWeeklyDigestLoader {
                 coveredThrough: result.through
             ), for: key)
             flight.waiters.values.forEach { $0.resume(returning: result.digest) }
+        }
+        startPendingFlights()
+    }
+
+    private func finishCancelledFlight(_ flightID: UUID, for key: CacheKey) {
+        guard activeTasks.removeValue(forKey: flightID) != nil else { return }
+        // Cancellation normally clears the flight first; if it did not, do not
+        // leave its waiters suspended.
+        if let flight = inFlight[key], flight.id == flightID {
+            inFlight[key] = nil
+            flight.waiters.values.forEach { $0.resume(returning: nil) }
         }
         startPendingFlights()
     }
